@@ -1,0 +1,445 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+header {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+h1 {
+  margin: 0;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.headerbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.75rem;
+}
+
+#account {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  flex-shrink: 0;
+}
+
+#pubkey-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+}
+
+#pubkey-short {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+#disconnect {
+  padding: 0 0.35rem;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+#launch-form {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+#nsite-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.875rem;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+
+#suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: Canvas;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+#suggestions:empty::after {
+  content: 'No saved entries yet';
+  display: block;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
+.suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.suggestion:hover,
+.suggestion.active {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.sugg-main {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sugg-napp,
+.sugg-raw {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.sugg-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  opacity: 0.4;
+}
+
+.sugg-pet {
+  font-size: 0.85rem;
+  font-weight: 500;
+  opacity: 0.95;
+}
+
+.suggestion .source {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+button {
+  padding: 0.35rem 0.8rem;
+  font: inherit;
+  font-size: 0.875rem;
+  border: 0;
+  border-radius: 6px;
+  background: #6b46ff;
+  color: white;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#load-local {
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
+#log-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+#log {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+  opacity: 0.7;
+  line-height: 1.35;
+  min-height: 1.2em;
+}
+
+#log-container.log-collapsed #log {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#log-container.log-expanded #log {
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+}
+
+#log-toggle {
+  padding: 0 0.35rem;
+  font-size: 0.75rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1.35;
+  min-height: 1.2em;
+}
+
+#stage {
+  flex: 1;
+  position: relative;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.napp-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: Canvas;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  min-width: 240px;
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.napp-window.maximized {
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.napp-window.minimized {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.napp-window.minimized .napp-body {
+  display: none;
+}
+
+.napp-window.minimized .napp-resize {
+  display: none;
+}
+
+.napp-window.minimized .napp-btn[title^='Minimize'],
+.napp-window.maximized .napp-btn[title^='Maximize'] {
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.napp-header {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 28px;
+  padding: 0 0.35rem 0 0.75rem;
+  box-sizing: border-box;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+  touch-action: none;
+}
+
+.napp-header:active {
+  cursor: grabbing;
+}
+
+.napp-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.napp-title.editing {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  outline: none;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.napp-instance-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.68rem;
+  font-family: ui-monospace, monospace;
+  opacity: 0.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.napp-controls {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 0.15rem;
+}
+
+.napp-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 0.75rem;
+  line-height: 1;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.napp-btn:hover {
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.napp-btn[title^='Close']:hover {
+  background: #e9a833;
+  color: white;
+}
+
+.napp-btn-destroy:hover {
+  background: #e33;
+  color: white;
+}
+
+.napp-body {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.napp-body iframe {
+  border: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.napp-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 55%,
+    currentColor 55%,
+    currentColor 62%,
+    transparent 62%,
+    transparent 72%,
+    currentColor 72%,
+    currentColor 79%,
+    transparent 79%,
+    transparent 100%
+  );
+  opacity: 0.35;
+  z-index: 1;
+}
+
+#permission-prompt {
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 12px;
+  padding: 1.5rem;
+  max-width: 28rem;
+  color: inherit;
+  background: Canvas;
+  font-family: inherit;
+}
+
+#permission-prompt::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#permission-prompt h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+#permission-prompt p {
+  margin: 0 0 1rem;
+  line-height: 1.4;
+}
+
+#permission-prompt code {
+  font-family: ui-monospace, monospace;
+  padding: 0.1rem 0.35rem;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 4px;
+}
+
+#permission-prompt .perm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0;
+}
+
+#permission-prompt button {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.875rem;
+}
+
+#permission-prompt button[value^='deny'] {
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}

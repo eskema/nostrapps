@@ -1,0 +1,18 @@
+{
+  "name": "nostrapps",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "nostr-tools": "^2.7.2",
+    "@nostr/gadgets": "npm:@jsr/nostr__gadgets"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

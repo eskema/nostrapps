@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>napp boot</title>
+  </head>
+  <body>
+    <script>
+      function reportError(err) {
+        try {
+          window.parent.postMessage(
+            {
+              __nostrapps: 'napp-boot-error',
+              error: err?.message || String(err),
+            },
+            '*',
+          );
+        } catch {
+          // parent gone
+        }
+      }
+
+      window.addEventListener('error', (e) =>
+        reportError(e.error || e.message),
+      );
+      window.addEventListener('unhandledrejection', (e) =>
+        reportError(e.reason),
+      );
+
+      (async () => {
+        const DB_NAME = 'nostrapps-napp';
+        const DB_VERSION = 1;
+        const STORE = 'files';
+
+        function openDB() {
+          return new Promise((resolve, reject) => {
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            req.onupgradeneeded = () => {
+              const db = req.result;
+              if (!db.objectStoreNames.contains(STORE)) {
+                db.createObjectStore(STORE, { keyPath: 'path' });
+              }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          });
+        }
+
+        async function clearAll() {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE, 'readwrite');
+            tx.objectStore(STORE).clear();
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          });
+        }
+
+        async function putFile(path, body, mime) {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE, 'readwrite');
+            tx.objectStore(STORE).put({ path, body, mime });
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          });
+        }
+
+        try {
+          await navigator.serviceWorker.register('/sw.js');
+          await navigator.serviceWorker.ready;
+        } catch (err) {
+          reportError(err);
+          return;
+        }
+
+        window.addEventListener('message', async (event) => {
+          const data = event.data;
+          if (!data || data.__nostrapps !== 'napp-install') return;
+          try {
+            await clearAll();
+            for (const f of data.files) {
+              await putFile(f.path, f.body, f.mime);
+            }
+            event.source.postMessage(
+              {
+                __nostrapps: 'napp-install-done',
+                fileCount: data.files.length,
+              },
+              event.origin,
+            );
+          } catch (err) {
+            event.source.postMessage(
+              { __nostrapps: 'napp-install-error', error: err.message },
+              event.origin,
+            );
+          }
+        });
+
+        window.parent.postMessage({ __nostrapps: 'napp-boot-ready' }, '*');
+      })();
+    </script>
+  </body>
+</html>

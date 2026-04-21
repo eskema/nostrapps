@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nostrapps</title>
+    <link rel="stylesheet" href="/src/launcher.css" />
+  </head>
+  <body>
+    <header>
+      <div class="headerbar">
+        <h1>nostrapps</h1>
+        <form id="launch-form">
+          <div class="input-wrap">
+            <input
+              id="nsite-input"
+              placeholder="npub / nappId / hex pubkey"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <div id="suggestions" hidden></div>
+          </div>
+          <button type="submit">Launch</button>
+          <button type="button" id="load-local">Load folder…</button>
+          <input
+            type="file"
+            id="local-folder"
+            webkitdirectory
+            multiple
+            hidden
+          />
+        </form>
+        <div id="account">
+          <button type="button" id="connect">Connect</button>
+          <span id="pubkey-display" hidden>
+            <code id="pubkey-short"></code>
+            <button type="button" id="disconnect" title="Disconnect">×</button>
+          </span>
+        </div>
+      </div>
+      <div id="log-container" class="log-collapsed">
+        <div id="log"></div>
+        <button id="log-toggle" type="button" title="Expand log">▸</button>
+      </div>
+    </header>
+    <main id="stage"></main>
+
+    <dialog id="permission-prompt">
+      <form method="dialog">
+        <h3>Permission request</h3>
+        <p>
+          Napp <code data-perm-nappid></code> wants to use
+          <code data-perm-method></code>
+        </p>
+        <menu class="perm-actions">
+          <button value="deny-always">Deny always</button>
+          <button value="deny-once">Deny</button>
+          <button value="allow-once">Allow once</button>
+          <button value="allow-always" autofocus>Allow always</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
