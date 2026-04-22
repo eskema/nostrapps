@@ -9,10 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "nostr-tools": "^2.7.2",
-    "@nostr/gadgets": "npm:@jsr/nostr__gadgets"
+    "@nostr/gadgets": "npm:@jsr/nostr__gadgets@0.1.7",
+    "@nostr/tools": "npm:@jsr/nostr__tools@2.23.1"
   },
   "devDependencies": {
+    "prettier": "^3.8.3",
     "vite": "^5.4.0"
   }
 }

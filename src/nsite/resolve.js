@@ -1,4 +1,4 @@
-import * as nip19 from 'nostr-tools/nip19';
+import * as nip19 from '@nostr/tools/nip19';
 
 export function resolveInput(input) {
   const s = input.trim();

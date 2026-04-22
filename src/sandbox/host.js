@@ -172,10 +172,6 @@ function dispatch(signer, method, params, instanceId) {
       return pool.query(params.filters, params.opts);
     case 'pool.publish':
       return pool.publish(params.event, params.opts);
-    case 'pool.relays':
-      return pool.getRelays();
-    case 'pool.setRelays':
-      return pool.setRelays(params.relays);
     case 'instance.get':
       return instanceStore.get(instanceId, params.key);
     case 'instance.set':
