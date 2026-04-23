@@ -7,7 +7,7 @@ export function createNappWindow({
   origin,
   src,
   petname,
-  sandbox = 'allow-scripts allow-same-origin',
+  sandbox = 'allow-scripts allow-same-origin allow-forms',
   onMessage,
   onClose,
   onDestroy,
