@@ -638,11 +638,14 @@ function maybeBootstrap() {
   localStorage.setItem(BOOTSTRAP_KEY, '1');
 }
 
-setStatus(
-  'Ready — try /store, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host',
-);
-await restoreAll();
-maybeBootstrap();
+async function init() {
+  setStatus(
+    'Ready — try /store, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host',
+  );
+  await restoreAll();
+  maybeBootstrap();
+}
+init();
 
 async function launchFromInput(raw) {
   // Slash commands → system napps or one-shot actions

@@ -1313,3 +1313,38 @@ body.napp-dragging .napp-body iframe {
   background: #d97706;
   color: white;
 }
+
+/* ─── store: NIP-5B listing extras ─────────────────────────────── */
+.store-card-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  object-fit: cover;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.store-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+}
+
+.store-chip {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  white-space: nowrap;
+}
+
+.store-chip-category {
+  text-transform: capitalize;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.store-chip-tag {
+  opacity: 0.75;
+  font-family: var(--font-mono);
+}

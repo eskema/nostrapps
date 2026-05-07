@@ -6,6 +6,7 @@ import { loadBlossomServers } from '@nostr/gadgets/lists';
 const NSITE_FILE_KIND = 34128;   // legacy: one event per file (d = path)
 const NSITE_ROOT_KIND = 15128;   // NIP-5A: root manifest (replaceable)
 const NSITE_NAMED_KIND = 35128;  // NIP-5A: named manifest (parameterized)
+const NSITE_LISTING_KIND = 37348; // NIP-5B: app listing (rich metadata)
 
 export async function fetchNsite(target, onProgress = () => {}) {
   const t = typeof target === 'string' ? { pubkey: target } : target;
@@ -22,15 +23,17 @@ export async function fetchNsite(target, onProgress = () => {}) {
 
 async function fetchRootOrLegacy(pubkey, onProgress) {
   onProgress('Querying relays for nsite events…');
-  // include kind 0 so we can extract a friendly title without an extra round-trip
+  // include kind 0 (profile) and kind 37348 (NIP-5B listing) so a single
+  // round-trip pulls everything we might want for naming/metadata.
   const reqs = await outboxFilterRelayBatch([pubkey], {
-    kinds: [NSITE_ROOT_KIND, NSITE_FILE_KIND, 0],
+    kinds: [NSITE_ROOT_KIND, NSITE_FILE_KIND, NSITE_LISTING_KIND, 0],
   });
   const events = await collect(reqs, 'nsite');
 
   const manifest = latestOfKind(events, NSITE_ROOT_KIND);
   if (manifest) {
-    return fetchFromManifest(pubkey, manifest, onProgress, null, events);
+    const listing = findListing(events, pubkey, getTag(manifest, 'd') || '');
+    return fetchFromManifest(pubkey, manifest, onProgress, null, events, listing);
   }
 
   const fileEvents = events.filter((e) => e.kind === NSITE_FILE_KIND);
@@ -43,14 +46,46 @@ async function fetchRootOrLegacy(pubkey, onProgress) {
 async function fetchNamedManifest(pubkey, dTag, onProgress) {
   onProgress(`Querying relays for named nsite "${dTag}"…`);
   const reqs = await outboxFilterRelayBatch([pubkey], {
-    kinds: [NSITE_NAMED_KIND],
+    kinds: [NSITE_NAMED_KIND, NSITE_LISTING_KIND],
     '#d': [dTag],
   });
   const events = await collect(reqs, 'nsite-named');
   const manifest = latestOfKind(events, NSITE_NAMED_KIND, dTag);
   if (!manifest) throw new Error(`Named nsite "${dTag}" not found`);
+  const listing = findListing(events, pubkey, dTag);
   const nappId = `${pubkey.slice(0, 40)}-${dTag}`;
-  return fetchFromManifest(pubkey, manifest, onProgress, nappId);
+  return fetchFromManifest(pubkey, manifest, onProgress, nappId, [], listing);
+}
+
+// Finds the latest kind 37348 listing for a given (pubkey, dTag) pair.
+function findListing(events, pubkey, dTag) {
+  let best = null;
+  for (const e of events) {
+    if (e.kind !== NSITE_LISTING_KIND) continue;
+    if (e.pubkey !== pubkey) continue;
+    if ((getTag(e, 'd') || '') !== dTag) continue;
+    if (!best || e.created_at > best.created_at) best = e;
+  }
+  return best;
+}
+
+// Picks the best `name` tag value from a listing, preferring the user's locale.
+// Tag shape: ["name", "<value>", "<lang?>"]. Multiple tags allowed.
+export function localizedTag(listing, tagName) {
+  if (!listing) return null;
+  const matches = listing.tags.filter(
+    (t) => t[0] === tagName && typeof t[1] === 'string' && t[1].length > 0,
+  );
+  if (matches.length === 0) return null;
+  const userLang =
+    typeof navigator !== 'undefined' && navigator.language
+      ? navigator.language.slice(0, 2).toLowerCase()
+      : 'en';
+  return (
+    matches.find((t) => (t[2] || '').toLowerCase() === userLang)?.[1] ||
+    matches.find((t) => !t[2] || t[2].toLowerCase() === 'en')?.[1] ||
+    matches[0][1]
+  );
 }
 
 function collect(reqs, label) {
@@ -81,6 +116,7 @@ async function fetchFromManifest(
   onProgress,
   nappIdOverride,
   extraEvents = [],
+  listing = null,
 ) {
   const paths = manifest.tags.filter(
     (t) => t[0] === 'path' && t.length >= 3 && t[1] && t[2],
@@ -110,11 +146,14 @@ async function fetchFromManifest(
   }
 
   const nappId = nappIdOverride ?? pubkey.slice(0, 40);
+  // Title resolution order: NIP-5B listing's localized `name` →
+  // manifest's `title` tag → kind 0 profile.
   const title =
+    localizedTag(listing, 'name') ||
     getTag(manifest, 'title') ||
     findProfileName(extraEvents, pubkey) ||
     (await fetchProfileName(pubkey));
-  return { nappId, files: out, title, manifest };
+  return { nappId, files: out, title, manifest, listing };
 }
 
 async function fetchFromFileEvents(pubkey, fileEvents, onProgress, extraEvents = []) {

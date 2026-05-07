@@ -1,4 +1,4 @@
-import { loadRelayList } from '@nostr/gadgets/lists';
+import { loadBlossomServers, loadRelayList } from '@nostr/gadgets/lists';
 import { loadNostrUser } from '@nostr/gadgets/metadata';
 import { npubEncode, naddrEncode } from '@nostr/tools/nip19';
 import * as pool from '../pool.js';
@@ -9,6 +9,7 @@ export const slash = '/store';
 
 const NSITE_ROOT = 15128;
 const NSITE_NAMED = 35128;
+const NSITE_LISTING = 37348; // NIP-5B app listing (paired to a manifest by d-tag)
 const CACHE_KEY = 'nostrapps:store:cache';
 const RELAYS_KEY = 'nostrapps:store:relays';
 const CACHE_LIMIT = 500;
@@ -71,11 +72,30 @@ export function mount(container, ctx) {
 
   function renderList() {
     listEl.innerHTML = '';
-    const filtered = events
-      .filter((e) => matchesFilter(e, filter))
+
+    // Cached events include both manifests (15128/35128) and NIP-5B listings
+    // (37348). Pair them by (pubkey, d-tag) so the rendered cards are driven
+    // by manifests but enriched with their listing's metadata.
+    const listingsByKey = new Map();
+    for (const e of events) {
+      if (e.kind !== NSITE_LISTING) continue;
+      const dTag = e.tags.find((t) => t[0] === 'd')?.[1] || '';
+      listingsByKey.set(`${e.pubkey}:${dTag}`, e);
+    }
+    const listingFor = (manifest) => {
+      const dTag = manifest.tags.find((t) => t[0] === 'd')?.[1] || '';
+      return listingsByKey.get(`${manifest.pubkey}:${dTag}`) || null;
+    };
+
+    const manifests = events.filter(
+      (e) => e.kind === NSITE_ROOT || e.kind === NSITE_NAMED,
+    );
+    const filtered = manifests
+      .filter((m) => matchesFilter(m, listingFor(m), filter))
       .sort((a, b) => b.created_at - a.created_at);
 
     let displayed = [];
+    const renderOne = (evt) => listEl.appendChild(renderCard(evt, ctx, listingFor(evt)));
 
     if (filterMode === 'installed') {
       const installed = [];
@@ -95,8 +115,7 @@ export function mount(container, ctx) {
       }
 
       if (installed.length > 0) {
-        for (const evt of installed)
-          listEl.appendChild(renderCard(evt, ctx));
+        for (const evt of installed) renderOne(evt);
       } else {
         const empty = document.createElement('div');
         empty.className = 'store-empty store-empty-thin';
@@ -109,7 +128,7 @@ export function mount(container, ctx) {
         heading.className = 'store-section-heading';
         heading.textContent = 'Previously installed';
         listEl.appendChild(heading);
-        for (const evt of past) listEl.appendChild(renderCard(evt, ctx));
+        for (const evt of past) renderOne(evt);
       }
 
       displayed = installed.concat(past);
@@ -118,21 +137,21 @@ export function mount(container, ctx) {
         const empty = document.createElement('div');
         empty.className = 'store-empty';
         empty.textContent =
-          events.length === 0
+          manifests.length === 0
             ? 'No nsites cached yet — tap ↻ to fetch.'
             : 'No matches.';
         listEl.appendChild(empty);
         return;
       }
-      for (const evt of filtered) listEl.appendChild(renderCard(evt, ctx));
+      for (const evt of filtered) renderOne(evt);
       displayed = filtered;
     }
 
-    // Lazy-fetch profile metadata for unique authors across both sections
-    const seen = new Set();
+    // Lazy-load profile metadata for unique authors.
+    const seenAuthors = new Set();
     for (const evt of displayed) {
-      if (seen.has(evt.pubkey)) continue;
-      seen.add(evt.pubkey);
+      if (seenAuthors.has(evt.pubkey)) continue;
+      seenAuthors.add(evt.pubkey);
       loadNostrUser(evt.pubkey)
         .then((user) => {
           if (cancelled) return;
@@ -147,6 +166,48 @@ export function mount(container, ctx) {
               picEl.src = pic;
               picEl.hidden = false;
             }
+          }
+        })
+        .catch(() => {});
+    }
+
+    // Lazy-load Blossom icons for unique authors that published a listing.
+    const seenIconPks = new Set();
+    for (const evt of displayed) {
+      if (seenIconPks.has(evt.pubkey)) continue;
+      const listing = listingFor(evt);
+      if (!listing) continue;
+      const hasIcon = listing.tags.some((t) => t[0] === 'icon' && t[1]);
+      if (!hasIcon) continue;
+      seenIconPks.add(evt.pubkey);
+      loadBlossomServers(evt.pubkey)
+        .then((res) => {
+          if (cancelled) return;
+          const servers = res?.items ?? [];
+          if (servers.length === 0) return;
+          const icons = listEl.querySelectorAll(
+            `[data-listing-pubkey="${evt.pubkey}"] .store-card-icon[data-icon-sha]`,
+          );
+          for (const img of icons) {
+            const sha = img.dataset.iconSha;
+            const base = servers[0].endsWith('/')
+              ? servers[0].slice(0, -1)
+              : servers[0];
+            img.src = `${base}/${sha}`;
+            img.hidden = false;
+            // If the first server fails, fall through to the next.
+            let next = 1;
+            img.onerror = () => {
+              if (next >= servers.length) {
+                img.hidden = true;
+                return;
+              }
+              const b = servers[next].endsWith('/')
+                ? servers[next].slice(0, -1)
+                : servers[next];
+              next++;
+              img.src = `${b}/${sha}`;
+            };
           }
         })
         .catch(() => {});
@@ -169,7 +230,7 @@ export function mount(container, ctx) {
       }
       setStatus(`Querying ${relays.length} relay(s)…`);
       const fresh = await pool.query(
-        { kinds: [NSITE_ROOT, NSITE_NAMED], limit: 200 },
+        { kinds: [NSITE_ROOT, NSITE_NAMED, NSITE_LISTING], limit: 400 },
         { relays },
       );
       if (cancelled) return;
@@ -240,10 +301,8 @@ export function mount(container, ctx) {
   };
 }
 
-function renderCard(evt, ctx) {
+function renderCard(evt, ctx, listing = null) {
   const tag = (k) => evt.tags.find((t) => t[0] === k)?.[1] || '';
-  const titleText = tag('title');
-  const description = tag('description');
   const dTag = tag('d');
   const source = tag('source');
   const date = new Date(evt.created_at * 1000).toLocaleDateString();
@@ -254,12 +313,39 @@ function renderCard(evt, ctx) {
   const updateAvailable =
     installed && installedManifest && installedManifest.createdAt < evt.created_at;
 
+  // NIP-5B: prefer listing fields over manifest fallbacks.
+  const listingName = localizedListingTag(listing, 'name');
+  const listingSummary = localizedListingTag(listing, 'summary');
+  const listingDescription = localizedListingTag(listing, 'description');
+  const titleText = listingName || tag('title');
+  const description = listingDescription || listingSummary || tag('description');
+  const iconTag = listing?.tags.find((t) => t[0] === 'icon');
+  const iconSha = iconTag?.[1];
+  const iconMime = iconTag?.[2];
+  const categoryTags = listing
+    ? listing.tags.filter((t) => t[0] === 'l' && t[1]).map((t) => t[1])
+    : [];
+  const hashtags = listing
+    ? listing.tags.filter((t) => t[0] === 't' && t[1]).map((t) => t[1])
+    : [];
+
   const card = document.createElement('div');
   card.className = 'store-card';
   card.dataset.author = evt.pubkey;
+  if (listing) card.dataset.listingPubkey = listing.pubkey;
 
   const head = document.createElement('div');
   head.className = 'store-card-head';
+
+  if (iconSha) {
+    const icon = document.createElement('img');
+    icon.className = 'store-card-icon';
+    icon.alt = '';
+    icon.dataset.iconSha = iconSha;
+    if (iconMime) icon.dataset.iconMime = iconMime;
+    icon.hidden = true; // shown once a Blossom URL resolves
+    head.appendChild(icon);
+  }
 
   const titles = document.createElement('div');
   titles.className = 'store-card-titles';
@@ -323,6 +409,25 @@ function renderCard(evt, ctx) {
     card.appendChild(desc);
   }
 
+  if (categoryTags.length || hashtags.length) {
+    const chips = document.createElement('div');
+    chips.className = 'store-chips';
+    for (const cat of categoryTags) {
+      const chip = document.createElement('span');
+      chip.className = 'store-chip store-chip-category';
+      chip.textContent = formatCategory(cat);
+      chip.title = cat;
+      chips.appendChild(chip);
+    }
+    for (const t of hashtags) {
+      const chip = document.createElement('span');
+      chip.className = 'store-chip store-chip-tag';
+      chip.textContent = `#${t}`;
+      chips.appendChild(chip);
+    }
+    card.appendChild(chips);
+  }
+
   if (source) {
     const src = document.createElement('a');
     src.className = 'store-source';
@@ -363,7 +468,7 @@ function renderCard(evt, ctx) {
         await ctx.launchFromInput(raw);
       }
       // Replace this card with a freshly-rendered one so the button flips.
-      const replacement = renderCard(evt, ctx);
+      const replacement = renderCard(evt, ctx, listing);
       card.replaceWith(replacement);
     } catch (err) {
       installBtn.title = err?.message || String(err);
@@ -457,7 +562,7 @@ function mergeEvents(cached, fresh) {
   return [...byKey.values()];
 }
 
-function matchesFilter(evt, filter) {
+function matchesFilter(evt, listing, filter) {
   if (!filter) return true;
   const fields = [
     evt.tags.find((t) => t[0] === 'title')?.[1] || '',
@@ -465,5 +570,46 @@ function matchesFilter(evt, filter) {
     evt.tags.find((t) => t[0] === 'd')?.[1] || '',
     evt.pubkey,
   ];
+  if (listing) {
+    for (const t of listing.tags) {
+      if (
+        (t[0] === 'name' ||
+          t[0] === 'summary' ||
+          t[0] === 'description' ||
+          t[0] === 'l' ||
+          t[0] === 't') &&
+        typeof t[1] === 'string'
+      ) {
+        fields.push(t[1]);
+      }
+    }
+  }
   return fields.some((f) => f.toLowerCase().includes(filter));
+}
+
+// Picks the best language variant of a listing's tag (name, summary,
+// description). Tag shape: ["<name>", "<value>", "<lang?>"].
+function localizedListingTag(listing, tagName) {
+  if (!listing) return null;
+  const matches = listing.tags.filter(
+    (t) => t[0] === tagName && typeof t[1] === 'string' && t[1].length > 0,
+  );
+  if (matches.length === 0) return null;
+  const userLang =
+    typeof navigator !== 'undefined' && navigator.language
+      ? navigator.language.slice(0, 2).toLowerCase()
+      : 'en';
+  return (
+    matches.find((t) => (t[2] || '').toLowerCase() === userLang)?.[1] ||
+    matches.find((t) => !t[2] || t[2].toLowerCase() === 'en')?.[1] ||
+    matches[0][1]
+  );
+}
+
+// Renders a category label like "napp.utilities:office" into a friendlier
+// "office · utilities" form for the chip text.
+function formatCategory(label) {
+  const m = /^napp\.([^:]+):(.+)$/.exec(label);
+  if (!m) return label;
+  return `${m[2]} · ${m[1]}`;
 }
