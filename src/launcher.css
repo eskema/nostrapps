@@ -273,7 +273,7 @@ button {
   /* Above the pin tier (PIN_BASE = 100000 in napp-window.js) so the dropdown
      never gets covered by a pinned napp. */
   z-index: 200000;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 95%, currentColor 2%);
   color: inherit;
   /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
   border-top: none;
@@ -465,7 +465,6 @@ button {
   border-radius: 4px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
   min-width: 240px;
-  min-height: fit-content;
   overflow: hidden;
   transition:
     max-height 220ms ease-in-out,
@@ -1420,4 +1419,115 @@ body.napp-dragging .napp-body iframe {
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   border-radius: 6px;
   cursor: pointer;
+}
+
+/* ─── settings: account section ────────────────────────────────── */
+.settings-account-connected {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.settings-account-disconnected {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* The bunker form expands across both columns of the disconnected row. */
+.settings-bunker-form {
+  grid-column: 1 / -1;
+}
+
+.settings-account-connected[hidden],
+.settings-account-disconnected[hidden],
+.settings-bunker-form[hidden] {
+  display: none;
+}
+
+.settings-account-type {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.settings-disconnect-btn,
+.settings-connect-extension,
+.settings-connect-bunker-toggle,
+.settings-bunker-submit,
+.settings-bunker-cancel {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-disconnect-btn:hover,
+.settings-connect-extension:hover,
+.settings-connect-bunker-toggle:hover,
+.settings-bunker-submit:hover,
+.settings-bunker-cancel:hover {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.settings-bunker-form {
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.settings-bunker-input {
+  padding: 0.35rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+}
+
+.settings-bunker-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, currentColor 50%, transparent);
+}
+
+.settings-bunker-actions {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 0.3rem;
+  justify-content: end;
+}
+
+.settings-bunker-error {
+  font-size: 0.78rem;
+  color: #c0392b;
+}
+
+/* ─── settings: reset ──────────────────────────────────────────── */
+.settings-reset-btn {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+  justify-self: start;
+}
+
+.settings-reset-btn:hover {
+  background: #c0392b;
+  color: white;
+  border-color: #c0392b;
 }

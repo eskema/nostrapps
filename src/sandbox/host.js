@@ -306,8 +306,12 @@ async function handleRpc(data, iframe, signer, nappId, dispatchHandlers) {
       const allowed = await requireApproval(nappId, method);
       if (!allowed) throw new Error(`Permission denied: ${method}`);
     }
+    // Signer can be passed either as an object (legacy) or as a getter
+    // (`() => currentSigner()`). The getter form lets the user hot-swap
+    // signer types (NIP-07 ↔ NIP-46) without forcing a napp reload.
+    const resolvedSigner = typeof signer === 'function' ? signer() : signer;
     const result = await dispatch(
-      signer,
+      resolvedSigner,
       method,
       params,
       instanceId,

@@ -16,7 +16,11 @@ import {
 import { resolveInput } from './nsite/resolve.js';
 import { fetchNsite } from './nsite/fetch.js';
 import { collectLocalFolder } from './nsite/local.js';
-import { nip07Signer } from './signers/nip07.js';
+import { currentSigner, reconnectIfNeeded } from './signers/index.js';
+import {
+  connectBunkerInput,
+  disconnectBunkerSigner,
+} from './signers/nip46.js';
 import * as account from './account.js';
 import { mountDialog, clearDecisions } from './permissions.js';
 import * as persist from './persistence.js';
@@ -92,15 +96,124 @@ async function connect() {
     if (!window.nostr) throw new Error('No NIP-07 extension detected');
     setStatus('Requesting pubkey from extension…');
     const pk = await window.nostr.getPublicKey();
-    account.setPubkey(pk);
+    account.setAccount(pk, 'nip07');
     setStatus(`Connected as ${pk.slice(0, 8)}…`);
   } catch (err) {
     setStatus(`Error: ${err.message}`);
+    throw err;
   }
 }
-function disconnect() {
+
+async function connectBunker(uri) {
+  try {
+    setStatus('Connecting to bunker…');
+    const pk = await connectBunkerInput(uri);
+    account.setAccount(pk, 'nip46');
+    setStatus(`Connected as ${pk.slice(0, 8)}… (bunker)`);
+  } catch (err) {
+    setStatus(`Error: ${err.message}`);
+    throw err;
+  }
+}
+
+async function disconnect() {
+  if (account.getType() === 'nip46') {
+    try {
+      await disconnectBunkerSigner();
+    } catch {}
+  }
   account.clearPubkey();
   setStatus('Disconnected');
+}
+
+// Wipe every trace of the launcher: every installed napp's origin storage,
+// every `nostrapps:*` localStorage entry, the launcher's IndexedDB, caches,
+// and any OPFS data. Then reload to a clean slate. Confirm gated upstream.
+async function factoryReset() {
+  setStatus('Starting full reset…');
+
+  // 1. Wipe each napp origin we've ever touched.
+  const allNappIds = new Set();
+  for (const id of persist.readKnown()) allNappIds.add(id);
+  for (const id of persist.readInstallLog()) allNappIds.add(id);
+  for (const s of persist.readOpen()) {
+    if (s.nappId && !s.system) allNappIds.add(s.nappId);
+  }
+  for (const nappId of allNappIds) {
+    setStatus(`Wiping ${nappId}…`);
+    try {
+      await wipe(nappId);
+    } catch (err) {
+      console.warn('wipe failed for', nappId, err);
+    }
+  }
+
+  // 2. Clear every `nostrapps:*` localStorage key.
+  setStatus('Clearing localStorage…');
+  const lsKeys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('nostrapps:')) lsKeys.push(k);
+  }
+  for (const k of lsKeys) localStorage.removeItem(k);
+  try {
+    sessionStorage.clear();
+  } catch {}
+
+  // 3. Drop every IndexedDB on the launcher origin.
+  setStatus('Clearing IndexedDB…');
+  try {
+    if (indexedDB.databases) {
+      const dbs = await indexedDB.databases();
+      await Promise.all(
+        dbs.map(
+          (d) =>
+            new Promise((resolve) => {
+              if (!d.name) return resolve();
+              const req = indexedDB.deleteDatabase(d.name);
+              req.onsuccess = () => resolve();
+              req.onerror = () => resolve();
+              req.onblocked = () => resolve();
+            }),
+        ),
+      );
+    }
+  } catch {}
+
+  // 4. CacheStorage on the launcher origin.
+  if (typeof caches !== 'undefined') {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch {}
+  }
+
+  // 5. OPFS (used by @nostr/gadgets/redstore for the global event store).
+  if (navigator.storage?.getDirectory) {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const entries = [];
+      for await (const handle of root.values?.() ?? []) {
+        entries.push(handle.name);
+      }
+      for (const name of entries) {
+        try {
+          await root.removeEntry(name, { recursive: true });
+        } catch {}
+      }
+    } catch {}
+  }
+
+  // 6. Service workers on the launcher origin (probably none, but be sure).
+  if (navigator.serviceWorker?.getRegistrations) {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    } catch {}
+  }
+
+  setStatus('Reset complete — reloading…');
+  setTimeout(() => location.reload(), 400);
 }
 
 function loadFolder() {
@@ -321,7 +434,7 @@ async function ensureNappOpen(nappId) {
 
   const closed = persist.readOpen().find((s) => s.nappId === nappId && s.closed);
   if (closed) {
-    const win = restore(stage, closed.nappId, nip07Signer, {
+    const win = restore(stage, closed.nappId, currentSigner, {
       ...makeLaunchOpts(),
       instanceId: closed.instanceId,
       petname: closed.petname,
@@ -347,7 +460,7 @@ async function ensureNappOpen(nappId) {
     };
     const result = await fetchNsite(target, setStatus);
     const petname = result.title || nappId;
-    const win = await launch(stage, result.nappId, result.files, nip07Signer, {
+    const win = await launch(stage, result.nappId, result.files, currentSigner, {
       ...makeLaunchOpts(),
       petname,
     });
@@ -375,7 +488,9 @@ const systemCtx = {
   theme,
   logs,
   connect,
+  connectBunker,
   disconnect,
+  factoryReset,
   loadFolder,
   setStatus,
   launchSystemNapp,
@@ -646,7 +761,7 @@ function renderSuggestionRow(item) {
 }
 
 async function launchFresh(nappId, petname) {
-  const win = restore(stage, nappId, nip07Signer, {
+  const win = restore(stage, nappId, currentSigner, {
     ...makeLaunchOpts(),
     petname: petname && petname !== nappId ? petname : nappId,
   });
@@ -658,7 +773,7 @@ async function launchSession(instanceId) {
   const session = persist.readOpen().find((s) => s.instanceId === instanceId);
   if (!session) throw new Error('Session not found');
   if (!session.closed && focusInstance(instanceId)) return;
-  const win = restore(stage, session.nappId, nip07Signer, {
+  const win = restore(stage, session.nappId, currentSigner, {
     ...makeLaunchOpts(),
     instanceId: session.instanceId,
     petname: session.petname,
@@ -810,7 +925,7 @@ async function restoreAll() {
         });
         continue;
       }
-      const win = restore(stage, state.nappId, nip07Signer, {
+      const win = restore(stage, state.nappId, currentSigner, {
         ...makeLaunchOpts(),
         instanceId: state.instanceId,
         petname: state.petname,
@@ -842,6 +957,11 @@ async function init() {
   setStatus(
     'Ready — try /store, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host',
   );
+  // If the user is paired with a bunker, get the connection warm in the
+  // background. First sign request will wait if it's still connecting.
+  reconnectIfNeeded().catch((err) =>
+    setStatus(`Bunker reconnect failed: ${err.message}`),
+  );
   await restoreAll();
   maybeBootstrap();
 }
@@ -871,7 +991,7 @@ async function launchFromInput(raw) {
       refreshSuggestions();
       return;
     }
-    const win = restore(stage, existing.nappId, nip07Signer, {
+    const win = restore(stage, existing.nappId, currentSigner, {
       ...makeLaunchOpts(),
       instanceId: existing.instanceId,
       petname: existing.petname,
@@ -890,7 +1010,7 @@ async function launchFromInput(raw) {
 
   const petNappId = persist.getNappIdForPetname(raw);
   if (petNappId) {
-    const win = restore(stage, petNappId, nip07Signer, {
+    const win = restore(stage, petNappId, currentSigner, {
       ...makeLaunchOpts(),
       petname: raw,
     });
@@ -900,7 +1020,7 @@ async function launchFromInput(raw) {
   }
   const known = new Set(persist.readKnown());
   if (known.has(raw)) {
-    const win = restore(stage, raw, nip07Signer, {
+    const win = restore(stage, raw, currentSigner, {
       ...makeLaunchOpts(),
       petname: raw,
     });
@@ -921,7 +1041,7 @@ async function launchFromInput(raw) {
     setStatus,
   );
   const petname = title || raw;
-  const win = await launch(stage, nappId, files, nip07Signer, {
+  const win = await launch(stage, nappId, files, currentSigner, {
     ...makeLaunchOpts(),
     petname,
   });
@@ -953,7 +1073,7 @@ localFolderInput.addEventListener('change', async (e) => {
   if (!inputFiles || inputFiles.length === 0) return;
   try {
     const { nappId, files } = await collectLocalFolder(inputFiles, setStatus);
-    const win = await launch(stage, nappId, files, nip07Signer, {
+    const win = await launch(stage, nappId, files, currentSigner, {
       ...makeLaunchOpts(),
       petname: nappId,
     });
