@@ -10,6 +10,8 @@ import {
   destroyByNappId,
   reinstallFiles,
   reloadIframesByNappId,
+  findOpenWindowByNappId,
+  callIframe,
 } from './sandbox/host.js';
 import { resolveInput } from './nsite/resolve.js';
 import { fetchNsite } from './nsite/fetch.js';
@@ -131,6 +133,7 @@ async function uninstallNapp(nappId) {
     for (const p of petnameKeys) persist.forgetHistory(p);
     clearDecisions(nappId);
     persist.forgetInstalledManifest(nappId);
+    persist.forgetHandlers(nappId);
     setStatus(`Uninstalling ${nappId}…`);
     try {
       await wipe(nappId);
@@ -153,6 +156,23 @@ function manifestInfoFromEvent(evt) {
   };
 }
 
+// NIP-5B: read `handle` (kind) and `action` (named) capability tags off the
+// listing event so the launcher can route inter-app calls to this napp.
+function capabilitiesFromListing(listing) {
+  if (!listing) return { kinds: [], actions: [] };
+  const kinds = [];
+  const actions = [];
+  for (const t of listing.tags) {
+    if (t[0] === 'handle' && t[1]) {
+      const k = Number(t[1]);
+      if (Number.isInteger(k) && k >= 0) kinds.push(k);
+    } else if (t[0] === 'action' && typeof t[1] === 'string' && t[1]) {
+      actions.push(t[1]);
+    }
+  }
+  return { kinds, actions };
+}
+
 // Update flow: re-fetch the manifest + files at the same target, swap them
 // into the napp's existing origin storage (no new window), persist the new
 // version, and force any open iframes to reload so they pick up new files.
@@ -165,6 +185,7 @@ async function updateNapp(target) {
   setStatus(`Updating ${label}…`);
   await reinstallFiles(nappId, files, setStatus, label);
   if (manifest) persist.setInstalledManifest(nappId, manifestInfoFromEvent(manifest));
+  persist.setHandlers(nappId, capabilitiesFromListing(result.listing));
   const reloaded = reloadIframesByNappId(nappId);
   setStatus(
     `Updated ${label}` +
@@ -173,6 +194,179 @@ async function updateNapp(target) {
         : ''),
   );
   refreshSuggestions();
+}
+
+// ─── inter-app calling (handle / action) ───────────────────────
+
+async function runNappHandle(callerNappId, event) {
+  const kind = Number(event?.kind);
+  if (!Number.isInteger(kind) || kind < 0) {
+    throw new Error('napp.handle: event must have a valid kind');
+  }
+  const candidates = persist
+    .findHandlersForKind(kind)
+    .filter((id) => id !== callerNappId);
+  if (candidates.length === 0) {
+    throw new Error(`No app registered to handle kind ${kind}`);
+  }
+  const target = await pickHandler(callerNappId, 'kind', String(kind), candidates);
+  const win = await ensureNappOpen(target);
+  return await callIframe(win.getState().instanceId, 'napp-dispatch-handle', {
+    event,
+  });
+}
+
+async function runNappAction(callerNappId, name, payload) {
+  if (typeof name !== 'string' || !name) {
+    throw new Error('napp.action: action name is required');
+  }
+  const candidates = persist
+    .findHandlersForAction(name)
+    .filter((id) => id !== callerNappId);
+  if (candidates.length === 0) {
+    throw new Error(`No app registered for action "${name}"`);
+  }
+  const target = await pickHandler(callerNappId, 'action', name, candidates);
+  const win = await ensureNappOpen(target);
+  return await callIframe(win.getState().instanceId, 'napp-dispatch-action', {
+    name,
+    payload,
+  });
+}
+
+async function pickHandler(callerNappId, type, key, candidates) {
+  if (candidates.length === 1) {
+    persist.setHandlerPref(callerNappId, type, key, candidates[0]);
+    return candidates[0];
+  }
+  const remembered = persist.getHandlerPref(callerNappId, type, key);
+  if (remembered && candidates.includes(remembered)) return remembered;
+  const choice = await showHandlerPicker(type, key, candidates);
+  persist.setHandlerPref(callerNappId, type, key, choice);
+  return choice;
+}
+
+// Promise-based modal that asks the user to pick one of `candidates`.
+function showHandlerPicker(type, key, candidates) {
+  return new Promise((resolve, reject) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'handler-picker';
+    const heading =
+      type === 'kind'
+        ? `Pick an app to handle kind ${key}`
+        : `Pick an app for "${key}"`;
+    const list = candidates
+      .map(
+        (id) => `
+          <li>
+            <button type="button" data-pick="${id}">
+              <span class="handler-pet">${escapeHtml(friendlyNameFor(id))}</span>
+              <code class="handler-id">${escapeHtml(id)}</code>
+            </button>
+          </li>`,
+      )
+      .join('');
+    dialog.innerHTML = `
+      <form method="dialog" class="handler-picker-form">
+        <h3>${escapeHtml(heading)}</h3>
+        <ul class="handler-picker-list">${list}</ul>
+        <menu class="handler-picker-actions">
+          <button type="button" value="cancel" class="handler-picker-cancel">cancel</button>
+        </menu>
+      </form>
+    `;
+    document.body.appendChild(dialog);
+    let settled = false;
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      if (!settled) reject(new Error('Picker dismissed'));
+    });
+    dialog.querySelector('.handler-picker-cancel').addEventListener('click', () => {
+      dialog.close();
+    });
+    for (const btn of dialog.querySelectorAll('[data-pick]')) {
+      btn.addEventListener('click', () => {
+        settled = true;
+        const pick = btn.dataset.pick;
+        dialog.close();
+        resolve(pick);
+      });
+    }
+    dialog.showModal();
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c],
+  );
+}
+
+// Make sure a window for nappId is open and focused. Tries (in order):
+// already-open, closed-session-reopen, fresh launch from installed manifest.
+async function ensureNappOpen(nappId) {
+  const existing = findOpenWindowByNappId(nappId);
+  if (existing) {
+    existing.focus?.();
+    return existing;
+  }
+
+  const closed = persist.readOpen().find((s) => s.nappId === nappId && s.closed);
+  if (closed) {
+    const win = restore(stage, closed.nappId, nip07Signer, {
+      ...makeLaunchOpts(),
+      instanceId: closed.instanceId,
+      petname: closed.petname,
+      initial: closed,
+    });
+    bringToTopOfStack(win.root);
+    persist.updateOpen(closed.instanceId, {
+      ...win.getState(),
+      closed: false,
+    });
+    persistDomOrder();
+    refreshSuggestions();
+    win.focus();
+    return win;
+  }
+
+  const info = persist.getInstalledManifest(nappId);
+  if (info?.pubkey) {
+    const target = {
+      pubkey: info.pubkey,
+      kind: info.kind,
+      dTag: info.dTag || undefined,
+    };
+    const result = await fetchNsite(target, setStatus);
+    const petname = result.title || nappId;
+    const win = await launch(stage, result.nappId, result.files, nip07Signer, {
+      ...makeLaunchOpts(),
+      petname,
+    });
+    trackOpened(result.nappId, win);
+    if (result.manifest)
+      persist.setInstalledManifest(result.nappId, manifestInfoFromEvent(result.manifest));
+    persist.setHandlers(result.nappId, capabilitiesFromListing(result.listing));
+    win.focus();
+    return win;
+  }
+
+  throw new Error(`Cannot open ${nappId}: no install info on file`);
+}
+
+function friendlyNameFor(nappId) {
+  return (
+    petnameForNappId(nappId, persist.readPetnames(), persist.readOpen()) ||
+    nappId
+  );
 }
 
 // ─── system napp ctx ────────────────────────────────────────────
@@ -547,6 +741,11 @@ function persistDomOrder() {
 function makeLaunchOpts() {
   return {
     onProgress: setStatus,
+    dispatchHandlers: {
+      handle: (callerNappId, event) => runNappHandle(callerNappId, event),
+      action: (callerNappId, name, payload) =>
+        runNappAction(callerNappId, name, payload),
+    },
     onStateChange: (state) => {
       persist.updateOpen(state.instanceId, state);
       if (state.petname && state.petname !== state.nappId) {
@@ -579,6 +778,7 @@ function makeLaunchOpts() {
           for (const p of petnameKeys) persist.forgetHistory(p);
           clearDecisions(entry.nappId);
           persist.forgetInstalledManifest(entry.nappId);
+          persist.forgetHandlers(entry.nappId);
           // Wipe the napp's origin storage (IDB, localStorage, caches, SW)
           // so re-installing it later starts from a clean slate.
           setStatus(`Wiping ${entry.nappId}…`);
@@ -716,7 +916,7 @@ async function launchFromInput(raw) {
       `Couldn't resolve "${raw}" — try a pubkey, npub, nprofile, naddr, or nsite hostname`,
     );
   }
-  const { nappId, files, title, manifest } = await fetchNsite(
+  const { nappId, files, title, manifest, listing } = await fetchNsite(
     resolved,
     setStatus,
   );
@@ -729,6 +929,7 @@ async function launchFromInput(raw) {
   if (raw && raw !== petname) persist.setPetname(raw, nappId);
   persist.pushHistory(raw);
   if (manifest) persist.setInstalledManifest(nappId, manifestInfoFromEvent(manifest));
+  persist.setHandlers(nappId, capabilitiesFromListing(listing));
   win.focus();
 }
 

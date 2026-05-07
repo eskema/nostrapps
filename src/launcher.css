@@ -1348,3 +1348,76 @@ body.napp-dragging .napp-body iframe {
   opacity: 0.75;
   font-family: var(--font-mono);
 }
+
+/* ─── handler picker ───────────────────────────────────────────── */
+.handler-picker {
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 12px;
+  padding: 1.2rem;
+  max-width: 28rem;
+  color: inherit;
+  background: var(--surface);
+  font-family: inherit;
+}
+
+.handler-picker::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.handler-picker h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.handler-picker-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.handler-picker-list button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  align-items: baseline;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.handler-picker-list button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.handler-picker .handler-pet {
+  font-weight: 500;
+}
+
+.handler-picker .handler-id {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  opacity: 0.55;
+}
+
+.handler-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+}
+
+.handler-picker-cancel {
+  padding: 0.4rem 0.8rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+}

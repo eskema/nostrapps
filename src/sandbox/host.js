@@ -46,6 +46,56 @@ export function destroyByNappId(nappId) {
   return targets.length;
 }
 
+export function findOpenWindowByNappId(nappId) {
+  for (const win of openWindows.values()) {
+    if (win.root.dataset.nappId === nappId) return win;
+  }
+  return null;
+}
+
+// Launcher → iframe dispatch calls (handle / action). Each call gets a
+// requestId; the iframe replies with that id once `window.napp.onHandle`
+// or `window.napp.onAction` has run.
+const pendingDispatches = new Map();
+const DISPATCH_TIMEOUT_MS = 30_000;
+
+export function callIframe(instanceId, type, data = {}) {
+  const win = openWindows.get(instanceId);
+  if (!win || !win.iframe) {
+    return Promise.reject(new Error(`No iframe for instance ${instanceId}`));
+  }
+  const origin = nappOriginFor(win.root.dataset.nappId);
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingDispatches.delete(requestId);
+      reject(new Error(`${type} timed out`));
+    }, DISPATCH_TIMEOUT_MS);
+    pendingDispatches.set(requestId, {
+      resolve: (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      reject: (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    });
+    win.iframe.contentWindow?.postMessage(
+      { __nostrapps: type, requestId, ...data },
+      origin,
+    );
+  });
+}
+
+function settleDispatch(data) {
+  const p = pendingDispatches.get(data.requestId);
+  if (!p) return;
+  pendingDispatches.delete(data.requestId);
+  if (data.__nostrapps === 'napp-dispatch-result') p.resolve(data.result);
+  else p.reject(new Error(data.error || 'dispatch failed'));
+}
+
 // Re-run the install flow into the napp's existing origin without spawning
 // a new visible window. boot.html's install handler clears its files store
 // before writing, so this swaps the files atomically for in-place updates.
@@ -128,8 +178,18 @@ function mount(stageEl, nappId, origin, signer, opts = {}) {
     petname,
     initial,
     onMessage: (data, iframe) => {
-      if (!data || data.__nostrapps !== 'rpc') return;
-      handleRpc(data, iframe, signer, nappId);
+      if (!data) return;
+      if (data.__nostrapps === 'rpc') {
+        handleRpc(data, iframe, signer, nappId, opts.dispatchHandlers);
+        return;
+      }
+      if (
+        data.__nostrapps === 'napp-dispatch-result' ||
+        data.__nostrapps === 'napp-dispatch-error'
+      ) {
+        settleDispatch(data);
+        return;
+      }
     },
     onClose: () => {
       openWindows.delete(instanceId);
@@ -239,14 +299,21 @@ function waitForMessage(expectedOrigin, successType, errorType) {
   });
 }
 
-async function handleRpc(data, iframe, signer, nappId) {
+async function handleRpc(data, iframe, signer, nappId, dispatchHandlers) {
   const { id, method, params, instanceId } = data;
   try {
     if (isGated(method)) {
       const allowed = await requireApproval(nappId, method);
       if (!allowed) throw new Error(`Permission denied: ${method}`);
     }
-    const result = await dispatch(signer, method, params, instanceId);
+    const result = await dispatch(
+      signer,
+      method,
+      params,
+      instanceId,
+      nappId,
+      dispatchHandlers,
+    );
     iframe.contentWindow?.postMessage(
       { __nostrapps: 'rpc-result', id, result },
       '*',
@@ -259,7 +326,7 @@ async function handleRpc(data, iframe, signer, nappId) {
   }
 }
 
-function dispatch(signer, method, params, instanceId) {
+function dispatch(signer, method, params, instanceId, callerNappId, dispatchHandlers) {
   switch (method) {
     case 'getPublicKey':
       return signer.getPublicKey();
@@ -297,6 +364,16 @@ function dispatch(signer, method, params, instanceId) {
       return store.event(params.id);
     case 'nostrdb.replaceable':
       return store.replaceable(params.kind, params.author, params.identifier);
+    case 'napp.handle':
+      if (!dispatchHandlers?.handle) {
+        throw new Error('napp.handle dispatch is not configured');
+      }
+      return dispatchHandlers.handle(callerNappId, params?.event);
+    case 'napp.action':
+      if (!dispatchHandlers?.action) {
+        throw new Error('napp.action dispatch is not configured');
+      }
+      return dispatchHandlers.action(callerNappId, params?.name, params?.payload);
     default:
       throw new Error(`unsupported method: ${method}`);
   }

@@ -4,6 +4,8 @@ const KNOWN_KEY = 'nostrapps:known';
 const PETNAMES_KEY = 'nostrapps:petnames';
 const INSTALL_LOG_KEY = 'nostrapps:installLog';
 const INSTALLED_MANIFESTS_KEY = 'nostrapps:installedManifests';
+const HANDLERS_KEY = 'nostrapps:handlers'; // { nappId: { kinds: number[], actions: string[] } }
+const HANDLER_PREFS_KEY = 'nostrapps:handlerPrefs'; // { '<caller>|<type>|<key>': nappId }
 const HISTORY_LIMIT = 20;
 
 function readJson(key, fallback) {
@@ -143,6 +145,91 @@ export function forgetInstalledManifest(nappId) {
     delete all[nappId];
     writeJson(INSTALLED_MANIFESTS_KEY, all);
   }
+}
+
+// ─── handler registry (NIP-5B `handle` / `action` capabilities) ──
+
+function readHandlers() {
+  const raw = readJson(HANDLERS_KEY, {});
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+export function setHandlers(nappId, capabilities) {
+  if (!nappId) return;
+  const all = readHandlers();
+  const kinds = Array.isArray(capabilities?.kinds)
+    ? capabilities.kinds.filter((k) => Number.isInteger(k) && k >= 0)
+    : [];
+  const actions = Array.isArray(capabilities?.actions)
+    ? capabilities.actions.filter((a) => typeof a === 'string' && a.length)
+    : [];
+  if (kinds.length === 0 && actions.length === 0) {
+    delete all[nappId];
+  } else {
+    all[nappId] = { kinds: [...new Set(kinds)], actions: [...new Set(actions)] };
+  }
+  writeJson(HANDLERS_KEY, all);
+}
+
+export function forgetHandlers(nappId) {
+  const all = readHandlers();
+  if (nappId in all) {
+    delete all[nappId];
+    writeJson(HANDLERS_KEY, all);
+  }
+}
+
+export function findHandlersForKind(kind) {
+  const all = readHandlers();
+  const k = Number(kind);
+  const out = [];
+  for (const [nappId, caps] of Object.entries(all)) {
+    if (caps?.kinds?.includes(k)) out.push(nappId);
+  }
+  return out;
+}
+
+export function findHandlersForAction(action) {
+  if (typeof action !== 'string' || !action) return [];
+  const all = readHandlers();
+  const out = [];
+  for (const [nappId, caps] of Object.entries(all)) {
+    if (caps?.actions?.includes(action)) out.push(nappId);
+  }
+  return out;
+}
+
+// "I last picked nappId X to handle <action 'edit:30023'> from <caller Y>".
+// The caller pin makes prefs scoped, so picking an editor for napp A doesn't
+// automatically apply when napp B asks for the same action.
+
+function readHandlerPrefs() {
+  const raw = readJson(HANDLER_PREFS_KEY, {});
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+function prefKey(callerNappId, type, key) {
+  return `${callerNappId || '*'}|${type}|${key}`;
+}
+
+export function getHandlerPref(callerNappId, type, key) {
+  return readHandlerPrefs()[prefKey(callerNappId, type, key)] ?? null;
+}
+
+export function setHandlerPref(callerNappId, type, key, nappId) {
+  const all = readHandlerPrefs();
+  const k = prefKey(callerNappId, type, key);
+  if (nappId) all[k] = nappId;
+  else delete all[k];
+  writeJson(HANDLER_PREFS_KEY, all);
+}
+
+export function readHandlerPrefsAll() {
+  return readHandlerPrefs();
+}
+
+export function clearHandlerPrefs() {
+  writeJson(HANDLER_PREFS_KEY, {});
 }
 
 export function forgetKnown(nappId) {
