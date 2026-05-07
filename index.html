@@ -2,26 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1" />
     <title>nostrapps</title>
     <link rel="stylesheet" href="/src/launcher.css" />
   </head>
   <body>
     <header>
       <div class="headerbar">
-        <h1>nostrapps</h1>
+        <h1>nostr<br><span>n</span>apps</h1>
         <form id="launch-form">
           <div class="input-wrap">
             <input
               id="nsite-input"
-              placeholder="npub / nappId / hex pubkey"
+              placeholder="pubkey / npub / naddr / nsite /…"
               autocomplete="off"
               spellcheck="false"
             />
             <div id="suggestions" hidden></div>
           </div>
-          <button type="submit">Launch</button>
-          <button type="button" id="load-local">Load folder…</button>
           <input
             type="file"
             id="local-folder"
@@ -30,17 +30,6 @@
             hidden
           />
         </form>
-        <div id="account">
-          <button type="button" id="connect">Connect</button>
-          <span id="pubkey-display" hidden>
-            <code id="pubkey-short"></code>
-            <button type="button" id="disconnect" title="Disconnect">×</button>
-          </span>
-        </div>
-      </div>
-      <div id="log-container" class="log-collapsed">
-        <div id="log"></div>
-        <button id="log-toggle" type="button" title="Expand log">▸</button>
       </div>
     </header>
     <main id="stage"></main>

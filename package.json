@@ -9,6 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/source-code-pro": "^5.2.7",
+    "@fontsource-variable/source-sans-3": "^5.2.9",
+    "@fontsource-variable/source-serif-4": "^5.2.9",
     "@nostr/gadgets": "npm:@jsr/nostr__gadgets@0.1.7",
     "@nostr/tools": "npm:@jsr/nostr__tools@2.23.1"
   },

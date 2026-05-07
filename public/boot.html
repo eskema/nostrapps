@@ -56,6 +56,55 @@
           });
         }
 
+        async function wipeAll() {
+          // IndexedDB — every database at this origin
+          try {
+            if (indexedDB.databases) {
+              const dbs = await indexedDB.databases();
+              await Promise.all(
+                dbs.map(
+                  (d) =>
+                    new Promise((resolve) => {
+                      const req = indexedDB.deleteDatabase(d.name);
+                      req.onsuccess = () => resolve();
+                      req.onerror = () => resolve();
+                      req.onblocked = () => resolve();
+                    }),
+                ),
+              );
+            } else {
+              // older browsers: at least delete the one we know about
+              await new Promise((resolve) => {
+                const req = indexedDB.deleteDatabase(DB_NAME);
+                req.onsuccess = () => resolve();
+                req.onerror = () => resolve();
+                req.onblocked = () => resolve();
+              });
+            }
+          } catch {}
+
+          try {
+            localStorage.clear();
+          } catch {}
+          try {
+            sessionStorage.clear();
+          } catch {}
+
+          if (typeof caches !== 'undefined') {
+            try {
+              const keys = await caches.keys();
+              await Promise.all(keys.map((k) => caches.delete(k)));
+            } catch {}
+          }
+
+          if (navigator.serviceWorker?.getRegistrations) {
+            try {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map((r) => r.unregister()));
+            } catch {}
+          }
+        }
+
         async function putFile(path, body, mime) {
           const db = await openDB();
           return new Promise((resolve, reject) => {
@@ -76,24 +125,39 @@
 
         window.addEventListener('message', async (event) => {
           const data = event.data;
-          if (!data || data.__nostrapps !== 'napp-install') return;
-          try {
-            await clearAll();
-            for (const f of data.files) {
-              await putFile(f.path, f.body, f.mime);
+          if (!data) return;
+          if (data.__nostrapps === 'napp-install') {
+            try {
+              await clearAll();
+              for (const f of data.files) {
+                await putFile(f.path, f.body, f.mime);
+              }
+              event.source.postMessage(
+                {
+                  __nostrapps: 'napp-install-done',
+                  fileCount: data.files.length,
+                },
+                event.origin,
+              );
+            } catch (err) {
+              event.source.postMessage(
+                { __nostrapps: 'napp-install-error', error: err.message },
+                event.origin,
+              );
             }
-            event.source.postMessage(
-              {
-                __nostrapps: 'napp-install-done',
-                fileCount: data.files.length,
-              },
-              event.origin,
-            );
-          } catch (err) {
-            event.source.postMessage(
-              { __nostrapps: 'napp-install-error', error: err.message },
-              event.origin,
-            );
+          } else if (data.__nostrapps === 'napp-wipe') {
+            try {
+              await wipeAll();
+              event.source.postMessage(
+                { __nostrapps: 'napp-wipe-done' },
+                event.origin,
+              );
+            } catch (err) {
+              event.source.postMessage(
+                { __nostrapps: 'napp-wipe-error', error: err.message },
+                event.origin,
+              );
+            }
           }
         });
 

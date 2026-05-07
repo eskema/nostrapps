@@ -2,6 +2,8 @@ const OPEN_KEY = 'nostrapps:open';
 const HISTORY_KEY = 'nostrapps:history';
 const KNOWN_KEY = 'nostrapps:known';
 const PETNAMES_KEY = 'nostrapps:petnames';
+const INSTALL_LOG_KEY = 'nostrapps:installLog';
+const INSTALLED_MANIFESTS_KEY = 'nostrapps:installedManifests';
 const HISTORY_LIMIT = 20;
 
 function readJson(key, fallback) {
@@ -43,10 +45,17 @@ export function writeOpen(napps) {
 
 export function updateOpen(instanceId, state) {
   const all = readOpen();
-  const existing = all.find((n) => n.instanceId === instanceId);
-  const rest = all.filter((n) => n.instanceId !== instanceId);
-  if (state) rest.push({ ...existing, ...state });
-  writeOpen(rest);
+  const idx = all.findIndex((n) => n.instanceId === instanceId);
+  if (idx >= 0) {
+    if (state) {
+      all[idx] = { ...all[idx], ...state };
+    } else {
+      all.splice(idx, 1);
+    }
+  } else if (state) {
+    all.push(state);
+  }
+  writeOpen(all);
 }
 
 export function removeOpen(instanceId) {
@@ -67,7 +76,7 @@ export function readActiveSessions() {
 
 export function findSessionByPetname(petname) {
   const all = readOpen();
-  return all.find((n) => n.petname === petname) ?? null;
+  return all.find((n) => !n.system && n.petname === petname) ?? null;
 }
 
 export function readHistory() {
@@ -80,6 +89,13 @@ export function pushHistory(entry) {
   writeJson(HISTORY_KEY, prev.slice(0, HISTORY_LIMIT));
 }
 
+export function forgetHistory(value) {
+  writeJson(
+    HISTORY_KEY,
+    readHistory().filter((e) => e !== value),
+  );
+}
+
 export function readKnown() {
   return readJson(KNOWN_KEY, []);
 }
@@ -88,6 +104,52 @@ export function rememberKnown(nappId) {
   const prev = readKnown().filter((n) => n !== nappId);
   prev.unshift(nappId);
   writeJson(KNOWN_KEY, prev.slice(0, 100));
+  // Also append to the permanent install log (never pruned by uninstall),
+  // so the store can show "ever installed" history.
+  const log = readInstallLog();
+  if (!log.includes(nappId)) {
+    log.push(nappId);
+    writeJson(INSTALL_LOG_KEY, log);
+  }
+}
+
+export function readInstallLog() {
+  const raw = readJson(INSTALL_LOG_KEY, []);
+  return Array.isArray(raw) ? raw : [];
+}
+
+// Per-nappId info about *which* manifest version is currently installed,
+// used to detect when a relay has a newer one and offer an update.
+// info shape: { pubkey, kind, dTag?: string|null, eventId, createdAt }
+function readInstalledManifests() {
+  const raw = readJson(INSTALLED_MANIFESTS_KEY, {});
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+export function getInstalledManifest(nappId) {
+  return readInstalledManifests()[nappId] || null;
+}
+
+export function setInstalledManifest(nappId, info) {
+  if (!nappId || !info) return;
+  const all = readInstalledManifests();
+  all[nappId] = info;
+  writeJson(INSTALLED_MANIFESTS_KEY, all);
+}
+
+export function forgetInstalledManifest(nappId) {
+  const all = readInstalledManifests();
+  if (nappId in all) {
+    delete all[nappId];
+    writeJson(INSTALLED_MANIFESTS_KEY, all);
+  }
+}
+
+export function forgetKnown(nappId) {
+  writeJson(
+    KNOWN_KEY,
+    readKnown().filter((n) => n !== nappId),
+  );
 }
 
 export function readPetnames() {
@@ -100,6 +162,18 @@ export function setPetname(petname, nappId) {
   const all = readPetnames();
   all[petname] = nappId;
   writeJson(PETNAMES_KEY, all);
+}
+
+export function forgetPetnamesForNapp(nappId) {
+  const all = readPetnames();
+  let changed = false;
+  for (const [petname, mapped] of Object.entries(all)) {
+    if (mapped === nappId) {
+      delete all[petname];
+      changed = true;
+    }
+  }
+  if (changed) writeJson(PETNAMES_KEY, all);
 }
 
 export function getNappIdForPetname(petname) {

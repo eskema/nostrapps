@@ -16,9 +16,10 @@ export function nappOriginFor(nappId) {
 export async function launch(stageEl, nappId, files, signer, opts = {}) {
   const origin = nappOriginFor(nappId);
   const onProgress = opts.onProgress ?? (() => {});
+  const label = opts.petname || nappId;
 
-  onProgress('Booting napp origin…');
-  await bootNapp(origin, files, onProgress);
+  onProgress(`Booting ${label}…`);
+  await bootNapp(origin, files, onProgress, label);
 
   return mount(stageEl, nappId, origin, signer, opts);
 }
@@ -31,8 +32,79 @@ export function restore(stageEl, nappId, signer, opts = {}) {
 export function focusInstance(instanceId) {
   const win = openWindows.get(instanceId);
   if (!win) return false;
-  win.root.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  win.focus?.();
   return true;
+}
+
+export function destroyByNappId(nappId) {
+  // Snapshot — destroy() mutates openWindows.
+  const targets = [];
+  for (const win of openWindows.values()) {
+    if (win.root.dataset.nappId === nappId) targets.push(win);
+  }
+  for (const win of targets) win.destroy();
+  return targets.length;
+}
+
+// Re-run the install flow into the napp's existing origin without spawning
+// a new visible window. boot.html's install handler clears its files store
+// before writing, so this swaps the files atomically for in-place updates.
+export async function reinstallFiles(nappId, files, onProgress, label) {
+  const origin = nappOriginFor(nappId);
+  await bootNapp(origin, files, onProgress ?? (() => {}), label || nappId);
+}
+
+// Reload every open iframe whose dataset.nappId matches. Reassigning
+// iframe.src triggers a same-origin navigation; window.name (the bridge's
+// instanceId) is preserved across same-origin reloads.
+export function reloadIframesByNappId(nappId) {
+  let count = 0;
+  for (const win of openWindows.values()) {
+    if (win.root.dataset.nappId === nappId && win.iframe) {
+      win.iframe.src = win.iframe.src;
+      count++;
+    }
+  }
+  return count;
+}
+
+const systemSingletons = new Map(); // sysId -> instanceId
+
+export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
+  // singleton — focus the existing instance if already open
+  const existing = systemSingletons.get(sysId);
+  if (existing && openWindows.has(existing)) {
+    focusInstance(existing);
+    return openWindows.get(existing);
+  }
+
+  const instanceId = `system:${sysId}`;
+  const bodyElement = document.createElement('div');
+  bodyElement.className = `system-napp-content system-napp-${sysId}`;
+
+  const handle = def.mount(bodyElement, ctx);
+
+  const win = createNappWindow({
+    nappId: `__${sysId}__`,
+    instanceId,
+    petname: def.title || sysId,
+    bodyElement,
+    system: true,
+    initial: opts.initial,
+    onStateChange: opts.onStateChange,
+    onClose: () => {
+      handle?.unmount?.();
+      openWindows.delete(instanceId);
+      systemSingletons.delete(sysId);
+      opts.onClose?.(instanceId);
+    },
+    onReorder: opts.onReorder,
+  });
+  win.systemId = sysId;
+  stageEl.appendChild(win.root);
+  openWindows.set(instanceId, win);
+  systemSingletons.set(sysId, instanceId);
+  return win;
 }
 
 function mount(stageEl, nappId, origin, signer, opts = {}) {
@@ -41,17 +113,18 @@ function mount(stageEl, nappId, origin, signer, opts = {}) {
     petname,
     onProgress = () => {},
     onStateChange,
+    onReorder,
     onClose,
     onDestroy,
     initial,
   } = opts;
 
-  onProgress('Starting napp…');
+  onProgress(`Starting ${petname || nappId}…`);
   const win = createNappWindow({
     nappId,
     instanceId,
     origin,
-    src: `${origin}/?__instance=${encodeURIComponent(instanceId)}`,
+    src: `${origin}/`,
     petname,
     initial,
     onMessage: (data, iframe) => {
@@ -67,13 +140,47 @@ function mount(stageEl, nappId, origin, signer, opts = {}) {
       onDestroy?.(instanceId);
     },
     onStateChange,
+    onReorder,
   });
   stageEl.appendChild(win.root);
   openWindows.set(instanceId, win);
   return win;
 }
 
-async function bootNapp(origin, files, onProgress) {
+export async function wipe(nappId) {
+  const origin = nappOriginFor(nappId);
+  const boot = document.createElement('iframe');
+  boot.src = `${origin}/boot.html`;
+  boot.style.display = 'none';
+  document.body.appendChild(boot);
+
+  try {
+    const ready = await waitForMessage(
+      origin,
+      'napp-boot-ready',
+      'napp-boot-error',
+    );
+    if (ready.__nostrapps === 'napp-boot-error') {
+      throw new Error(`Napp boot failed: ${ready.error}`);
+    }
+    boot.contentWindow.postMessage(
+      { __nostrapps: 'napp-wipe' },
+      origin,
+    );
+    const result = await waitForMessage(
+      origin,
+      'napp-wipe-done',
+      'napp-wipe-error',
+    );
+    if (result.__nostrapps === 'napp-wipe-error') {
+      throw new Error(result.error);
+    }
+  } finally {
+    boot.remove();
+  }
+}
+
+async function bootNapp(origin, files, onProgress, label) {
   const boot = document.createElement('iframe');
   boot.src = `${origin}/boot.html`;
   boot.style.display = 'none';
@@ -89,7 +196,7 @@ async function bootNapp(origin, files, onProgress) {
       throw new Error(`Napp boot failed: ${ready.error}`);
     }
 
-    onProgress(`Installing ${files.length} file(s) into ${origin}…`);
+    onProgress(`Installing ${files.length} file(s) for ${label}…`);
     boot.contentWindow.postMessage(
       { __nostrapps: 'napp-install', files },
       origin,

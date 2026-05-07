@@ -1,56 +1,97 @@
 # nostrapps
 
-> ⚠️ **Work in progress.** Everything here is early and unfinished. APIs will change, bugs exist, and the security story isn't complete. Not for production use.
+> Heads up: still rough around the edges. APIs will move, things will break.
 
-A browser-based launcher for **napps** — small Nostr apps served as [nsites](https://github.com/hzrd149/blossom/blob/master/docs/nsite.md) (kind 34128 events + Blossom blobs) or loaded from a local folder. The launcher ("nostrapps") downloads a napp once, caches its files, and runs it in an isolated, resizable window. The napp sees a NIP-07-style `window.nostr` plus a few extensions for shared relay pool, local event store (NIP-DB), and per-instance state.
+Nostrapps is a small browser launcher for Nostr apps. Each app is a static site published as an [nsite](https://nips.nostr.com/5A), or just a folder you point at locally. The launcher fetches it once, caches it, and runs it in its own sandboxed window with a `window.nostr` bridge wired to your NIP-07 extension.
 
-## What it does today
+## How to use it
 
-- **Load a napp** by npub / nprofile / hex pubkey (fetches kind 34128 events, pulls blobs from Blossom), or by picking a local folder.
-- **Sandboxing** — each napp runs at its own origin (`<id>.napps.localhost:5173` in dev), so `window.parent` is cross-origin and the iframe can't reach into the launcher.
-- **Bridge** — a script injected into every napp exposes `window.nostr`, `window.nostrdb`, `window.nostr.pool`, and `window.nostr.instance` via `postMessage` RPC to the launcher.
-- **Multiple instances** — open the same napp more than once; each window gets its own `instanceId`, its own per-instance storage, its own petname. Drag, resize, minimize, maximize.
-- **Close vs destroy** — `×` closes a window but keeps the session; `⌫` wipes it (and its per-instance storage). Suggestions list shows closed sessions so you can reopen them with their saved position and state.
-- **Persistence** — the launcher remembers open sessions, petnames, and the relay list across reloads. Napps' own per-origin IDB/localStorage is untouched.
-- **Permissions** — privileged methods (`signEvent`, `nip04/44.*`, `pool.publish`, `pool.setRelays`) prompt the user on first use per napp and cache the decision.
+The whole UI is one input. Type something and press enter:
 
-## Example napps
+- An npub, nprofile, hex pubkey, or naddr to fetch and run that nsite.
+- A NIP-5A hostname like `eskema.nsite-host.com`.
+- A slash command for one of the built-in tools.
+- Anything you've launched before, picked from the suggestions dropdown.
 
-A few sample napps are kept in a separate repo (coming soon):
+Click the input and you'll see a dropdown grouped into three sections: slash commands first, your last 5 opened sessions next, then everything else alphabetically. `OPEN` and `CLOSED` rows reopen that exact session at its saved position. `NAPP` rows launch a fresh instance.
 
-- **profile** — trivial example; calls `window.nostr.getPublicKey()` and prints it.
-- **notes** — textarea with per-instance auto-draft, a Save button that writes to the napp's own origin IDB, and a Publish button that signs a kind-1 event, stores it in the global nostrdb, and sends it to the pool's relays.
-- **relays** — add/remove relays in the launcher's global pool via `window.nostr.pool.setRelays`.
+### Slash commands
 
-In the meantime, any folder with an `index.html` works — click **Load folder…** in the launcher and pick one.
+Four built-in panels open the first time you load the launcher and remember whether you closed them after that.
 
-## Bridge API surface
+- `/store` — discover and install nsites your relays know about. Search, filter, update.
+- `/settings` — theme picker (light, dark, auto), connect or disconnect your account, load a local folder.
+- `/logs` — what the launcher is doing right now, with timestamps.
+- `/permissions` — every grant or denial you've made, per app. Forget any of them.
 
-Exposed inside every napp's iframe:
+There's also `/folder` as a shortcut to the folder picker.
+
+### Window controls
+
+| Button | Does |
+| --- | --- |
+| `–` | Minimize. Header only, body collapses. |
+| `▢` | Maximize, or restore. |
+| `•` | Pin on top. Fills in (`●`) when active. Stays above everything, even after you click somewhere else. |
+| `×` | Close. The session is remembered, type the name back to reopen at its saved position. |
+| `⌫` | Destroy. Wipes the app and all its data. There's a confirm prompt. |
+
+Drag the header to move. Drag any edge or corner to resize. Double-click the title to rename it.
+
+### Snap zones
+
+Drag a window near an edge or corner of the stage and stop moving for about 300ms. A preview lights up showing the half or quadrant it'll fill. Drop on it to snap.
+
+### Mobile gestures
+
+On a narrow screen the layout switches to a vertical stack and the snap zones go away. To reorder, press and hold a window's header for about a quarter second, then drag up or down.
+
+### Installing and updating from the store
+
+`/store` queries your relays for nsite manifests the first time you open it, then caches the results so subsequent opens are instant. Hit `↻` to check for updates, `⚙` to override the relay list.
+
+Each card shows what the manifest provides: title, description, author, file count, date. The button on the right has three states:
+
+- **install**: not installed yet.
+- **uninstall**: currently installed and up to date.
+- **update**: currently installed, but the relay has a newer manifest. Click to fetch the new files and reload any open windows of the app in place. Per-instance state survives the update.
+
+The `installed` filter shows what you have right now at the top, then a "Previously installed" section below for apps you've uninstalled.
+
+### Working without an account
+
+The store works without connecting. It falls back to a small default set of relays for discovery, and you can override that anytime. Connecting just lets it use your kind 10002 list instead.
+
+You can also browse and run nsites that don't need a signer, like a static blog. The moment an app calls `signEvent` or anything else privileged, you'll get a permission prompt. Your answer is remembered per app, per method.
+
+---
+
+## For developers
+
+### Building a napp
+
+A napp is any folder with an `index.html`. Inside the iframe you get:
 
 ```js
-// NIP-07 signer (forwarded to the user's extension via the launcher)
+// NIP-07 signer, forwarded to your extension via the launcher
 window.nostr.getPublicKey()
 window.nostr.signEvent(evt)
 window.nostr.getRelays()
 window.nostr.nip04.encrypt|decrypt(pubkey, text)
 window.nostr.nip44.encrypt|decrypt(pubkey, text)
 
-// Shared relay pool managed by the launcher
+// Shared relay pool, managed by the launcher
 window.nostr.pool.query(filters, opts?)
 window.nostr.pool.publish(event, opts?)
-window.nostr.pool.relays()
-window.nostr.pool.setRelays(urls)
 
-// Per-instance key/value storage (launcher-side IDB, keyed by instanceId)
-window.nostr.instance.id              // this window's instance id
+// Per-window state. Each window has its own bucket, keyed by instanceId.
+window.nostr.instance.id
 window.nostr.instance.get(key)
 window.nostr.instance.set(key, value)
 window.nostr.instance.delete(key)
 window.nostr.instance.keys()
 
-// Global event store, shape from NIP-DB draft
-// https://github.com/nostr-protocol/nips/pull/2229
+// Global event store (NIP-DB draft)
 window.nostrdb.add(event)
 window.nostrdb.query(filters)
 window.nostrdb.count(filters)
@@ -58,37 +99,83 @@ window.nostrdb.event(id)
 window.nostrdb.replaceable(kind, author, identifier?)
 ```
 
-For napp-wide state shared across instances, napps can just use native `indexedDB` / `localStorage` at their own origin — no bridge needed.
+For data tied to the app rather than a specific window, use the napp's own `localStorage` or `indexedDB`. Each napp lives at its own origin so everything is naturally isolated.
 
-## Running locally
+### Origin sandboxing
+
+Each napp runs at its own origin (a unique `<nappId>` subdomain). From the iframe, `window.parent` is cross-origin, so the napp can't reach into the launcher. The bridge is the only channel.
+
+The `nappId` is derived from the manifest: for a root manifest (kind 15128) it's the first 40 hex chars of the publisher's pubkey, and for a named manifest (kind 35128) it's that plus `-<dTag>`.
+
+### Boot flow
+
+1. The launcher opens a hidden iframe at `<napp-origin>/boot.html`.
+2. That iframe registers a service worker and writes the napp's files to its origin's IndexedDB via `postMessage`.
+3. The launcher creates the visible iframe at `<napp-origin>/`. The service worker serves the HTML and assets out of IDB.
+4. The bridge picks up its `instanceId` from `window.name` (set by the parent before the iframe loads) and starts forwarding RPC.
+
+`window.name` survives same-origin navigations, so reloading an iframe (during an update, for example) keeps the same instance id and per-instance state.
+
+### How updates work
+
+When the launcher installs a napp it remembers the manifest event's `id` and `created_at`. The store compares that against the latest manifest cached from your relays. Newer `created_at` means an update is available.
+
+Clicking update re-fetches the manifest and blobs, reuses the boot iframe to swap the files store atomically (the install handler clears the store before writing), updates the saved manifest version, and then reassigns `iframe.src` on every open window of that napp so the new files take effect right away.
+
+### How destroy works
+
+Close keeps the session and its per-instance state. Destroy is the full nuke. The launcher forgets the session, all its petnames, the install log entry, and any cached permission decisions. Then a hidden boot iframe at the napp's origin clears every IndexedDB on that origin, plus `localStorage`, `sessionStorage`, every CacheStorage entry, and every service worker registration. Reinstalling later starts from a clean slate.
+
+There's a confirm prompt before all that happens.
+
+### Permissions
+
+These RPC methods prompt on first use per napp:
+
+- `signEvent`
+- `nip04.encrypt`, `nip04.decrypt`
+- `nip44.encrypt`, `nip44.decrypt`
+- `pool.publish`
+
+The dialog gives you Allow once, Allow always, Deny once, Deny always. The "always" answers are cached. `/permissions` shows the full list and lets you revoke any of them.
+
+### Running locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173 in Chrome or Firefox. Napps load at `*.napps.localhost:5173`, which those browsers resolve to 127.0.0.1 automatically.
+### Persistence keys
 
-**Brave users:** disable Shields for localhost — Brave blocks cross-site iframes (subdomains count as cross-site), which breaks the napp boot flow. Safari doesn't resolve `*.localhost` at all; use Chrome / Firefox / Brave-shields-down for now.
+All in `localStorage`, prefixed with `nostrapps:`:
 
-## Architecture notes
+- `open` — array of session entries (open and closed)
+- `known` — recently launched nappIds
+- `petnames` — petname to nappId map
+- `installLog` — every nappId ever installed (kept across destroy, used for the store's "previously installed" section)
+- `installedManifests` — per-nappId manifest version, used for update detection
+- `history` — recent raw inputs typed into the launch box
+- `permissions` — per-nappId per-method allow/deny decisions
+- `theme` — `light`, `dark`, or absent (= auto)
+- `bootstrapped` — set after the first launcher load auto-opens the system napps
+- `pubkey` — the connected pubkey
+- `store:cache` — cached nsite events from the store's last refresh
+- `store:relays` — custom relay list for the store, if any
 
-- Launcher at `localhost:5173` — no service worker; UI only.
-- Each napp at `<nappId>.napps.localhost:5173` — its own SW serves files from that origin's IDB.
-- Boot flow: launcher opens a hidden iframe at `<napp-origin>/boot.html`, which registers the SW and writes the napp's files to IDB via `postMessage`. Then the visible iframe loads `<napp-origin>/` and the SW serves the HTML with the bridge script injected.
-- `@nostr/gadgets/redstore` (OPFS-backed SQLite via a Web Worker) powers the global event store.
+Per-instance KV (`window.nostr.instance.*`) lives in the launcher's IndexedDB instead, keyed by instanceId.
 
-## Status / roadmap
+### Stack
 
-Rough, and much of this is already sketched in but not polished:
+Vanilla JS with Vite. `@nostr/tools` and `@nostr/gadgets` for the protocol bits. `@nostr/gadgets/redstore` (OPFS-backed SQLite via a Web Worker) powers the global event store. No framework.
 
-- [ ] NIP-46 (bunker) signer
-- [ ] `window.nostrdb.subscribe()` streaming API
-- [ ] Per-napp permission management UI in the launcher (revoke, review)
-- [ ] Real nsite publishing from inside the launcher
-- [ ] Desktop packaging
-- [ ] Docs, tests, polish
+## Roadmap
+
+- NIP-46 (bunker) signer
+- Streaming `nostrdb.subscribe()`
+- Publishing nsites from inside the launcher
+- Desktop wrapper
 
 ## License
 
-None yet.
+Not picked yet.

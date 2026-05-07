@@ -1,7 +1,12 @@
 (() => {
   const pending = new Map();
+  // Prefer iframe.name (set by the launcher cross-origin) so we don't pollute
+  // the URL with a query string that napps might echo into their own routing.
+  // Fall back to the legacy `?__instance=` for back-compat.
   const INSTANCE_ID =
-    new URLSearchParams(location.search).get('__instance') || '';
+    (typeof window.name === 'string' && window.name) ||
+    new URLSearchParams(location.search).get('__instance') ||
+    '';
 
   function rpc(method, params) {
     const id = crypto.randomUUID();
@@ -54,8 +59,6 @@
     pool: {
       query: (filters, opts) => rpc('pool.query', { filters, opts }),
       publish: (event, opts) => rpc('pool.publish', { event, opts }),
-      relays: () => rpc('pool.relays'),
-      setRelays: (relays) => rpc('pool.setRelays', { relays }),
     },
     instance: {
       id: INSTANCE_ID,

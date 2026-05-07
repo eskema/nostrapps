@@ -35,12 +35,46 @@ export function setDecision(nappId, method, decision) {
   all[nappId] ??= {};
   all[nappId][method] = decision;
   writeAll(all);
+  notify();
 }
 
 export function clearDecisions(nappId) {
   const all = readAll();
   delete all[nappId];
   writeAll(all);
+  notify();
+}
+
+export function listDecisions() {
+  return readAll();
+}
+
+export function forgetDecision(nappId, method) {
+  const all = readAll();
+  if (!all[nappId]) return;
+  if (method) {
+    delete all[nappId][method];
+    if (Object.keys(all[nappId]).length === 0) delete all[nappId];
+  } else {
+    delete all[nappId];
+  }
+  writeAll(all);
+  notify();
+}
+
+const subscribers = new Set();
+
+function notify() {
+  for (const fn of subscribers) {
+    try {
+      fn();
+    } catch {}
+  }
+}
+
+export function subscribe(fn) {
+  subscribers.add(fn);
+  return () => subscribers.delete(fn);
 }
 
 let dialogEl;
