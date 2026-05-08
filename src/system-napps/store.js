@@ -14,6 +14,13 @@ const CACHE_KEY = 'nostrapps:store:cache';
 const RELAYS_KEY = 'nostrapps:store:relays';
 const CACHE_LIMIT = 500;
 
+// Transparent 1×1 SVG used as the initial src for icon/avatar slots so the
+// browser doesn't render a broken-image glyph while async loads are pending.
+// The CSS placeholder background shows through; a real src replaces it
+// without changing the slot's dimensions, so loading icons doesn't cause CLS.
+const PLACEHOLDER_SRC =
+  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>';
+
 const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://relay.nostr.band',
@@ -162,10 +169,8 @@ export function mount(container, ctx) {
             const nameEl = card.querySelector('.store-author-name');
             const picEl = card.querySelector('.store-author-pic');
             if (nameEl && name) nameEl.textContent = name;
-            if (picEl && pic) {
-              picEl.src = pic;
-              picEl.hidden = false;
-            }
+            // Slot was reserved at render time; just swap src — no shift.
+            if (picEl && pic) picEl.src = pic;
           }
         })
         .catch(() => {});
@@ -194,12 +199,13 @@ export function mount(container, ctx) {
               ? servers[0].slice(0, -1)
               : servers[0];
             img.src = `${base}/${sha}`;
-            img.hidden = false;
-            // If the first server fails, fall through to the next.
+            // If the first server fails, fall through to the next. If all
+            // servers fail, restore the placeholder so the slot stays the
+            // same height (vs hiding it and shifting layout).
             let next = 1;
             img.onerror = () => {
               if (next >= servers.length) {
-                img.hidden = true;
+                img.src = PLACEHOLDER_SRC;
                 return;
               }
               const b = servers[next].endsWith('/')
@@ -343,7 +349,9 @@ function renderCard(evt, ctx, listing = null) {
     icon.alt = '';
     icon.dataset.iconSha = iconSha;
     if (iconMime) icon.dataset.iconMime = iconMime;
-    icon.hidden = true; // shown once a Blossom URL resolves
+    // Reserve the slot up front so the placeholder background fills it; the
+    // real src is set once a Blossom URL resolves (no layout shift).
+    icon.src = PLACEHOLDER_SRC;
     head.appendChild(icon);
   }
 
@@ -364,7 +372,9 @@ function renderCard(evt, ctx, listing = null) {
   const pic = document.createElement('img');
   pic.className = 'store-author-pic';
   pic.alt = '';
-  pic.hidden = true;
+  // Always reserve the 16×16 slot via the CSS placeholder background; src is
+  // set when loadNostrUser resolves with a profile image.
+  pic.src = PLACEHOLDER_SRC;
   const name = document.createElement('span');
   name.className = 'store-author-name';
   name.textContent = evt.pubkey.slice(0, 8) + '…';
@@ -385,21 +395,76 @@ function renderCard(evt, ctx, listing = null) {
   meta.append(author, dateEl, pathsEl, kindEl);
   titles.appendChild(meta);
 
-  const installBtn = document.createElement('button');
-  installBtn.type = 'button';
-  let installState;
-  if (updateAvailable) installState = 'update';
-  else if (installed) installState = 'uninstall';
-  else installState = 'install';
-  installBtn.className =
-    installState === 'update'
-      ? 'store-install update-available'
-      : installState === 'uninstall'
-        ? 'store-install installed'
-        : 'store-install';
-  installBtn.textContent = installState;
+  // Action buttons. When an update is available we show *both* update and
+  // uninstall (so the user can drop an installed app without first updating
+  // it). Otherwise it's a single install/uninstall toggle.
+  const actions = document.createElement('div');
+  actions.className = 'store-actions';
 
-  head.append(titles, installBtn);
+  const performAction = async (btn, action) => {
+    btn.disabled = true;
+    btn.textContent =
+      action === 'update'
+        ? 'updating…'
+        : action === 'uninstall'
+          ? 'uninstalling…'
+          : 'launching…';
+    try {
+      if (action === 'update') {
+        await ctx.update({
+          pubkey: evt.pubkey,
+          kind: evt.kind,
+          dTag: dTag || undefined,
+        });
+      } else if (action === 'uninstall') {
+        await ctx.uninstall(nappId);
+      } else {
+        const raw =
+          evt.kind === NSITE_NAMED
+            ? naddrEncode({
+                pubkey: evt.pubkey,
+                kind: NSITE_NAMED,
+                identifier: dTag,
+                relays: [],
+              })
+            : npubEncode(evt.pubkey);
+        await ctx.launchFromInput(raw);
+      }
+      // Re-render so the buttons reflect the new install state.
+      const replacement = renderCard(evt, ctx, listing);
+      card.replaceWith(replacement);
+    } catch (err) {
+      btn.title = err?.message || String(err);
+      btn.textContent = 'error';
+      btn.disabled = false;
+      setTimeout(() => {
+        btn.textContent = action;
+        btn.removeAttribute('title');
+      }, 3000);
+    }
+  };
+
+  const makeActionBtn = (action, className) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = className;
+    b.textContent = action;
+    b.addEventListener('click', () => performAction(b, action));
+    return b;
+  };
+
+  if (updateAvailable) {
+    actions.append(
+      makeActionBtn('update', 'store-install update-available'),
+      makeActionBtn('uninstall', 'store-install installed'),
+    );
+  } else if (installed) {
+    actions.append(makeActionBtn('uninstall', 'store-install installed'));
+  } else {
+    actions.append(makeActionBtn('install', 'store-install'));
+  }
+
+  head.append(titles, actions);
   card.appendChild(head);
 
   if (description) {
@@ -437,49 +502,6 @@ function renderCard(evt, ctx, listing = null) {
     src.textContent = 'source ↗';
     card.appendChild(src);
   }
-
-  installBtn.addEventListener('click', async () => {
-    installBtn.disabled = true;
-    installBtn.textContent =
-      installState === 'update'
-        ? 'updating…'
-        : installState === 'uninstall'
-          ? 'uninstalling…'
-          : 'launching…';
-    try {
-      if (installState === 'update') {
-        await ctx.update({
-          pubkey: evt.pubkey,
-          kind: evt.kind,
-          dTag: dTag || undefined,
-        });
-      } else if (installState === 'uninstall') {
-        await ctx.uninstall(nappId);
-      } else {
-        const raw =
-          evt.kind === NSITE_NAMED
-            ? naddrEncode({
-                pubkey: evt.pubkey,
-                kind: NSITE_NAMED,
-                identifier: dTag,
-                relays: [],
-              })
-            : npubEncode(evt.pubkey);
-        await ctx.launchFromInput(raw);
-      }
-      // Replace this card with a freshly-rendered one so the button flips.
-      const replacement = renderCard(evt, ctx, listing);
-      card.replaceWith(replacement);
-    } catch (err) {
-      installBtn.title = err?.message || String(err);
-      installBtn.textContent = 'error';
-      installBtn.disabled = false;
-      setTimeout(() => {
-        installBtn.textContent = installState;
-        installBtn.removeAttribute('title');
-      }, 3000);
-    }
-  });
 
   return card;
 }

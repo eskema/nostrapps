@@ -154,6 +154,8 @@ export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
   stageEl.appendChild(win.root);
   openWindows.set(instanceId, win);
   systemSingletons.set(sysId, instanceId);
+  ensureStageObserver(stageEl);
+  clampToStage(win.root, stageEl);
   return win;
 }
 
@@ -204,7 +206,251 @@ function mount(stageEl, nappId, origin, signer, opts = {}) {
   });
   stageEl.appendChild(win.root);
   openWindows.set(instanceId, win);
+  ensureStageObserver(stageEl);
+  clampToStage(win.root, stageEl);
   return win;
+}
+
+// Lay every visible (non-minimized) window out as a non-overlapping
+// partition that fills the inner area. Each call shuffles + repartitions,
+// so clicking the tile button repeatedly produces fresh layouts.
+//
+// We work over a fixed 4×3 grid (12 cells). With N windows we recursively
+// split that grid at integer cell lines, so each window gets a rectangular
+// region of 1+ whole cells — some 1×1, some 2×1, some 2×2, etc. All cells
+// are covered (no empty space). For N > 12 we grow the grid in rows so the
+// column width stays consistent.
+const TILE_GAP = 8;
+const TILE_BASE_COLS = 4;
+const TILE_BASE_ROWS = 3;
+
+export function tileWindows(stageEl) {
+  if (!stageEl) return;
+  const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl);
+  if (innerW <= 0 || innerH <= 0) return;
+
+  const wins = Array.from(openWindows.values()).filter((w) => {
+    if (!w.root || !w.root.isConnected) return false;
+    if (w.root.classList.contains('minimized')) return false;
+    // Mobile static layout doesn't honor left/top — tiling makes no sense.
+    if (getComputedStyle(w.root).position === 'static') return false;
+    return true;
+  });
+  if (wins.length === 0) return;
+
+  const shuffled = shuffle(wins.slice());
+  const n = shuffled.length;
+
+  // Pick grid dimensions: 4×3 base, growing rows so we always have enough
+  // cells (one per window minimum). Columns stay at 4 so cell width is
+  // predictable.
+  const cols = TILE_BASE_COLS;
+  const rows = Math.max(TILE_BASE_ROWS, Math.ceil(n / cols));
+  const gridRects = partitionGrid(
+    { col: 0, row: 0, cols, rows },
+    Math.min(n, cols * rows),
+  );
+
+  const cellW = innerW / cols;
+  const cellH = innerH / rows;
+
+  for (let i = 0; i < shuffled.length && i < gridRects.length; i++) {
+    const w = shuffled[i];
+    const g = gridRects[i];
+    // Convert grid units to pixels (rounded so adjacent cells share an
+    // integer boundary — no sub-pixel overlap or gap from rounding).
+    const x0 = Math.round(padL + g.col * cellW);
+    const y0 = Math.round(padT + g.row * cellH);
+    const x1 = Math.round(padL + (g.col + g.cols) * cellW);
+    const y1 = Math.round(padT + (g.row + g.rows) * cellH);
+    const half = TILE_GAP / 2;
+    const left = x0 + half;
+    const top = y0 + half;
+    const width = Math.max(0, x1 - x0 - TILE_GAP);
+    const height = Math.max(0, y1 - y0 - TILE_GAP);
+    // Drop maximized state — it'd override our left/top with !important.
+    w.root.classList.remove('maximized');
+    w.root.style.left = `${left}px`;
+    w.root.style.top = `${top}px`;
+    w.root.style.width = `${width}px`;
+    w.root.style.height = `${height}px`;
+    // The 240px CSS min-width would force narrow cells to render oversized
+    // and overlap their neighbors. Override it so the partition is honored.
+    // (User can still drag the window wider afterward.)
+    w.root.style.minWidth = '0';
+    w.root.style.minHeight = '0';
+    // First-tile marks the window as user-sized so the 420px cap doesn't
+    // claw the height back next render.
+    w.root.classList.add('user-sized');
+    w.notifyState?.();
+  }
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Recursively partition a grid `rect` (in integer cell units) into `n`
+// non-overlapping sub-rectangles, also in cell units. Splits land on
+// integer cell lines so every output rectangle is whole-cell aligned.
+//
+// Constraints to avoid losing windows:
+//   - Only split if the chosen side has ≥ 2 cells.
+//   - Each side must end up with at least as many cells as it has windows
+//     (otherwise a deeper recursion would hit "no split possible" with
+//      n > 1 and silently drop windows).
+function partitionGrid(rect, n) {
+  if (n <= 1) return [rect];
+  const cells = rect.cols * rect.rows;
+  // Caller guarantees `cells >= n`; if somehow not, we can't split safely.
+  if (cells <= 1 || n > cells) return [rect];
+
+  // Pick a direction we can actually split + satisfy the cell-count
+  // constraint. Try the preferred direction first, fall back to the other.
+  const canV = canSplitDirection(rect, n, true);
+  const canH = canSplitDirection(rect, n, false);
+  if (!canV && !canH) return [rect];
+
+  let vertical;
+  if (canV && canH) {
+    const wide = rect.cols > rect.rows * 1.2;
+    const tall = rect.rows > rect.cols * 1.2;
+    vertical = wide ? true : tall ? false : Math.random() < 0.5;
+  } else {
+    vertical = canV;
+  }
+
+  const sideCells = vertical ? rect.cols : rect.rows;
+  const otherCells = vertical ? rect.rows : rect.cols;
+
+  // Pick how many windows go on each side, then a cut that fits both.
+  // leftN must be in [1, n-1]. Then the valid cut range is
+  //   [ceil(leftN / otherCells), sideCells - ceil(rightN / otherCells)].
+  // We retry leftN a few times if it produces no valid cut range.
+  let leftN = 1 + Math.floor(Math.random() * (n - 1));
+  let rightN = n - leftN;
+  let minCut = Math.ceil(leftN / otherCells);
+  let maxCut = sideCells - Math.ceil(rightN / otherCells);
+  if (minCut > maxCut) {
+    // Random pick produced no fit. Collect every leftN that does fit and
+    // pick one of those at random — keeps the layout diverse instead of
+    // always biasing to the smallest valid leftN.
+    const valid = [];
+    for (let i = 1; i < n; i++) {
+      const lo = Math.ceil(i / otherCells);
+      const hi = sideCells - Math.ceil((n - i) / otherCells);
+      if (lo <= hi) valid.push(i);
+    }
+    if (valid.length === 0) return [rect]; // shouldn't happen
+    leftN = valid[Math.floor(Math.random() * valid.length)];
+    rightN = n - leftN;
+    minCut = Math.ceil(leftN / otherCells);
+    maxCut = sideCells - Math.ceil(rightN / otherCells);
+  }
+
+  // Bias cut toward the proportional position with ±1 cell jitter.
+  const proportional = Math.round((leftN / n) * sideCells);
+  const jitter =
+    Math.random() < 0.33 ? -1 : Math.random() < 0.5 ? 1 : 0;
+  const cut = Math.max(minCut, Math.min(maxCut, proportional + jitter));
+
+  if (vertical) {
+    const a = { col: rect.col, row: rect.row, cols: cut, rows: rect.rows };
+    const b = {
+      col: rect.col + cut,
+      row: rect.row,
+      cols: rect.cols - cut,
+      rows: rect.rows,
+    };
+    return [...partitionGrid(a, leftN), ...partitionGrid(b, rightN)];
+  }
+  const a = { col: rect.col, row: rect.row, cols: rect.cols, rows: cut };
+  const b = {
+    col: rect.col,
+    row: rect.row + cut,
+    cols: rect.cols,
+    rows: rect.rows - cut,
+  };
+  return [...partitionGrid(a, leftN), ...partitionGrid(b, rightN)];
+}
+
+// Can we split this rect along the given axis such that both sides hold at
+// least 1 window, with enough cells for SOME valid (leftN, rightN) pair?
+//
+// The minimum value of `ceil(leftN/O) + ceil(rightN/O)` over leftN ∈ [1, n-1]
+// is ceil(n/O) (attained when one side is a multiple of O). So as long as
+// ceil(n / otherCells) ≤ sideCells, a balanced leftN exists that fits.
+function canSplitDirection(rect, n, vertical) {
+  const sideCells = vertical ? rect.cols : rect.rows;
+  if (sideCells < 2) return false;
+  const otherCells = vertical ? rect.rows : rect.cols;
+  return Math.ceil(n / otherCells) <= sideCells;
+}
+
+// Read the stage's effective inner bounds. With `position: absolute` children,
+// left/top are measured from the padding edge, so the usable region is
+// 0 → (clientW - padLeft - padRight). We return both the bounds and the
+// padding so callers (clamp + tile) can use them consistently.
+export function getStageBounds(stage) {
+  const cs = getComputedStyle(stage);
+  const padL = parseFloat(cs.paddingLeft) || 0;
+  const padR = parseFloat(cs.paddingRight) || 0;
+  const padT = parseFloat(cs.paddingTop) || 0;
+  const padB = parseFloat(cs.paddingBottom) || 0;
+  return {
+    width: Math.max(0, stage.clientWidth - padL - padR),
+    height: Math.max(0, stage.clientHeight - padT - padB),
+    padL,
+    padR,
+    padT,
+    padB,
+  };
+}
+
+// Make sure the window's header is reachable inside the stage's visible
+// area, AND that the window respects the stage's padding gutter.
+//
+// `position: absolute` children of a padded ancestor ignore the padding —
+// `left: 0` is at the padding box's outer edge, which is the same as the
+// stage's outer edge here. So the visual 1rem gutter only exists if we
+// actively clamp the window's left/top to ≥ padding.
+function clampToStage(root, stage) {
+  if (!stage) return;
+  // Mobile static layout: nothing to clamp (the layout handles position).
+  if (getComputedStyle(root).position === 'static') return;
+  const { padL, padR, padT, padB } = getStageBounds(stage);
+  const W = stage.clientWidth;
+  const H = stage.clientHeight;
+  if (W <= 0 || H <= 0) return;
+  const left = parseFloat(root.style.left) || 0;
+  const top = parseFloat(root.style.top) || 0;
+  const width = root.offsetWidth || parseFloat(root.style.width) || 240;
+  // Always leave at least this much of the window inside the stage so the
+  // user can grab the header. Header height ≈ 28px on desktop, 40px on mobile.
+  const minVisibleX = Math.min(80, width);
+  const minLeft = padL;
+  const minTop = padT;
+  const maxLeft = Math.max(minLeft, W - padR - minVisibleX);
+  const maxTop = Math.max(minTop, H - padB - 28);
+  const newLeft = Math.max(minLeft, Math.min(maxLeft, left));
+  const newTop = Math.max(minTop, Math.min(maxTop, top));
+  if (newLeft !== left) root.style.left = `${newLeft}px`;
+  if (newTop !== top) root.style.top = `${newTop}px`;
+}
+
+let stageObserver = null;
+function ensureStageObserver(stageEl) {
+  if (stageObserver) return;
+  stageObserver = new ResizeObserver(() => {
+    for (const win of openWindows.values()) {
+      clampToStage(win.root, stageEl);
+    }
+  });
+  stageObserver.observe(stageEl);
 }
 
 export async function wipe(nappId) {

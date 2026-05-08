@@ -73,6 +73,29 @@ h1 span
   border-bottom: 1px dotted color-mix(in srgb, currentColor 40%, transparent);
 }
 
+/* Tile control lives inside the stage's top-left gutter — positioned
+   absolutely against #stage's padding box (which ignores padding for
+   absolute children, putting us right at the outer corner). z-index is
+   above non-pinned windows; the gutter is reserved space anyway, since
+   clampToStage prevents windows from entering it. */
+#tile-windows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1rem;
+  color: color-mix(in srgb, currentColor 60%, transparent);
+  background: transparent;
+  z-index: 200;
+}
+
+#tile-windows:hover {
+  color: var(--text);
+}
+
 button {
   /* padding: 0.35rem 0.8rem; */
   font: inherit;
@@ -454,12 +477,22 @@ button {
   position: relative;
   overflow-x: hidden;
   overflow-y: auto;
+  /* Inner gutter so windows never touch the edge. clampToStage in host.js
+     reads this padding from computed style and uses it as the bound for
+     window left/top. */
+  padding: 1rem;
+  box-sizing: border-box;
 }
 
 .napp-window {
   position: absolute;
   display: flex;
   flex-direction: column;
+  /* Border lives inside the box so JS-set widths/heights match what the
+     partition allocated — without this the 1px border would push every
+     window 2px wider than its cell, causing the rightmost column to
+     overflow the stage gutter. */
+  box-sizing: border-box;
   background: var(--surface);
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
   border-radius: 4px;
@@ -476,10 +509,13 @@ button {
 }
 
 .napp-window.maximized {
-  top: 0 !important;
-  left: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
+  /* Respect the stage's gutter on all sides. `inset` is the absolute-position
+     equivalent of these four edges; using it lets the browser auto-size the
+     box to fill what's left, instead of us hardcoding 100% which would
+     bleed into the padding region. */
+  inset: 1rem !important;
+  width: auto !important;
+  height: auto !important;
   border-radius: 0;
   border: 0;
   box-shadow: none;
@@ -1311,6 +1347,14 @@ body.napp-dragging .napp-body iframe {
 .store-install.update-available:hover {
   background: #d97706;
   color: white;
+}
+
+/* When an update is available we show update + uninstall side by side. */
+.store-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex-shrink: 0;
 }
 
 /* ─── store: NIP-5B listing extras ─────────────────────────────── */

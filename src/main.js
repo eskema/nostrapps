@@ -12,6 +12,7 @@ import {
   reloadIframesByNappId,
   findOpenWindowByNappId,
   callIframe,
+  tileWindows,
 } from './sandbox/host.js';
 import { resolveInput } from './nsite/resolve.js';
 import { fetchNsite } from './nsite/fetch.js';
@@ -39,6 +40,9 @@ const form = document.getElementById('launch-form');
 const input = document.getElementById('nsite-input');
 const suggestions = document.getElementById('suggestions');
 const localFolderInput = document.getElementById('local-folder');
+const tileBtn = document.getElementById('tile-windows');
+
+tileBtn?.addEventListener('click', () => tileWindows(stage));
 
 mountDialog(document.getElementById('permission-prompt'));
 

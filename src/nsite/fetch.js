@@ -8,6 +8,21 @@ const NSITE_ROOT_KIND = 15128;   // NIP-5A: root manifest (replaceable)
 const NSITE_NAMED_KIND = 35128;  // NIP-5A: named manifest (parameterized)
 const NSITE_LISTING_KIND = 37348; // NIP-5B: app listing (rich metadata)
 
+// Cap for any relay subscription. If the pubkey's outbox relays are slow or
+// dead we'd otherwise hang forever waiting on EOSE — bail out with whatever
+// we've collected so far.
+const COLLECT_TIMEOUT_MS = 10000;
+
+// Used when outboxFilterRelayBatch returns nothing reachable for the pubkey
+// (no kind 10002 on the bootstrap relays, all outbox relays down, etc.).
+// Same set the store uses, intentionally — these are reasonable fallbacks.
+const FALLBACK_RELAYS = [
+  'wss://relay.damus.io',
+  'wss://relay.nostr.band',
+  'wss://nos.lol',
+  'wss://relay.primal.net',
+];
+
 export async function fetchNsite(target, onProgress = () => {}) {
   const t = typeof target === 'string' ? { pubkey: target } : target;
   const { pubkey, kind, dTag } = t;
@@ -25,9 +40,10 @@ async function fetchRootOrLegacy(pubkey, onProgress) {
   onProgress('Querying relays for nsite events…');
   // include kind 0 (profile) and kind 37348 (NIP-5B listing) so a single
   // round-trip pulls everything we might want for naming/metadata.
-  const reqs = await outboxFilterRelayBatch([pubkey], {
+  const filter = {
     kinds: [NSITE_ROOT_KIND, NSITE_FILE_KIND, NSITE_LISTING_KIND, 0],
-  });
+  };
+  const reqs = await resolveReqs([pubkey], filter, onProgress);
   const events = await collect(reqs, 'nsite');
 
   const manifest = latestOfKind(events, NSITE_ROOT_KIND);
@@ -45,10 +61,11 @@ async function fetchRootOrLegacy(pubkey, onProgress) {
 
 async function fetchNamedManifest(pubkey, dTag, onProgress) {
   onProgress(`Querying relays for named nsite "${dTag}"…`);
-  const reqs = await outboxFilterRelayBatch([pubkey], {
+  const filter = {
     kinds: [NSITE_NAMED_KIND, NSITE_LISTING_KIND],
     '#d': [dTag],
-  });
+  };
+  const reqs = await resolveReqs([pubkey], filter, onProgress);
   const events = await collect(reqs, 'nsite-named');
   const manifest = latestOfKind(events, NSITE_NAMED_KIND, dTag);
   if (!manifest) throw new Error(`Named nsite "${dTag}" not found`);
@@ -88,14 +105,59 @@ export function localizedTag(listing, tagName) {
   );
 }
 
+// Wrap outboxFilterRelayBatch so a totally empty result (no relays known for
+// this pubkey, or the bootstrap probe timed out) still gives us something to
+// query. Without this fallback the subscription opens against zero relays and
+// `oneose` never fires, hanging the launch.
+//
+// We also race it against a hard timeout — outboxFilterRelayBatch can stall
+// internally if the bootstrap relays are unreachable and gadgets has no
+// timeout of its own, which is what was hanging the launch indefinitely.
+async function resolveReqs(pubkeys, filter, onProgress) {
+  let reqs = null;
+  try {
+    reqs = await Promise.race([
+      outboxFilterRelayBatch(pubkeys, filter),
+      new Promise((resolve) =>
+        setTimeout(() => resolve(null), COLLECT_TIMEOUT_MS),
+      ),
+    ]);
+  } catch {
+    reqs = null;
+  }
+  // outboxFilterRelayBatch returns Array<{ url, filter }>. Fall back to the
+  // same shape — subscribeMap iterates this directly.
+  if (!Array.isArray(reqs) || reqs.length === 0) {
+    onProgress?.('Outbox lookup yielded nothing — querying default relays…');
+    reqs = FALLBACK_RELAYS.map((url) => ({ url, filter }));
+  }
+  return reqs;
+}
+
+// Resolves on EOSE *or* on timeout, whichever comes first. We always resolve
+// (never reject on timeout) so the caller can decide what to do with whatever
+// events came in — usually that's enough to find the manifest.
 function collect(reqs, label) {
   const events = [];
   return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(events);
+    };
+    const timer = setTimeout(finish, COLLECT_TIMEOUT_MS);
     pool.subscribeMap(reqs, {
       label,
       onevent(e) { events.push(e); },
-      oneose: () => resolve(events),
-      onerror: reject,
+      oneose: finish,
+      onerror: (err) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(err);
+      },
     });
   });
 }
@@ -195,7 +257,7 @@ function findProfileName(events, pubkey) {
 
 async function fetchProfileName(pubkey) {
   try {
-    const reqs = await outboxFilterRelayBatch([pubkey], { kinds: [0] });
+    const reqs = await resolveReqs([pubkey], { kinds: [0] });
     const events = await collect(reqs, 'nsite-profile');
     return findProfileName(events, pubkey);
   } catch {

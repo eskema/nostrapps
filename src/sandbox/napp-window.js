@@ -1,3 +1,5 @@
+import { getStageBounds } from './host.js';
+
 let zIndexCounter = 1;
 let positionOffset = 0;
 let focusTrackerInstalled = false;
@@ -247,7 +249,7 @@ export function createNappWindow({
     setupResize(root, resizeHandles[dir], dir, notifyState);
   }
 
-  return { root, iframe, close, destroy, getState, focus };
+  return { root, iframe, close, destroy, getState, focus, notifyState };
 }
 
 function startRename(el, onDone) {
@@ -399,8 +401,16 @@ function setupDrag(root, handle, onDone, onReorder) {
   let lastClientX = 0;
   let lastClientY = 0;
   let cachedStageRect = null;
+  // Inner content width/height after stage padding. `position: absolute`
+  // children are measured from the padding edge, so this is also the bound
+  // we clamp to.
   let cachedStageWidth = 0;
   let cachedStageHeight = 0;
+  // Cursor coords relative to stage (clientX - stageRect.left) include the
+  // padding region; subtracting `cachedPadL/T` gives content-area coords for
+  // snap detection.
+  let cachedPadL = 0;
+  let cachedPadT = 0;
   let cachedMaxLeft = 0;
 
   // Mobile reorder hold: drag is only allowed to activate once the press has
@@ -442,24 +452,27 @@ function setupDrag(root, handle, onDone, onReorder) {
     });
   }
 
-  function updateSnapPreview(zone, stage, stageRect) {
+  function updateSnapPreview(zone, stage /*, stageRect */) {
     if (!zone) {
       snapPreview?.remove();
       snapPreview = null;
       return;
     }
-    const layout = snapLayout(zone, stageRect.width, stageRect.height);
+    // Snap layout is in content-area coords (excluding stage padding) so it
+    // matches what the dropped window will land at.
+    const { width: w, height: h, padL, padT } = getStageBounds(stage);
+    const layout = snapLayout(zone, w, h);
     if (!layout) return;
     if (!snapPreview) {
       snapPreview = document.createElement('div');
       snapPreview.className = 'snap-preview';
       stage.appendChild(snapPreview);
     }
-    // The layout is in viewport-of-stage coordinates (0,0 = current visible
-    // top-left). The preview is positioned absolutely inside #stage, whose
-    // coordinate system is the *content*, so we offset by the scroll.
-    snapPreview.style.left = `${layout.left + stage.scrollLeft}px`;
-    snapPreview.style.top = `${layout.top + stage.scrollTop}px`;
+    // Offset by padding (so the preview sits inside the gutter, matching the
+    // final window position) and by scroll (so we target the visible region,
+    // not the top of the stage's scrolled content).
+    snapPreview.style.left = `${layout.left + padL + stage.scrollLeft}px`;
+    snapPreview.style.top = `${layout.top + padT + stage.scrollTop}px`;
     snapPreview.style.width = `${layout.width}px`;
     snapPreview.style.height = `${layout.height}px`;
   }
@@ -595,9 +608,15 @@ function setupDrag(root, handle, onDone, onReorder) {
       const stage = root.parentElement;
       if (stage) {
         cachedStageRect = stage.getBoundingClientRect();
-        cachedStageWidth = stage.clientWidth;
-        cachedStageHeight = stage.clientHeight;
-        cachedMaxLeft = Math.max(0, cachedStageWidth - root.offsetWidth);
+        const bounds = getStageBounds(stage);
+        cachedStageWidth = bounds.width;
+        cachedStageHeight = bounds.height;
+        cachedPadL = bounds.padL;
+        cachedPadT = bounds.padT;
+        // Drag bounds: window's `left` (in absolute coords) must stay within
+        // [padL, clientWidth - padR - winWidth] so it never enters the
+        // visual gutter. (The cached inner width already excludes padding.)
+        cachedMaxLeft = cachedPadL + Math.max(0, cachedStageWidth - root.offsetWidth);
       }
     }
     if (!dragging) return;
@@ -612,16 +631,19 @@ function setupDrag(root, handle, onDone, onReorder) {
     const dx = lastClientX - startX;
     const dy = lastClientY - startY;
     // Clamp the translate so the rendered position respects bounds without
-    // touching `left` / `top` (no layout pass).
-    const targetLeft = Math.max(0, Math.min(cachedMaxLeft, startLeft + dx));
-    const targetTop = Math.max(0, startTop + dy);
+    // touching `left` / `top` (no layout pass). Min-left/top are the stage
+    // padding so the window never enters the gutter.
+    const targetLeft = Math.max(cachedPadL, Math.min(cachedMaxLeft, startLeft + dx));
+    const targetTop = Math.max(cachedPadT, startTop + dy);
     const tx = targetLeft - startLeft;
     const ty = targetTop - startTop;
     root.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
 
-    // Snap detection — pure math against cached stage rect.
-    const relX = lastClientX - cachedStageRect.left;
-    const relY = lastClientY - cachedStageRect.top;
+    // Snap detection — pure math against cached stage rect. Subtract the
+    // padding so (relX, relY) is in *content-area* coords, matching the
+    // (cachedStageWidth, cachedStageHeight) bounds we pass to detect/layout.
+    const relX = lastClientX - cachedStageRect.left - cachedPadL;
+    const relY = lastClientY - cachedStageRect.top - cachedPadT;
     const zone = detectSnapZone(
       relX,
       relY,
@@ -703,16 +725,15 @@ function setupDrag(root, handle, onDone, onReorder) {
     if (finalZone) {
       const stage = root.parentElement;
       if (stage) {
-        const layout = snapLayout(
-          finalZone,
-          stage.clientWidth,
-          stage.clientHeight,
-        );
+        const { width: w, height: h, padL, padT } = getStageBounds(stage);
+        const layout = snapLayout(finalZone, w, h);
         if (layout) {
-          // Offset by the stage's scroll so the snap targets the *visible*
-          // half/quadrant rather than the absolute top of the stage content.
-          root.style.left = `${layout.left + stage.scrollLeft}px`;
-          root.style.top = `${layout.top + stage.scrollTop}px`;
+          // snapLayout returns positions in content-area coords (0 = inside
+          // the gutter). Offset by padding so the window lands inside the
+          // gutter, and by scroll so we target the visible half/quadrant
+          // rather than the absolute top of the stage content.
+          root.style.left = `${layout.left + padL + stage.scrollLeft}px`;
+          root.style.top = `${layout.top + padT + stage.scrollTop}px`;
           root.style.width = `${layout.width}px`;
           root.style.height = `${layout.height}px`;
           // A snap is a deliberate sizing — drop the 420px starter cap so
