@@ -1,4 +1,9 @@
-import { getStageBounds } from './host.js';
+import {
+  getStageBounds,
+  packCellSnap,
+  bestFitPack,
+  capturePackSnapshot,
+} from './host.js';
 
 let zIndexCounter = 1;
 let positionOffset = 0;
@@ -49,6 +54,11 @@ export function createNappWindow({
 }) {
   const root = document.createElement('div');
   root.className = 'napp-window';
+  // Pack-mode weight: more-recently-touched windows are "stamped" earlier
+  // in bestFitPack so they hold their cells while older neighbors reflow
+  // around them. A freshly-opened window starts at "now" so the user's
+  // newest creation has priority.
+  root.dataset.lastMovedAt = String(Date.now());
   if (system) root.classList.add('system-napp');
   root.dataset.nappId = nappId;
   root.dataset.instanceId = instanceId;
@@ -426,6 +436,20 @@ function setupDrag(root, handle, onDone, onReorder) {
   let pendingZone = null;
   let snapTimer = 0;
 
+  // Pack-mode drop placeholder (Packery-style ghost showing the snap target
+  // while the user drags). Created on first move when stage is in pack mode,
+  // updated each rAF, removed on drag end.
+  let packPlaceholder = null;
+  // Last cell key (e.g. "1,2,2,1") the dragged window snapped to. Used to
+  // throttle live-pack — we only re-pack neighbors when the dragged
+  // window crosses a cell boundary, not every pointermove.
+  let lastPackKey = '';
+  // Pre-drag layout snapshot. Lets the live-pack default each non-focused
+  // window to where it started, so the user can revert by dragging back —
+  // displaced windows return to their original cells when the dragged
+  // window stops blocking them.
+  let packSnapshot = null;
+
   // Pin the dragged window so its `anchorY` offset stays under `clientY`.
   // We clear the current transform before reading the rect — that way we
   // measure the *natural* top directly, which is immune to any browser
@@ -498,6 +522,21 @@ function setupDrag(root, handle, onDone, onReorder) {
       }, REORDER_HOLD_MS);
     } else {
       mode = 'float';
+      // If a pack transition is in flight, the offset values point at the
+      // animation *target*, not the visible position. Read the live rect
+      // and commit it as the layout position so the drag picks up where
+      // the eye sees the window.
+      if (root.classList.contains('packing')) {
+        const r = root.getBoundingClientRect();
+        const pr = root.parentElement?.getBoundingClientRect();
+        if (pr) {
+          root.classList.remove('packing');
+          root.style.left = `${r.left - pr.left}px`;
+          root.style.top = `${r.top - pr.top}px`;
+          root.style.width = `${r.width}px`;
+          root.style.height = `${r.height}px`;
+        }
+      }
       startLeft = root.offsetLeft;
       startTop = root.offsetTop;
       snapZone = null;
@@ -617,6 +656,11 @@ function setupDrag(root, handle, onDone, onReorder) {
         // [padL, clientWidth - padR - winWidth] so it never enters the
         // visual gutter. (The cached inner width already excludes padding.)
         cachedMaxLeft = cachedPadL + Math.max(0, cachedStageWidth - root.offsetWidth);
+        // Capture the pre-drag layout for revert-by-moving-back semantics.
+        // Only meaningful in pack mode; cheap to take regardless.
+        if (stage.classList.contains('pack-mode')) {
+          packSnapshot = capturePackSnapshot(stage);
+        }
       }
     }
     if (!dragging) return;
@@ -639,17 +683,67 @@ function setupDrag(root, handle, onDone, onReorder) {
     const ty = targetTop - startTop;
     root.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
 
+    // Pack-mode placeholder + live reflow. The placeholder tracks the
+    // cell-snapped target. When the snapped cell changes, run a pack with
+    // the dragged window as focus so neighbors slide to make room.
+    const stage = root.parentElement;
+    if (stage && stage.classList.contains('pack-mode')) {
+      const snap = packCellSnap(
+        stage,
+        targetLeft,
+        targetTop,
+        root.offsetWidth,
+        root.offsetHeight,
+      );
+      if (snap) {
+        if (!packPlaceholder) {
+          packPlaceholder = document.createElement('div');
+          packPlaceholder.className = 'pack-placeholder';
+          stage.appendChild(packPlaceholder);
+        }
+        packPlaceholder.style.left = `${snap.left + stage.scrollLeft}px`;
+        packPlaceholder.style.top = `${snap.top + stage.scrollTop}px`;
+        packPlaceholder.style.width = `${snap.width}px`;
+        packPlaceholder.style.height = `${snap.height}px`;
+
+        // Cell-boundary crossing → reflow neighbors. We pass the dragged
+        // root as focus so its cell is reserved and other windows pack
+        // around it. The snapshot makes them prefer their pre-drag cells
+        // whenever those cells aren't blocked, so dragging back undoes
+        // the displacement.
+        const key = `${snap.col},${snap.row},${snap.cols},${snap.rows}`;
+        if (key !== lastPackKey) {
+          lastPackKey = key;
+          bestFitPack(
+            stage,
+            root,
+            {
+              col: snap.col,
+              row: snap.row,
+              cols: snap.cols,
+              rows: snap.rows,
+            },
+            packSnapshot,
+          );
+        }
+      }
+    } else if (packPlaceholder) {
+      packPlaceholder.remove();
+      packPlaceholder = null;
+      lastPackKey = '';
+    }
+
     // Snap detection — pure math against cached stage rect. Subtract the
     // padding so (relX, relY) is in *content-area* coords, matching the
     // (cachedStageWidth, cachedStageHeight) bounds we pass to detect/layout.
     const relX = lastClientX - cachedStageRect.left - cachedPadL;
     const relY = lastClientY - cachedStageRect.top - cachedPadT;
-    const zone = detectSnapZone(
-      relX,
-      relY,
-      cachedStageWidth,
-      cachedStageHeight,
-    );
+    // Pack mode owns the snap behavior — half/quadrant zones would
+    // disagree with the 4×3 cell grid, so skip them entirely.
+    const packMode = stage && stage.classList.contains('pack-mode');
+    const zone = packMode
+      ? null
+      : detectSnapZone(relX, relY, cachedStageWidth, cachedStageHeight);
     pendingZone = zone;
     // Any movement (this rAF tick only fires because the cursor moved)
     // cancels a pending arm AND disarms a previously-armed preview. The
@@ -744,15 +838,28 @@ function setupDrag(root, handle, onDone, onReorder) {
     } else if (cachedStageRect) {
       // Translate-based drag never updated left/top — commit the final
       // position now so future layout queries return correct values.
+      // Min-left/top match the live clamp in applyFloatDrag (padL/padT),
+      // so the committed value matches what was rendered during the drag.
       const dx = lastClientX - startX;
       const dy = lastClientY - startY;
-      const finalLeft = Math.max(0, Math.min(cachedMaxLeft, startLeft + dx));
-      const finalTop = Math.max(0, startTop + dy);
+      const finalLeft = Math.max(cachedPadL, Math.min(cachedMaxLeft, startLeft + dx));
+      const finalTop = Math.max(cachedPadT, startTop + dy);
       root.style.left = `${finalLeft}px`;
       root.style.top = `${finalTop}px`;
     }
     root.style.transform = '';
     cachedStageRect = null;
+    if (packPlaceholder) {
+      packPlaceholder.remove();
+      packPlaceholder = null;
+    }
+    lastPackKey = '';
+    // Snapshot is per-drag — discard so the drop-time pack and the next
+    // drag's snapshot are taken fresh from the just-settled layout.
+    packSnapshot = null;
+    // Bump the move timestamp — pack mode uses this to prioritize
+    // recently-touched windows over older ones during reflow.
+    root.dataset.lastMovedAt = String(Date.now());
     onDone?.();
   };
   handle.addEventListener('pointerup', end);
@@ -784,6 +891,19 @@ function setupResize(root, handle, dir, onDone) {
     if (e.button !== 0) return;
     if (root.classList.contains('maximized')) return;
     if (root.classList.contains('minimized') && purelyVertical) return;
+    // If pack is mid-transition, commit the visible rect as the layout
+    // position so the resize picks up the on-screen size, not the target.
+    if (root.classList.contains('packing')) {
+      const r = root.getBoundingClientRect();
+      const pr = root.parentElement?.getBoundingClientRect();
+      if (pr) {
+        root.classList.remove('packing');
+        root.style.left = `${r.left - pr.left}px`;
+        root.style.top = `${r.top - pr.top}px`;
+        root.style.width = `${r.width}px`;
+        root.style.height = `${r.height}px`;
+      }
+    }
     resizing = true;
     startX = e.clientX;
     startY = e.clientY;
@@ -851,6 +971,8 @@ function setupResize(root, handle, dir, onDone) {
     // User has manually sized this window — drop the 420px starter cap so
     // they can freely grow it. Persisted via state on the next notify.
     root.classList.add('user-sized');
+    // Bump the move timestamp — pack mode uses this for weight ordering.
+    root.dataset.lastMovedAt = String(Date.now());
     onDone?.();
   };
   handle.addEventListener('pointerup', end);

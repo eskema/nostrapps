@@ -13,6 +13,7 @@ import {
   findOpenWindowByNappId,
   callIframe,
   tileWindows,
+  bestFitPack,
 } from './sandbox/host.js';
 import { resolveInput } from './nsite/resolve.js';
 import { fetchNsite } from './nsite/fetch.js';
@@ -41,8 +42,56 @@ const input = document.getElementById('nsite-input');
 const suggestions = document.getElementById('suggestions');
 const localFolderInput = document.getElementById('local-folder');
 const tileBtn = document.getElementById('tile-windows');
+const packToggleBtn = document.getElementById('pack-toggle');
 
 tileBtn?.addEventListener('click', () => tileWindows(stage));
+
+// ─── pack mode (Packery-style auto-layout on move/resize) ───────
+const PACK_MODE_KEY = 'nostrapps:packMode';
+let packModeOn = localStorage.getItem(PACK_MODE_KEY) === '1';
+
+// Re-entry guard: bestFitPack itself fires onStateChange (per persisted
+// position) which would loop right back here. We coalesce all state
+// changes during a single tick into one rAF-scheduled pack, and skip
+// scheduling while the pack is mid-flight.
+//
+// Also skip while a drag is in progress (`body.napp-dragging`): the drag
+// runs its own live-pack with the dragged window as focus, which keeps
+// the dragged window's style untouched (the transform owns it). A
+// generic bestFitPack here would re-include the dragged window and move
+// its style.left/top, fighting the transform.
+let repackQueued = false;
+let repackInProgress = false;
+function maybeRepack() {
+  if (!packModeOn || repackInProgress || repackQueued) return;
+  if (document.body.classList.contains('napp-dragging')) return;
+  repackQueued = true;
+  requestAnimationFrame(() => {
+    repackQueued = false;
+    repackInProgress = true;
+    try {
+      bestFitPack(stage);
+    } finally {
+      repackInProgress = false;
+    }
+  });
+}
+
+function applyPackMode() {
+  packToggleBtn?.setAttribute('aria-pressed', packModeOn ? 'true' : 'false');
+  // The drag handler (in napp-window.js) reads this class to decide
+  // whether to render a drop placeholder during the drag.
+  stage?.classList.toggle('pack-mode', packModeOn);
+  localStorage.setItem(PACK_MODE_KEY, packModeOn ? '1' : '0');
+  if (packModeOn) maybeRepack();
+}
+
+packToggleBtn?.addEventListener('click', () => {
+  packModeOn = !packModeOn;
+  applyPackMode();
+});
+
+applyPackMode();
 
 mountDialog(document.getElementById('permission-prompt'));
 
@@ -516,6 +565,7 @@ function makeSystemLaunchOpts(sysId) {
         systemId: sysId,
       });
       refreshSuggestions();
+      maybeRepack();
     },
     onReorder: persistDomOrder,
     onClose: (instanceId) => {
@@ -871,6 +921,7 @@ function makeLaunchOpts() {
         persist.setPetname(state.petname, state.nappId);
       }
       refreshSuggestions();
+      maybeRepack();
     },
     onReorder: persistDomOrder,
     onClose: (instanceId) => {
@@ -968,6 +1019,9 @@ async function init() {
   );
   await restoreAll();
   maybeBootstrap();
+  // Restore doesn't fire onStateChange — kick the packer manually so a
+  // session that resumed in pack mode lands cleanly.
+  if (packModeOn) maybeRepack();
 }
 init();
 

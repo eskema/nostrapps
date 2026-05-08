@@ -224,6 +224,297 @@ const TILE_GAP = 8;
 const TILE_BASE_COLS = 4;
 const TILE_BASE_ROWS = 3;
 
+// Snapshot every visible window's current cell. Used at drag start so the
+// live-pack can default to the pre-drag layout: as long as the dragged
+// window isn't blocking a window's original cell, that window returns to
+// where it started. This lets the user "undo" mid-drag by moving back.
+export function capturePackSnapshot(stageEl) {
+  if (!stageEl) return new Map();
+  const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl);
+  if (innerW <= 0 || innerH <= 0) return new Map();
+  const COLS = TILE_BASE_COLS;
+  const cellW = innerW / COLS;
+  const cellH = innerH / TILE_BASE_ROWS;
+  const map = new Map();
+  for (const w of openWindows.values()) {
+    if (!w.root || !w.root.isConnected) continue;
+    if (w.root.classList.contains('minimized')) continue;
+    if (w.root.classList.contains('maximized')) continue;
+    const px = parseFloat(w.root.style.left) || padL;
+    const py = parseFloat(w.root.style.top) || padT;
+    const pw = w.root.offsetWidth || cellW;
+    const ph = w.root.offsetHeight || cellH;
+    const col = Math.max(0, Math.min(COLS - 1, Math.round((px - padL) / cellW)));
+    const row = Math.max(0, Math.round((py - padT) / cellH));
+    const cols = Math.max(1, Math.min(COLS - col, Math.round(pw / cellW)));
+    const rows = Math.max(1, Math.round(ph / cellH));
+    map.set(w.root, { col, row, cols, rows });
+  }
+  return map;
+}
+
+// Snap an arbitrary pixel rect to the nearest 4×3 cell rect. Returns the
+// snap target in BOTH grid units (col/row/cols/rows) and pixel coords
+// (left/top/width/height). The drag handler uses the pixels to position
+// the placeholder, and the cell coords to drive live-pack reflow.
+export function packCellSnap(stageEl, leftPx, topPx, widthPx, heightPx) {
+  const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl);
+  if (innerW <= 0 || innerH <= 0) return null;
+  const COLS = TILE_BASE_COLS;
+  const cellW = innerW / COLS;
+  const cellH = innerH / TILE_BASE_ROWS;
+  const cols = Math.max(1, Math.min(COLS, Math.round(widthPx / cellW)));
+  const rows = Math.max(1, Math.round(heightPx / cellH));
+  const col = Math.max(
+    0,
+    Math.min(COLS - cols, Math.round((leftPx - padL) / cellW)),
+  );
+  const row = Math.max(0, Math.round((topPx - padT) / cellH));
+  const x0 = Math.round(padL + col * cellW);
+  const y0 = Math.round(padT + row * cellH);
+  const x1 = Math.round(padL + (col + cols) * cellW);
+  const y1 = Math.round(padT + (row + rows) * cellH);
+  const half = TILE_GAP / 2;
+  return {
+    col,
+    row,
+    cols,
+    rows,
+    left: x0 + half,
+    top: y0 + half,
+    width: Math.max(0, x1 - x0 - TILE_GAP),
+    height: Math.max(0, y1 - y0 - TILE_GAP),
+  };
+}
+
+// Module-level timer for clearing the .packing class. Reset on every pack
+// so a long drag (many live-pack calls) keeps the transition class on.
+let packingClearTimer = null;
+
+// Bin-pack windows into a 4-column grid. Used by the optional pack-mode
+// toggle.
+//
+// Without args: regular pack — sort all windows by weight, place each in
+// its desired cell (with first-fit fallback if occupied).
+//
+// With (focusRoot, focusCell): "live-drag" pack — focusRoot is currently
+// being dragged; we don't touch its style (the drag controls it via
+// transform). Its cell is stamped as occupied so other windows pack
+// around it. Neighbors transition smoothly to make room.
+//
+// With (focusRoot) and no cell: drop-time pack — the dragged window has
+// just committed its drop position to style.left/top. It's processed via
+// the regular weight-ordered loop with its lastMovedAt freshly bumped,
+// so it wins.
+//
+// With (..., snapshot): each item prefers its snapshot cell over its
+// current style-derived cell. Used during a drag so other windows
+// default back to their pre-drag positions whenever the dragged window
+// isn't blocking them — the user can revert by moving back.
+//
+//   - Pinned windows are stamps (immovable obstacles).
+//   - Maximized windows are skipped entirely.
+//   - Minimized windows are skipped.
+//   - Grid grows downward as needed; stage scrolls.
+export function bestFitPack(
+  stageEl,
+  focusRoot = null,
+  focusCell = null,
+  snapshot = null,
+) {
+  if (!stageEl) return;
+  const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl);
+  if (innerW <= 0 || innerH <= 0) return;
+
+  const COLS = TILE_BASE_COLS;
+  const cellW = innerW / COLS;
+  const cellH = innerH / TILE_BASE_ROWS;
+
+  const all = Array.from(openWindows.values()).filter((w) => {
+    if (!w.root || !w.root.isConnected) return false;
+    if (w.root.classList.contains('minimized')) return false;
+    if (w.root.classList.contains('maximized')) return false;
+    if (getComputedStyle(w.root).position === 'static') return false;
+    return true;
+  });
+  if (all.length === 0) return;
+
+  const focused = focusRoot
+    ? all.find((w) => w.root === focusRoot) || null
+    : null;
+
+  const stamps = all.filter((w) => w.root.classList.contains('pinned'));
+  // Items = all non-pinned, non-focused windows. Focused is positioned
+  // separately (or not at all, when the drag's transform owns its style).
+  let items = all.filter((w) => !w.root.classList.contains('pinned'));
+  if (focused) items = items.filter((w) => w !== focused);
+
+  // Sort items by weight (heaviest first) so the most-stamp-like windows
+  // get their desired cells first; lighter ones pack around them.
+  //   weight = (lastMovedAt, area)  — both descending
+  // The most-recently-moved window holds its position; bigger windows
+  // beat smaller ones at equal recency. The dragged window itself is
+  // either focus (excluded from items, gets stamped first) or — at drop
+  // time — included with a freshly-bumped timestamp, so it wins.
+  items.sort((a, b) => {
+    const ma = parseInt(a.root.dataset.lastMovedAt, 10) || 0;
+    const mb = parseInt(b.root.dataset.lastMovedAt, 10) || 0;
+    if (ma !== mb) return mb - ma;
+    const aa = a.root.offsetWidth * a.root.offsetHeight;
+    const ab = b.root.offsetWidth * b.root.offsetHeight;
+    return ab - aa;
+  });
+
+  // Lazy occupancy grid (rows × COLS), grows as needed.
+  const grid = [];
+  const ensureRows = (n) => {
+    while (grid.length < n) grid.push(new Array(COLS).fill(false));
+  };
+  const fits = (col, row, w, h) => {
+    if (col < 0 || col + w > COLS) return false;
+    ensureRows(row + h);
+    for (let r = row; r < row + h; r++) {
+      for (let c = col; c < col + w; c++) {
+        if (grid[r][c]) return false;
+      }
+    }
+    return true;
+  };
+  const mark = (col, row, w, h) => {
+    ensureRows(row + h);
+    for (let r = row; r < row + h; r++) {
+      for (let c = col; c < col + w; c++) {
+        grid[r][c] = true;
+      }
+    }
+  };
+
+  const cellFromPx = (w) => {
+    const px = parseFloat(w.root.style.left) || padL;
+    const py = parseFloat(w.root.style.top) || padT;
+    const pw = w.root.offsetWidth || cellW;
+    const ph = w.root.offsetHeight || cellH;
+    const col = Math.max(0, Math.min(COLS - 1, Math.round((px - padL) / cellW)));
+    const row = Math.max(0, Math.round((py - padT) / cellH));
+    const cols = Math.max(1, Math.min(COLS - col, Math.round(pw / cellW)));
+    const rows = Math.max(1, Math.round(ph / cellH));
+    return { col, row, cols, rows };
+  };
+
+  // Add the transition class to items so neighbors slide smoothly. The
+  // focused window is excluded — during a live drag it's controlled by
+  // transform, and we don't want its left/top change on drop to animate
+  // (the user expects it to land where they released, not slide there).
+  for (const w of items) w.root.classList.add('packing');
+  // Force a style flush so the freshly-added transition rule applies
+  // before we mutate the transitioned properties below. Without this,
+  // a same-tick add+mutate can skip the transition entirely.
+  if (items.length) void items[0].root.offsetHeight;
+
+  // Lay down stamps first so items have to flow around them.
+  for (const s of stamps) {
+    const { col, row, cols, rows } = cellFromPx(s);
+    mark(col, row, cols, rows);
+    applyCellRect(s, col, row, cols, rows, padL, padT, cellW, cellH);
+  }
+
+  // The focused window claims its cell BEFORE other items pack — this is
+  // what makes "drag wins collisions" work. focusCell is provided by the
+  // live-drag path (cell from packCellSnap of the cursor's hypothetical
+  // position); without it, we read the focused window's current
+  // style.left/top (the just-committed drop position).
+  if (focused) {
+    const fCell = focusCell ?? cellFromPx(focused);
+    const c = Math.max(0, Math.min(COLS - fCell.cols, fCell.col));
+    const r = Math.max(0, fCell.row);
+    mark(c, r, fCell.cols, fCell.rows);
+    // If we're at drop time (no focusCell hint), commit the focused
+    // window's cell-aligned position too. Skip while live-dragging — the
+    // transform owns its position then.
+    if (!focusCell) {
+      applyCellRect(focused, c, r, fCell.cols, fCell.rows, padL, padT, cellW, cellH);
+    }
+  }
+
+  for (const item of items) {
+    // Prefer the snapshot cell (where this window was at drag start) so
+    // an item only relocates when the dragged window is actually blocking
+    // its original spot. Without snapshot we fall back to its current
+    // style-derived cell — that's the regular non-drag pack path.
+    const original = snapshot?.get(item.root);
+    const desired = original ?? cellFromPx(item);
+    let cols = desired.cols;
+    // If the desired cell is free, place there. Otherwise scan top→bottom
+    // / left→right for the first available rectangle that fits.
+    let placed = null;
+    if (fits(desired.col, desired.row, cols, desired.rows)) {
+      placed = {
+        col: desired.col,
+        row: desired.row,
+        cols,
+        rows: desired.rows,
+      };
+    } else {
+      for (let r = 0; r < 1000 && !placed; r++) {
+        for (let c = 0; c <= COLS - cols; c++) {
+          if (fits(c, r, cols, desired.rows)) {
+            placed = { col: c, row: r, cols, rows: desired.rows };
+            break;
+          }
+        }
+      }
+    }
+    if (!placed) continue;
+    mark(placed.col, placed.row, placed.cols, placed.rows);
+    applyCellRect(
+      item,
+      placed.col,
+      placed.row,
+      placed.cols,
+      placed.rows,
+      padL,
+      padT,
+      cellW,
+      cellH,
+    );
+  }
+
+  // Reset the clear timer on each pack so an ongoing drag (multiple
+  // live-pack calls) keeps .packing on for as long as the drag lasts.
+  if (packingClearTimer) clearTimeout(packingClearTimer);
+  packingClearTimer = setTimeout(() => {
+    document
+      .querySelectorAll('.napp-window.packing')
+      .forEach((el) => el.classList.remove('packing'));
+    packingClearTimer = null;
+  }, 260);
+}
+
+function applyCellRect(w, col, row, cols, rows, padL, padT, cellW, cellH) {
+  const x0 = Math.round(padL + col * cellW);
+  const y0 = Math.round(padT + row * cellH);
+  const x1 = Math.round(padL + (col + cols) * cellW);
+  const y1 = Math.round(padT + (row + rows) * cellH);
+  const half = TILE_GAP / 2;
+  const newLeft = `${x0 + half}px`;
+  const newTop = `${y0 + half}px`;
+  const newW = `${Math.max(0, x1 - x0 - TILE_GAP)}px`;
+  const newH = `${Math.max(0, y1 - y0 - TILE_GAP)}px`;
+  const changed =
+    w.root.style.left !== newLeft ||
+    w.root.style.top !== newTop ||
+    w.root.style.width !== newW ||
+    w.root.style.height !== newH;
+  w.root.style.left = newLeft;
+  w.root.style.top = newTop;
+  w.root.style.width = newW;
+  w.root.style.height = newH;
+  w.root.style.minWidth = '0';
+  w.root.style.minHeight = '0';
+  w.root.classList.add('user-sized');
+  if (changed) w.notifyState?.();
+}
+
 export function tileWindows(stageEl) {
   if (!stageEl) return;
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl);
