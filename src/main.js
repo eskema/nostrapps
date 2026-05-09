@@ -55,16 +55,20 @@ let packModeOn = localStorage.getItem(PACK_MODE_KEY) === '1';
 // changes during a single tick into one rAF-scheduled pack, and skip
 // scheduling while the pack is mid-flight.
 //
-// Also skip while a drag is in progress (`body.napp-dragging`): the drag
-// runs its own live-pack with the dragged window as focus, which keeps
-// the dragged window's style untouched (the transform owns it). A
-// generic bestFitPack here would re-include the dragged window and move
-// its style.left/top, fighting the transform.
+// Also skip while a drag or resize is in progress (`body.napp-dragging` /
+// `body.napp-resizing`): each runs its own focused live-pack which
+// already keeps the operating window's style untouched. A generic
+// bestFitPack here would re-include it and fight the user's input.
 let repackQueued = false;
 let repackInProgress = false;
 function maybeRepack() {
   if (!packModeOn || repackInProgress || repackQueued) return;
-  if (document.body.classList.contains('napp-dragging')) return;
+  if (
+    document.body.classList.contains('napp-dragging') ||
+    document.body.classList.contains('napp-resizing')
+  ) {
+    return;
+  }
   repackQueued = true;
   requestAnimationFrame(() => {
     repackQueued = false;

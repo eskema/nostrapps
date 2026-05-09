@@ -886,6 +886,10 @@ function setupResize(root, handle, dir, onDone) {
   let startTop = 0;
   let startW = 0;
   let startH = 0;
+  // Pack-mode placeholder + reflow tracking (mirrors setupDrag).
+  let packPlaceholder = null;
+  let lastPackKey = '';
+  let packSnapshot = null;
 
   handle.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -911,6 +915,17 @@ function setupResize(root, handle, dir, onDone) {
     startTop = root.offsetTop;
     startW = root.offsetWidth;
     startH = root.offsetHeight;
+    // Capture pre-resize layout for revert-by-shrinking semantics, mirror
+    // of the drag-start snapshot. Only meaningful in pack mode.
+    const stage = root.parentElement;
+    if (stage && stage.classList.contains('pack-mode')) {
+      packSnapshot = capturePackSnapshot(stage);
+    }
+    // Mark a resize as in flight so main.js's maybeRepack short-circuits
+    // — same reason as drag. The resize handler runs its own focused
+    // live-pack; a generic bestFitPack in parallel would re-place the
+    // resized window from its style-derived cell, fighting the user.
+    document.body.classList.add('napp-resizing');
     handle.setPointerCapture(e.pointerId);
     e.preventDefault();
     e.stopPropagation();
@@ -960,6 +975,46 @@ function setupResize(root, handle, dir, onDone) {
       root.style.top = `${newTop}px`;
       root.style.height = `${newH}px`;
     }
+
+    // Pack-mode placeholder + live reflow. Mirrors the drag path: show a
+    // ghost at the cell-snapped target, and when that target's cell key
+    // changes, reflow neighbors so they slide out of the resized
+    // window's growing footprint (or back in when it shrinks).
+    const stage = root.parentElement;
+    if (stage && stage.classList.contains('pack-mode')) {
+      const snap = packCellSnap(stage, newLeft, newTop, newW, newH);
+      if (snap) {
+        if (!packPlaceholder) {
+          packPlaceholder = document.createElement('div');
+          packPlaceholder.className = 'pack-placeholder';
+          stage.appendChild(packPlaceholder);
+        }
+        packPlaceholder.style.left = `${snap.left + stage.scrollLeft}px`;
+        packPlaceholder.style.top = `${snap.top + stage.scrollTop}px`;
+        packPlaceholder.style.width = `${snap.width}px`;
+        packPlaceholder.style.height = `${snap.height}px`;
+
+        const key = `${snap.col},${snap.row},${snap.cols},${snap.rows}`;
+        if (key !== lastPackKey) {
+          lastPackKey = key;
+          bestFitPack(
+            stage,
+            root,
+            {
+              col: snap.col,
+              row: snap.row,
+              cols: snap.cols,
+              rows: snap.rows,
+            },
+            packSnapshot,
+          );
+        }
+      }
+    } else if (packPlaceholder) {
+      packPlaceholder.remove();
+      packPlaceholder = null;
+      lastPackKey = '';
+    }
   });
 
   const end = (e) => {
@@ -968,9 +1023,16 @@ function setupResize(root, handle, dir, onDone) {
     if (handle.hasPointerCapture?.(e.pointerId)) {
       handle.releasePointerCapture(e.pointerId);
     }
+    document.body.classList.remove('napp-resizing');
     // User has manually sized this window — drop the 420px starter cap so
     // they can freely grow it. Persisted via state on the next notify.
     root.classList.add('user-sized');
+    if (packPlaceholder) {
+      packPlaceholder.remove();
+      packPlaceholder = null;
+    }
+    lastPackKey = '';
+    packSnapshot = null;
     // Bump the move timestamp — pack mode uses this for weight ordering.
     root.dataset.lastMovedAt = String(Date.now());
     onDone?.();
