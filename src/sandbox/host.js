@@ -436,6 +436,19 @@ export function bestFitPack(
     }
   }
 
+  // Identify the highest-weight non-focused window. We *don't* shrink it
+  // around the focus stamp — it's the user's most-recently-touched
+  // window before this drag, treated as a stamp itself.
+  let mostRecentItem = null;
+  let mostRecentTime = -1;
+  for (const item of items) {
+    const t = parseInt(item.root.dataset.lastMovedAt, 10) || 0;
+    if (t > mostRecentTime) {
+      mostRecentTime = t;
+      mostRecentItem = item;
+    }
+  }
+
   for (const item of items) {
     // Prefer the snapshot cell (where this window was at drag start) so
     // an item only relocates when the dragged window is actually blocking
@@ -443,22 +456,39 @@ export function bestFitPack(
     // style-derived cell — that's the regular non-drag pack path.
     const original = snapshot?.get(item.root);
     const desired = original ?? cellFromPx(item);
-    let cols = desired.cols;
-    // If the desired cell is free, place there. Otherwise scan top→bottom
-    // / left→right for the first available rectangle that fits.
     let placed = null;
-    if (fits(desired.col, desired.row, cols, desired.rows)) {
+    // 1. Try the exact desired cell.
+    if (fits(desired.col, desired.row, desired.cols, desired.rows)) {
       placed = {
         col: desired.col,
         row: desired.row,
-        cols,
+        cols: desired.cols,
         rows: desired.rows,
       };
-    } else {
+    }
+    // 2. Blocked → if this item is "much bigger" than the dragged stamp,
+    //    try shrinking it around the stamp instead of relocating. Skip
+    //    the most-recently-touched non-focused window — that one holds
+    //    its size.
+    if (
+      !placed &&
+      focusCell &&
+      item !== mostRecentItem &&
+      desired.cols * desired.rows >= 2 * (focusCell.cols * focusCell.rows)
+    ) {
+      placed = shrinkAroundFocus(desired, focusCell, fits);
+    }
+    // 3. Last resort: first-fit scan, original cols×rows.
+    if (!placed) {
       for (let r = 0; r < 1000 && !placed; r++) {
-        for (let c = 0; c <= COLS - cols; c++) {
-          if (fits(c, r, cols, desired.rows)) {
-            placed = { col: c, row: r, cols, rows: desired.rows };
+        for (let c = 0; c <= COLS - desired.cols; c++) {
+          if (fits(c, r, desired.cols, desired.rows)) {
+            placed = {
+              col: c,
+              row: r,
+              cols: desired.cols,
+              rows: desired.rows,
+            };
             break;
           }
         }
@@ -488,6 +518,74 @@ export function bestFitPack(
       .forEach((el) => el.classList.remove('packing'));
     packingClearTimer = null;
   }, 260);
+}
+
+// Try to fit `desired` around `focus` by trimming one of the four sides
+// (top/bottom/left/right). Returns the largest valid sub-rectangle that:
+//   1. is contained within `desired`,
+//   2. doesn't overlap `focus`,
+//   3. passes `fits` (no other obstructions in the partially-built grid).
+// Used to let a "big" window shrink around the dragged window's stamp
+// instead of relocating entirely. Returns null if no candidate works.
+function shrinkAroundFocus(desired, focus, fits) {
+  const ic1 = desired.col;
+  const ir1 = desired.row;
+  const ic2 = ic1 + desired.cols;
+  const ir2 = ir1 + desired.rows;
+  const fc1 = focus.col;
+  const fr1 = focus.row;
+  const fc2 = fc1 + focus.cols;
+  const fr2 = fr1 + focus.rows;
+
+  // Focus must actually overlap desired; if it doesn't we shouldn't be
+  // here (the desired cell would have fit).
+  if (fc2 <= ic1 || fc1 >= ic2 || fr2 <= ir1 || fr1 >= ir2) return null;
+
+  const candidates = [];
+  // Sub-rect above focus.
+  if (fr1 > ir1) {
+    candidates.push({
+      col: ic1,
+      row: ir1,
+      cols: desired.cols,
+      rows: fr1 - ir1,
+    });
+  }
+  // Sub-rect below focus.
+  if (fr2 < ir2) {
+    candidates.push({
+      col: ic1,
+      row: fr2,
+      cols: desired.cols,
+      rows: ir2 - fr2,
+    });
+  }
+  // Sub-rect left of focus.
+  if (fc1 > ic1) {
+    candidates.push({
+      col: ic1,
+      row: ir1,
+      cols: fc1 - ic1,
+      rows: desired.rows,
+    });
+  }
+  // Sub-rect right of focus.
+  if (fc2 < ic2) {
+    candidates.push({
+      col: fc2,
+      row: ir1,
+      cols: ic2 - fc2,
+      rows: desired.rows,
+    });
+  }
+
+  // Filter to ones that actually fit, then pick the one with most cells.
+  const valid = candidates.filter(
+    (c) => c.cols > 0 && c.rows > 0 && fits(c.col, c.row, c.cols, c.rows),
+  );
+  if (valid.length === 0) return null;
+  valid.sort((a, b) => b.cols * b.rows - a.cols * a.rows);
+  return valid[0];
 }
 
 function applyCellRect(w, col, row, cols, rows, padL, padT, cellW, cellH) {
