@@ -349,20 +349,36 @@ export function bestFitPack(
   let items = all.filter((w) => !w.root.classList.contains('pinned'));
   if (focused) items = items.filter((w) => w !== focused);
 
-  // Sort items by weight (heaviest first) so the most-stamp-like windows
-  // get their desired cells first; lighter ones pack around them.
-  //   weight = (lastMovedAt, area)  — both descending
-  // The most-recently-moved window holds its position; bigger windows
-  // beat smaller ones at equal recency. The dragged window itself is
-  // either focus (excluded from items, gets stamped first) or — at drop
-  // time — included with a freshly-bumped timestamp, so it wins.
+  // Sort items by a three-tier weight (each tier broken to the next on
+  // tie):
+  //   1. "Just moved" tier — windows whose lastMovedAt is within
+  //      JUST_MOVED_MS of NOW. At drop time this is the just-released
+  //      window; placing it first means it claims its drop-position
+  //      cell, so the user sees their drop "stick" even when bigger
+  //      older windows would otherwise outweigh it on size.
+  //   2. Area descending — bigger windows have less placement flexibility
+  //      (more ways to be blocked) so they go first. A small recent
+  //      window grabbing a cell can otherwise force a big older one to
+  //      a new row, growing the stage unnecessarily.
+  //   3. lastMovedAt descending — older > newer so a recently-moved
+  //      window of equal area still gets placed earlier. Stability for
+  //      "I just touched this, leave it" scenarios.
+  const NOW = Date.now();
+  const JUST_MOVED_MS = 100;
+  const justMoved = (w) => {
+    const t = parseInt(w.root.dataset.lastMovedAt, 10) || 0;
+    return NOW - t < JUST_MOVED_MS;
+  };
   items.sort((a, b) => {
-    const ma = parseInt(a.root.dataset.lastMovedAt, 10) || 0;
-    const mb = parseInt(b.root.dataset.lastMovedAt, 10) || 0;
-    if (ma !== mb) return mb - ma;
+    const ja = justMoved(a);
+    const jb = justMoved(b);
+    if (ja !== jb) return ja ? -1 : 1;
     const aa = a.root.offsetWidth * a.root.offsetHeight;
     const ab = b.root.offsetWidth * b.root.offsetHeight;
-    return ab - aa;
+    if (aa !== ab) return ab - aa;
+    const ma = parseInt(a.root.dataset.lastMovedAt, 10) || 0;
+    const mb = parseInt(b.root.dataset.lastMovedAt, 10) || 0;
+    return mb - ma;
   });
 
   // Lazy occupancy grid (rows × COLS), grows as needed.
