@@ -1,8 +1,8 @@
-export const id = 'settings';
-export const title = 'Settings';
-export const slash = '/settings';
+export const id = "settings"
+export const title = "Settings"
+export const slash = "/settings"
 
-const GOOGLE_LABEL = 'log in with google';
+const GOOGLE_LABEL = "log in with google"
 
 export function mount(container, ctx) {
   container.innerHTML = `
@@ -60,137 +60,137 @@ export function mount(container, ctx) {
         </div>
       </div>
     </div>
-  `;
+  `
 
-  const themeBtns = container.querySelectorAll('.settings-theme button');
-  const connectedEl = container.querySelector('.settings-account-connected');
-  const disconnectedEl = container.querySelector('.settings-account-disconnected');
-  const pubkeyEl = container.querySelector('.settings-pubkey');
-  const accountTypeEl = container.querySelector('.settings-account-type');
-  const disconnectBtn = container.querySelector('.settings-disconnect-btn');
-  const connectExtBtn = container.querySelector('.settings-connect-extension');
-  const bunkerToggleBtn = container.querySelector('.settings-connect-bunker-toggle');
-  const googleBtn = container.querySelector('.settings-connect-google');
-  const googleError = container.querySelector('.settings-google-error');
-  const bunkerForm = container.querySelector('.settings-bunker-form');
-  const bunkerInput = container.querySelector('.settings-bunker-input');
-  const bunkerSubmit = container.querySelector('.settings-bunker-submit');
-  const bunkerCancel = container.querySelector('.settings-bunker-cancel');
-  const bunkerError = container.querySelector('.settings-bunker-error');
-  const resetBtn = container.querySelector('.settings-reset-btn');
+  const themeBtns = container.querySelectorAll(".settings-theme button")
+  const connectedEl = container.querySelector(".settings-account-connected")
+  const disconnectedEl = container.querySelector(".settings-account-disconnected")
+  const pubkeyEl = container.querySelector(".settings-pubkey")
+  const accountTypeEl = container.querySelector(".settings-account-type")
+  const disconnectBtn = container.querySelector(".settings-disconnect-btn")
+  const connectExtBtn = container.querySelector(".settings-connect-extension")
+  const bunkerToggleBtn = container.querySelector(".settings-connect-bunker-toggle")
+  const googleBtn = container.querySelector(".settings-connect-google")
+  const googleError = container.querySelector(".settings-google-error")
+  const bunkerForm = container.querySelector(".settings-bunker-form")
+  const bunkerInput = container.querySelector(".settings-bunker-input")
+  const bunkerSubmit = container.querySelector(".settings-bunker-submit")
+  const bunkerCancel = container.querySelector(".settings-bunker-cancel")
+  const bunkerError = container.querySelector(".settings-bunker-error")
+  const resetBtn = container.querySelector(".settings-reset-btn")
 
   function renderTheme(choice) {
     for (const btn of themeBtns) {
-      btn.classList.toggle('active', btn.dataset.choice === choice);
+      btn.classList.toggle("active", btn.dataset.choice === choice)
     }
   }
 
   function renderAccount(pk) {
     if (pk) {
-      connectedEl.hidden = false;
-      disconnectedEl.hidden = true;
-      pubkeyEl.textContent = pk.slice(0, 8);
-      pubkeyEl.title = pk;
-      const type = ctx.account.getType?.();
-      accountTypeEl.textContent = type === 'nip46' ? 'bunker' : 'extension';
+      connectedEl.hidden = false
+      disconnectedEl.hidden = true
+      pubkeyEl.textContent = pk.slice(0, 8)
+      pubkeyEl.title = pk
+      const type = ctx.account.getType?.()
+      accountTypeEl.textContent = type === "nip46" ? "bunker" : "extension"
     } else {
-      connectedEl.hidden = true;
-      disconnectedEl.hidden = false;
-      bunkerForm.hidden = true;
-      bunkerError.hidden = true;
-      bunkerInput.value = '';
-      googleError.hidden = true;
-      googleError.textContent = '';
+      connectedEl.hidden = true
+      disconnectedEl.hidden = false
+      bunkerForm.hidden = true
+      bunkerError.hidden = true
+      bunkerInput.value = ""
+      googleError.hidden = true
+      googleError.textContent = ""
     }
   }
 
   function showBunkerError(msg) {
-    bunkerError.textContent = msg;
-    bunkerError.hidden = false;
+    bunkerError.textContent = msg
+    bunkerError.hidden = false
   }
 
   for (const btn of themeBtns) {
-    btn.addEventListener('click', () => ctx.theme.set(btn.dataset.choice));
+    btn.addEventListener("click", () => ctx.theme.set(btn.dataset.choice))
   }
 
-  disconnectBtn.addEventListener('click', () => ctx.disconnect());
+  disconnectBtn.addEventListener("click", () => ctx.disconnect())
 
-  connectExtBtn.addEventListener('click', async () => {
+  connectExtBtn.addEventListener("click", async () => {
     try {
-      await ctx.connect();
+      await ctx.connect()
     } catch {
       // setStatus already logged it
     }
-  });
+  })
 
-  bunkerToggleBtn.addEventListener('click', () => {
-    bunkerForm.hidden = !bunkerForm.hidden;
-    if (!bunkerForm.hidden) bunkerInput.focus();
-  });
+  bunkerToggleBtn.addEventListener("click", () => {
+    bunkerForm.hidden = !bunkerForm.hidden
+    if (!bunkerForm.hidden) bunkerInput.focus()
+  })
 
-  googleBtn.addEventListener('click', async () => {
-    googleError.hidden = true;
-    googleError.textContent = '';
-    googleBtn.disabled = true;
-    googleBtn.textContent = 'connecting…';
+  googleBtn.addEventListener("click", async () => {
+    googleError.hidden = true
+    googleError.textContent = ""
+    googleBtn.disabled = true
+    googleBtn.textContent = "connecting…"
     try {
       // On success the account.subscribe callback re-renders the
       // connected state; nothing to do here.
-      await ctx.connectGoogle();
+      await ctx.connectGoogle()
     } catch (err) {
-      googleError.textContent = err?.message || String(err);
-      googleError.hidden = false;
+      googleError.textContent = err?.message || String(err)
+      googleError.hidden = false
     } finally {
-      googleBtn.disabled = false;
-      googleBtn.textContent = GOOGLE_LABEL;
+      googleBtn.disabled = false
+      googleBtn.textContent = GOOGLE_LABEL
     }
-  });
+  })
 
-  bunkerCancel.addEventListener('click', () => {
-    bunkerForm.hidden = true;
-    bunkerError.hidden = true;
-    bunkerInput.value = '';
-  });
+  bunkerCancel.addEventListener("click", () => {
+    bunkerForm.hidden = true
+    bunkerError.hidden = true
+    bunkerInput.value = ""
+  })
 
-  resetBtn.addEventListener('click', () => {
+  resetBtn.addEventListener("click", () => {
     const ok = window.confirm(
-      'Erase all nostrapps data?\n\n' +
-        'This wipes every installed app, all settings, your account ' +
-        'connection, all permissions, all storage. The launcher will reload ' +
-        'into a fresh state.\n\n' +
-        'This cannot be undone.',
-    );
-    if (!ok) return;
-    ctx.factoryReset?.();
-  });
+      "Erase all nostrapps data?\n\n" +
+        "This wipes every installed app, all settings, your account " +
+        "connection, all permissions, all storage. The launcher will reload " +
+        "into a fresh state.\n\n" +
+        "This cannot be undone."
+    )
+    if (!ok) return
+    ctx.factoryReset?.()
+  })
 
-  bunkerForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    bunkerError.hidden = true;
-    const uri = bunkerInput.value.trim();
-    if (!uri) return;
-    bunkerSubmit.disabled = true;
-    bunkerSubmit.textContent = 'connecting…';
+  bunkerForm.addEventListener("submit", async e => {
+    e.preventDefault()
+    bunkerError.hidden = true
+    const uri = bunkerInput.value.trim()
+    if (!uri) return
+    bunkerSubmit.disabled = true
+    bunkerSubmit.textContent = "connecting…"
     try {
-      await ctx.connectBunker(uri);
+      await ctx.connectBunker(uri)
     } catch (err) {
-      showBunkerError(err?.message || String(err));
+      showBunkerError(err?.message || String(err))
     } finally {
-      bunkerSubmit.disabled = false;
-      bunkerSubmit.textContent = 'connect';
+      bunkerSubmit.disabled = false
+      bunkerSubmit.textContent = "connect"
     }
-  });
+  })
 
-  renderTheme(ctx.theme.get());
-  renderAccount(ctx.account.getPubkey());
+  renderTheme(ctx.theme.get())
+  renderAccount(ctx.account.getPubkey())
 
-  const unsubTheme = ctx.theme.subscribe(renderTheme);
-  const unsubAccount = ctx.account.subscribe(renderAccount);
+  const unsubTheme = ctx.theme.subscribe(renderTheme)
+  const unsubAccount = ctx.account.subscribe(renderAccount)
 
   return {
     unmount() {
-      unsubTheme();
-      unsubAccount();
-    },
-  };
+      unsubTheme()
+      unsubAccount()
+    }
+  }
 }

@@ -1,122 +1,120 @@
-import * as perms from '../permissions.js';
-import * as persist from '../persistence.js';
+import * as perms from "../permissions.js"
+import * as persist from "../persistence.js"
 
-export const id = 'permissions';
-export const title = 'Permissions';
-export const slash = '/permissions';
+export const id = "permissions"
+export const title = "Permissions"
+export const slash = "/permissions"
 
 export function mount(container) {
   container.innerHTML = `
     <div class="perm-list" data-section="decisions"></div>
     <div class="perm-list" data-section="handlers"></div>
-  `;
-  const decisionsEl = container.querySelector('[data-section="decisions"]');
-  const handlersEl = container.querySelector('[data-section="handlers"]');
+  `
+  const decisionsEl = container.querySelector('[data-section="decisions"]')
+  const handlersEl = container.querySelector('[data-section="handlers"]')
 
   function renderDecisions() {
-    decisionsEl.innerHTML = '';
-    const all = perms.listDecisions();
-    const entries = Object.entries(all);
+    decisionsEl.innerHTML = ""
+    const all = perms.listDecisions()
+    const entries = Object.entries(all)
     if (entries.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'perm-empty';
-      empty.textContent = 'No permission decisions stored yet.';
-      decisionsEl.appendChild(empty);
-      return;
+      const empty = document.createElement("div")
+      empty.className = "perm-empty"
+      empty.textContent = "No permission decisions stored yet."
+      decisionsEl.appendChild(empty)
+      return
     }
     for (const [nappId, methods] of entries) {
-      const group = document.createElement('div');
-      group.className = 'perm-group';
+      const group = document.createElement("div")
+      group.className = "perm-group"
 
-      const head = document.createElement('div');
-      head.className = 'perm-group-head';
-      const name = document.createElement('code');
-      name.className = 'perm-napp-id';
-      name.textContent = nappId;
-      head.appendChild(name);
-      const clearAll = document.createElement('button');
-      clearAll.type = 'button';
-      clearAll.textContent = 'forget all';
-      clearAll.addEventListener('click', () => perms.forgetDecision(nappId));
-      head.appendChild(clearAll);
-      group.appendChild(head);
+      const head = document.createElement("div")
+      head.className = "perm-group-head"
+      const name = document.createElement("code")
+      name.className = "perm-napp-id"
+      name.textContent = nappId
+      head.appendChild(name)
+      const clearAll = document.createElement("button")
+      clearAll.type = "button"
+      clearAll.textContent = "forget all"
+      clearAll.addEventListener("click", () => perms.forgetDecision(nappId))
+      head.appendChild(clearAll)
+      group.appendChild(head)
 
       for (const [method, decision] of Object.entries(methods)) {
-        const row = document.createElement('div');
-        row.className = 'perm-row';
-        const m = document.createElement('code');
-        m.className = 'perm-method';
-        m.textContent = method;
-        const d = document.createElement('span');
-        d.className = `perm-decision perm-${decision}`;
-        d.textContent = decision;
-        const f = document.createElement('button');
-        f.type = 'button';
-        f.textContent = 'forget';
-        f.addEventListener('click', () =>
-          perms.forgetDecision(nappId, method),
-        );
-        row.append(m, d, f);
-        group.appendChild(row);
+        const row = document.createElement("div")
+        row.className = "perm-row"
+        const m = document.createElement("code")
+        m.className = "perm-method"
+        m.textContent = method
+        const d = document.createElement("span")
+        d.className = `perm-decision perm-${decision}`
+        d.textContent = decision
+        const f = document.createElement("button")
+        f.type = "button"
+        f.textContent = "forget"
+        f.addEventListener("click", () => perms.forgetDecision(nappId, method))
+        row.append(m, d, f)
+        group.appendChild(row)
       }
 
-      decisionsEl.appendChild(group);
+      decisionsEl.appendChild(group)
     }
   }
 
   function renderHandlerPrefs() {
-    handlersEl.innerHTML = '';
-    const all = persist.readHandlerPrefsAll();
-    const entries = Object.entries(all);
+    handlersEl.innerHTML = ""
+    const all = persist.readHandlerPrefsAll()
+    const entries = Object.entries(all)
 
-    const heading = document.createElement('h4');
-    heading.className = 'store-section-heading';
-    heading.textContent = 'Handler choices';
-    handlersEl.appendChild(heading);
+    const heading = document.createElement("h4")
+    heading.className = "store-section-heading"
+    heading.textContent = "Handler choices"
+    handlersEl.appendChild(heading)
 
     if (entries.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'perm-empty';
+      const empty = document.createElement("div")
+      empty.className = "perm-empty"
       empty.textContent =
-        'No remembered handler picks yet. Picks are saved when an app calls window.napp.handle/action and you choose between options.';
-      handlersEl.appendChild(empty);
-      return;
+        "No remembered handler picks yet. Picks are saved when an app calls window.napp.handle/action and you choose between options."
+      handlersEl.appendChild(empty)
+      return
     }
 
     for (const [key, target] of entries) {
       // key shape: "<caller>|<type>|<value>"
-      const [caller, type, value] = key.split('|');
-      const row = document.createElement('div');
-      row.className = 'perm-row';
-      const desc = document.createElement('span');
-      desc.className = 'perm-method';
-      desc.textContent = `${caller || '(any)'} → ${type}:${value}`;
-      const t = document.createElement('code');
-      t.className = 'perm-napp-id';
-      t.textContent = target;
-      const f = document.createElement('button');
-      f.type = 'button';
-      f.textContent = 'forget';
-      f.addEventListener('click', () => {
-        persist.setHandlerPref(caller, type, value, null);
-        renderHandlerPrefs();
-      });
-      row.append(desc, t, f);
-      handlersEl.appendChild(row);
+      const [caller, type, value] = key.split("|")
+      const row = document.createElement("div")
+      row.className = "perm-row"
+      const desc = document.createElement("span")
+      desc.className = "perm-method"
+      desc.textContent = `${caller || "(any)"} → ${type}:${value}`
+      const t = document.createElement("code")
+      t.className = "perm-napp-id"
+      t.textContent = target
+      const f = document.createElement("button")
+      f.type = "button"
+      f.textContent = "forget"
+      f.addEventListener("click", () => {
+        persist.setHandlerPref(caller, type, value, null)
+        renderHandlerPrefs()
+      })
+      row.append(desc, t, f)
+      handlersEl.appendChild(row)
     }
   }
 
   function render() {
-    renderDecisions();
-    renderHandlerPrefs();
+    renderDecisions()
+    renderHandlerPrefs()
   }
 
-  render();
-  const unsub = perms.subscribe(render);
+  render()
+  const unsub = perms.subscribe(render)
 
   return {
     unmount() {
-      unsub();
-    },
-  };
+      unsub()
+    }
+  }
 }
