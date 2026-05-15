@@ -210,7 +210,7 @@ export async function googleLoginAndCreateBunker({ onProgress } = {}) {
       },
       secretKey
     )
-    const opResp = await fetch(`${op}/register`, {
+    const opResp = await fetch(`${op}/po/register`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
