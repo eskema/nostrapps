@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fiatjaf/promenade-trusted-dealer": "npm:@jsr/fiatjaf__promenade-trusted-dealer@^0.4.3",
     "@fontsource-variable/source-code-pro": "^5.2.7",
     "@fontsource-variable/source-sans-3": "^5.2.9",
     "@fontsource-variable/source-serif-4": "^5.2.9",

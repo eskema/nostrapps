@@ -1550,6 +1550,7 @@ body.napp-dragging .napp-body iframe {
 .settings-disconnect-btn,
 .settings-connect-extension,
 .settings-connect-bunker-toggle,
+.settings-connect-google,
 .settings-bunker-submit,
 .settings-bunker-cancel {
   padding: 0.3rem 0.7rem;
@@ -1564,10 +1565,30 @@ body.napp-dragging .napp-body iframe {
 .settings-disconnect-btn:hover,
 .settings-connect-extension:hover,
 .settings-connect-bunker-toggle:hover,
+.settings-connect-google:hover,
 .settings-bunker-submit:hover,
 .settings-bunker-cancel:hover {
   background: var(--text);
   color: var(--surface);
+}
+
+.settings-connect-google:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The google button + its error sit on their own row of the disconnected
+   grid — central fixes the operator list, so it's effectively a one-click
+   alternative to the two manual paths above. */
+.settings-connect-google,
+.settings-google-error {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.settings-google-error {
+  font-size: 0.78rem;
+  color: #c0392b;
 }
 
 .settings-bunker-form {

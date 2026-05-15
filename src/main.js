@@ -23,6 +23,7 @@ import {
   connectBunkerInput,
   disconnectBunkerSigner,
 } from './signers/nip46.js';
+import { googleLoginAndCreateBunker } from './signers/google.js';
 import * as account from './account.js';
 import { mountDialog, clearDecisions } from './permissions.js';
 import * as persist from './persistence.js';

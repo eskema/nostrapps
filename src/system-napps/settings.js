@@ -2,6 +2,8 @@ export const id = 'settings';
 export const title = 'Settings';
 export const slash = '/settings';
 
+const GOOGLE_LABEL = 'log in with google';
+
 export function mount(container, ctx) {
   container.innerHTML = `
     <div class="settings-panel">
@@ -36,6 +38,10 @@ export function mount(container, ctx) {
             <button type="button" class="settings-connect-bunker-toggle">
               connect with bunker
             </button>
+            <button type="button" class="settings-connect-google">
+              ${GOOGLE_LABEL}
+            </button>
+            <div class="settings-google-error" hidden></div>
             <form class="settings-bunker-form" hidden>
               <input
                 type="text"
@@ -64,6 +70,8 @@ export function mount(container, ctx) {
   const disconnectBtn = container.querySelector('.settings-disconnect-btn');
   const connectExtBtn = container.querySelector('.settings-connect-extension');
   const bunkerToggleBtn = container.querySelector('.settings-connect-bunker-toggle');
+  const googleBtn = container.querySelector('.settings-connect-google');
+  const googleError = container.querySelector('.settings-google-error');
   const bunkerForm = container.querySelector('.settings-bunker-form');
   const bunkerInput = container.querySelector('.settings-bunker-input');
   const bunkerSubmit = container.querySelector('.settings-bunker-submit');
@@ -91,6 +99,8 @@ export function mount(container, ctx) {
       bunkerForm.hidden = true;
       bunkerError.hidden = true;
       bunkerInput.value = '';
+      googleError.hidden = true;
+      googleError.textContent = '';
     }
   }
 
@@ -116,6 +126,24 @@ export function mount(container, ctx) {
   bunkerToggleBtn.addEventListener('click', () => {
     bunkerForm.hidden = !bunkerForm.hidden;
     if (!bunkerForm.hidden) bunkerInput.focus();
+  });
+
+  googleBtn.addEventListener('click', async () => {
+    googleError.hidden = true;
+    googleError.textContent = '';
+    googleBtn.disabled = true;
+    googleBtn.textContent = 'connecting…';
+    try {
+      // On success the account.subscribe callback re-renders the
+      // connected state; nothing to do here.
+      await ctx.connectGoogle();
+    } catch (err) {
+      googleError.textContent = err?.message || String(err);
+      googleError.hidden = false;
+    } finally {
+      googleBtn.disabled = false;
+      googleBtn.textContent = GOOGLE_LABEL;
+    }
   });
 
   bunkerCancel.addEventListener('click', () => {
