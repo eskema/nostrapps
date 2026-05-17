@@ -341,21 +341,17 @@ function manifestInfoFromEvent(evt) {
   }
 }
 
-// NIP-5B: read `handle` (kind) and `action` (named) capability tags off the
-// listing event so the launcher can route inter-app calls to this napp.
+// NIP-5B: read `handle` (kind → `view:{kind}`) and `action` (named) capability
+// tags off the listing event so the launcher can route inter-app calls.
 function capabilitiesFromListing(listing) {
-  if (!listing) return { kinds: [], actions: [] }
-  const kinds = []
+  if (!listing) return []
   const actions = []
   for (const t of listing.tags) {
-    if (t[0] === "handle" && t[1]) {
-      const k = Number(t[1])
-      if (Number.isInteger(k) && k >= 0) kinds.push(k)
-    } else if (t[0] === "action" && typeof t[1] === "string" && t[1]) {
+    if (t[0] === "action" && typeof t[1] === "string" && t[1]) {
       actions.push(t[1])
     }
   }
-  return { kinds, actions }
+  return actions
 }
 
 // Update flow: re-fetch the manifest + files at the same target, swap them
@@ -379,23 +375,7 @@ async function updateNapp(target) {
   refreshSuggestions()
 }
 
-// ─── inter-app calling (handle / action) ───────────────────────
-
-async function runNappHandle(callerNappId, event) {
-  const kind = Number(event?.kind)
-  if (!Number.isInteger(kind) || kind < 0) {
-    throw new Error("napp.handle: event must have a valid kind")
-  }
-  const candidates = persist.findHandlersForKind(kind).filter(id => id !== callerNappId)
-  if (candidates.length === 0) {
-    throw new Error(`No app registered to handle kind ${kind}`)
-  }
-  const target = await pickHandler(callerNappId, "kind", String(kind), candidates)
-  const win = await ensureNappOpen(target)
-  return await callIframe(win.getState().instanceId, "napp-dispatch-handle", {
-    event
-  })
-}
+// ─── inter-app calling (actions) ────────────────────────────────
 
 async function runNappAction(callerNappId, name, payload) {
   if (typeof name !== "string" || !name) {
@@ -405,7 +385,7 @@ async function runNappAction(callerNappId, name, payload) {
   if (candidates.length === 0) {
     throw new Error(`No app registered for action "${name}"`)
   }
-  const target = await pickHandler(callerNappId, "action", name, candidates)
+  const target = await pickHandler(callerNappId, name, candidates)
   const win = await ensureNappOpen(target)
   return await callIframe(win.getState().instanceId, "napp-dispatch-action", {
     name,
@@ -413,25 +393,24 @@ async function runNappAction(callerNappId, name, payload) {
   })
 }
 
-async function pickHandler(callerNappId, type, key, candidates) {
+async function pickHandler(callerNappId, actionName, candidates) {
   if (candidates.length === 1) {
-    persist.setHandlerPref(callerNappId, type, key, candidates[0])
+    persist.setHandlerPref(callerNappId, "action", actionName, candidates[0])
     return candidates[0]
   }
-  const remembered = persist.getHandlerPref(callerNappId, type, key)
+  const remembered = persist.getHandlerPref(callerNappId, "action", actionName)
   if (remembered && candidates.includes(remembered)) return remembered
-  const choice = await showHandlerPicker(type, key, candidates)
-  persist.setHandlerPref(callerNappId, type, key, choice)
+  const choice = await showHandlerPicker(actionName, candidates)
+  persist.setHandlerPref(callerNappId, "action", actionName, choice)
   return choice
 }
 
 // Promise-based modal that asks the user to pick one of `candidates`.
-function showHandlerPicker(type, key, candidates) {
+function showHandlerPicker(actionName, candidates) {
   return new Promise((resolve, reject) => {
     const dialog = document.createElement("dialog")
     dialog.className = "handler-picker"
-    const heading =
-      type === "kind" ? `Pick an app to handle kind ${key}` : `Pick an app for "${key}"`
+    const heading = `Pick an app for "${actionName}"`
     const list = candidates
       .map(
         id => `
@@ -915,7 +894,6 @@ function makeLaunchOpts() {
   return {
     onProgress: setStatus,
     dispatchHandlers: {
-      handle: (callerNappId, event) => runNappHandle(callerNappId, event),
       action: (callerNappId, name, payload) => runNappAction(callerNappId, name, payload)
     },
     onStateChange: state => {
@@ -1124,14 +1102,16 @@ localFolderInput.addEventListener("change", async e => {
   const inputFiles = e.target.files
   if (!inputFiles || inputFiles.length === 0) return
   try {
-    const { nappId, files } = await collectLocalFolder(inputFiles, setStatus)
+    const { nappId, files, metadata } = await collectLocalFolder(inputFiles, setStatus)
+    const petname = metadata?.name || nappId
     const win = await launch(stage, nappId, files, currentSigner, {
       ...makeLaunchOpts(),
-      petname: nappId
+      petname
     })
     trackOpened(nappId, win)
+    if (metadata?.actions?.length) persist.setHandlers(nappId, metadata.actions)
     win.focus()
-    setStatus(`Launched ${nappId}`)
+    setStatus(`Launched ${petname}`)
   } catch (err) {
     setStatus(`Error: ${err.message}`)
     console.error(err)

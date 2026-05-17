@@ -53,9 +53,9 @@ export function findOpenWindowByNappId(nappId) {
   return null
 }
 
-// Launcher → iframe dispatch calls (handle / action). Each call gets a
-// requestId; the iframe replies with that id once `window.napp.onHandle`
-// or `window.napp.onAction` has run.
+// Launcher → iframe dispatch calls (action). Each call gets a
+// requestId; the iframe replies with that id once `window.napp.onAction`
+// has run.
 const pendingDispatches = new Map()
 const DISPATCH_TIMEOUT_MS = 30_000
 
@@ -962,11 +962,6 @@ function dispatch(signer, method, params, instanceId, callerNappId, dispatchHand
       return store.event(params.id)
     case "nostrdb.replaceable":
       return store.replaceable(params.kind, params.author, params.identifier)
-    case "napp.handle":
-      if (!dispatchHandlers?.handle) {
-        throw new Error("napp.handle dispatch is not configured")
-      }
-      return dispatchHandlers.handle(callerNappId, params?.event)
     case "napp.action":
       if (!dispatchHandlers?.action) {
         throw new Error("napp.action dispatch is not configured")

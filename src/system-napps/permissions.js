@@ -76,7 +76,7 @@ export function mount(container) {
       const empty = document.createElement("div")
       empty.className = "perm-empty"
       empty.textContent =
-        "No remembered handler picks yet. Picks are saved when an app calls window.napp.handle/action and you choose between options."
+        "No remembered action picks yet. Picks are saved when an app calls window.napp.action() and you choose between options."
       handlersEl.appendChild(empty)
       return
     }

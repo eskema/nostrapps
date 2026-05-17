@@ -4,7 +4,7 @@ const KNOWN_KEY = "nostrapps:known"
 const PETNAMES_KEY = "nostrapps:petnames"
 const INSTALL_LOG_KEY = "nostrapps:installLog"
 const INSTALLED_MANIFESTS_KEY = "nostrapps:installedManifests"
-const HANDLERS_KEY = "nostrapps:handlers" // { nappId: { kinds: number[], actions: string[] } }
+const HANDLERS_KEY = "nostrapps:handlers" // { nappId: string[] }
 const HANDLER_PREFS_KEY = "nostrapps:handlerPrefs" // { '<caller>|<type>|<key>': nappId }
 const HISTORY_LIMIT = 20
 
@@ -147,26 +147,21 @@ export function forgetInstalledManifest(nappId) {
   }
 }
 
-// ─── handler registry (NIP-5B `handle` / `action` capabilities) ──
+// ─── handler registry (actions) ──
 
 function readHandlers() {
   const raw = readJson(HANDLERS_KEY, {})
   return raw && typeof raw === "object" ? raw : {}
 }
 
-export function setHandlers(nappId, capabilities) {
+export function setHandlers(nappId, actions) {
   if (!nappId) return
   const all = readHandlers()
-  const kinds = Array.isArray(capabilities?.kinds)
-    ? capabilities.kinds.filter(k => Number.isInteger(k) && k >= 0)
-    : []
-  const actions = Array.isArray(capabilities?.actions)
-    ? capabilities.actions.filter(a => typeof a === "string" && a.length)
-    : []
-  if (kinds.length === 0 && actions.length === 0) {
+  const valid = Array.isArray(actions) ? actions.filter(a => typeof a === "string" && a.length) : []
+  if (valid.length === 0) {
     delete all[nappId]
   } else {
-    all[nappId] = { kinds: [...new Set(kinds)], actions: [...new Set(actions)] }
+    all[nappId] = [...new Set(valid)]
   }
   writeJson(HANDLERS_KEY, all)
 }
@@ -179,22 +174,12 @@ export function forgetHandlers(nappId) {
   }
 }
 
-export function findHandlersForKind(kind) {
-  const all = readHandlers()
-  const k = Number(kind)
-  const out = []
-  for (const [nappId, caps] of Object.entries(all)) {
-    if (caps?.kinds?.includes(k)) out.push(nappId)
-  }
-  return out
-}
-
 export function findHandlersForAction(action) {
   if (typeof action !== "string" || !action) return []
   const all = readHandlers()
   const out = []
-  for (const [nappId, caps] of Object.entries(all)) {
-    if (caps?.actions?.includes(action)) out.push(nappId)
+  for (const [nappId, actions] of Object.entries(all)) {
+    if (Array.isArray(actions) && actions.includes(action)) out.push(nappId)
   }
   return out
 }

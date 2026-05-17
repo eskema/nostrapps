@@ -38,29 +38,12 @@
   }
 
   async function handleDispatch(data) {
-    if (data.__nostrapps === "napp-dispatch-handle") {
-      try {
-        const fn = window.napp?.onHandle
-        if (typeof fn !== "function") {
-          throw new Error("window.napp.onHandle is not registered")
-        }
-        const result = await fn(data.event)
-        reply(data.requestId, true, result ?? null)
-      } catch (err) {
-        reply(data.requestId, false, err?.message ?? String(err))
-      }
-    } else if (data.__nostrapps === "napp-dispatch-action") {
-      try {
-        const fn = window.napp?.onAction
-        if (typeof fn !== "function") {
-          throw new Error("window.napp.onAction is not registered")
-        }
-        const result = await fn(data.name, data.payload)
-        reply(data.requestId, true, result ?? null)
-      } catch (err) {
-        reply(data.requestId, false, err?.message ?? String(err))
-      }
+    const fn = window.napp?.onAction
+    if (typeof fn !== "function") {
+      throw new Error("window.napp.onAction is not registered")
     }
+    const result = await fn(data.name, data.payload)
+    reply(data.requestId, true, result ?? null)
   }
 
   window.addEventListener("message", event => {
@@ -74,10 +57,7 @@
       else p.reject(new Error(data.error))
       return
     }
-    if (
-      data.__nostrapps === "napp-dispatch-handle" ||
-      data.__nostrapps === "napp-dispatch-action"
-    ) {
+    if (data.__nostrapps === "napp-dispatch-action") {
       handleDispatch(data)
     }
   })
@@ -116,17 +96,12 @@
       rpc("nostrdb.replaceable", { kind, author, identifier })
   }
 
-  // Inter-app calling. Apps declare capabilities via NIP-5B `handle` and
-  // `action` tags on their listing event; the launcher routes calls here.
-  //   window.napp.handle(event) — find an app that displays this kind, open it
+  // Inter-app calling. Everything is an action.
   //   window.napp.action(name, payload) — call a registered action handler
   // Receiving apps register:
-  //   window.napp.onHandle = async (event) => { ... }
   //   window.napp.onAction = async (name, payload) => { ... return value }
   window.napp = {
-    handle: event => rpc("napp.handle", { event }),
     action: (name, payload) => rpc("napp.action", { name, payload }),
-    onHandle: null,
     onAction: null
   }
 })()
