@@ -64,7 +64,18 @@ async function getFile(path) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly")
     const req = tx.objectStore(STORE).get(path)
-    req.onsuccess = () => resolve(req.result ?? null)
-    req.onerror = () => reject(req.error)
+    req.onsuccess = () => {
+      const result = req.result ?? null
+      try {
+        db.close()
+      } catch {}
+      resolve(result)
+    }
+    req.onerror = () => {
+      try {
+        db.close()
+      } catch {}
+      reject(req.error)
+    }
   })
 }

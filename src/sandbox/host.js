@@ -1,5 +1,4 @@
 import { isGated, requireApproval } from "../permissions.js"
-import * as pool from "../pool.js"
 import * as store from "../store.js"
 import * as instanceStore from "../storage/instance.js"
 import { createNappWindow } from "./napp-window.js"
@@ -118,39 +117,51 @@ export function reloadIframesByNappId(nappId) {
 const systemSingletons = new Map() // sysId -> instanceId
 
 export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
-  // singleton — focus the existing instance if already open
-  const existing = systemSingletons.get(sysId)
-  if (existing && openWindows.has(existing)) {
-    focusInstance(existing)
-    return openWindows.get(existing)
+  const singleton = def.singleton !== false
+  if (singleton) {
+    const existing = systemSingletons.get(sysId)
+    if (existing && openWindows.has(existing)) {
+      focusInstance(existing)
+      return openWindows.get(existing)
+    }
   }
 
-  const instanceId = `system:${sysId}`
+  let currentPanelState = opts.initial?.panelState ?? null
+  let win = null
+  const instanceId =
+    opts.instanceId || opts.initial?.instanceId || (singleton ? `system:${sysId}` : `system:${sysId}:${crypto.randomUUID()}`)
   const bodyElement = document.createElement("div")
   bodyElement.className = `system-napp-content system-napp-${sysId}`
 
-  const handle = def.mount(bodyElement, ctx)
+  const handle = def.mount(bodyElement, ctx, {
+    initial: currentPanelState,
+    onStateChange(panelState) {
+      currentPanelState = panelState ?? null
+      if (win) opts.onStateChange?.({ ...win.getState(), panelState: currentPanelState })
+    }
+  })
 
-  const win = createNappWindow({
+  win = createNappWindow({
     nappId: `__${sysId}__`,
     instanceId,
     petname: def.title || sysId,
     bodyElement,
     system: true,
     initial: opts.initial,
-    onStateChange: opts.onStateChange,
+    onStateChange: state => opts.onStateChange?.({ ...state, panelState: currentPanelState }),
     onClose: () => {
       handle?.unmount?.()
       openWindows.delete(instanceId)
-      systemSingletons.delete(sysId)
+      if (singleton) systemSingletons.delete(sysId)
       opts.onClose?.(instanceId)
     },
     onReorder: opts.onReorder
   })
   win.systemId = sysId
+  win.getSystemPanelState = () => currentPanelState
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
-  systemSingletons.set(sysId, instanceId)
+  if (singleton) systemSingletons.set(sysId, instanceId)
   ensureStageObserver(stageEl)
   clampToStage(win.root, stageEl)
   return win
@@ -940,10 +951,6 @@ function dispatch(signer, method, params, instanceId, callerNappId, dispatchHand
       return signer.nip44.encrypt(params.pubkey, params.plaintext)
     case "nip44.decrypt":
       return signer.nip44.decrypt(params.pubkey, params.ciphertext)
-    case "pool.query":
-      return pool.query(params.filters, params.opts)
-    case "pool.publish":
-      return pool.publish(params.event, params.opts)
     case "instance.get":
       return instanceStore.get(instanceId, params.key)
     case "instance.set":

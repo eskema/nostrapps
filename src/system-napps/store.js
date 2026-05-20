@@ -1,7 +1,7 @@
-import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
-import { loadNostrUser } from "@nostr/gadgets/metadata"
+import { pool } from "@nostr/gadgets/global"
+import { loadBlossomServers } from "@nostr/gadgets/lists"
 import { npubEncode, naddrEncode } from "@nostr/tools/nip19"
-import * as pool from "../pool.js"
+import "nostr-web-components"
 
 export const id = "store"
 export const title = "Store"
@@ -10,9 +10,6 @@ export const slash = "/store"
 const NSITE_ROOT = 15128
 const NSITE_NAMED = 35128
 const NSITE_LISTING = 37348 // NIP-5B app listing (paired to a manifest by d-tag)
-const CACHE_KEY = "nostrapps:store:cache"
-const RELAYS_KEY = "nostrapps:store:relays"
-const CACHE_LIMIT = 500
 
 // Transparent 1×1 SVG used as the initial src for icon/avatar slots so the
 // browser doesn't render a broken-image glyph while async loads are pending.
@@ -21,24 +18,27 @@ const CACHE_LIMIT = 500
 const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
 
 const DEFAULT_RELAYS = [
-  "wss://relay.damus.io",
-  "wss://relay.nostr.band",
-  "wss://nos.lol",
-  "wss://relay.primal.net"
+  "wss://relay.nostrapps.com",
+  "wss://relay.nostrapps.com/personal",
+  "wss://relay.nostrapps.com/public",
+  "wss://relay.nostrapps.com/internal",
+  "wss://relay.nostrapps.com/favorites"
 ]
 
-export function mount(container, ctx) {
-  let events = readCache()
+export function mount(container, ctx, opts = {}) {
   let filter = ""
-  let filterMode = "all" // 'all' | 'installed' | 'past'
-  let refreshing = false
+  let events = []
+  let relays = sanitizeRelays(opts.initial?.relays)
   let cancelled = false
+  let sub = null
+  let sawEose = false
+
+  if (relays.length === 0) relays = [...DEFAULT_RELAYS]
 
   container.innerHTML = `
     <div class="store-panel">
       <div class="store-toolbar">
         <input class="store-search" type="search" placeholder="Search title, description, npub…" />
-        <button type="button" class="store-refresh" title="Refresh">↻</button>
         <button type="button" class="store-relays-toggle" title="Configure relays">⚙</button>
       </div>
       <div class="store-relays" hidden>
@@ -49,17 +49,12 @@ export function mount(container, ctx) {
           <button type="button" class="store-relays-clear">clear</button>
         </div>
       </div>
-      <div class="store-filters" role="group" aria-label="Filter">
-        <button type="button" data-filter="all" class="active">all</button>
-        <button type="button" data-filter="installed">installed</button>
-      </div>
       <div class="store-status" hidden></div>
       <div class="store-list"></div>
     </div>
   `
 
   const searchEl = container.querySelector(".store-search")
-  const refreshBtn = container.querySelector(".store-refresh")
   const relaysToggleBtn = container.querySelector(".store-relays-toggle")
   const relaysPanel = container.querySelector(".store-relays")
   const relaysInput = container.querySelector(".store-relays-input")
@@ -67,13 +62,16 @@ export function mount(container, ctx) {
   const relaysClearBtn = container.querySelector(".store-relays-clear")
   const statusEl = container.querySelector(".store-status")
   const listEl = container.querySelector(".store-list")
-  const filterBtns = container.querySelectorAll(".store-filters button")
 
-  relaysInput.value = readCustomRelays().join("\n")
+  relaysInput.value = relays.join("\n")
 
   function setStatus(msg) {
     statusEl.textContent = msg || ""
     statusEl.hidden = !msg
+  }
+
+  function emitState() {
+    opts.onStateChange?.({ relays: [...relays] })
   }
 
   function renderList() {
@@ -95,6 +93,7 @@ export function mount(container, ctx) {
 
     const manifests = events.filter(e => e.kind === NSITE_ROOT || e.kind === NSITE_NAMED)
     const filtered = manifests
+      .filter(m => !(ctx.isInstalled?.(computeNappId(m)) ?? false))
       .filter(m => matchesFilter(m, listingFor(m), filter))
       .sort((a, b) => b.created_at - a.created_at)
 
@@ -105,75 +104,16 @@ export function mount(container, ctx) {
     // (and an install in any tab gets re-categorized too).
     const renderOne = evt => listEl.appendChild(renderCard(evt, ctx, listingFor(evt), renderList))
 
-    if (filterMode === "installed") {
-      const installed = []
-      const past = []
-      for (const e of filtered) {
-        const nid = computeNappId(e)
-        if (ctx.isInstalled?.(nid)) installed.push(e)
-        else if (ctx.wasInstalled?.(nid)) past.push(e)
-      }
-
-      if (installed.length === 0 && past.length === 0) {
-        const empty = document.createElement("div")
-        empty.className = "store-empty"
-        empty.textContent = "No installed nsites."
-        listEl.appendChild(empty)
-        return
-      }
-
-      if (installed.length > 0) {
-        for (const evt of installed) renderOne(evt)
-      } else {
-        const empty = document.createElement("div")
-        empty.className = "store-empty store-empty-thin"
-        empty.textContent = "Nothing currently installed."
-        listEl.appendChild(empty)
-      }
-
-      if (past.length > 0) {
-        const heading = document.createElement("h4")
-        heading.className = "store-section-heading"
-        heading.textContent = "Previously installed"
-        listEl.appendChild(heading)
-        for (const evt of past) renderOne(evt)
-      }
-
-      displayed = installed.concat(past)
-    } else {
-      if (filtered.length === 0) {
-        const empty = document.createElement("div")
-        empty.className = "store-empty"
-        empty.textContent =
-          manifests.length === 0 ? "No nsites cached yet — tap ↻ to fetch." : "No matches."
-        listEl.appendChild(empty)
-        return
-      }
-      for (const evt of filtered) renderOne(evt)
-      displayed = filtered
+    if (filtered.length === 0) {
+      const empty = document.createElement("div")
+      empty.className = "store-empty"
+      empty.textContent = manifests.length === 0 ? "No napps found." : "No matches."
+      listEl.appendChild(empty)
+      return
     }
 
-    // Lazy-load profile metadata for unique authors.
-    const seenAuthors = new Set()
-    for (const evt of displayed) {
-      if (seenAuthors.has(evt.pubkey)) continue
-      seenAuthors.add(evt.pubkey)
-      loadNostrUser(evt.pubkey)
-        .then(user => {
-          if (cancelled) return
-          const cards = listEl.querySelectorAll(`[data-author="${evt.pubkey}"]`)
-          const name = user?.shortName || user?.name || ""
-          const pic = user?.image
-          for (const card of cards) {
-            const nameEl = card.querySelector(".store-author-name")
-            const picEl = card.querySelector(".store-author-pic")
-            if (nameEl && name) nameEl.textContent = name
-            // Slot was reserved at render time; just swap src — no shift.
-            if (picEl && pic) picEl.src = pic
-          }
-        })
-        .catch(() => {})
-    }
+    for (const evt of filtered) renderOne(evt)
+    displayed = filtered
 
     // Lazy-load Blossom icons for unique authors that published a listing.
     const seenIconPks = new Set()
@@ -215,42 +155,53 @@ export function mount(container, ctx) {
     }
   }
 
-  async function refresh() {
-    if (refreshing || cancelled) return
-    refreshing = true
-    refreshBtn.disabled = true
-    refreshBtn.classList.add("spinning")
-    const before = events.length
+  function closeSubscription() {
     try {
-      setStatus("Resolving relays…")
-      const relays = await resolveRelays(ctx)
-      if (cancelled) return
-      if (!relays.length) {
-        setStatus("No relays configured.")
-        return
-      }
-      setStatus(`Querying ${relays.length} relay(s)…`)
-      const fresh = await pool.query(
-        { kinds: [NSITE_ROOT, NSITE_NAMED, NSITE_LISTING], limit: 400 },
-        { relays }
-      )
-      if (cancelled) return
-      events = mergeEvents(events, fresh)
-      writeCache(events)
-      renderList()
-      const added = events.length - before
-      if (added > 0) {
-        setStatus(`+${added} new — ${events.length} cached`)
-      } else {
-        setStatus(`Up to date — ${events.length} cached`)
-      }
-    } catch (err) {
-      setStatus(`Error: ${err.message}`)
-    } finally {
-      refreshing = false
-      refreshBtn.disabled = false
-      refreshBtn.classList.remove("spinning")
+      sub?.close?.()
+    } catch {}
+    sub = null
+  }
+
+  function startSubscription() {
+    closeSubscription()
+    events = []
+    sawEose = false
+    renderList()
+
+    if (cancelled) return
+    if (!relays.length) {
+      setStatus("No relays configured.")
+      return
     }
+
+    setStatus(`Subscribing to ${relays.length} relay(s)…`)
+    sub = pool.subscribeMany(relays, { kinds: [NSITE_ROOT, NSITE_NAMED, NSITE_LISTING], limit: 400 }, {
+      label: "apps",
+      onevent(event) {
+        if (cancelled) return
+        if (events.some(existing => existing.id === event.id)) return
+        events.push(event)
+        renderList()
+        if (sawEose) {
+          setStatus(`Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`)
+        } else {
+          setStatus(`Loading from ${relays.length} relay(s)… ${events.length}`)
+        }
+      },
+      oneose() {
+        if (cancelled) return
+        sawEose = true
+        setStatus(`Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`)
+      },
+      onclose(reason) {
+        if (cancelled) return
+        if (reason) setStatus(`Subscription closed: ${reason.message || String(reason)}`)
+      },
+      onerror(err) {
+        if (cancelled) return
+        setStatus(`Error: ${err.message}`)
+      }
+    })
   }
 
   searchEl.addEventListener("input", () => {
@@ -258,45 +209,35 @@ export function mount(container, ctx) {
     renderList()
   })
 
-  for (const btn of filterBtns) {
-    btn.addEventListener("click", () => {
-      filterMode = btn.dataset.filter
-      for (const b of filterBtns) b.classList.toggle("active", b === btn)
-      renderList()
-    })
-  }
-
-  refreshBtn.addEventListener("click", refresh)
-
   relaysToggleBtn.addEventListener("click", () => {
     relaysPanel.hidden = !relaysPanel.hidden
   })
 
   relaysSaveBtn.addEventListener("click", () => {
-    const list = relaysInput.value
-      .split("\n")
-      .map(s => s.trim())
-      .filter(Boolean)
-    writeCustomRelays(list)
+    relays = sanitizeRelays(relaysInput.value.split("\n"))
+    if (relays.length === 0) relays = [...DEFAULT_RELAYS]
+    relaysInput.value = relays.join("\n")
+    emitState()
     relaysPanel.hidden = true
-    refresh()
+    startSubscription()
   })
 
   relaysClearBtn.addEventListener("click", () => {
-    writeCustomRelays([])
-    relaysInput.value = ""
+    relays = [...DEFAULT_RELAYS]
+    relaysInput.value = relays.join("\n")
+    emitState()
     relaysPanel.hidden = true
-    refresh()
+    startSubscription()
   })
 
-  // Show cached results immediately, then check for updates in background
   renderList()
-  if (events.length === 0) setStatus("Loading…")
-  refresh()
+  emitState()
+  startSubscription()
 
   return {
     unmount() {
       cancelled = true
+      closeSubscription()
     }
   }
 }
@@ -358,14 +299,12 @@ function renderCard(evt, ctx, listing = null, onChange = null) {
 
   const author = document.createElement("span")
   author.className = "store-author"
-  const pic = document.createElement("img")
+  const pic = document.createElement("nostr-picture")
   pic.className = "store-author-pic"
-  pic.alt = ""
-  // Always reserve the 16×16 slot via the CSS placeholder background; src is
-  // set when loadNostrUser resolves with a profile image.
-  pic.src = PLACEHOLDER_SRC
-  const name = document.createElement("span")
+  pic.setAttribute("pubkey", evt.pubkey)
+  const name = document.createElement("nostr-name")
   name.className = "store-author-name"
+  name.setAttribute("pubkey", evt.pubkey)
   name.textContent = evt.pubkey.slice(0, 8) + "…"
   author.append(pic, name)
 
@@ -506,71 +445,11 @@ function computeNappId(evt) {
   return evt.pubkey.slice(0, 40)
 }
 
-// ─── persistence ─────────────────────────────────────────────────
-
-function readCache() {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr : []
-  } catch {
-    return []
-  }
-}
-
-function writeCache(events) {
-  try {
-    // Cap to N most recent so we don't blow localStorage
-    const sorted = [...events].sort((a, b) => b.created_at - a.created_at)
-    const capped = sorted.slice(0, CACHE_LIMIT)
-    localStorage.setItem(CACHE_KEY, JSON.stringify(capped))
-  } catch (err) {
-    console.warn("store cache write failed", err)
-  }
-}
-
-function readCustomRelays() {
-  try {
-    const raw = localStorage.getItem(RELAYS_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr : []
-  } catch {
-    return []
-  }
-}
-
-function writeCustomRelays(relays) {
-  if (relays.length === 0) localStorage.removeItem(RELAYS_KEY)
-  else localStorage.setItem(RELAYS_KEY, JSON.stringify(relays))
-}
-
 // ─── helpers ─────────────────────────────────────────────────────
 
-async function resolveRelays(ctx) {
-  const custom = readCustomRelays()
-  if (custom.length) return custom
-  const pk = ctx.account.getPubkey()
-  if (pk) {
-    try {
-      const rl = await loadRelayList(pk)
-      const relays = (rl?.items || []).filter(r => r.read).map(r => r.url)
-      if (relays.length) return relays
-    } catch {
-      // fall through to defaults
-    }
-  }
-  return DEFAULT_RELAYS.slice()
-}
-
-function mergeEvents(cached, fresh) {
-  const byKey = new Map()
-  for (const e of [...cached, ...fresh]) {
-    const dTag = e.tags.find(t => t[0] === "d")?.[1] || ""
-    const key = `${e.kind}:${e.pubkey}:${dTag}`
-    const prev = byKey.get(key)
-    if (!prev || e.created_at > prev.created_at) byKey.set(key, e)
-  }
-  return [...byKey.values()]
+function sanitizeRelays(relays) {
+  if (!Array.isArray(relays)) return []
+  return [...new Set(relays.map(s => (typeof s === "string" ? s.trim() : "")).filter(Boolean))]
 }
 
 function matchesFilter(evt, listing, filter) {

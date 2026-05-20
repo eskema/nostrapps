@@ -2,8 +2,10 @@ import * as settings from "./settings.js"
 import * as logs from "./logs.js"
 import * as permissions from "./permissions.js"
 import * as store from "./store.js"
+import * as apps from "./apps.js"
+import * as database from "./database.js"
 
-const napps = [settings, logs, permissions, store]
+const napps = [settings, logs, permissions, store, apps, database]
 
 // Slash actions are like system napps but they fire a one-shot side effect
 // (e.g. opening a file picker) instead of mounting a window.

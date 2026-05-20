@@ -46,12 +46,28 @@
           return new Promise((resolve, reject) => {
             const tx = db.transaction(STORE, "readwrite")
             tx.objectStore(STORE).clear()
-            tx.oncomplete = () => resolve()
-            tx.onerror = () => reject(tx.error)
+            tx.oncomplete = () => {
+              try {
+                db.close()
+              } catch {}
+              resolve()
+            }
+            tx.onerror = () => {
+              try {
+                db.close()
+              } catch {}
+              reject(tx.error)
+            }
           })
         }
 
         async function wipeAll() {
+          // First clear known file store. Even if later deleteDatabase() gets
+          // blocked by a still-closing worker connection, app files are gone.
+          try {
+            await clearAll()
+          } catch {}
+
           // IndexedDB — every database at this origin
           try {
             if (indexedDB.databases) {
@@ -105,8 +121,18 @@
           return new Promise((resolve, reject) => {
             const tx = db.transaction(STORE, "readwrite")
             tx.objectStore(STORE).put({ path, body, mime })
-            tx.oncomplete = () => resolve()
-            tx.onerror = () => reject(tx.error)
+            tx.oncomplete = () => {
+              try {
+                db.close()
+              } catch {}
+              resolve()
+            }
+            tx.onerror = () => {
+              try {
+                db.close()
+              } catch {}
+              reject(tx.error)
+            }
           })
         }
 

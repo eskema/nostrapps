@@ -15,7 +15,8 @@
     "@fontsource-variable/source-sans-3": "^5.2.9",
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@nostr/gadgets": "npm:@jsr/nostr__gadgets@0.1.7",
-    "@nostr/tools": "npm:@jsr/nostr__tools@2.23.1"
+    "@nostr/tools": "npm:@jsr/nostr__tools@2.23.1",
+    "nostr-web-components": "^0.2.2"
   },
   "devDependencies": {
     "prettier": "^3.8.3",

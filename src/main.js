@@ -25,6 +25,7 @@ import * as account from "./account.js"
 import { mountDialog, clearDecisions } from "./permissions.js"
 import * as persist from "./persistence.js"
 import * as instanceStore from "./storage/instance.js"
+import * as nostrdb from "./store.js"
 import {
   registry as systemRegistry,
   slashCommands,
@@ -145,6 +146,37 @@ const logs = {
   }
 }
 
+const appSubs = new Set()
+function notifyAppsChanged() {
+  for (const fn of appSubs) {
+    try {
+      fn()
+    } catch {}
+  }
+}
+
+const apps = {
+  list() {
+    const aliasesByNappId = new Map()
+    for (const [alias, nappId] of Object.entries(persist.readPetnames())) {
+      if (!aliasesByNappId.has(nappId)) aliasesByNappId.set(nappId, [])
+      aliasesByNappId.get(nappId).push(alias)
+    }
+
+    return persist.readKnown().map(nappId => ({
+      nappId,
+      name: friendlyNameFor(nappId),
+      aliases: aliasesByNappId.get(nappId) || [],
+      manifest: persist.getInstalledManifest(nappId),
+      openCount: persist.readOpen().filter(s => s.nappId === nappId && !s.closed).length
+    }))
+  },
+  subscribe(fn) {
+    appSubs.add(fn)
+    return () => appSubs.delete(fn)
+  }
+}
+
 // ─── account actions ────────────────────────────────────────────
 async function connect() {
   try {
@@ -196,6 +228,29 @@ async function disconnect() {
   }
   account.clearPubkey()
   setStatus("Disconnected")
+}
+
+const uninstallingNapps = new Set()
+
+async function finalizeNappRemoval(nappId, actionLabel = "Uninstalling") {
+  const petnameKeys = Object.entries(persist.readPetnames())
+    .filter(([, mapped]) => mapped === nappId)
+    .map(([petname]) => petname)
+  persist.forgetKnown(nappId)
+  persist.forgetPetnamesForNapp(nappId)
+  persist.forgetHistory(nappId)
+  for (const p of petnameKeys) persist.forgetHistory(p)
+  clearDecisions(nappId)
+  persist.forgetInstalledManifest(nappId)
+  persist.forgetHandlers(nappId)
+  setStatus(`${actionLabel} ${nappId}…`)
+  try {
+    await wipe(nappId)
+    setStatus(`${actionLabel === "Wiping" ? "Destroyed" : "Uninstalled"} ${nappId}`)
+  } catch (err) {
+    setStatus(`Wipe error: ${err.message}`)
+    throw err
+  }
 }
 
 // Wipe every trace of the launcher: every installed napp's origin storage,
@@ -293,41 +348,30 @@ function loadFolder() {
 }
 
 async function uninstallNapp(nappId) {
+  const wasKnown = persist.readKnown().includes(nappId)
+  uninstallingNapps.add(nappId)
+
   // Destroy any open windows; their onDestroy chain runs the per-instance
   // cleanup and (when the last open instance dies) the global wipe path.
-  destroyByNappId(nappId)
+  try {
+    destroyByNappId(nappId)
 
-  // Close any remaining (closed) sessions in persistence so they don't
-  // linger as orphan entries.
-  for (const s of persist.readOpen()) {
-    if (s.nappId === nappId) {
-      persist.removeOpen(s.instanceId)
-      instanceStore.clear(s.instanceId).catch(() => {})
+    // Close any remaining (closed) sessions in persistence so they don't
+    // linger as orphan entries.
+    for (const s of persist.readOpen()) {
+      if (s.nappId === nappId) {
+        persist.removeOpen(s.instanceId)
+        instanceStore.clear(s.instanceId).catch(() => {})
+      }
     }
-  }
 
-  // If the destroy chain didn't finalize global cleanup (because closed
-  // sessions were present when the last open instance died), do it now.
-  if (persist.readKnown().includes(nappId)) {
-    const petnameKeys = Object.entries(persist.readPetnames())
-      .filter(([, mapped]) => mapped === nappId)
-      .map(([petname]) => petname)
-    persist.forgetKnown(nappId)
-    persist.forgetPetnamesForNapp(nappId)
-    persist.forgetHistory(nappId)
-    for (const p of petnameKeys) persist.forgetHistory(p)
-    clearDecisions(nappId)
-    persist.forgetInstalledManifest(nappId)
-    persist.forgetHandlers(nappId)
-    setStatus(`Uninstalling ${nappId}…`)
-    try {
-      await wipe(nappId)
-      setStatus(`Uninstalled ${nappId}`)
-    } catch (err) {
-      setStatus(`Wipe error: ${err.message}`)
+    if (wasKnown) {
+      await finalizeNappRemoval(nappId, "Uninstalling")
     }
+  } finally {
+    uninstallingNapps.delete(nappId)
+    refreshSuggestions()
   }
-  refreshSuggestions()
 }
 
 function manifestInfoFromEvent(evt) {
@@ -525,6 +569,10 @@ function friendlyNameFor(nappId) {
 // ─── system napp ctx ────────────────────────────────────────────
 const systemCtx = {
   account,
+  apps,
+  database: {
+    query: filter => nostrdb.query(filter)
+  },
   theme,
   logs,
   connect,
@@ -573,8 +621,10 @@ function launchSystemNapp(sysId, { initial } = {}) {
   bringToTopOfStack(win.root)
   // Persist the entry now (with current zIndex/position) so it can be
   // restored on the next reload even if the user never interacts with it.
-  persist.updateOpen(`system:${sysId}`, {
-    ...win.getState(),
+  const state = win.getState()
+  persist.updateOpen(state.instanceId, {
+    ...state,
+    panelState: win.getSystemPanelState?.() || null,
     system: true,
     systemId: sysId,
     closed: false
@@ -849,6 +899,7 @@ input.addEventListener("keydown", e => {
 
 function refreshSuggestions() {
   if (!suggestions.hidden) renderSuggestions()
+  notifyAppsChanged()
 }
 
 function bringToTopOfStack(root) {
@@ -915,22 +966,11 @@ function makeLaunchOpts() {
       instanceStore.clear(instanceId).catch(() => {})
       if (entry?.nappId) {
         const stillUsed = persist.readOpen().some(s => s.nappId === entry.nappId)
-        if (!stillUsed) {
-          const petnameKeys = Object.entries(persist.readPetnames())
-            .filter(([, mapped]) => mapped === entry.nappId)
-            .map(([petname]) => petname)
-          persist.forgetKnown(entry.nappId)
-          persist.forgetPetnamesForNapp(entry.nappId)
-          persist.forgetHistory(entry.nappId)
-          for (const p of petnameKeys) persist.forgetHistory(p)
-          clearDecisions(entry.nappId)
-          persist.forgetInstalledManifest(entry.nappId)
-          persist.forgetHandlers(entry.nappId)
+        if (!stillUsed && !uninstallingNapps.has(entry.nappId)) {
           // Wipe the napp's origin storage (IDB, localStorage, caches, SW)
           // so re-installing it later starts from a clean slate.
-          setStatus(`Wiping ${entry.nappId}…`)
-          wipe(entry.nappId)
-            .then(() => setStatus(`Destroyed ${entry.nappId}`))
+          finalizeNappRemoval(entry.nappId, "Wiping")
+            .then(() => {})
             .catch(err => setStatus(`Wipe error: ${err.message}`))
         }
       }
@@ -948,10 +988,12 @@ async function restoreAll() {
         if (!def) continue
         const win = launchSystem(stage, state.systemId, def, systemCtx, {
           ...makeSystemLaunchOpts(state.systemId),
+          instanceId: state.instanceId,
           initial: state
         })
         persist.updateOpen(state.instanceId, {
           ...win.getState(),
+          panelState: win.getSystemPanelState?.() || null,
           system: true,
           systemId: state.systemId
         })
@@ -987,7 +1029,7 @@ function maybeBootstrap() {
 
 async function init() {
   setStatus(
-    "Ready — try /store, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host"
+    "Ready — try /store, /apps, /database, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host"
   )
   // If the user is paired with a bunker, get the connection warm in the
   // background. First sign request will wait if it's still connecting.
