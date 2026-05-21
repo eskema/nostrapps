@@ -28,13 +28,13 @@ There's also `/folder` as a shortcut to the folder picker.
 
 ### Window controls
 
-| Button | Does |
-| --- | --- |
-| `–` | Minimize. Header only, body collapses. |
-| `▢` | Maximize, or restore. |
-| `•` | Pin on top. Fills in (`●`) when active. Stays above everything, even after you click somewhere else. |
-| `×` | Close. The session is remembered, type the name back to reopen at its saved position. |
-| `⌫` | Destroy. Wipes the app and all its data. There's a confirm prompt. |
+| Button | Does                                                                                                 |
+| ------ | ---------------------------------------------------------------------------------------------------- |
+| `–`    | Minimize. Header only, body collapses.                                                               |
+| `▢`    | Maximize, or restore.                                                                                |
+| `•`    | Pin on top. Fills in (`●`) when active. Stays above everything, even after you click somewhere else. |
+| `×`    | Close. The session is remembered, type the name back to reopen at its saved position.                |
+| `⌫`    | Destroy. Wipes the app and all its data. There's a confirm prompt.                                   |
 
 Drag the header to move. Drag any edge or corner to resize. Double-click the title to rename it.
 
@@ -178,4 +178,4 @@ Vanilla JS with Vite. `@nostr/tools` and `@nostr/gadgets` for the protocol bits.
 
 ## License
 
-Not picked yet.
+[Unlicense](LICENSE) — released into the public domain. Do whatever you want with it.
