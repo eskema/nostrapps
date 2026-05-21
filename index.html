@@ -2,16 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>nostrapps</title>
     <link rel="stylesheet" href="/src/launcher.css" />
   </head>
   <body>
     <header>
       <div class="headerbar">
-        <h1>nostr<br><span>n</span>apps</h1>
+        <h1>nostr<br /><span>n</span>apps</h1>
         <form id="launch-form">
           <div class="input-wrap">
             <input
@@ -22,13 +20,7 @@
             />
             <div id="suggestions" hidden></div>
           </div>
-          <input
-            type="file"
-            id="local-folder"
-            webkitdirectory
-            multiple
-            hidden
-          />
+          <input type="file" id="local-folder" webkitdirectory multiple hidden />
         </form>
       </div>
     </header>
@@ -38,14 +30,18 @@
         type="button"
         title="Tile open windows"
         aria-label="Tile open windows"
-      >▦</button>
+      >
+        ▦
+      </button>
       <button
         id="pack-toggle"
         type="button"
         title="Auto-pack on move/resize"
         aria-label="Auto-pack on move/resize"
         aria-pressed="false"
-      >⊟</button>
+      >
+        ⊟
+      </button>
     </main>
 
     <dialog id="permission-prompt">

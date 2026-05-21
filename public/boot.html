@@ -10,159 +10,151 @@
         try {
           window.parent.postMessage(
             {
-              __nostrapps: 'napp-boot-error',
-              error: err?.message || String(err),
+              __nostrapps: "napp-boot-error",
+              error: err?.message || String(err)
             },
-            '*',
-          );
+            "*"
+          )
         } catch {
           // parent gone
         }
       }
 
-      window.addEventListener('error', (e) =>
-        reportError(e.error || e.message),
-      );
-      window.addEventListener('unhandledrejection', (e) =>
-        reportError(e.reason),
-      );
-
-      (async () => {
-        const DB_NAME = 'nostrapps-napp';
-        const DB_VERSION = 1;
-        const STORE = 'files';
+      window.addEventListener("error", e => reportError(e.error || e.message))
+      window.addEventListener("unhandledrejection", e => reportError(e.reason))
+      ;(async () => {
+        const DB_NAME = "nostrapps-napp"
+        const DB_VERSION = 1
+        const STORE = "files"
 
         function openDB() {
           return new Promise((resolve, reject) => {
-            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            const req = indexedDB.open(DB_NAME, DB_VERSION)
             req.onupgradeneeded = () => {
-              const db = req.result;
+              const db = req.result
               if (!db.objectStoreNames.contains(STORE)) {
-                db.createObjectStore(STORE, { keyPath: 'path' });
+                db.createObjectStore(STORE, { keyPath: "path" })
               }
-            };
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-          });
+            }
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+          })
         }
 
         async function clearAll() {
-          const db = await openDB();
+          const db = await openDB()
           return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE, 'readwrite');
-            tx.objectStore(STORE).clear();
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-          });
+            const tx = db.transaction(STORE, "readwrite")
+            tx.objectStore(STORE).clear()
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(tx.error)
+          })
         }
 
         async function wipeAll() {
           // IndexedDB — every database at this origin
           try {
             if (indexedDB.databases) {
-              const dbs = await indexedDB.databases();
+              const dbs = await indexedDB.databases()
               await Promise.all(
                 dbs.map(
-                  (d) =>
-                    new Promise((resolve) => {
-                      const req = indexedDB.deleteDatabase(d.name);
-                      req.onsuccess = () => resolve();
-                      req.onerror = () => resolve();
-                      req.onblocked = () => resolve();
-                    }),
-                ),
-              );
+                  d =>
+                    new Promise(resolve => {
+                      const req = indexedDB.deleteDatabase(d.name)
+                      req.onsuccess = () => resolve()
+                      req.onerror = () => resolve()
+                      req.onblocked = () => resolve()
+                    })
+                )
+              )
             } else {
               // older browsers: at least delete the one we know about
-              await new Promise((resolve) => {
-                const req = indexedDB.deleteDatabase(DB_NAME);
-                req.onsuccess = () => resolve();
-                req.onerror = () => resolve();
-                req.onblocked = () => resolve();
-              });
+              await new Promise(resolve => {
+                const req = indexedDB.deleteDatabase(DB_NAME)
+                req.onsuccess = () => resolve()
+                req.onerror = () => resolve()
+                req.onblocked = () => resolve()
+              })
             }
           } catch {}
 
           try {
-            localStorage.clear();
+            localStorage.clear()
           } catch {}
           try {
-            sessionStorage.clear();
+            sessionStorage.clear()
           } catch {}
 
-          if (typeof caches !== 'undefined') {
+          if (typeof caches !== "undefined") {
             try {
-              const keys = await caches.keys();
-              await Promise.all(keys.map((k) => caches.delete(k)));
+              const keys = await caches.keys()
+              await Promise.all(keys.map(k => caches.delete(k)))
             } catch {}
           }
 
           if (navigator.serviceWorker?.getRegistrations) {
             try {
-              const regs = await navigator.serviceWorker.getRegistrations();
-              await Promise.all(regs.map((r) => r.unregister()));
+              const regs = await navigator.serviceWorker.getRegistrations()
+              await Promise.all(regs.map(r => r.unregister()))
             } catch {}
           }
         }
 
         async function putFile(path, body, mime) {
-          const db = await openDB();
+          const db = await openDB()
           return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE, 'readwrite');
-            tx.objectStore(STORE).put({ path, body, mime });
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-          });
+            const tx = db.transaction(STORE, "readwrite")
+            tx.objectStore(STORE).put({ path, body, mime })
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(tx.error)
+          })
         }
 
         try {
-          await navigator.serviceWorker.register('/sw.js');
-          await navigator.serviceWorker.ready;
+          await navigator.serviceWorker.register("/sw.js")
+          await navigator.serviceWorker.ready
         } catch (err) {
-          reportError(err);
-          return;
+          reportError(err)
+          return
         }
 
-        window.addEventListener('message', async (event) => {
-          const data = event.data;
-          if (!data) return;
-          if (data.__nostrapps === 'napp-install') {
+        window.addEventListener("message", async event => {
+          const data = event.data
+          if (!data) return
+          if (data.__nostrapps === "napp-install") {
             try {
-              await clearAll();
+              await clearAll()
               for (const f of data.files) {
-                await putFile(f.path, f.body, f.mime);
+                await putFile(f.path, f.body, f.mime)
               }
               event.source.postMessage(
                 {
-                  __nostrapps: 'napp-install-done',
-                  fileCount: data.files.length,
+                  __nostrapps: "napp-install-done",
+                  fileCount: data.files.length
                 },
-                event.origin,
-              );
+                event.origin
+              )
             } catch (err) {
               event.source.postMessage(
-                { __nostrapps: 'napp-install-error', error: err.message },
-                event.origin,
-              );
+                { __nostrapps: "napp-install-error", error: err.message },
+                event.origin
+              )
             }
-          } else if (data.__nostrapps === 'napp-wipe') {
+          } else if (data.__nostrapps === "napp-wipe") {
             try {
-              await wipeAll();
-              event.source.postMessage(
-                { __nostrapps: 'napp-wipe-done' },
-                event.origin,
-              );
+              await wipeAll()
+              event.source.postMessage({ __nostrapps: "napp-wipe-done" }, event.origin)
             } catch (err) {
               event.source.postMessage(
-                { __nostrapps: 'napp-wipe-error', error: err.message },
-                event.origin,
-              );
+                { __nostrapps: "napp-wipe-error", error: err.message },
+                event.origin
+              )
             }
           }
-        });
+        })
 
-        window.parent.postMessage({ __nostrapps: 'napp-boot-ready' }, '*');
-      })();
+        window.parent.postMessage({ __nostrapps: "napp-boot-ready" }, "*")
+      })()
     </script>
   </body>
 </html>
