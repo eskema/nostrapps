@@ -1,7 +1,7 @@
 import { generateSecretKey, finalizeEvent } from "@nostr/tools/pure"
 import { trustedKeyDeal, hexShard, hexPubShard } from "@fiatjaf/promenade-trusted-dealer"
-import { sha256 } from "@noble/hashes/sha256"
-import { bytesToHex } from "@noble/hashes/utils"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex } from "@noble/hashes/utils.js"
 
 // Hardcoded Pomegranate deployment we point this launcher at.
 const CENTRAL_URL = "https://auth.njump.me"
