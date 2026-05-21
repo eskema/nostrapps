@@ -99,7 +99,11 @@ export function mount(container, ctx) {
       .sort((a, b) => b.created_at - a.created_at)
 
     let displayed = []
-    const renderOne = evt => listEl.appendChild(renderCard(evt, ctx, listingFor(evt)))
+    // Cards call onChange after an action completes — we re-render the whole
+    // list rather than just swapping the card in place, so an uninstalled
+    // app in the "installed" tab moves down into "Previously installed"
+    // (and an install in any tab gets re-categorized too).
+    const renderOne = evt => listEl.appendChild(renderCard(evt, ctx, listingFor(evt), renderList))
 
     if (filterMode === "installed") {
       const installed = []
@@ -297,7 +301,7 @@ export function mount(container, ctx) {
   }
 }
 
-function renderCard(evt, ctx, listing = null) {
+function renderCard(evt, ctx, listing = null, onChange = null) {
   const tag = k => evt.tags.find(t => t[0] === k)?.[1] || ""
   const dTag = tag("d")
   const source = tag("source")
@@ -411,9 +415,16 @@ function renderCard(evt, ctx, listing = null) {
             : npubEncode(evt.pubkey)
         await ctx.launchFromInput(raw)
       }
-      // Re-render so the buttons reflect the new install state.
-      const replacement = renderCard(evt, ctx, listing)
-      card.replaceWith(replacement)
+      // Re-render the whole list so the card lands in the right section
+      // for the current filter (e.g. uninstalling in "installed" moves
+      // the card down into "Previously installed"). If no callback was
+      // wired through, fall back to swapping the card in place.
+      if (onChange) {
+        onChange()
+      } else {
+        const replacement = renderCard(evt, ctx, listing)
+        card.replaceWith(replacement)
+      }
     } catch (err) {
       btn.title = err?.message || String(err)
       btn.textContent = "error"
