@@ -1,5 +1,6 @@
 import { generateSecretKey, EventTemplate } from "@nostr/tools/pure"
 import { BunkerPointer, BunkerSigner, parseBunkerInput } from "@nostr/tools/nip46"
+import { VerifiedEvent } from "@nostr/tools"
 
 const CLIENT_SECRET_KEY = "nostrapps:nip46:client-secret"
 const BUNKER_POINTER_KEY = "nostrapps:nip46:bunker-pointer"
@@ -60,6 +61,7 @@ export async function connectBunkerInput(input: string) {
   const pointer = await parseBunkerInput(trimmed)
   if (!pointer) throw new Error("Invalid bunker URL")
   const signer = BunkerSigner.fromBunker(getClientSecret(), pointer)
+  await signer.connect()
   const pk = await signer.getPublicKey()
   writeBunkerPointer(pointer)
   activeSigner = signer
@@ -113,7 +115,7 @@ export const nip46Signer = {
   async getPublicKey() {
     return (await active()).getPublicKey()
   },
-  async signEvent(evt: EventTemplate) {
+  async signEvent(evt: EventTemplate): Promise<VerifiedEvent> {
     return (await active()).signEvent(evt)
   },
   nip04: {

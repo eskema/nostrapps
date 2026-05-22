@@ -53,7 +53,11 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     const inputs = [...wrapper.querySelectorAll("input")]
     while (inputs.length < 1) {
       wrapper.appendChild(
-        makeVariadicInput(wrapper, wrapper.dataset.fieldKey || "", wrapper.dataset.placeholder || "")
+        makeVariadicInput(
+          wrapper,
+          wrapper.dataset.fieldKey || "",
+          wrapper.dataset.placeholder || ""
+        )
       )
       inputs.push(wrapper.lastElementChild as HTMLInputElement)
     }
@@ -61,7 +65,11 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     let filled = inputs.filter(input => input.value.trim() !== "").length
     while (filled === inputs.length) {
       wrapper.appendChild(
-        makeVariadicInput(wrapper, wrapper.dataset.fieldKey || "", wrapper.dataset.placeholder || "")
+        makeVariadicInput(
+          wrapper,
+          wrapper.dataset.fieldKey || "",
+          wrapper.dataset.placeholder || ""
+        )
       )
       inputs.push(wrapper.lastElementChild as HTMLInputElement)
       filled = inputs.filter(input => input.value.trim() !== "").length

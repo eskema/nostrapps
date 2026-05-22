@@ -26,6 +26,7 @@ const DEFAULT_RELAYS = [
 ]
 
 import type { SystemCtx } from "../types.js"
+import { currentSigner } from "../signers/index.js"
 
 export function mount(
   container: HTMLElement,
@@ -182,7 +183,7 @@ export function mount(
     }
 
     setStatus(`Subscribing to ${relays.length} relay(s)…`)
-    sub = (pool.subscribeMany as any)(
+    sub = pool.subscribeMany(
       relays,
       { kinds: [NSITE_ROOT, NSITE_NAMED, NSITE_LISTING], limit: 400 },
       {
@@ -201,19 +202,16 @@ export function mount(
           }
         },
         oneose() {
-          if (cancelled) return
           sawEose = true
           setStatus(
             `Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`
           )
         },
-        onclose(reason: any) {
-          if (cancelled) return
-          if (reason) setStatus(`Subscription closed: ${reason?.message ?? String(reason)}`)
+        onclose(reasons: string[]) {
+          setStatus(`Subscriptions closed: ${reasons}`)
         },
-        onerror(err: any) {
-          if (cancelled) return
-          setStatus(`Error: ${err.message}`)
+        onauth(event) {
+          return currentSigner().signEvent(event)
         }
       }
     )
@@ -387,6 +385,7 @@ function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = nul
         card.replaceWith(replacement)
       }
     } catch (err) {
+      console.error(err)
       btn.title = (err as any)?.message || String(err)
       btn.textContent = "error"
       btn.disabled = false

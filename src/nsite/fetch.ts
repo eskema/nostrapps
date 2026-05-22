@@ -2,6 +2,7 @@ import { pool } from "@nostr/gadgets/global"
 import { guessMime } from "./mime.js"
 import { outboxFilterRelayBatch } from "@nostr/gadgets/outbox"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
+import { currentSigner } from "../signers/index.js"
 
 const NSITE_FILE_KIND = 34128 // legacy: one event per file (d = path)
 const NSITE_ROOT_KIND = 15128 // NIP-5A: root manifest (replaceable)
@@ -154,12 +155,14 @@ function collect(reqs: Array<{ url: string; filter: unknown }>, label: string): 
       onevent(e: any) {
         events.push(e)
       },
+      onauth(event) {
+        return currentSigner().signEvent(event)
+      },
       oneose: finish,
-      onerror: (err: Error) => {
-        if (done) return
+      onclose(reasons) {
         done = true
         clearTimeout(timer)
-        reject(err)
+        reject(reasons)
       }
     })
   })

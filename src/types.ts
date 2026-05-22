@@ -1,10 +1,11 @@
+import { VerifiedEvent } from "@nostr/tools"
 import type { EventTemplate, NostrEvent } from "@nostr/tools/pure"
 
 declare global {
   interface Window {
     nostr?: {
       getPublicKey(): Promise<string>
-      signEvent(event: EventTemplate): Promise<NostrEvent>
+      signEvent(event: EventTemplate): Promise<VerifiedEvent>
       nip04: {
         encrypt(pubkey: string, plaintext: string): Promise<string>
         decrypt(pubkey: string, ciphertext: string): Promise<string>
@@ -19,7 +20,7 @@ declare global {
 
 export interface Signer {
   getPublicKey(): Promise<string>
-  signEvent(event: EventTemplate): Promise<NostrEvent>
+  signEvent(event: EventTemplate): Promise<VerifiedEvent>
   nip04: {
     encrypt(pubkey: string, plaintext: string): Promise<string>
     decrypt(pubkey: string, ciphertext: string): Promise<string>

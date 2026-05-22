@@ -17,12 +17,7 @@ declare module "@nostr/gadgets/global" {
   export const pool: {
     subscribeMap(
       reqs: Array<{ url: string; filter: unknown }>,
-      params: {
-        label?: string
-        onevent(event: unknown): void
-        oneose(): void
-        onerror?(err: Error): void
-      }
+      params: SubscribeManyParams
     ): { close(): void }
     subscribeMany(
       relays: string[],

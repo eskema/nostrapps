@@ -1134,6 +1134,7 @@ async function launchFromInput(raw: string): Promise<void> {
     win.focus()
     return
   }
+
   const known = new Set(persist.readKnown())
   if (known.has(raw)) {
     console.debug("[launch] raw matches known nappId, restoring fresh", { raw })
@@ -1145,6 +1146,7 @@ async function launchFromInput(raw: string): Promise<void> {
     win.focus()
     return
   }
+
   let resolved
   try {
     resolved = resolveInput(raw)
@@ -1155,6 +1157,7 @@ async function launchFromInput(raw: string): Promise<void> {
       `Couldn't resolve "${raw}" — try a pubkey, npub, nprofile, naddr, or nsite hostname`
     )
   }
+
   const result3 = (await fetchNsite(resolved, setStatus)) as unknown as NsiteResult
   const { nappId, files, title, manifest, listing } = result3
   console.debug("[launch] nsite fetched", {
