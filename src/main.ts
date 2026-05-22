@@ -26,7 +26,7 @@ import { mountDialog, clearDecisions } from "./permissions.js"
 import * as persist from "./persistence.js"
 import * as instanceStore from "./storage/instance.js"
 import * as nostrdb from "./store.js"
-import type { SuggestionItem, NsiteResult, AppInfo, NappWindowState } from "./types.js"
+import type { SuggestionItem, NsiteResult, AppInfo, NappWindowState, SystemCtx } from "./types.js"
 import {
   registry as systemRegistry,
   slashCommands,
@@ -590,7 +590,7 @@ function friendlyNameFor(nappId: string): string {
 }
 
 // ─── system napp ctx ────────────────────────────────────────────
-const systemCtx = {
+const systemCtx: SystemCtx = {
   account,
   apps,
   database: {
@@ -649,7 +649,6 @@ function launchSystemNapp(sysId: string, { initial }: { initial?: unknown } = {}
   const state = win.getState()
   persist.updateOpen(state.instanceId, {
     ...state,
-    panelState: win.getSystemPanelState?.() || null,
     system: true,
     systemId: sysId,
     closed: false
@@ -1007,7 +1006,8 @@ function makeLaunchOpts() {
   return {
     onProgress: setStatus,
     dispatchHandlers: {
-      action: (callerNappId: string, name: string, payload: unknown) => runNappAction(callerNappId, name, payload)
+      action: (callerNappId: string, name: string, payload: unknown) =>
+        runNappAction(callerNappId, name, payload)
     },
     onStateChange: (state: NappWindowState) => {
       persist.updateOpen(state.instanceId, state)
@@ -1058,7 +1058,6 @@ async function restoreAll() {
         })!
         persist.updateOpen(state.instanceId, {
           ...win.getState(),
-          panelState: win.getSystemPanelState?.() || null,
           system: true,
           systemId: state.systemId
         })

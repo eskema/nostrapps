@@ -2057,3 +2057,102 @@ body.napp-dragging .napp-body iframe {
 .upload-publish:hover:not(:disabled) {
   background: color-mix(in srgb, currentColor 85%, transparent);
 }
+
+/* app info */
+.app-info-empty {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.app-info-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.app-info-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: var(--font-serif);
+}
+
+.app-info-id {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  opacity: 0.65;
+}
+
+.app-info-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+}
+
+.app-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.app-info-row span:first-child {
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.app-info-row code {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.app-info-row a {
+  word-break: break-all;
+}
+
+.app-info-desc {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  line-height: 1.4;
+}
+
+.app-info-handlers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.app-info-handler {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.72rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  font-family: var(--font-mono);
+}
+
+.app-info-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.app-info-author-pic {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.app-info-author-pic::part(img) {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.app-info-author-name {
+  font-family: var(--font-mono);
+}

@@ -46,7 +46,6 @@ export interface NappWindowState {
   closed?: boolean
   system?: boolean
   systemId?: string
-  panelState?: unknown
 }
 
 export interface NappWindow {
@@ -58,7 +57,6 @@ export interface NappWindow {
   focus(): void
   notifyState(): void
   systemId?: string
-  getSystemPanelState?(): unknown
 }
 
 export interface MessageData {
@@ -184,7 +182,7 @@ export interface NappLaunchOpts {
 
 export interface SystemLaunchOpts {
   instanceId?: string
-  initial?: { data?: unknown; panelState?: unknown } & Partial<NappWindowState>
+  initial?: { data?: unknown } & Partial<NappWindowState>
   onStateChange?: (state: NappWindowState) => void
   onReorder?: () => void
   onClose?: (instanceId: string) => void

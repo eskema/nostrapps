@@ -8,7 +8,8 @@ import type {
   NsiteFile,
   SystemNappDef,
   PackCell,
-  GridRect
+  GridRect,
+  SystemCtx
 } from "../types.js"
 
 import { isGated, requireApproval } from "../permissions.js"
@@ -156,7 +157,7 @@ export function launchSystem(
   stageEl: HTMLElement,
   sysId: string,
   def: SystemNappDef,
-  ctx: any,
+  ctx: SystemCtx,
   opts: SystemLaunchOpts = {}
 ) {
   console.debug("[sandbox] launchSystem", { sysId, def, opts })
@@ -173,7 +174,6 @@ export function launchSystem(
     }
   }
 
-  let currentPanelState = opts.initial?.panelState ?? null
   let win: NappWindow | null = null
   const instanceId =
     opts.instanceId || singleton ? `system:${sysId}` : `system:${sysId}:${crypto.randomUUID()}`
@@ -181,10 +181,9 @@ export function launchSystem(
   bodyElement.className = `system-napp-content system-napp-${sysId}`
 
   const handle = def.mount(bodyElement, ctx, {
-    initial: currentPanelState,
-    onStateChange(panelState) {
-      currentPanelState = panelState ?? null
-      if (win) opts.onStateChange?.({ ...win.getState(), panelState: currentPanelState })
+    initial: opts.initial,
+    onStateChange(_state) {
+      if (win) opts.onStateChange?.({ ...win.getState() })
     }
   })
 
@@ -195,7 +194,7 @@ export function launchSystem(
     bodyElement,
     system: true,
     initial: opts.initial,
-    onStateChange: state => opts.onStateChange?.({ ...state, panelState: currentPanelState }),
+    onStateChange: state => opts.onStateChange?.(state),
     onClose: () => {
       handle && handle.unmount?.()
       openWindows.delete(instanceId)
@@ -205,7 +204,6 @@ export function launchSystem(
     onReorder: opts.onReorder
   })
   win.systemId = sysId
-  win.getSystemPanelState = () => currentPanelState
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
   if (singleton) systemSingletons.set(sysId, instanceId)
@@ -318,7 +316,13 @@ export function capturePackSnapshot(stageEl: HTMLElement) {
 // snap target in BOTH grid units (col/row/cols/rows) and pixel coords
 // (left/top/width/height). The drag handler uses the pixels to position
 // the placeholder, and the cell coords to drive live-pack reflow.
-export function packCellSnap(stageEl: HTMLElement, leftPx: number, topPx: number, widthPx: number, heightPx: number) {
+export function packCellSnap(
+  stageEl: HTMLElement,
+  leftPx: number,
+  topPx: number,
+  widthPx: number,
+  heightPx: number
+) {
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return null
   const COLS = TILE_BASE_COLS
@@ -374,7 +378,12 @@ let packingClearTimer: ReturnType<typeof setTimeout> | null = null
 //   - Maximized windows are skipped entirely.
 //   - Minimized windows are skipped.
 //   - Grid grows downward as needed; stage scrolls.
-export function bestFitPack(stageEl: HTMLElement, focusRoot: HTMLElement | null = null, focusCell: PackCell | null = null, snapshot: Map<HTMLElement, PackCell> | null = null) {
+export function bestFitPack(
+  stageEl: HTMLElement,
+  focusRoot: HTMLElement | null = null,
+  focusCell: PackCell | null = null,
+  snapshot: Map<HTMLElement, PackCell> | null = null
+) {
   if (!stageEl) return
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return
@@ -582,7 +591,11 @@ export function bestFitPack(stageEl: HTMLElement, focusRoot: HTMLElement | null 
 //   3. passes `fits` (no other obstructions in the partially-built grid).
 // Used to let a "big" window shrink around the dragged window's stamp
 // instead of relocating entirely. Returns null if no candidate works.
-function shrinkAroundFocus(desired: PackCell, focus: PackCell, fits: (col: number, row: number, cols: number, rows: number) => boolean) {
+function shrinkAroundFocus(
+  desired: PackCell,
+  focus: PackCell,
+  fits: (col: number, row: number, cols: number, rows: number) => boolean
+) {
   const ic1 = desired.col
   const ir1 = desired.row
   const ic2 = ic1 + desired.cols
@@ -643,7 +656,17 @@ function shrinkAroundFocus(desired: PackCell, focus: PackCell, fits: (col: numbe
   return valid[0]
 }
 
-function applyCellRect(w: NappWindow, col: number, row: number, cols: number, rows: number, padL: number, padT: number, cellW: number, cellH: number) {
+function applyCellRect(
+  w: NappWindow,
+  col: number,
+  row: number,
+  cols: number,
+  rows: number,
+  padL: number,
+  padT: number,
+  cellW: number,
+  cellH: number
+) {
   const x0 = Math.round(padL + col * cellW)
   const y0 = Math.round(padT + row * cellH)
   const x1 = Math.round(padL + (col + cols) * cellW)
