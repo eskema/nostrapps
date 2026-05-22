@@ -182,8 +182,8 @@ export function launchSystem(
 
   const handle = def.mount(bodyElement, ctx, {
     initial: opts.initial,
-    onStateChange(_state) {
-      if (win) opts.onStateChange?.({ ...win.getState() })
+    onStateChange(sysState) {
+      if (win) opts.onStateChange?.({ ...win.getState(), ...sysState })
     }
   })
 

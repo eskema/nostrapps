@@ -16,7 +16,7 @@ import type { SystemCtx } from "../types.js"
 export function mount(
   container: HTMLElement,
   _ctx: SystemCtx,
-  opts: { initial?: { data?: any } } = {}
+  opts: { initial?: { data?: any }; onStateChange?: (state: any) => void } = {}
 ) {
   const data = opts.initial?.data
   console.log("opts", opts)
@@ -69,4 +69,6 @@ export function mount(
       }
     </div>
   `
+
+  opts.onStateChange?.({ data })
 }

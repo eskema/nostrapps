@@ -9,7 +9,15 @@ import * as uploader from "./uploader.js"
 
 import type { SystemNappDef } from "../types.js"
 
-const napps = [settings, logs, permissions, store, apps, database, uploader] satisfies SystemNappDef[]
+const napps = [
+  settings,
+  logs,
+  permissions,
+  store,
+  apps,
+  database,
+  uploader
+] satisfies SystemNappDef[]
 const _appInfoCheck = appInfo satisfies SystemNappDef
 
 // Slash actions are like system napps but they fire a one-shot side effect

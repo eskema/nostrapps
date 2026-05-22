@@ -43,9 +43,9 @@ export interface NappWindowState {
   pinned: boolean
   userSized: boolean
   zIndex: number
-  closed?: boolean
   system?: boolean
   systemId?: string
+  initialData?: any
 }
 
 export interface NappWindow {
@@ -71,7 +71,7 @@ export interface MessageData {
 }
 
 export interface SuggestionItem {
-  source: "system" | "action" | "open" | "closed" | "name" | "napp"
+  source: "system" | "action" | "open" | "name" | "napp"
   nappId?: string
   instanceId?: string
   petname?: string | null
@@ -137,7 +137,6 @@ export interface SystemCtx {
   loadFolder(): void
   setStatus(msg: string): void
   launchSystemNapp(sysId: string, opts?: { initial?: unknown }): NappWindow
-  launchAppInfo(data: AppInfo): NappWindow
   launchFromInput(raw: string): Promise<void>
   isInstalled(nappId: string): boolean
   wasInstalled(nappId: string): boolean

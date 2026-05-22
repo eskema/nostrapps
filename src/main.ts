@@ -26,7 +26,7 @@ import { mountDialog, clearDecisions } from "./permissions.js"
 import * as persist from "./persistence.js"
 import * as instanceStore from "./storage/instance.js"
 import * as nostrdb from "./store.js"
-import type { SuggestionItem, NsiteResult, AppInfo, NappWindowState, SystemCtx } from "./types.js"
+import type { SuggestionItem, NsiteResult, NappWindowState, SystemCtx } from "./types.js"
 import {
   registry as systemRegistry,
   slashCommands,
@@ -35,7 +35,6 @@ import {
   slashActions,
   actionList
 } from "./system-napps/index.js"
-import * as appInfo from "./system-napps/app-info.js"
 import { Filter } from "@nostr/tools/filter"
 
 const stage = document.getElementById("stage")!
@@ -165,7 +164,7 @@ const apps = {
       name: friendlyNameFor(nappId),
       handlers: persist.getHandlers(nappId),
       manifest: persist.getInstalledManifest(nappId),
-      openCount: persist.readOpen().filter(s => s.nappId === nappId && !s.closed).length
+      openCount: persist.readOpen().filter(s => s.nappId === nappId).length
     }))
   },
   subscribe(fn: () => void) {
@@ -535,29 +534,6 @@ async function ensureNappOpen(nappId: string) {
     return existing
   }
 
-  const closed = persist.readOpen().find(s => s.nappId === nappId && s.closed)
-  if (closed) {
-    console.debug("[launch] ensureNappOpen: restoring closed session", {
-      nappId,
-      instanceId: closed.instanceId
-    })
-    const win = restore(stage, closed.nappId, currentSigner, {
-      ...makeLaunchOpts(),
-      instanceId: closed.instanceId,
-      petname: closed.petname,
-      initial: closed
-    })
-    bringToTopOfStack(win.root)
-    persist.updateOpen(closed.instanceId, {
-      ...win.getState(),
-      closed: false
-    })
-    persistDomOrder()
-    refreshSuggestions()
-    win.focus()
-    return win
-  }
-
   const info = persist.getInstalledManifest(nappId)
   if (info?.pubkey) {
     console.debug("[launch] ensureNappOpen: fresh launch from manifest", { nappId, target: info })
@@ -606,7 +582,6 @@ const systemCtx: SystemCtx = {
   loadFolder,
   setStatus,
   launchSystemNapp,
-  launchAppInfo: (data: AppInfo) => launchAppInfo(data),
   // Use a thunk so the reference resolves to the function declared later.
   launchFromInput: (raw: string) => launchFromInput(raw),
   isInstalled: (nappId: string) => persist.readKnown().includes(nappId),
@@ -629,13 +604,13 @@ function makeSystemLaunchOpts(sysId: string) {
     },
     onReorder: persistDomOrder,
     onClose: (instanceId: string) => {
-      persist.setOpenClosed(instanceId, true)
+      persist.removeOpen(instanceId)
       refreshSuggestions()
     }
   }
 }
 
-function launchSystemNapp(sysId: string, { initial }: { initial?: unknown } = {}) {
+function launchSystemNapp(sysId: string, { initial }: { initial?: any } = {}) {
   const def = systemRegistry[sysId]
   if (!def) throw new Error(`Unknown system napp: ${sysId}`)
   console.debug("[launch] launchSystemNapp", { sysId, title: def.title, hasInitial: !!initial })
@@ -647,29 +622,13 @@ function launchSystemNapp(sysId: string, { initial }: { initial?: unknown } = {}
   // Persist the entry now (with current zIndex/position) so it can be
   // restored on the next reload even if the user never interacts with it.
   const state = win.getState()
+
+  console.log("calling updateOpen", state.instanceId, initial)
   persist.updateOpen(state.instanceId, {
     ...state,
     system: true,
     systemId: sysId,
-    closed: false
-  })
-  persistDomOrder()
-  refreshSuggestions()
-  return win
-}
-
-function launchAppInfo(data: AppInfo) {
-  console.debug("[launch] launchAppInfo", { nappId: data.nappId, name: data.name })
-  const win = launchSystem(stage, "app-info", appInfo, systemCtx, {
-    ...makeSystemLaunchOpts("app-info"),
-    initial: { data }
-  })!
-  bringToTopOfStack(win.root)
-  persist.updateOpen(win.getState().instanceId, {
-    ...win.getState(),
-    system: true,
-    systemId: "app-info",
-    closed: false
+    initialData: initial
   })
   persistDomOrder()
   refreshSuggestions()
@@ -710,7 +669,7 @@ function buildSuggestionItems(): SuggestionItem[] {
     seen.add(key)
     const customPet = s.petname && s.petname !== s.nappId ? s.petname : null
     out.push({
-      source: s.closed ? "closed" : "open",
+      source: "open",
       nappId: s.nappId,
       instanceId: s.instanceId,
       petname: customPet
@@ -799,7 +758,7 @@ function renderSuggestions() {
   //   2. Last 5 sessions (open or closed), in recency order from persist.
   //   3. Everything else (NAPP / NAME), alphabetical by friendly name.
   const systemItems = items.filter(i => i.source === "system" || i.source === "action")
-  const sessionItems = items.filter(i => i.source === "open" || i.source === "closed").slice(0, 5)
+  const sessionItems = items.filter(i => i.source === "open").slice(0, 5)
   const sessionSet = new Set(sessionItems)
   const sysSet = new Set(systemItems)
   const restItems = items
@@ -909,10 +868,9 @@ async function launchSession(instanceId: string) {
   console.debug("[launch] launchSession", {
     instanceId,
     nappId: session.nappId,
-    petname: session.petname,
-    closed: session.closed
+    petname: session.petname
   })
-  if (!session.closed && focusInstance(instanceId)) return
+  if (focusInstance(instanceId)) return
   const win = restore(stage, session.nappId, currentSigner, {
     ...makeLaunchOpts(),
     instanceId: session.instanceId,
@@ -920,10 +878,7 @@ async function launchSession(instanceId: string) {
     initial: session
   })
   bringToTopOfStack(win.root)
-  persist.updateOpen(session.instanceId, {
-    ...win.getState(),
-    closed: false
-  })
+  persist.updateOpen(session.instanceId, win.getState())
   persistDomOrder()
   refreshSuggestions()
   win.focus()
@@ -1019,7 +974,7 @@ function makeLaunchOpts() {
     },
     onReorder: persistDomOrder,
     onClose: (instanceId: string) => {
-      persist.setOpenClosed(instanceId, true)
+      persist.removeOpen(instanceId)
       refreshSuggestions()
     },
     onDestroy: (instanceId: string) => {
@@ -1043,9 +998,9 @@ function makeLaunchOpts() {
 
 async function restoreAll() {
   console.debug("[launch] restoreAll — restoring", {
-    sessionCount: persist.readActiveSessions().length
+    sessionCount: persist.readOpen().length
   })
-  const open = persist.readActiveSessions()
+  const open = persist.readOpen()
   for (const state of open) {
     try {
       if (state.system && state.systemId) {
@@ -1054,7 +1009,7 @@ async function restoreAll() {
         const win = launchSystem(stage, state.systemId, def, systemCtx, {
           ...makeSystemLaunchOpts(state.systemId),
           instanceId: state.instanceId,
-          initial: state
+          initial: state.initialData
         })!
         persist.updateOpen(state.instanceId, {
           ...win.getState(),
@@ -1130,7 +1085,7 @@ async function launchFromInput(raw: string): Promise<void> {
 
   const existing = persist.findSessionByPetname(raw)
   if (existing) {
-    if (!existing.closed && focusInstance(existing.instanceId)) {
+    if (focusInstance(existing.instanceId)) {
       console.debug("[launch] session already open, focused", {
         raw,
         instanceId: existing.instanceId
@@ -1152,10 +1107,7 @@ async function launchFromInput(raw: string): Promise<void> {
       initial: existing
     })
     bringToTopOfStack(win.root)
-    persist.updateOpen(existing.instanceId, {
-      ...win.getState(),
-      closed: false
-    })
+    persist.updateOpen(existing.instanceId, win.getState())
     persistDomOrder()
     refreshSuggestions()
     win.focus()

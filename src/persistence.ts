@@ -1,3 +1,5 @@
+import { NappWindowState } from "./types"
+
 const OPEN_KEY = "nostrapps:open"
 const HISTORY_KEY = "nostrapps:history"
 const KNOWN_KEY = "nostrapps:known"
@@ -20,41 +22,24 @@ function writeJson(key: string, value: any) {
   localStorage.setItem(key, JSON.stringify(value))
 }
 
-export function readOpen() {
+export function readOpen(): NappWindowState[] {
   const raw = readJson(OPEN_KEY, [])
   if (!Array.isArray(raw)) {
-    writeOpen([])
     return []
   }
-  const byId = new Map()
-  let dirty = false
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object" || !entry.instanceId) {
-      dirty = true
-      continue
-    }
-    if (byId.has(entry.instanceId)) dirty = true
-    byId.set(entry.instanceId, entry)
-  }
-  const clean = [...byId.values()]
-  if (dirty) writeOpen(clean)
-  return clean
+  return raw
 }
 
-export function writeOpen(napps: any[]) {
+export function writeOpen(napps: NappWindowState[]) {
   writeJson(OPEN_KEY, napps)
 }
 
-export function updateOpen(instanceId: string, state: any) {
+export function updateOpen(instanceId: string, state: NappWindowState) {
   const all = readOpen()
   const idx = all.findIndex(n => n.instanceId === instanceId)
   if (idx >= 0) {
-    if (state) {
-      all[idx] = { ...all[idx], ...state }
-    } else {
-      all.splice(idx, 1)
-    }
-  } else if (state) {
+    all[idx] = { ...all[idx], ...state }
+  } else {
     all.push(state)
   }
   writeOpen(all)
@@ -64,19 +49,7 @@ export function removeOpen(instanceId: string) {
   writeOpen(readOpen().filter(n => n.instanceId !== instanceId))
 }
 
-export function setOpenClosed(instanceId: string, closed: boolean) {
-  const all = readOpen()
-  const entry = all.find(n => n.instanceId === instanceId)
-  if (!entry) return
-  entry.closed = closed
-  writeOpen(all)
-}
-
-export function readActiveSessions() {
-  return readOpen().filter(n => !n.closed)
-}
-
-export function findSessionByPetname(petname: string) {
+export function findSessionByPetname(petname: string): NappWindowState | null {
   const all = readOpen()
   return all.find(n => !n.system && n.petname === petname) ?? null
 }
@@ -207,7 +180,12 @@ export function getHandlerPref(callerNappId: string | null, type: string, key: s
   return readHandlerPrefs()[prefKey(callerNappId, type, key)] ?? null
 }
 
-export function setHandlerPref(callerNappId: string | null, type: string, key: string, nappId: string | null) {
+export function setHandlerPref(
+  callerNappId: string | null,
+  type: string,
+  key: string,
+  nappId: string | null
+) {
   const all = readHandlerPrefs()
   const k = prefKey(callerNappId, type, key)
   if (nappId) all[k] = nappId
