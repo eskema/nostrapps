@@ -2,6 +2,7 @@ import type {
   SystemLaunchOpts,
   LaunchOpts,
   NappWindow,
+  NappWindowState,
   Signer,
   SignerGetter,
   MessageData,
@@ -181,8 +182,8 @@ export function launchSystem(
   bodyElement.className = `system-napp-content system-napp-${sysId}`
 
   const handle = def.mount(bodyElement, ctx, {
-    initial: opts.initial,
-    onStateChange(sysState) {
+    params: opts.params,
+    onStateChange(sysState: NappWindowState) {
       if (win) opts.onStateChange?.({ ...win.getState(), ...sysState })
     }
   })
@@ -193,7 +194,6 @@ export function launchSystem(
     petname: def.title || sysId,
     bodyElement,
     system: true,
-    initial: opts.initial,
     onStateChange: state => opts.onStateChange?.(state),
     onClose: () => {
       handle && handle.unmount?.()
@@ -201,7 +201,9 @@ export function launchSystem(
       if (singleton) systemSingletons.delete(sysId)
       opts.onClose?.(instanceId)
     },
-    onReorder: opts.onReorder
+    onReorder: opts.onReorder,
+    position: opts.position,
+    status: opts.status
   })
   win.systemId = sysId
   stageEl.appendChild(win.root)
@@ -227,7 +229,8 @@ function mount(
     onReorder,
     onClose,
     onDestroy,
-    initial
+    position,
+    status
   } = opts
 
   onProgress(`Starting ${petname || nappId}…`)
@@ -237,7 +240,8 @@ function mount(
     origin,
     src: `${origin}/`,
     petname,
-    initial,
+    position,
+    status,
     onMessage: (data, iframe) => {
       if (!data) return
       if (data.__nostrapps === "rpc") {

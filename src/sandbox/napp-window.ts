@@ -1,12 +1,4 @@
-import type {
-  NappWindow,
-  NappWindowState,
-  StageBounds,
-  PackCell,
-  CellRect,
-  GridRect,
-  MessageData
-} from "../types.js"
+import type { NappWindow, NappWindowState, MessageData, Position, Status } from "../types.js"
 import { getStageBounds, packCellSnap, bestFitPack, capturePackSnapshot } from "./host.js"
 
 let zIndexCounter = 1
@@ -52,7 +44,8 @@ export function createNappWindow({
   onDestroy,
   onStateChange,
   onReorder,
-  initial,
+  position,
+  status,
   bodyElement,
   system = false
 }: {
@@ -67,7 +60,8 @@ export function createNappWindow({
   onDestroy?: (instanceId: string) => void
   onStateChange?: (state: NappWindowState) => void
   onReorder?: () => void
-  initial?: Partial<NappWindowState>
+  position?: Position
+  status?: Status
   bodyElement?: HTMLElement
   system?: boolean
 }): NappWindow {
@@ -138,7 +132,7 @@ export function createNappWindow({
   root.append(header, body)
   for (const dir of RESIZE_DIRS) root.appendChild(resizeHandles[dir])
 
-  const start = initial ?? { ...nextPosition(), width: 640 }
+  const start = position ?? nextPosition()
   root.style.left = `${start.left ?? 40}px`
   root.style.top = `${start.top ?? 40}px`
   root.style.width = `${start.width ?? 640}px`
@@ -150,20 +144,21 @@ export function createNappWindow({
   } else if (!system) {
     root.style.height = `420px`
   }
-  if (start.minimized) root.classList.add("minimized")
-  if (start.maximized) root.classList.add("maximized")
-  if (start.userSized) root.classList.add("user-sized")
-  if (start.pinned) {
+
+  if (status?.minimized) root.classList.add("minimized")
+  if (status?.maximized) root.classList.add("maximized")
+  if (status?.userSized) root.classList.add("user-sized")
+  if (status?.pinned) {
     root.classList.add("pinned")
     btnPin.textContent = "●"
     btnPin.title = "Unpin"
   }
-  if (typeof start.zIndex === "number" && start.zIndex > 0) {
-    root.style.zIndex = String(start.zIndex)
+  if (status && status.zIndex > 0) {
+    root.style.zIndex = String(status.zIndex)
     // Bump the shared counter using the *logical* part (subtract pin tier
     // base when restoring a pinned window) so future bringToFront calls land
     // in the right tier without racing past the saved values.
-    const logical = start.pinned ? Math.max(0, start.zIndex - PIN_BASE) : start.zIndex
+    const logical = status.pinned ? Math.max(0, status.zIndex - PIN_BASE) : status.zIndex
     if (logical > zIndexCounter) zIndexCounter = logical
   } else {
     bringToFront(root)
@@ -195,23 +190,27 @@ export function createNappWindow({
     onDestroy?.(instanceId)
   }
 
-  function getState() {
+  function getState(): NappWindowState {
     const h = parseFloat(root.style.height)
     return {
       nappId,
       instanceId,
       petname: titleEl.textContent,
-      left: parseFloat(root.style.left) || 0,
-      top: parseFloat(root.style.top) || 0,
-      width: parseFloat(root.style.width) || 0,
-      // omit when there's no inline height — keeps system-napp auto-sizing
-      // intact across reload/restore until the user explicitly resizes.
-      height: Number.isFinite(h) && h > 0 ? h : undefined,
-      minimized: root.classList.contains("minimized"),
-      maximized: root.classList.contains("maximized"),
-      pinned: root.classList.contains("pinned"),
-      userSized: root.classList.contains("user-sized"),
-      zIndex: parseInt(root.style.zIndex, 10) || 0
+      position: {
+        left: parseFloat(root.style.left) || 0,
+        top: parseFloat(root.style.top) || 0,
+        width: parseFloat(root.style.width) || 0,
+        // omit when there's no inline height — keeps system-napp auto-sizing
+        // intact across reload/restore until the user explicitly resizes.
+        height: Number.isFinite(h) && h > 0 ? h : undefined
+      },
+      status: {
+        minimized: root.classList.contains("minimized"),
+        maximized: root.classList.contains("maximized"),
+        pinned: root.classList.contains("pinned"),
+        userSized: root.classList.contains("user-sized"),
+        zIndex: parseInt(root.style.zIndex, 10) || 0
+      }
     }
   }
 
@@ -328,9 +327,9 @@ function makeBtn(label: string, title: string) {
   return btn
 }
 
-function nextPosition() {
+function nextPosition(): Position {
   positionOffset = (positionOffset + 28) % 240
-  return { left: 40 + positionOffset, top: 40 + positionOffset }
+  return { left: 40 + positionOffset, top: 40 + positionOffset, width: 640 }
 }
 
 function bringToFront(el: HTMLElement) {
@@ -388,7 +387,12 @@ function detectSnapZone(x: number, y: number, w: number, h: number) {
   return null
 }
 
-function setupDrag(root: HTMLElement, handle: HTMLElement, onDone: (() => void) | undefined, onReorder: (() => void) | undefined) {
+function setupDrag(
+  root: HTMLElement,
+  handle: HTMLElement,
+  onDone: (() => void) | undefined,
+  onReorder: (() => void) | undefined
+) {
   // Desktop float drag: small threshold so the cursor feels responsive.
   // Mobile reorder: bigger threshold + a hold timer so a quick flick to
   // scroll/swipe doesn't accidentally enter reorder mode.
@@ -825,7 +829,7 @@ function setupDrag(root: HTMLElement, handle: HTMLElement, onDone: (() => void) 
     if (finalZone) {
       const stage = root.parentElement
       if (stage) {
-    const { width: w, height: h, padL, padT } = getStageBounds(stage!)
+        const { width: w, height: h, padL, padT } = getStageBounds(stage!)
         const layout = snapLayout(finalZone, w, h)
         if (layout) {
           // snapLayout returns positions in content-area coords (0 = inside
@@ -872,7 +876,12 @@ function setupDrag(root: HTMLElement, handle: HTMLElement, onDone: (() => void) 
   handle.addEventListener("pointercancel", end)
 }
 
-function setupResize(root: HTMLElement, handle: HTMLElement, dir: string, onDone: (() => void) | undefined) {
+function setupResize(
+  root: HTMLElement,
+  handle: HTMLElement,
+  dir: string,
+  onDone: (() => void) | undefined
+) {
   const MIN_W = 240
   // Just a soft floor for drag-resize; the window's CSS `min-height:
   // fit-content` is what actually clamps the rendered size to the napp's

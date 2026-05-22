@@ -16,10 +16,9 @@ import type { SystemCtx } from "../types.js"
 export function mount(
   container: HTMLElement,
   _ctx: SystemCtx,
-  opts: { initial?: { data?: any }; onStateChange?: (state: any) => void } = {}
+  opts: { params?: any; onStateChange?: (state: any) => void } = {}
 ) {
-  const data = opts.initial?.data
-  console.log("opts", opts)
+  const data = opts.params
   if (!data) {
     container.innerHTML = `<div class="app-info-empty">No app data provided.</div>`
     return

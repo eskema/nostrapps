@@ -30,25 +30,33 @@ export interface Signer {
   }
 }
 
-export interface NappWindowState {
+export type NappWindowState = {
   nappId: string
   instanceId: string
   petname: string
-  left: number
-  top: number
-  width: number
-  height: number | undefined
+  system?: boolean
+  systemId?: string
+  status: Status
+  position?: Position
+  params?: any
+}
+
+export type Status = {
   minimized: boolean
   maximized: boolean
   pinned: boolean
   userSized: boolean
   zIndex: number
-  system?: boolean
-  systemId?: string
-  initialData?: any
 }
 
-export interface NappWindow {
+export type Position = {
+  left: number
+  top: number
+  width: number
+  height?: number
+}
+
+export type NappWindow = {
   root: HTMLDivElement
   iframe: HTMLIFrameElement | null
   close(): void
@@ -89,7 +97,7 @@ export interface SystemNappDef {
   mount(
     container: HTMLElement,
     ctx: SystemCtx,
-    opts?: { initial?: unknown; onStateChange?(state: unknown): void }
+    opts?: { params?: any; onStateChange?(state: NappWindowState): void }
   ): { unmount(): void } | void
 }
 
@@ -136,7 +144,7 @@ export interface SystemCtx {
   factoryReset(): Promise<void>
   loadFolder(): void
   setStatus(msg: string): void
-  launchSystemNapp(sysId: string, opts?: { initial?: unknown }): NappWindow
+  launchSystemNapp(sysId: string, opts?: { params?: any }): NappWindow
   launchFromInput(raw: string): Promise<void>
   isInstalled(nappId: string): boolean
   wasInstalled(nappId: string): boolean
@@ -159,38 +167,23 @@ export interface NsiteResult {
   listing?: NostrEvent | null
 }
 
-export interface NsiteTarget {
-  pubkey: string
-  kind?: number
-  dTag?: string
-}
-
-export interface NappLaunchOpts {
+export type SystemLaunchOpts = {
   instanceId?: string
-  petname?: string
-  onProgress?: (msg: string) => void
-  onStateChange?: (state: NappWindowState) => void
-  onReorder?: () => void
-  onClose?: (instanceId: string) => void
-  onDestroy?: (instanceId: string) => void
   initial?: Partial<NappWindowState>
-  dispatchHandlers?: {
-    action(callerNappId: string, name: string, payload: unknown): Promise<unknown>
-  }
-}
-
-export interface SystemLaunchOpts {
-  instanceId?: string
-  initial?: { data?: unknown } & Partial<NappWindowState>
+  params?: any
+  position?: Position
+  status?: Status
   onStateChange?: (state: NappWindowState) => void
   onReorder?: () => void
   onClose?: (instanceId: string) => void
 }
 
-export interface LaunchOpts {
+export type LaunchOpts = {
   instanceId?: string
   petname?: string
-  initial?: Partial<NappWindowState>
+  params?: any
+  position?: Position
+  status?: Status
   onProgress?: (msg: string) => void
   onStateChange?: (state: NappWindowState) => void
   onReorder?: () => void

@@ -610,25 +610,24 @@ function makeSystemLaunchOpts(sysId: string) {
   }
 }
 
-function launchSystemNapp(sysId: string, { initial }: { initial?: any } = {}) {
+function launchSystemNapp(sysId: string, { params }: { params?: any } = {}) {
   const def = systemRegistry[sysId]
   if (!def) throw new Error(`Unknown system napp: ${sysId}`)
-  console.debug("[launch] launchSystemNapp", { sysId, title: def.title, hasInitial: !!initial })
+  console.debug("[launch] launchSystemNapp", { sysId, title: def.title, params })
   const win = launchSystem(stage, sysId, def, systemCtx, {
     ...makeSystemLaunchOpts(sysId),
-    initial: initial as any
+    params
   })!
   bringToTopOfStack(win.root)
   // Persist the entry now (with current zIndex/position) so it can be
   // restored on the next reload even if the user never interacts with it.
   const state = win.getState()
 
-  console.log("calling updateOpen", state.instanceId, initial)
   persist.updateOpen(state.instanceId, {
     ...state,
     system: true,
     systemId: sysId,
-    initialData: initial
+    params
   })
   persistDomOrder()
   refreshSuggestions()
@@ -875,7 +874,9 @@ async function launchSession(instanceId: string) {
     ...makeLaunchOpts(),
     instanceId: session.instanceId,
     petname: session.petname,
-    initial: session
+    position: session.position,
+    status: session.status,
+    params: session.params
   })
   bringToTopOfStack(win.root)
   persist.updateOpen(session.instanceId, win.getState())
@@ -1000,8 +1001,7 @@ async function restoreAll() {
   console.debug("[launch] restoreAll — restoring", {
     sessionCount: persist.readOpen().length
   })
-  const open = persist.readOpen()
-  for (const state of open) {
+  for (const state of persist.readOpen()) {
     try {
       if (state.system && state.systemId) {
         const def = systemRegistry[state.systemId]
@@ -1009,7 +1009,9 @@ async function restoreAll() {
         const win = launchSystem(stage, state.systemId, def, systemCtx, {
           ...makeSystemLaunchOpts(state.systemId),
           instanceId: state.instanceId,
-          initial: state.initialData
+          params: state.params,
+          position: state.position,
+          status: state.status
         })!
         persist.updateOpen(state.instanceId, {
           ...win.getState(),
@@ -1022,7 +1024,9 @@ async function restoreAll() {
         ...makeLaunchOpts(),
         instanceId: state.instanceId,
         petname: state.petname,
-        initial: state
+        params: state.params,
+        position: state.position,
+        status: state.status
       })
       persist.updateOpen(state.instanceId, win.getState())
     } catch (err: any) {
@@ -1104,7 +1108,9 @@ async function launchFromInput(raw: string): Promise<void> {
       ...makeLaunchOpts(),
       instanceId: existing.instanceId,
       petname: existing.petname,
-      initial: existing
+      position: existing.position,
+      status: existing.status,
+      params: existing.params
     })
     bringToTopOfStack(win.root)
     persist.updateOpen(existing.instanceId, win.getState())
