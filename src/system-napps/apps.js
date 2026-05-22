@@ -21,6 +21,10 @@ export function mount(container, ctx) {
     for (const app of apps) {
       const card = document.createElement("div")
       card.className = "apps-card"
+      card.addEventListener("mouseup", e => {
+        if (e.target.closest("button")) return
+        ctx.launchAppInfo(app)
+      })
 
       const head = document.createElement("div")
       head.className = "apps-card-head"
@@ -53,13 +57,19 @@ export function mount(container, ctx) {
         meta.appendChild(manifestDate)
       }
 
-      if (app.aliases.length > 0) {
-        const aliases = document.createElement("span")
-        aliases.textContent = `aliases: ${app.aliases.join(", ")}`
-        meta.appendChild(aliases)
-      }
-
       titles.appendChild(meta)
+
+      if (app.handlers.length > 0) {
+        const handlers = document.createElement("div")
+        handlers.className = "apps-handlers"
+        for (const action of app.handlers) {
+          const chip = document.createElement("span")
+          chip.className = "apps-handler"
+          chip.textContent = action
+          handlers.appendChild(chip)
+        }
+        titles.appendChild(handlers)
+      }
 
       const actions = document.createElement("div")
       actions.className = "apps-actions"

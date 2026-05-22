@@ -1051,6 +1051,24 @@ body.napp-dragging .napp-body iframe {
   opacity: 0.65;
 }
 
+.apps-handlers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.apps-handler {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 0.12rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  opacity: 0.8;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
 .apps-napp-id {
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -1647,12 +1665,21 @@ body.napp-dragging .napp-body iframe {
   margin-top: 0.1rem;
 }
 
+.store-handlers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+}
+
 .store-chip {
   font-size: 0.7rem;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .store-chip-category {
@@ -1663,6 +1690,11 @@ body.napp-dragging .napp-body iframe {
 .store-chip-tag {
   opacity: 0.75;
   font-family: var(--font-mono);
+}
+
+.store-chip-handler {
+  font-family: var(--font-mono);
+  background: color-mix(in srgb, #3182ce 18%, transparent);
 }
 
 /* ─── handler picker ───────────────────────────────────────────── */
@@ -1868,4 +1900,160 @@ body.napp-dragging .napp-body iframe {
   background: #c0392b;
   color: white;
   border-color: #c0392b;
+}
+
+/* ─── uploader ─────────────────────────────────────────────────── */
+.upload-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.upload-toolbar {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.upload-pick-folder {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.upload-pick-folder:hover {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.upload-relays-toggle {
+  flex-shrink: 0;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.95rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.upload-relays-toggle:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.upload-relays {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-radius: 6px;
+}
+
+.upload-relays[hidden] {
+  display: none;
+}
+
+.upload-relays-label {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+
+.upload-relays-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  resize: vertical;
+}
+
+.upload-relays-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, currentColor 50%, transparent);
+}
+
+.upload-relays-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.3rem;
+}
+
+.upload-relays-actions button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.upload-relays-save {
+  background: var(--text) !important;
+  color: var(--surface) !important;
+  border-color: var(--text) !important;
+}
+
+.upload-status {
+  font-size: 0.75rem;
+  opacity: 0.65;
+}
+
+.upload-status[hidden] {
+  display: none;
+}
+
+.upload-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.upload-preview h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.upload-json {
+  margin: 0;
+  padding: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  border-radius: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.upload-publish {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  background: var(--text);
+  color: var(--surface);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.upload-publish:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.upload-publish:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 85%, transparent);
 }

@@ -17,6 +17,7 @@ export async function launch(stageEl, nappId, files, signer, opts = {}) {
   const onProgress = opts.onProgress ?? (() => {})
   const label = opts.petname || nappId
 
+  console.debug("[sandbox] launch", { nappId, label, fileCount: files.length, origin, opts })
   onProgress(`Booting ${label}…`)
   await bootNapp(origin, files, onProgress, label)
 
@@ -25,6 +26,7 @@ export async function launch(stageEl, nappId, files, signer, opts = {}) {
 
 export function restore(stageEl, nappId, signer, opts = {}) {
   const origin = nappOriginFor(nappId)
+  console.debug("[sandbox] restore", { nappId, origin, opts })
   return mount(stageEl, nappId, origin, signer, opts)
 }
 
@@ -97,6 +99,7 @@ function settleDispatch(data) {
 // before writing, so this swaps the files atomically for in-place updates.
 export async function reinstallFiles(nappId, files, onProgress, label) {
   const origin = nappOriginFor(nappId)
+  console.debug("[sandbox] reinstallFiles", { nappId, origin, fileCount: files.length, label })
   await bootNapp(origin, files, onProgress ?? (() => {}), label || nappId)
 }
 
@@ -117,10 +120,15 @@ export function reloadIframesByNappId(nappId) {
 const systemSingletons = new Map() // sysId -> instanceId
 
 export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
+  console.debug("[sandbox] launchSystem", { sysId, def, opts })
   const singleton = def.singleton !== false
   if (singleton) {
     const existing = systemSingletons.get(sysId)
     if (existing && openWindows.has(existing)) {
+      console.debug("[sandbox] launchSystem: reusing existing singleton", {
+        sysId,
+        instanceId: existing
+      })
       focusInstance(existing)
       return openWindows.get(existing)
     }
@@ -129,7 +137,7 @@ export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
   let currentPanelState = opts.initial?.panelState ?? null
   let win = null
   const instanceId =
-    opts.instanceId || opts.initial?.instanceId || (singleton ? `system:${sysId}` : `system:${sysId}:${crypto.randomUUID()}`)
+    opts.instanceId || singleton ? `system:${sysId}` : `system:${sysId}:${crypto.randomUUID()}`
   const bodyElement = document.createElement("div")
   bodyElement.className = `system-napp-content system-napp-${sysId}`
 
@@ -863,6 +871,7 @@ export async function wipe(nappId) {
 }
 
 async function bootNapp(origin, files, onProgress, label) {
+  console.debug("[sandbox] bootNapp", { origin, fileCount: files.length, label })
   const boot = document.createElement("iframe")
   boot.src = `${origin}/boot.html`
   boot.style.display = "none"

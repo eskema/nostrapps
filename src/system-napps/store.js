@@ -263,6 +263,7 @@ function renderCard(evt, ctx, listing = null, onChange = null) {
   const iconTag = listing?.tags.find(t => t[0] === "icon")
   const iconSha = iconTag?.[1]
   const iconMime = iconTag?.[2]
+  const actionTags = listing ? listing.tags.filter(t => t[0] === "action" && t[1]).map(t => t[1]) : []
   const categoryTags = listing ? listing.tags.filter(t => t[0] === "l" && t[1]).map(t => t[1]) : []
   const hashtags = listing ? listing.tags.filter(t => t[0] === "t" && t[1]).map(t => t[1]) : []
 
@@ -403,6 +404,18 @@ function renderCard(evt, ctx, listing = null, onChange = null) {
     desc.className = "store-description"
     desc.textContent = description
     card.appendChild(desc)
+  }
+
+  if (actionTags.length > 0) {
+    const handlers = document.createElement("div")
+    handlers.className = "store-handlers"
+    for (const action of actionTags) {
+      const chip = document.createElement("span")
+      chip.className = "store-chip store-chip-handler"
+      chip.textContent = action
+      handlers.appendChild(chip)
+    }
+    card.appendChild(handlers)
   }
 
   if (categoryTags.length || hashtags.length) {

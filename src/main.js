@@ -34,6 +34,7 @@ import {
   slashActions,
   actionList
 } from "./system-napps/index.js"
+import * as appInfo from "./system-napps/app-info.js"
 
 const stage = document.getElementById("stage")
 const form = document.getElementById("launch-form")
@@ -157,16 +158,10 @@ function notifyAppsChanged() {
 
 const apps = {
   list() {
-    const aliasesByNappId = new Map()
-    for (const [alias, nappId] of Object.entries(persist.readPetnames())) {
-      if (!aliasesByNappId.has(nappId)) aliasesByNappId.set(nappId, [])
-      aliasesByNappId.get(nappId).push(alias)
-    }
-
     return persist.readKnown().map(nappId => ({
       nappId,
       name: friendlyNameFor(nappId),
-      aliases: aliasesByNappId.get(nappId) || [],
+      handlers: persist.getHandlers(nappId),
       manifest: persist.getInstalledManifest(nappId),
       openCount: persist.readOpen().filter(s => s.nappId === nappId && !s.closed).length
     }))
@@ -403,6 +398,7 @@ function capabilitiesFromListing(listing) {
 // version, and force any open iframes to reload so they pick up new files.
 async function updateNapp(target) {
   if (!target?.pubkey) throw new Error("updateNapp: missing pubkey")
+  console.debug("[launch] updateNapp", { pubkey: target.pubkey, kind: target.kind, dTag: target.dTag })
   setStatus(`Checking update…`)
   const result = await fetchNsite(target, setStatus)
   const { nappId, files, title, manifest } = result
@@ -513,14 +509,17 @@ function escapeHtml(s) {
 // Make sure a window for nappId is open and focused. Tries (in order):
 // already-open, closed-session-reopen, fresh launch from installed manifest.
 async function ensureNappOpen(nappId) {
+  console.debug("[launch] ensureNappOpen", { nappId })
   const existing = findOpenWindowByNappId(nappId)
   if (existing) {
+    console.debug("[launch] ensureNappOpen: already open, focusing", { nappId })
     existing.focus?.()
     return existing
   }
 
   const closed = persist.readOpen().find(s => s.nappId === nappId && s.closed)
   if (closed) {
+    console.debug("[launch] ensureNappOpen: restoring closed session", { nappId, instanceId: closed.instanceId })
     const win = restore(stage, closed.nappId, currentSigner, {
       ...makeLaunchOpts(),
       instanceId: closed.instanceId,
@@ -540,6 +539,7 @@ async function ensureNappOpen(nappId) {
 
   const info = persist.getInstalledManifest(nappId)
   if (info?.pubkey) {
+    console.debug("[launch] ensureNappOpen: fresh launch from manifest", { nappId, target: info })
     const target = {
       pubkey: info.pubkey,
       kind: info.kind,
@@ -559,6 +559,7 @@ async function ensureNappOpen(nappId) {
     return win
   }
 
+  console.debug("[launch] ensureNappOpen: no install info on file", { nappId })
   throw new Error(`Cannot open ${nappId}: no install info on file`)
 }
 
@@ -583,6 +584,7 @@ const systemCtx = {
   loadFolder,
   setStatus,
   launchSystemNapp,
+  launchAppInfo: data => launchAppInfo(data),
   // Use a thunk so the reference resolves to the function declared later.
   launchFromInput: raw => launchFromInput(raw),
   isInstalled: nappId => persist.readKnown().includes(nappId),
@@ -614,6 +616,7 @@ function makeSystemLaunchOpts(sysId) {
 function launchSystemNapp(sysId, { initial } = {}) {
   const def = systemRegistry[sysId]
   if (!def) throw new Error(`Unknown system napp: ${sysId}`)
+  console.debug("[launch] launchSystemNapp", { sysId, title: def.title, hasInitial: !!initial })
   const win = launchSystem(stage, sysId, def, systemCtx, {
     ...makeSystemLaunchOpts(sysId),
     initial
@@ -627,6 +630,24 @@ function launchSystemNapp(sysId, { initial } = {}) {
     panelState: win.getSystemPanelState?.() || null,
     system: true,
     systemId: sysId,
+    closed: false
+  })
+  persistDomOrder()
+  refreshSuggestions()
+  return win
+}
+
+function launchAppInfo(data) {
+  console.debug("[launch] launchAppInfo", { nappId: data.nappId, name: data.name })
+  const win = launchSystem(stage, "app-info", appInfo, systemCtx, {
+    ...makeSystemLaunchOpts("app-info"),
+    initial: { data }
+  })
+  bringToTopOfStack(win.root)
+  persist.updateOpen(win.getState().instanceId, {
+    ...win.getState(),
+    system: true,
+    systemId: "app-info",
     closed: false
   })
   persistDomOrder()
@@ -848,6 +869,7 @@ function renderSuggestionRow(item) {
 }
 
 async function launchFresh(nappId, petname) {
+  console.debug("[launch] launchFresh", { nappId, petname })
   const win = restore(stage, nappId, currentSigner, {
     ...makeLaunchOpts(),
     petname: petname && petname !== nappId ? petname : nappId
@@ -859,6 +881,7 @@ async function launchFresh(nappId, petname) {
 async function launchSession(instanceId) {
   const session = persist.readOpen().find(s => s.instanceId === instanceId)
   if (!session) throw new Error("Session not found")
+  console.debug("[launch] launchSession", { instanceId, nappId: session.nappId, petname: session.petname, closed: session.closed })
   if (!session.closed && focusInstance(instanceId)) return
   const win = restore(stage, session.nappId, currentSigner, {
     ...makeLaunchOpts(),
@@ -910,6 +933,7 @@ function bringToTopOfStack(root) {
 
 function trackOpened(nappId, win) {
   const state = win.getState()
+  console.debug("[launch] trackOpened", { nappId, instanceId: state.instanceId, petname: state.petname })
   persist.rememberKnown(nappId)
   bringToTopOfStack(win.root)
   persist.updateOpen(state.instanceId, state)
@@ -980,6 +1004,7 @@ function makeLaunchOpts() {
 }
 
 async function restoreAll() {
+  console.debug("[launch] restoreAll — restoring", { sessionCount: persist.readActiveSessions().length })
   const open = persist.readActiveSessions()
   for (const state of open) {
     try {
@@ -1029,7 +1054,7 @@ function maybeBootstrap() {
 
 async function init() {
   setStatus(
-    "Ready — try /store, /apps, /database, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host"
+    "Ready — try /store, /apps, /database, /upload, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host"
   )
   // If the user is paired with a bunker, get the connection warm in the
   // background. First sign request will wait if it's still connecting.
@@ -1043,29 +1068,36 @@ async function init() {
 init()
 
 async function launchFromInput(raw) {
+  console.debug("[launch] launchFromInput", { raw })
+
   // Slash commands → system napps or one-shot actions
   if (raw.startsWith("/")) {
     const sysId = slashCommands[raw]
     if (sysId) {
+      console.debug("[launch] slash command → system napp", { sysId })
       const win = launchSystemNapp(sysId)
       win?.focus?.()
       return
     }
     const actionId = slashActions[raw]
     if (actionId) {
+      console.debug("[launch] slash command → action", { actionId })
       actionRegistry[actionId]?.run(systemCtx)
       return
     }
+    console.debug("[launch] unknown slash command", { raw })
     throw new Error(`Unknown command: ${raw}`)
   }
 
   const existing = persist.findSessionByPetname(raw)
   if (existing) {
     if (!existing.closed && focusInstance(existing.instanceId)) {
+      console.debug("[launch] session already open, focused", { raw, instanceId: existing.instanceId })
       setStatus(`${raw} is already open`)
       refreshSuggestions()
       return
     }
+    console.debug("[launch] restoring session by petname", { raw, nappId: existing.nappId, instanceId: existing.instanceId, petname: existing.petname })
     const win = restore(stage, existing.nappId, currentSigner, {
       ...makeLaunchOpts(),
       instanceId: existing.instanceId,
@@ -1085,6 +1117,7 @@ async function launchFromInput(raw) {
 
   const petNappId = persist.getNappIdForPetname(raw)
   if (petNappId) {
+    console.debug("[launch] petname maps to known nappId, restoring fresh", { raw, nappId: petNappId })
     const win = restore(stage, petNappId, currentSigner, {
       ...makeLaunchOpts(),
       petname: raw
@@ -1095,6 +1128,7 @@ async function launchFromInput(raw) {
   }
   const known = new Set(persist.readKnown())
   if (known.has(raw)) {
+    console.debug("[launch] raw matches known nappId, restoring fresh", { raw })
     const win = restore(stage, raw, currentSigner, {
       ...makeLaunchOpts(),
       petname: raw
@@ -1106,13 +1140,17 @@ async function launchFromInput(raw) {
   let resolved
   try {
     resolved = resolveInput(raw)
+    console.debug("[launch] input resolved", { raw, resolved })
   } catch {
+    console.debug("[launch] input could not be resolved", { raw })
     throw new Error(
       `Couldn't resolve "${raw}" — try a pubkey, npub, nprofile, naddr, or nsite hostname`
     )
   }
   const { nappId, files, title, manifest, listing } = await fetchNsite(resolved, setStatus)
+  console.debug("[launch] nsite fetched", { nappId, title, fileCount: files.length, hasManifest: !!manifest, hasListing: !!listing })
   const petname = title || raw
+  console.debug("[launch] launching napp with opts", { nappId, petname })
   const win = await launch(stage, nappId, files, currentSigner, {
     ...makeLaunchOpts(),
     petname
@@ -1143,8 +1181,10 @@ form.addEventListener("submit", async e => {
 localFolderInput.addEventListener("change", async e => {
   const inputFiles = e.target.files
   if (!inputFiles || inputFiles.length === 0) return
+  console.debug("[launch] local folder selected", { fileCount: inputFiles.length })
   try {
     const { nappId, files, metadata } = await collectLocalFolder(inputFiles, setStatus)
+    console.debug("[launch] local folder collected", { nappId, fileCount: files.length, metadata })
     const petname = metadata?.name || nappId
     const win = await launch(stage, nappId, files, currentSigner, {
       ...makeLaunchOpts(),

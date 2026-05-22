@@ -184,6 +184,12 @@ export function findHandlersForAction(action) {
   return out
 }
 
+export function getHandlers(nappId) {
+  if (typeof nappId !== "string" || !nappId) return []
+  const actions = readHandlers()[nappId]
+  return Array.isArray(actions) ? actions : []
+}
+
 // "I last picked nappId X to handle <action 'edit:30023'> from <caller Y>".
 // The caller pin makes prefs scoped, so picking an editor for napp A doesn't
 // automatically apply when napp B asks for the same action.
