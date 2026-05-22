@@ -1,4 +1,4 @@
-import * as nip19 from "@nostr/tools/nip19"
+import { decode } from "@nostr/tools/nip19"
 
 // NIP-5A:
 //   root site:  <npub>.<host>                       → kind 15128
@@ -6,7 +6,7 @@ import * as nip19 from "@nostr/tools/nip19"
 //     pubkeyB36 = 50-char lowercase base36 of the 32-byte pubkey
 //     dTag      = 1..13 chars of [a-z0-9-]
 
-export function resolveInput(input) {
+export function resolveInput(input: string): { pubkey: string; kind?: number; dTag?: string } {
   const s = input.trim()
   if (!s) throw new Error("empty input")
 
@@ -25,26 +25,34 @@ export function resolveInput(input) {
   throw new Error(`Unrecognized input format`)
 }
 
-function resolveBech32(s) {
-  const decoded = nip19.decode(s)
-  if (decoded.type === "npub") return { pubkey: decoded.data }
-  if (decoded.type === "nprofile") return { pubkey: decoded.data.pubkey }
-  if (decoded.type === "naddr") {
-    const { pubkey, kind, identifier } = decoded.data
-    if (kind === 35128) return { pubkey, kind, dTag: identifier }
-    if (kind === 15128) return { pubkey, kind }
-    throw new Error(`Unsupported naddr kind: ${kind}`)
+function resolveBech32(s: string): { pubkey: string; kind?: number; dTag?: string } {
+  const decoded = decode(s)
+  switch (decoded.type) {
+    case "npub":
+      return { pubkey: decoded.data as string }
+    case "nprofile": {
+      const profile = decoded.data as { pubkey: string }
+      return { pubkey: profile.pubkey }
+    }
+    case "naddr": {
+      const addr = decoded.data as { pubkey: string; kind: number; identifier: string }
+      if (addr.kind === 35128)
+        return { pubkey: addr.pubkey, kind: addr.kind, dTag: addr.identifier }
+      if (addr.kind === 15128) return { pubkey: addr.pubkey, kind: addr.kind }
+      throw new Error(`Unsupported naddr kind: ${addr.kind}`)
+    }
+    default:
+      throw new Error(`Unsupported bech32 type: ${decoded.type}`)
   }
-  throw new Error(`Unsupported bech32 type: ${decoded.type}`)
 }
 
-function looksLikeHostOrUrl(s) {
+function looksLikeHostOrUrl(s: string): boolean {
   if (/^https?:\/\//i.test(s)) return true
   if (s.includes(".") && !s.includes(" ")) return true
   return false
 }
 
-function resolveHostname(input) {
+function resolveHostname(input: string): { pubkey: string; kind?: number; dTag?: string } {
   const host = input
     .replace(/^https?:\/\//i, "")
     .split("/")[0]
@@ -53,11 +61,11 @@ function resolveHostname(input) {
   if (!label) throw new Error(`No hostname label in "${input}"`)
 
   if (label.startsWith("npub1")) {
-    const decoded = nip19.decode(label)
+    const decoded = decode(label)
     if (decoded.type !== "npub") {
       throw new Error(`Expected npub label, got ${decoded.type}`)
     }
-    return { pubkey: decoded.data, kind: 15128 }
+    return { pubkey: decoded.data as string, kind: 15128 }
   }
 
   // <50 base36 chars><1..13 chars [a-z0-9-]>
@@ -73,7 +81,7 @@ function resolveHostname(input) {
   throw new Error(`Hostname "${label}" is not a NIP-5A label`)
 }
 
-function pubkeyB36ToHex(s) {
+function pubkeyB36ToHex(s: string): string {
   let n = 0n
   for (const ch of s) {
     const c = ch.charCodeAt(0)

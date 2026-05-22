@@ -1,3 +1,16 @@
+import type {
+  SystemLaunchOpts,
+  LaunchOpts,
+  NappWindow,
+  Signer,
+  SignerGetter,
+  MessageData,
+  NsiteFile,
+  SystemNappDef,
+  PackCell,
+  GridRect
+} from "../types.js"
+
 import { isGated, requireApproval } from "../permissions.js"
 import * as store from "../store.js"
 import * as instanceStore from "../storage/instance.js"
@@ -5,14 +18,20 @@ import { createNappWindow } from "./napp-window.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
-const openWindows = new Map()
+const openWindows = new Map<string, NappWindow>()
 
-export function nappOriginFor(nappId) {
+export function nappOriginFor(nappId: string): string {
   const port = location.port ? `:${location.port}` : ""
   return `${location.protocol}//${nappId}.napps.localhost${port}`
 }
 
-export async function launch(stageEl, nappId, files, signer, opts = {}) {
+export async function launch(
+  stageEl: HTMLElement,
+  nappId: string,
+  files: NsiteFile[],
+  signer: Signer | SignerGetter,
+  opts: LaunchOpts = {}
+) {
   const origin = nappOriginFor(nappId)
   const onProgress = opts.onProgress ?? (() => {})
   const label = opts.petname || nappId
@@ -24,20 +43,25 @@ export async function launch(stageEl, nappId, files, signer, opts = {}) {
   return mount(stageEl, nappId, origin, signer, opts)
 }
 
-export function restore(stageEl, nappId, signer, opts = {}) {
+export function restore(
+  stageEl: HTMLElement,
+  nappId: string,
+  signer: Signer | SignerGetter,
+  opts: LaunchOpts = {}
+) {
   const origin = nappOriginFor(nappId)
   console.debug("[sandbox] restore", { nappId, origin, opts })
   return mount(stageEl, nappId, origin, signer, opts)
 }
 
-export function focusInstance(instanceId) {
+export function focusInstance(instanceId: string): boolean {
   const win = openWindows.get(instanceId)
   if (!win) return false
   win.focus?.()
   return true
 }
 
-export function destroyByNappId(nappId) {
+export function destroyByNappId(nappId: string): number {
   // Snapshot — destroy() mutates openWindows.
   const targets = []
   for (const win of openWindows.values()) {
@@ -47,7 +71,7 @@ export function destroyByNappId(nappId) {
   return targets.length
 }
 
-export function findOpenWindowByNappId(nappId) {
+export function findOpenWindowByNappId(nappId: string): NappWindow | null {
   for (const win of openWindows.values()) {
     if (win.root.dataset.nappId === nappId) return win
   }
@@ -57,15 +81,19 @@ export function findOpenWindowByNappId(nappId) {
 // Launcher → iframe dispatch calls (action). Each call gets a
 // requestId; the iframe replies with that id once `window.napp.onAction`
 // has run.
-const pendingDispatches = new Map()
+const pendingDispatches = new Map<string, { resolve(v: unknown): void; reject(e: Error): void }>()
 const DISPATCH_TIMEOUT_MS = 30_000
 
-export function callIframe(instanceId, type, data = {}) {
+export function callIframe(
+  instanceId: string,
+  type: string,
+  data: Record<string, unknown> = {}
+): Promise<unknown> {
   const win = openWindows.get(instanceId)
   if (!win || !win.iframe) {
     return Promise.reject(new Error(`No iframe for instance ${instanceId}`))
   }
-  const origin = nappOriginFor(win.root.dataset.nappId)
+  const origin = nappOriginFor(win.root.dataset.nappId!)
   const requestId = crypto.randomUUID()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -82,14 +110,14 @@ export function callIframe(instanceId, type, data = {}) {
         reject(err)
       }
     })
-    win.iframe.contentWindow?.postMessage({ __nostrapps: type, requestId, ...data }, origin)
+    win.iframe!.contentWindow?.postMessage({ __nostrapps: type, requestId, ...data }, origin)
   })
 }
 
-function settleDispatch(data) {
-  const p = pendingDispatches.get(data.requestId)
+function settleDispatch(data: MessageData) {
+  const p = pendingDispatches.get(data.requestId!)
   if (!p) return
-  pendingDispatches.delete(data.requestId)
+  pendingDispatches.delete(data.requestId!)
   if (data.__nostrapps === "napp-dispatch-result") p.resolve(data.result)
   else p.reject(new Error(data.error || "dispatch failed"))
 }
@@ -97,7 +125,12 @@ function settleDispatch(data) {
 // Re-run the install flow into the napp's existing origin without spawning
 // a new visible window. boot.html's install handler clears its files store
 // before writing, so this swaps the files atomically for in-place updates.
-export async function reinstallFiles(nappId, files, onProgress, label) {
+export async function reinstallFiles(
+  nappId: string,
+  files: NsiteFile[],
+  onProgress?: (msg: string) => void,
+  label?: string
+) {
   const origin = nappOriginFor(nappId)
   console.debug("[sandbox] reinstallFiles", { nappId, origin, fileCount: files.length, label })
   await bootNapp(origin, files, onProgress ?? (() => {}), label || nappId)
@@ -106,7 +139,7 @@ export async function reinstallFiles(nappId, files, onProgress, label) {
 // Reload every open iframe whose dataset.nappId matches. Reassigning
 // iframe.src triggers a same-origin navigation; window.name (the bridge's
 // instanceId) is preserved across same-origin reloads.
-export function reloadIframesByNappId(nappId) {
+export function reloadIframesByNappId(nappId: string): number {
   let count = 0
   for (const win of openWindows.values()) {
     if (win.root.dataset.nappId === nappId && win.iframe) {
@@ -117,9 +150,15 @@ export function reloadIframesByNappId(nappId) {
   return count
 }
 
-const systemSingletons = new Map() // sysId -> instanceId
+const systemSingletons = new Map<string, string>() // sysId -> instanceId
 
-export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
+export function launchSystem(
+  stageEl: HTMLElement,
+  sysId: string,
+  def: SystemNappDef,
+  ctx: any,
+  opts: SystemLaunchOpts = {}
+) {
   console.debug("[sandbox] launchSystem", { sysId, def, opts })
   const singleton = def.singleton !== false
   if (singleton) {
@@ -135,7 +174,7 @@ export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
   }
 
   let currentPanelState = opts.initial?.panelState ?? null
-  let win = null
+  let win: NappWindow | null = null
   const instanceId =
     opts.instanceId || singleton ? `system:${sysId}` : `system:${sysId}:${crypto.randomUUID()}`
   const bodyElement = document.createElement("div")
@@ -158,7 +197,7 @@ export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
     initial: opts.initial,
     onStateChange: state => opts.onStateChange?.({ ...state, panelState: currentPanelState }),
     onClose: () => {
-      handle?.unmount?.()
+      handle && handle.unmount?.()
       openWindows.delete(instanceId)
       if (singleton) systemSingletons.delete(sysId)
       opts.onClose?.(instanceId)
@@ -175,7 +214,13 @@ export function launchSystem(stageEl, sysId, def, ctx, opts = {}) {
   return win
 }
 
-function mount(stageEl, nappId, origin, signer, opts = {}) {
+function mount(
+  stageEl: HTMLElement,
+  nappId: string,
+  origin: string,
+  signer: Signer | SignerGetter,
+  opts: LaunchOpts = {}
+) {
   const {
     instanceId = crypto.randomUUID(),
     petname,
@@ -244,7 +289,7 @@ const TILE_BASE_ROWS = 3
 // live-pack can default to the pre-drag layout: as long as the dragged
 // window isn't blocking a window's original cell, that window returns to
 // where it started. This lets the user "undo" mid-drag by moving back.
-export function capturePackSnapshot(stageEl) {
+export function capturePackSnapshot(stageEl: HTMLElement) {
   if (!stageEl) return new Map()
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return new Map()
@@ -273,7 +318,7 @@ export function capturePackSnapshot(stageEl) {
 // snap target in BOTH grid units (col/row/cols/rows) and pixel coords
 // (left/top/width/height). The drag handler uses the pixels to position
 // the placeholder, and the cell coords to drive live-pack reflow.
-export function packCellSnap(stageEl, leftPx, topPx, widthPx, heightPx) {
+export function packCellSnap(stageEl: HTMLElement, leftPx: number, topPx: number, widthPx: number, heightPx: number) {
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return null
   const COLS = TILE_BASE_COLS
@@ -302,7 +347,7 @@ export function packCellSnap(stageEl, leftPx, topPx, widthPx, heightPx) {
 
 // Module-level timer for clearing the .packing class. Reset on every pack
 // so a long drag (many live-pack calls) keeps the transition class on.
-let packingClearTimer = null
+let packingClearTimer: ReturnType<typeof setTimeout> | null = null
 
 // Bin-pack windows into a 4-column grid. Used by the optional pack-mode
 // toggle.
@@ -329,7 +374,7 @@ let packingClearTimer = null
 //   - Maximized windows are skipped entirely.
 //   - Minimized windows are skipped.
 //   - Grid grows downward as needed; stage scrolls.
-export function bestFitPack(stageEl, focusRoot = null, focusCell = null, snapshot = null) {
+export function bestFitPack(stageEl: HTMLElement, focusRoot: HTMLElement | null = null, focusCell: PackCell | null = null, snapshot: Map<HTMLElement, PackCell> | null = null) {
   if (!stageEl) return
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return
@@ -371,8 +416,8 @@ export function bestFitPack(stageEl, focusRoot = null, focusCell = null, snapsho
   //      "I just touched this, leave it" scenarios.
   const NOW = Date.now()
   const JUST_MOVED_MS = 100
-  const justMoved = w => {
-    const t = parseInt(w.root.dataset.lastMovedAt, 10) || 0
+  const justMoved = (w: NappWindow) => {
+    const t = parseInt(w.root.dataset.lastMovedAt!, 10) || 0
     return NOW - t < JUST_MOVED_MS
   }
   items.sort((a, b) => {
@@ -382,17 +427,17 @@ export function bestFitPack(stageEl, focusRoot = null, focusCell = null, snapsho
     const aa = a.root.offsetWidth * a.root.offsetHeight
     const ab = b.root.offsetWidth * b.root.offsetHeight
     if (aa !== ab) return ab - aa
-    const ma = parseInt(a.root.dataset.lastMovedAt, 10) || 0
-    const mb = parseInt(b.root.dataset.lastMovedAt, 10) || 0
+    const ma = parseInt(a.root.dataset.lastMovedAt!, 10) || 0
+    const mb = parseInt(b.root.dataset.lastMovedAt!, 10) || 0
     return mb - ma
   })
 
   // Lazy occupancy grid (rows × COLS), grows as needed.
-  const grid = []
-  const ensureRows = n => {
+  const grid: boolean[][] = []
+  const ensureRows = (n: number) => {
     while (grid.length < n) grid.push(new Array(COLS).fill(false))
   }
-  const fits = (col, row, w, h) => {
+  const fits = (col: number, row: number, w: number, h: number) => {
     if (col < 0 || col + w > COLS) return false
     ensureRows(row + h)
     for (let r = row; r < row + h; r++) {
@@ -402,7 +447,7 @@ export function bestFitPack(stageEl, focusRoot = null, focusCell = null, snapsho
     }
     return true
   }
-  const mark = (col, row, w, h) => {
+  const mark = (col: number, row: number, w: number, h: number) => {
     ensureRows(row + h)
     for (let r = row; r < row + h; r++) {
       for (let c = col; c < col + w; c++) {
@@ -411,7 +456,7 @@ export function bestFitPack(stageEl, focusRoot = null, focusCell = null, snapsho
     }
   }
 
-  const cellFromPx = w => {
+  const cellFromPx = (w: NappWindow) => {
     const px = parseFloat(w.root.style.left) || padL
     const py = parseFloat(w.root.style.top) || padT
     const pw = w.root.offsetWidth || cellW
@@ -464,7 +509,7 @@ export function bestFitPack(stageEl, focusRoot = null, focusCell = null, snapsho
   let mostRecentItem = null
   let mostRecentTime = -1
   for (const item of items) {
-    const t = parseInt(item.root.dataset.lastMovedAt, 10) || 0
+    const t = parseInt(item.root.dataset.lastMovedAt!, 10) || 0
     if (t > mostRecentTime) {
       mostRecentTime = t
       mostRecentItem = item
@@ -537,7 +582,7 @@ export function bestFitPack(stageEl, focusRoot = null, focusCell = null, snapsho
 //   3. passes `fits` (no other obstructions in the partially-built grid).
 // Used to let a "big" window shrink around the dragged window's stamp
 // instead of relocating entirely. Returns null if no candidate works.
-function shrinkAroundFocus(desired, focus, fits) {
+function shrinkAroundFocus(desired: PackCell, focus: PackCell, fits: (col: number, row: number, cols: number, rows: number) => boolean) {
   const ic1 = desired.col
   const ir1 = desired.row
   const ic2 = ic1 + desired.cols
@@ -598,7 +643,7 @@ function shrinkAroundFocus(desired, focus, fits) {
   return valid[0]
 }
 
-function applyCellRect(w, col, row, cols, rows, padL, padT, cellW, cellH) {
+function applyCellRect(w: NappWindow, col: number, row: number, cols: number, rows: number, padL: number, padT: number, cellW: number, cellH: number) {
   const x0 = Math.round(padL + col * cellW)
   const y0 = Math.round(padT + row * cellH)
   const x1 = Math.round(padL + (col + cols) * cellW)
@@ -623,7 +668,7 @@ function applyCellRect(w, col, row, cols, rows, padL, padT, cellW, cellH) {
   if (changed) w.notifyState?.()
 }
 
-export function tileWindows(stageEl) {
+export function tileWindows(stageEl: HTMLElement) {
   if (!stageEl) return
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return
@@ -682,7 +727,7 @@ export function tileWindows(stageEl) {
   }
 }
 
-function shuffle(arr) {
+function shuffle(arr: NappWindow[]) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
@@ -699,7 +744,7 @@ function shuffle(arr) {
 //   - Each side must end up with at least as many cells as it has windows
 //     (otherwise a deeper recursion would hit "no split possible" with
 //      n > 1 and silently drop windows).
-function partitionGrid(rect, n) {
+function partitionGrid(rect: GridRect, n: number): GridRect[] {
   if (n <= 1) return [rect]
   const cells = rect.cols * rect.rows
   // Caller guarantees `cells >= n`; if somehow not, we can't split safely.
@@ -779,7 +824,7 @@ function partitionGrid(rect, n) {
 // The minimum value of `ceil(leftN/O) + ceil(rightN/O)` over leftN ∈ [1, n-1]
 // is ceil(n/O) (attained when one side is a multiple of O). So as long as
 // ceil(n / otherCells) ≤ sideCells, a balanced leftN exists that fits.
-function canSplitDirection(rect, n, vertical) {
+function canSplitDirection(rect: GridRect, n: number, vertical: boolean) {
   const sideCells = vertical ? rect.cols : rect.rows
   if (sideCells < 2) return false
   const otherCells = vertical ? rect.rows : rect.cols
@@ -790,7 +835,7 @@ function canSplitDirection(rect, n, vertical) {
 // left/top are measured from the padding edge, so the usable region is
 // 0 → (clientW - padLeft - padRight). We return both the bounds and the
 // padding so callers (clamp + tile) can use them consistently.
-export function getStageBounds(stage) {
+export function getStageBounds(stage: HTMLElement) {
   const cs = getComputedStyle(stage)
   const padL = parseFloat(cs.paddingLeft) || 0
   const padR = parseFloat(cs.paddingRight) || 0
@@ -813,7 +858,7 @@ export function getStageBounds(stage) {
 // `left: 0` is at the padding box's outer edge, which is the same as the
 // stage's outer edge here. So the visual 1rem gutter only exists if we
 // actively clamp the window's left/top to ≥ padding.
-function clampToStage(root, stage) {
+function clampToStage(root: HTMLElement, stage: HTMLElement) {
   if (!stage) return
   // Mobile static layout: nothing to clamp (the layout handles position).
   if (getComputedStyle(root).position === "static") return
@@ -837,8 +882,8 @@ function clampToStage(root, stage) {
   if (newTop !== top) root.style.top = `${newTop}px`
 }
 
-let stageObserver = null
-function ensureStageObserver(stageEl) {
+let stageObserver: ResizeObserver | null = null
+function ensureStageObserver(stageEl: HTMLElement) {
   if (stageObserver) return
   stageObserver = new ResizeObserver(() => {
     for (const win of openWindows.values()) {
@@ -848,7 +893,7 @@ function ensureStageObserver(stageEl) {
   stageObserver.observe(stageEl)
 }
 
-export async function wipe(nappId) {
+export async function wipe(nappId: string): Promise<void> {
   const origin = nappOriginFor(nappId)
   const boot = document.createElement("iframe")
   boot.src = `${origin}/boot.html`
@@ -860,7 +905,7 @@ export async function wipe(nappId) {
     if (ready.__nostrapps === "napp-boot-error") {
       throw new Error(`Napp boot failed: ${ready.error}`)
     }
-    boot.contentWindow.postMessage({ __nostrapps: "napp-wipe" }, origin)
+    boot.contentWindow!.postMessage({ __nostrapps: "napp-wipe" }, origin)
     const result = await waitForMessage(origin, "napp-wipe-done", "napp-wipe-error")
     if (result.__nostrapps === "napp-wipe-error") {
       throw new Error(result.error)
@@ -870,7 +915,12 @@ export async function wipe(nappId) {
   }
 }
 
-async function bootNapp(origin, files, onProgress, label) {
+async function bootNapp(
+  origin: string,
+  files: NsiteFile[],
+  onProgress: (msg: string) => void,
+  label: string
+) {
   console.debug("[sandbox] bootNapp", { origin, fileCount: files.length, label })
   const boot = document.createElement("iframe")
   boot.src = `${origin}/boot.html`
@@ -884,7 +934,7 @@ async function bootNapp(origin, files, onProgress, label) {
     }
 
     onProgress(`Installing ${files.length} file(s) for ${label}…`)
-    boot.contentWindow.postMessage({ __nostrapps: "napp-install", files }, origin)
+    boot.contentWindow!.postMessage({ __nostrapps: "napp-install", files }, origin)
 
     const result = await waitForMessage(origin, "napp-install-done", "napp-install-error")
     if (result.__nostrapps === "napp-install-error") {
@@ -895,16 +945,20 @@ async function bootNapp(origin, files, onProgress, label) {
   }
 }
 
-function waitForMessage(expectedOrigin, successType, errorType) {
-  return new Promise((resolve, reject) => {
+function waitForMessage(
+  expectedOrigin: string,
+  successType: string,
+  errorType: string
+): Promise<any> {
+  return new Promise<any>((resolve, reject) => {
     const timer = setTimeout(() => {
       window.removeEventListener("message", handler)
       reject(new Error(`Timed out waiting for ${successType}`))
     }, BOOT_TIMEOUT_MS)
 
-    const handler = event => {
+    const handler = (event: MessageEvent) => {
       if (event.origin !== expectedOrigin) return
-      const data = event.data
+      const data: any = event.data
       if (!data) return
       if (data.__nostrapps === successType || (errorType && data.__nostrapps === errorType)) {
         clearTimeout(timer)
@@ -916,12 +970,20 @@ function waitForMessage(expectedOrigin, successType, errorType) {
   })
 }
 
-async function handleRpc(data, iframe, signer, nappId, dispatchHandlers) {
+async function handleRpc(
+  data: MessageData,
+  iframe: HTMLIFrameElement,
+  signer: Signer | SignerGetter,
+  nappId: string,
+  dispatchHandlers:
+    | { action(callerNappId: string, name: string, payload: unknown): Promise<unknown> }
+    | undefined
+) {
   const { id, method, params, instanceId } = data
   try {
-    if (isGated(method)) {
-      const allowed = await requireApproval(nappId, method)
-      if (!allowed) throw new Error(`Permission denied: ${method}`)
+    if (isGated(method!)) {
+      const allowed = await requireApproval(nappId, method!)
+      if (!allowed) throw new Error(`Permission denied: ${method!}`)
     }
     // Signer can be passed either as an object (legacy) or as a getter
     // (`() => currentSigner()`). The getter form lets the user hot-swap
@@ -929,14 +991,14 @@ async function handleRpc(data, iframe, signer, nappId, dispatchHandlers) {
     const resolvedSigner = typeof signer === "function" ? signer() : signer
     const result = await dispatch(
       resolvedSigner,
-      method,
+      method!,
       params,
-      instanceId,
+      instanceId!,
       nappId,
       dispatchHandlers
     )
     iframe.contentWindow?.postMessage({ __nostrapps: "rpc-result", id, result }, "*")
-  } catch (err) {
+  } catch (err: any) {
     iframe.contentWindow?.postMessage(
       { __nostrapps: "rpc-error", id, error: err?.message ?? String(err) },
       "*"
@@ -944,14 +1006,21 @@ async function handleRpc(data, iframe, signer, nappId, dispatchHandlers) {
   }
 }
 
-function dispatch(signer, method, params, instanceId, callerNappId, dispatchHandlers) {
+function dispatch(
+  signer: Signer,
+  method: string,
+  params: any,
+  instanceId: string,
+  callerNappId: string,
+  dispatchHandlers:
+    | { action(callerNappId: string, name: string, payload: unknown): Promise<unknown> }
+    | undefined
+) {
   switch (method) {
     case "getPublicKey":
       return signer.getPublicKey()
     case "signEvent":
       return signer.signEvent(params)
-    case "getRelays":
-      return signer.getRelays?.() ?? {}
     case "nip04.encrypt":
       return signer.nip04.encrypt(params.pubkey, params.plaintext)
     case "nip04.decrypt":
@@ -982,7 +1051,7 @@ function dispatch(signer, method, params, instanceId, callerNappId, dispatchHand
       if (!dispatchHandlers?.action) {
         throw new Error("napp.action dispatch is not configured")
       }
-      return dispatchHandlers.action(callerNappId, params?.name, params?.payload)
+      return dispatchHandlers.action(callerNappId, params?.name ?? "", params?.payload)
     default:
       throw new Error(`unsupported method: ${method}`)
   }

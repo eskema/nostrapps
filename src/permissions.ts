@@ -10,7 +10,7 @@ const GATED_METHODS = new Set([
   "pool.setRelays"
 ])
 
-export function isGated(method) {
+export function isGated(method: string) {
   return GATED_METHODS.has(method)
 }
 
@@ -22,15 +22,15 @@ function readAll() {
   }
 }
 
-function writeAll(data) {
+function writeAll(data: Record<string, any>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
 }
 
-export function getDecision(nappId, method) {
+export function getDecision(nappId: string, method: string) {
   return readAll()[nappId]?.[method] ?? null
 }
 
-export function setDecision(nappId, method, decision) {
+export function setDecision(nappId: string, method: string, decision: string) {
   const all = readAll()
   all[nappId] ??= {}
   all[nappId][method] = decision
@@ -38,7 +38,7 @@ export function setDecision(nappId, method, decision) {
   notify()
 }
 
-export function clearDecisions(nappId) {
+export function clearDecisions(nappId: string) {
   const all = readAll()
   delete all[nappId]
   writeAll(all)
@@ -49,7 +49,7 @@ export function listDecisions() {
   return readAll()
 }
 
-export function forgetDecision(nappId, method) {
+export function forgetDecision(nappId: string, method?: string) {
   const all = readAll()
   if (!all[nappId]) return
   if (method) {
@@ -62,7 +62,7 @@ export function forgetDecision(nappId, method) {
   notify()
 }
 
-const subscribers = new Set()
+const subscribers = new Set<() => void>()
 
 function notify() {
   for (const fn of subscribers) {
@@ -72,19 +72,19 @@ function notify() {
   }
 }
 
-export function subscribe(fn) {
+export function subscribe(fn: () => void) {
   subscribers.add(fn)
   return () => subscribers.delete(fn)
 }
 
-let dialogEl
-let promptChain = Promise.resolve()
+let dialogEl: HTMLDialogElement | null
+let promptChain: Promise<void> = Promise.resolve()
 
-export function mountDialog(dialog) {
+export function mountDialog(dialog: HTMLDialogElement | null) {
   dialogEl = dialog
 }
 
-export async function requireApproval(nappId, method) {
+export async function requireApproval(nappId: string, method: string) {
   const cached = getDecision(nappId, method)
   if (cached === "allow") return true
   if (cached === "deny") return false
@@ -95,23 +95,24 @@ export async function requireApproval(nappId, method) {
   return decision === "allow-once" || decision === "allow-always"
 }
 
-function prompt(nappId, method) {
-  const next = promptChain.then(() => showOne(nappId, method))
-  promptChain = next.catch(() => {})
+function prompt(nappId: string, method: string): Promise<string> {
+  const next: Promise<string> = promptChain.then(() => showOne(nappId, method))
+  promptChain = next.catch(() => {}) as Promise<void>
   return next
 }
 
-function showOne(nappId, method) {
-  if (!dialogEl) return Promise.resolve("deny-once")
+function showOne(nappId: string, method: string): Promise<string> {
+  const el = dialogEl
+  if (!el) return Promise.resolve("deny-once")
   return new Promise(resolve => {
-    dialogEl.querySelector("[data-perm-nappid]").textContent = nappId
-    dialogEl.querySelector("[data-perm-method]").textContent = method
-    dialogEl.returnValue = ""
-    dialogEl.showModal()
+    el.querySelector("[data-perm-nappid]")!.textContent = nappId
+    el.querySelector("[data-perm-method]")!.textContent = method
+    el.returnValue = ""
+    el.showModal()
     const onClose = () => {
-      dialogEl.removeEventListener("close", onClose)
-      resolve(dialogEl.returnValue || "deny-once")
+      el.removeEventListener("close", onClose)
+      resolve(el.returnValue || "deny-once")
     }
-    dialogEl.addEventListener("close", onClose)
+    el.addEventListener("close", onClose)
   })
 }

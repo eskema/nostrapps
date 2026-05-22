@@ -1,17 +1,17 @@
-import { generateSecretKey, getPublicKey } from "@nostr/tools/pure"
-import { BunkerSigner, parseBunkerInput } from "@nostr/tools/nip46"
+import { generateSecretKey, EventTemplate } from "@nostr/tools/pure"
+import { BunkerPointer, BunkerSigner, parseBunkerInput } from "@nostr/tools/nip46"
 
 const CLIENT_SECRET_KEY = "nostrapps:nip46:client-secret"
 const BUNKER_POINTER_KEY = "nostrapps:nip46:bunker-pointer"
 
-let activeSigner = null
-let restorePromise = null
+let activeSigner: any = null
+let restorePromise: Promise<string | null> | null = null
 
-function bytesToHex(bytes) {
+function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("")
 }
 
-function hexToBytes(hex) {
+function hexToBytes(hex: string): Uint8Array {
   if (!hex || hex.length % 2 !== 0) throw new Error("Invalid hex secret")
   const out = new Uint8Array(hex.length / 2)
   for (let i = 0; i < out.length; i += 1) {
@@ -39,7 +39,7 @@ function readBunkerPointer() {
   }
 }
 
-function writeBunkerPointer(pointer) {
+function writeBunkerPointer(pointer: BunkerPointer) {
   localStorage.setItem(BUNKER_POINTER_KEY, JSON.stringify(pointer))
 }
 
@@ -50,7 +50,7 @@ export function hasStoredBunker() {
 // Connect from a bunker URI. We only accept bunker:// URIs here — NIP-05
 // (name@domain) shortcuts route through a third-party HTTPS lookup that
 // could hand back an attacker's bunker pubkey if compromised.
-export async function connectBunkerInput(input) {
+export async function connectBunkerInput(input: string) {
   const trimmed = (input || "").trim()
   if (!trimmed.startsWith("bunker://")) {
     throw new Error(
@@ -113,22 +113,17 @@ export const nip46Signer = {
   async getPublicKey() {
     return (await active()).getPublicKey()
   },
-  async signEvent(evt) {
+  async signEvent(evt: EventTemplate) {
     return (await active()).signEvent(evt)
   },
-  async getRelays() {
-    const a = await active()
-    if (a.getRelays) return a.getRelays()
-    return Object.fromEntries((a.bp?.relays ?? []).map(r => [r, { read: true, write: true }]))
-  },
   nip04: {
-    async encrypt(pubkey, plaintext) {
+    async encrypt(pubkey: string, plaintext: string) {
       const a = await active()
       return a.nip04?.encrypt
         ? a.nip04.encrypt(pubkey, plaintext)
         : a.nip04Encrypt(pubkey, plaintext)
     },
-    async decrypt(pubkey, ciphertext) {
+    async decrypt(pubkey: string, ciphertext: string) {
       const a = await active()
       return a.nip04?.decrypt
         ? a.nip04.decrypt(pubkey, ciphertext)
@@ -136,13 +131,13 @@ export const nip46Signer = {
     }
   },
   nip44: {
-    async encrypt(pubkey, plaintext) {
+    async encrypt(pubkey: string, plaintext: string) {
       const a = await active()
       return a.nip44?.encrypt
         ? a.nip44.encrypt(pubkey, plaintext)
         : a.nip44Encrypt(pubkey, plaintext)
     },
-    async decrypt(pubkey, ciphertext) {
+    async decrypt(pubkey: string, ciphertext: string) {
       const a = await active()
       return a.nip44?.decrypt
         ? a.nip44.decrypt(pubkey, ciphertext)

@@ -26,6 +26,7 @@ import { mountDialog, clearDecisions } from "./permissions.js"
 import * as persist from "./persistence.js"
 import * as instanceStore from "./storage/instance.js"
 import * as nostrdb from "./store.js"
+import type { SuggestionItem, NsiteResult, AppInfo, NappWindowState } from "./types.js"
 import {
   registry as systemRegistry,
   slashCommands,
@@ -35,14 +36,15 @@ import {
   actionList
 } from "./system-napps/index.js"
 import * as appInfo from "./system-napps/app-info.js"
+import { Filter } from "@nostr/tools/filter"
 
-const stage = document.getElementById("stage")
-const form = document.getElementById("launch-form")
-const input = document.getElementById("nsite-input")
-const suggestions = document.getElementById("suggestions")
-const localFolderInput = document.getElementById("local-folder")
-const tileBtn = document.getElementById("tile-windows")
-const packToggleBtn = document.getElementById("pack-toggle")
+const stage = document.getElementById("stage")!
+const form = document.getElementById("launch-form")!
+const input = document.getElementById("nsite-input") as HTMLInputElement
+const suggestions = document.getElementById("suggestions")!
+const localFolderInput = document.getElementById("local-folder") as HTMLInputElement
+const tileBtn = document.getElementById("tile-windows")!
+const packToggleBtn = document.getElementById("pack-toggle")!
 
 tileBtn?.addEventListener("click", () => tileWindows(stage))
 
@@ -97,12 +99,12 @@ packToggleBtn?.addEventListener("click", () => {
 
 applyPackMode()
 
-mountDialog(document.getElementById("permission-prompt"))
+mountDialog(document.getElementById("permission-prompt") as HTMLDialogElement | null)
 
 // ─── theme store ────────────────────────────────────────────────
 const THEME_KEY = "nostrapps:theme"
-const themeSubs = new Set()
-function applyTheme(choice) {
+const themeSubs = new Set<(choice: string) => void>()
+function applyTheme(choice: string) {
   if (choice === "light" || choice === "dark") {
     document.documentElement.dataset.theme = choice
   } else {
@@ -113,13 +115,13 @@ const theme = {
   get() {
     return localStorage.getItem(THEME_KEY) || "auto"
   },
-  set(choice) {
+  set(choice: string) {
     if (choice === "auto") localStorage.removeItem(THEME_KEY)
     else localStorage.setItem(THEME_KEY, choice)
     applyTheme(choice)
     for (const fn of themeSubs) fn(choice)
   },
-  subscribe(fn) {
+  subscribe(fn: (choice: string) => void) {
     themeSubs.add(fn)
     return () => themeSubs.delete(fn)
   }
@@ -129,9 +131,9 @@ applyTheme(theme.get())
 // ─── log bus ────────────────────────────────────────────────────
 // Each entry is `{ at: msTimestamp, msg: string }`. Consumers (currently
 // /logs) format the timestamp how they want.
-const logHistory = []
-const logSubs = new Set()
-function setStatus(msg) {
+const logHistory: Array<{ at: number; msg: string }> = []
+const logSubs = new Set<() => void>()
+function setStatus(msg: string) {
   logHistory.push({ at: Date.now(), msg })
   for (const fn of logSubs) {
     try {
@@ -141,13 +143,13 @@ function setStatus(msg) {
 }
 const logs = {
   history: () => logHistory.slice(),
-  subscribe(fn) {
+  subscribe(fn: () => void) {
     logSubs.add(fn)
     return () => logSubs.delete(fn)
   }
 }
 
-const appSubs = new Set()
+const appSubs = new Set<() => void>()
 function notifyAppsChanged() {
   for (const fn of appSubs) {
     try {
@@ -158,7 +160,7 @@ function notifyAppsChanged() {
 
 const apps = {
   list() {
-    return persist.readKnown().map(nappId => ({
+    return persist.readKnown().map((nappId: string) => ({
       nappId,
       name: friendlyNameFor(nappId),
       handlers: persist.getHandlers(nappId),
@@ -166,33 +168,33 @@ const apps = {
       openCount: persist.readOpen().filter(s => s.nappId === nappId && !s.closed).length
     }))
   },
-  subscribe(fn) {
+  subscribe(fn: () => void) {
     appSubs.add(fn)
     return () => appSubs.delete(fn)
   }
 }
 
 // ─── account actions ────────────────────────────────────────────
-async function connect() {
+async function connect(): Promise<void> {
   try {
     if (!window.nostr) throw new Error("No NIP-07 extension detected")
     setStatus("Requesting pubkey from extension…")
     const pk = await window.nostr.getPublicKey()
     account.setAccount(pk, "nip07")
     setStatus(`Connected as ${pk.slice(0, 8)}…`)
-  } catch (err) {
+  } catch (err: any) {
     setStatus(`Error: ${err.message}`)
     throw err
   }
 }
 
-async function connectBunker(uri) {
+async function connectBunker(uri: string): Promise<void> {
   try {
     setStatus("Connecting to bunker…")
     const pk = await connectBunkerInput(uri)
     account.setAccount(pk, "nip46")
     setStatus(`Connected as ${pk.slice(0, 8)}… (bunker)`)
-  } catch (err) {
+  } catch (err: any) {
     setStatus(`Error: ${err.message}`)
     throw err
   }
@@ -201,7 +203,7 @@ async function connectBunker(uri) {
 // One-shot Google OAuth → Pomegranate sharding → bunker handoff. End state
 // is identical to a plain `connect with bunker` paste, but the user never
 // sees a bunker URI: we mint one against our hardcoded central+operators.
-async function connectGoogle() {
+async function connectGoogle(): Promise<void> {
   try {
     setStatus("Logging in with Google…")
     const uri = await googleLoginAndCreateBunker({ onProgress: setStatus })
@@ -209,13 +211,13 @@ async function connectGoogle() {
     const pk = await connectBunkerInput(uri)
     account.setAccount(pk, "nip46")
     setStatus(`Connected as ${pk.slice(0, 8)}… (bunker)`)
-  } catch (err) {
+  } catch (err: any) {
     setStatus(`Error: ${err.message}`)
     throw err
   }
 }
 
-async function disconnect() {
+async function disconnect(): Promise<void> {
   if (account.getType() === "nip46") {
     try {
       await disconnectBunkerSigner()
@@ -225,9 +227,9 @@ async function disconnect() {
   setStatus("Disconnected")
 }
 
-const uninstallingNapps = new Set()
+const uninstallingNapps = new Set<string>()
 
-async function finalizeNappRemoval(nappId, actionLabel = "Uninstalling") {
+async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling") {
   const petnameKeys = Object.entries(persist.readPetnames())
     .filter(([, mapped]) => mapped === nappId)
     .map(([petname]) => petname)
@@ -242,7 +244,7 @@ async function finalizeNappRemoval(nappId, actionLabel = "Uninstalling") {
   try {
     await wipe(nappId)
     setStatus(`${actionLabel === "Wiping" ? "Destroyed" : "Uninstalled"} ${nappId}`)
-  } catch (err) {
+  } catch (err: any) {
     setStatus(`Wipe error: ${err.message}`)
     throw err
   }
@@ -255,7 +257,7 @@ async function factoryReset() {
   setStatus("Starting full reset…")
 
   // 1. Wipe each napp origin we've ever touched.
-  const allNappIds = new Set()
+  const allNappIds = new Set<string>()
   for (const id of persist.readKnown()) allNappIds.add(id)
   for (const id of persist.readInstallLog()) allNappIds.add(id)
   for (const s of persist.readOpen()) {
@@ -265,7 +267,7 @@ async function factoryReset() {
     setStatus(`Wiping ${nappId}…`)
     try {
       await wipe(nappId)
-    } catch (err) {
+    } catch (err: any) {
       console.warn("wipe failed for", nappId, err)
     }
   }
@@ -285,12 +287,12 @@ async function factoryReset() {
   // 3. Drop every IndexedDB on the launcher origin.
   setStatus("Clearing IndexedDB…")
   try {
-    if (indexedDB.databases) {
-      const dbs = await indexedDB.databases()
+    if (typeof (indexedDB as any).databases === "function") {
+      const dbs: any[] = await (indexedDB as any).databases()
       await Promise.all(
         dbs.map(
-          d =>
-            new Promise(resolve => {
+          (d: any) =>
+            new Promise<void>(resolve => {
               if (!d.name) return resolve()
               const req = indexedDB.deleteDatabase(d.name)
               req.onsuccess = () => resolve()
@@ -342,7 +344,7 @@ function loadFolder() {
   localFolderInput.click()
 }
 
-async function uninstallNapp(nappId) {
+async function uninstallNapp(nappId: string) {
   const wasKnown = persist.readKnown().includes(nappId)
   uninstallingNapps.add(nappId)
 
@@ -369,7 +371,12 @@ async function uninstallNapp(nappId) {
   }
 }
 
-function manifestInfoFromEvent(evt) {
+function manifestInfoFromEvent(
+  evt:
+    | { pubkey: string; kind: number; tags: string[][]; id: string; created_at: number }
+    | null
+    | undefined
+) {
   if (!evt) return null
   return {
     pubkey: evt.pubkey,
@@ -382,7 +389,7 @@ function manifestInfoFromEvent(evt) {
 
 // NIP-5B: read `handle` (kind → `view:{kind}`) and `action` (named) capability
 // tags off the listing event so the launcher can route inter-app calls.
-function capabilitiesFromListing(listing) {
+function capabilitiesFromListing(listing: { tags: string[][] } | null | undefined): string[] {
   if (!listing) return []
   const actions = []
   for (const t of listing.tags) {
@@ -396,17 +403,21 @@ function capabilitiesFromListing(listing) {
 // Update flow: re-fetch the manifest + files at the same target, swap them
 // into the napp's existing origin storage (no new window), persist the new
 // version, and force any open iframes to reload so they pick up new files.
-async function updateNapp(target) {
+async function updateNapp(target: { pubkey: string; kind?: number; dTag?: string }) {
   if (!target?.pubkey) throw new Error("updateNapp: missing pubkey")
-  console.debug("[launch] updateNapp", { pubkey: target.pubkey, kind: target.kind, dTag: target.dTag })
+  console.debug("[launch] updateNapp", {
+    pubkey: target.pubkey,
+    kind: target.kind,
+    dTag: target.dTag
+  })
   setStatus(`Checking update…`)
-  const result = await fetchNsite(target, setStatus)
-  const { nappId, files, title, manifest } = result
+  const updateResult = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
+  const { nappId, files, title, manifest, listing } = updateResult
   const label = title || nappId
   setStatus(`Updating ${label}…`)
   await reinstallFiles(nappId, files, setStatus, label)
   if (manifest) persist.setInstalledManifest(nappId, manifestInfoFromEvent(manifest))
-  persist.setHandlers(nappId, capabilitiesFromListing(result.listing))
+  persist.setHandlers(nappId, capabilitiesFromListing(listing))
   const reloaded = reloadIframesByNappId(nappId)
   setStatus(
     `Updated ${label}` +
@@ -417,7 +428,7 @@ async function updateNapp(target) {
 
 // ─── inter-app calling (actions) ────────────────────────────────
 
-async function runNappAction(callerNappId, name, payload) {
+async function runNappAction(callerNappId: string, name: string, payload: unknown) {
   if (typeof name !== "string" || !name) {
     throw new Error("napp.action: action name is required")
   }
@@ -433,7 +444,11 @@ async function runNappAction(callerNappId, name, payload) {
   })
 }
 
-async function pickHandler(callerNappId, actionName, candidates) {
+async function pickHandler(
+  callerNappId: string,
+  actionName: string,
+  candidates: string[]
+): Promise<string> {
   if (candidates.length === 1) {
     persist.setHandlerPref(callerNappId, "action", actionName, candidates[0])
     return candidates[0]
@@ -446,8 +461,8 @@ async function pickHandler(callerNappId, actionName, candidates) {
 }
 
 // Promise-based modal that asks the user to pick one of `candidates`.
-function showHandlerPicker(actionName, candidates) {
-  return new Promise((resolve, reject) => {
+function showHandlerPicker(actionName: string, candidates: string[]): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     const dialog = document.createElement("dialog")
     dialog.className = "handler-picker"
     const heading = `Pick an app for "${actionName}"`
@@ -477,22 +492,25 @@ function showHandlerPicker(actionName, candidates) {
       dialog.remove()
       if (!settled) reject(new Error("Picker dismissed"))
     })
-    dialog.querySelector(".handler-picker-cancel").addEventListener("click", () => {
-      dialog.close()
-    })
-    for (const btn of dialog.querySelectorAll("[data-pick]")) {
+    ;(dialog.querySelector(".handler-picker-cancel") as HTMLElement).addEventListener(
+      "click",
+      () => {
+        dialog.close()
+      }
+    )
+    for (const btn of dialog.querySelectorAll<HTMLElement>("[data-pick]")) {
       btn.addEventListener("click", () => {
         settled = true
         const pick = btn.dataset.pick
         dialog.close()
-        resolve(pick)
+        resolve(pick || "")
       })
     }
     dialog.showModal()
   })
 }
 
-function escapeHtml(s) {
+function escapeHtml(s: string): string {
   return String(s).replace(
     /[&<>"']/g,
     c =>
@@ -502,13 +520,13 @@ function escapeHtml(s) {
         ">": "&gt;",
         '"': "&quot;",
         "'": "&#39;"
-      })[c]
+      })[c] as string
   )
 }
 
 // Make sure a window for nappId is open and focused. Tries (in order):
 // already-open, closed-session-reopen, fresh launch from installed manifest.
-async function ensureNappOpen(nappId) {
+async function ensureNappOpen(nappId: string) {
   console.debug("[launch] ensureNappOpen", { nappId })
   const existing = findOpenWindowByNappId(nappId)
   if (existing) {
@@ -519,7 +537,10 @@ async function ensureNappOpen(nappId) {
 
   const closed = persist.readOpen().find(s => s.nappId === nappId && s.closed)
   if (closed) {
-    console.debug("[launch] ensureNappOpen: restoring closed session", { nappId, instanceId: closed.instanceId })
+    console.debug("[launch] ensureNappOpen: restoring closed session", {
+      nappId,
+      instanceId: closed.instanceId
+    })
     const win = restore(stage, closed.nappId, currentSigner, {
       ...makeLaunchOpts(),
       instanceId: closed.instanceId,
@@ -545,16 +566,17 @@ async function ensureNappOpen(nappId) {
       kind: info.kind,
       dTag: info.dTag || undefined
     }
-    const result = await fetchNsite(target, setStatus)
-    const petname = result.title || nappId
-    const win = await launch(stage, result.nappId, result.files, currentSigner, {
+    const result2 = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
+    const { listing } = result2
+    const petname = result2.title || nappId
+    const win = await launch(stage, result2.nappId, result2.files, currentSigner, {
       ...makeLaunchOpts(),
       petname
     })
-    trackOpened(result.nappId, win)
-    if (result.manifest)
-      persist.setInstalledManifest(result.nappId, manifestInfoFromEvent(result.manifest))
-    persist.setHandlers(result.nappId, capabilitiesFromListing(result.listing))
+    trackOpened(result2.nappId, win)
+    if (result2.manifest)
+      persist.setInstalledManifest(result2.nappId, manifestInfoFromEvent(result2.manifest))
+    persist.setHandlers(result2.nappId, capabilitiesFromListing(listing))
     win.focus()
     return win
   }
@@ -563,7 +585,7 @@ async function ensureNappOpen(nappId) {
   throw new Error(`Cannot open ${nappId}: no install info on file`)
 }
 
-function friendlyNameFor(nappId) {
+function friendlyNameFor(nappId: string): string {
   return petnameForNappId(nappId, persist.readPetnames(), persist.readOpen()) || nappId
 }
 
@@ -572,7 +594,7 @@ const systemCtx = {
   account,
   apps,
   database: {
-    query: filter => nostrdb.query(filter)
+    query: (filter: Filter) => nostrdb.query(filter)
   },
   theme,
   logs,
@@ -584,19 +606,19 @@ const systemCtx = {
   loadFolder,
   setStatus,
   launchSystemNapp,
-  launchAppInfo: data => launchAppInfo(data),
+  launchAppInfo: (data: AppInfo) => launchAppInfo(data),
   // Use a thunk so the reference resolves to the function declared later.
-  launchFromInput: raw => launchFromInput(raw),
-  isInstalled: nappId => persist.readKnown().includes(nappId),
-  wasInstalled: nappId => persist.readInstallLog().includes(nappId),
-  uninstall: nappId => uninstallNapp(nappId),
-  installedManifest: nappId => persist.getInstalledManifest(nappId),
-  update: target => updateNapp(target)
+  launchFromInput: (raw: string) => launchFromInput(raw),
+  isInstalled: (nappId: string) => persist.readKnown().includes(nappId),
+  wasInstalled: (nappId: string) => persist.readInstallLog().includes(nappId),
+  uninstall: (nappId: string) => uninstallNapp(nappId),
+  installedManifest: (nappId: string) => persist.getInstalledManifest(nappId),
+  update: (target: { pubkey: string; kind?: number; dTag?: string }) => updateNapp(target)
 }
 
-function makeSystemLaunchOpts(sysId) {
+function makeSystemLaunchOpts(sysId: string) {
   return {
-    onStateChange: state => {
+    onStateChange: (state: NappWindowState) => {
       persist.updateOpen(state.instanceId, {
         ...state,
         system: true,
@@ -606,21 +628,21 @@ function makeSystemLaunchOpts(sysId) {
       maybeRepack()
     },
     onReorder: persistDomOrder,
-    onClose: instanceId => {
+    onClose: (instanceId: string) => {
       persist.setOpenClosed(instanceId, true)
       refreshSuggestions()
     }
   }
 }
 
-function launchSystemNapp(sysId, { initial } = {}) {
+function launchSystemNapp(sysId: string, { initial }: { initial?: unknown } = {}) {
   const def = systemRegistry[sysId]
   if (!def) throw new Error(`Unknown system napp: ${sysId}`)
   console.debug("[launch] launchSystemNapp", { sysId, title: def.title, hasInitial: !!initial })
   const win = launchSystem(stage, sysId, def, systemCtx, {
     ...makeSystemLaunchOpts(sysId),
-    initial
-  })
+    initial: initial as any
+  })!
   bringToTopOfStack(win.root)
   // Persist the entry now (with current zIndex/position) so it can be
   // restored on the next reload even if the user never interacts with it.
@@ -637,12 +659,12 @@ function launchSystemNapp(sysId, { initial } = {}) {
   return win
 }
 
-function launchAppInfo(data) {
+function launchAppInfo(data: AppInfo) {
   console.debug("[launch] launchAppInfo", { nappId: data.nappId, name: data.name })
   const win = launchSystem(stage, "app-info", appInfo, systemCtx, {
     ...makeSystemLaunchOpts("app-info"),
     initial: { data }
-  })
+  })!
   bringToTopOfStack(win.root)
   persist.updateOpen(win.getState().instanceId, {
     ...win.getState(),
@@ -656,9 +678,9 @@ function launchAppInfo(data) {
 }
 
 // ─── suggestions ────────────────────────────────────────────────
-function buildSuggestionItems() {
+function buildSuggestionItems(): SuggestionItem[] {
   const seen = new Set()
-  const out = []
+  const out: SuggestionItem[] = []
   const sessionNappIds = new Set()
 
   // System napps + slash actions first — discoverability for slash commands
@@ -702,7 +724,7 @@ function buildSuggestionItems() {
     const key = `name:${petname}`
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ source: "name", nappId, petname })
+    out.push({ source: "name", nappId: nappId as string, petname })
   }
 
   for (const v of persist.readKnown()) {
@@ -719,7 +741,11 @@ function buildSuggestionItems() {
   return out
 }
 
-function petnameForNappId(nappId, petnamesMap, sessions) {
+function petnameForNappId(
+  nappId: string,
+  petnamesMap: Record<string, string>,
+  sessions: any[]
+): string | null {
   // Prefer a petname from any session for this nappId — that's typically the
   // friendliest name (manifest title we set at launch).
   for (const s of sessions) {
@@ -737,14 +763,14 @@ function petnameForNappId(nappId, petnamesMap, sessions) {
   return candidates.find(p => !looksLikeIdentifier(p)) || candidates[0]
 }
 
-function looksLikeIdentifier(s) {
+function looksLikeIdentifier(s: string): boolean {
   if (/^[0-9a-f]{64}$/i.test(s)) return true
   if (/^(npub1|nprofile1|naddr1)[0-9a-z]+$/i.test(s)) return true
   if (/^(?:https?:\/\/)?[a-z0-9][a-z0-9-]*\.[a-z0-9.-]+$/i.test(s)) return true
   return false
 }
 
-function itemSearchText(item) {
+function itemSearchText(item: SuggestionItem): string {
   return [
     item.nappId,
     item.instanceId,
@@ -759,12 +785,12 @@ function itemSearchText(item) {
     .toLowerCase()
 }
 
-function itemPreferredValue(item) {
+function itemPreferredValue(item: SuggestionItem): string {
   return item.slash || item.petname || item.nappId || item.raw || ""
 }
 
 function renderSuggestions() {
-  const filter = input.value.trim().toLowerCase()
+  const filter = input!.value.trim().toLowerCase()
   const items = buildSuggestionItems().filter(
     item => !filter || itemSearchText(item).includes(filter)
   )
@@ -795,11 +821,11 @@ function renderSuggestions() {
   }
 }
 
-function itemSortLabel(item) {
+function itemSortLabel(item: SuggestionItem): string {
   return (item.petname || item.nappId || item.raw || "").toLowerCase()
 }
 
-function renderSuggestionRow(item) {
+function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
   const row = document.createElement("div")
   row.className = "suggestion"
 
@@ -809,24 +835,24 @@ function renderSuggestionRow(item) {
   if (item.systemId || item.actionId) {
     const cmd = document.createElement("span")
     cmd.className = "sugg-slash"
-    cmd.textContent = item.slash
+    cmd.textContent = item.slash || null
     main.appendChild(cmd)
   } else if (item.raw) {
     const raw = document.createElement("span")
     raw.className = "sugg-raw"
-    raw.textContent = item.raw
+    raw.textContent = item.raw || null
     main.appendChild(raw)
   } else {
     // Friendly name first, then the pubkey-id, then the instance id for sessions.
     if (item.petname) {
       const pet = document.createElement("span")
       pet.className = "sugg-pet"
-      pet.textContent = item.petname
+      pet.textContent = item.petname ?? null
       main.appendChild(pet)
     }
     const napp = document.createElement("span")
     napp.className = "sugg-napp"
-    napp.textContent = item.nappId
+    napp.textContent = item.nappId || null
     main.appendChild(napp)
     if (item.instanceId) {
       const id = document.createElement("span")
@@ -841,7 +867,7 @@ function renderSuggestionRow(item) {
   source.textContent = item.source
   row.append(main, source)
 
-  row.addEventListener("mousedown", async e => {
+  row.addEventListener("mousedown", async (e: MouseEvent) => {
     e.preventDefault()
     const label = itemPreferredValue(item)
     hideSuggestions()
@@ -859,8 +885,8 @@ function renderSuggestionRow(item) {
         await launchFromInput(item.raw)
       }
       setStatus(`Launched ${label}`)
-      input.value = ""
-    } catch (err) {
+      input!.value = ""
+    } catch (err: any) {
       setStatus(`Error: ${err.message}`)
       console.error(err)
     }
@@ -868,7 +894,7 @@ function renderSuggestionRow(item) {
   return row
 }
 
-async function launchFresh(nappId, petname) {
+async function launchFresh(nappId: string, petname: string) {
   console.debug("[launch] launchFresh", { nappId, petname })
   const win = restore(stage, nappId, currentSigner, {
     ...makeLaunchOpts(),
@@ -878,10 +904,15 @@ async function launchFresh(nappId, petname) {
   win.focus()
 }
 
-async function launchSession(instanceId) {
+async function launchSession(instanceId: string) {
   const session = persist.readOpen().find(s => s.instanceId === instanceId)
   if (!session) throw new Error("Session not found")
-  console.debug("[launch] launchSession", { instanceId, nappId: session.nappId, petname: session.petname, closed: session.closed })
+  console.debug("[launch] launchSession", {
+    instanceId,
+    nappId: session.nappId,
+    petname: session.petname,
+    closed: session.closed
+  })
   if (!session.closed && focusInstance(instanceId)) return
   const win = restore(stage, session.nappId, currentSigner, {
     ...makeLaunchOpts(),
@@ -899,6 +930,7 @@ async function launchSession(instanceId) {
   win.focus()
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function showSuggestions() {
   renderSuggestions()
   suggestions.hidden = false
@@ -908,15 +940,15 @@ function hideSuggestions() {
   suggestions.hidden = true
 }
 
-input.addEventListener("focus", showSuggestions)
-input.addEventListener("input", () => {
+input!.addEventListener("focus", showSuggestions)
+input!.addEventListener("input", () => {
   if (!suggestions.hidden) renderSuggestions()
   else showSuggestions()
 })
-input.addEventListener("blur", () => {
+input!.addEventListener("blur", () => {
   setTimeout(hideSuggestions, 150)
 })
-input.addEventListener("keydown", e => {
+input!.addEventListener("keydown", (e: KeyboardEvent) => {
   if (e.key === "Escape") hideSuggestions()
 })
 
@@ -925,15 +957,19 @@ function refreshSuggestions() {
   notifyAppsChanged()
 }
 
-function bringToTopOfStack(root) {
+function bringToTopOfStack(root: HTMLElement) {
   if (!root || !stage.contains(root)) return
   if (stage.firstElementChild === root) return
   stage.insertBefore(root, stage.firstElementChild)
 }
 
-function trackOpened(nappId, win) {
+function trackOpened(nappId: string, win: any) {
   const state = win.getState()
-  console.debug("[launch] trackOpened", { nappId, instanceId: state.instanceId, petname: state.petname })
+  console.debug("[launch] trackOpened", {
+    nappId,
+    instanceId: state.instanceId,
+    petname: state.petname
+  })
   persist.rememberKnown(nappId)
   bringToTopOfStack(win.root)
   persist.updateOpen(state.instanceId, state)
@@ -943,12 +979,14 @@ function trackOpened(nappId, win) {
 
 function persistDomOrder() {
   const ordered = Array.from(stage.children)
-    .filter(el => el.classList?.contains("napp-window"))
-    .map(el => el.dataset.instanceId)
-    .filter(Boolean)
+    .filter(
+      (el): el is HTMLElement => el instanceof HTMLElement && el.classList?.contains("napp-window")
+    )
+    .map(el => (el as HTMLElement).dataset.instanceId)
+    .filter((id): id is string => typeof id === "string")
   if (ordered.length === 0) return
-  const open = persist.readOpen()
-  const byId = new Map(open.map(s => [s.instanceId, s]))
+  const open2 = persist.readOpen()
+  const byId = new Map<string, any>(open2.map((s: any) => [s.instanceId, s]))
   const nextOrder = []
   const used = new Set()
   for (const id of ordered) {
@@ -959,7 +997,7 @@ function persistDomOrder() {
       used.add(id)
     }
   }
-  for (const s of open) {
+  for (const s of open2) {
     if (!used.has(s.instanceId)) nextOrder.push(s)
   }
   persist.writeOpen(nextOrder)
@@ -969,9 +1007,9 @@ function makeLaunchOpts() {
   return {
     onProgress: setStatus,
     dispatchHandlers: {
-      action: (callerNappId, name, payload) => runNappAction(callerNappId, name, payload)
+      action: (callerNappId: string, name: string, payload: unknown) => runNappAction(callerNappId, name, payload)
     },
-    onStateChange: state => {
+    onStateChange: (state: NappWindowState) => {
       persist.updateOpen(state.instanceId, state)
       if (state.petname && state.petname !== state.nappId) {
         persist.setPetname(state.petname, state.nappId)
@@ -980,11 +1018,11 @@ function makeLaunchOpts() {
       maybeRepack()
     },
     onReorder: persistDomOrder,
-    onClose: instanceId => {
+    onClose: (instanceId: string) => {
       persist.setOpenClosed(instanceId, true)
       refreshSuggestions()
     },
-    onDestroy: instanceId => {
+    onDestroy: (instanceId: string) => {
       const entry = persist.readOpen().find(s => s.instanceId === instanceId)
       persist.removeOpen(instanceId)
       instanceStore.clear(instanceId).catch(() => {})
@@ -1004,7 +1042,9 @@ function makeLaunchOpts() {
 }
 
 async function restoreAll() {
-  console.debug("[launch] restoreAll — restoring", { sessionCount: persist.readActiveSessions().length })
+  console.debug("[launch] restoreAll — restoring", {
+    sessionCount: persist.readActiveSessions().length
+  })
   const open = persist.readActiveSessions()
   for (const state of open) {
     try {
@@ -1015,7 +1055,7 @@ async function restoreAll() {
           ...makeSystemLaunchOpts(state.systemId),
           instanceId: state.instanceId,
           initial: state
-        })
+        })!
         persist.updateOpen(state.instanceId, {
           ...win.getState(),
           panelState: win.getSystemPanelState?.() || null,
@@ -1031,7 +1071,7 @@ async function restoreAll() {
         initial: state
       })
       persist.updateOpen(state.instanceId, win.getState())
-    } catch (err) {
+    } catch (err: any) {
       setStatus(`Failed to restore ${state.nappId}: ${err.message}`)
     }
   }
@@ -1045,7 +1085,7 @@ function maybeBootstrap() {
   for (const def of systemList) {
     try {
       launchSystemNapp(def.id)
-    } catch (err) {
+    } catch (err: any) {
       console.warn(`bootstrap ${def.id}:`, err)
     }
   }
@@ -1067,7 +1107,7 @@ async function init() {
 }
 init()
 
-async function launchFromInput(raw) {
+async function launchFromInput(raw: string): Promise<void> {
   console.debug("[launch] launchFromInput", { raw })
 
   // Slash commands → system napps or one-shot actions
@@ -1092,12 +1132,20 @@ async function launchFromInput(raw) {
   const existing = persist.findSessionByPetname(raw)
   if (existing) {
     if (!existing.closed && focusInstance(existing.instanceId)) {
-      console.debug("[launch] session already open, focused", { raw, instanceId: existing.instanceId })
+      console.debug("[launch] session already open, focused", {
+        raw,
+        instanceId: existing.instanceId
+      })
       setStatus(`${raw} is already open`)
       refreshSuggestions()
       return
     }
-    console.debug("[launch] restoring session by petname", { raw, nappId: existing.nappId, instanceId: existing.instanceId, petname: existing.petname })
+    console.debug("[launch] restoring session by petname", {
+      raw,
+      nappId: existing.nappId,
+      instanceId: existing.instanceId,
+      petname: existing.petname
+    })
     const win = restore(stage, existing.nappId, currentSigner, {
       ...makeLaunchOpts(),
       instanceId: existing.instanceId,
@@ -1117,7 +1165,10 @@ async function launchFromInput(raw) {
 
   const petNappId = persist.getNappIdForPetname(raw)
   if (petNappId) {
-    console.debug("[launch] petname maps to known nappId, restoring fresh", { raw, nappId: petNappId })
+    console.debug("[launch] petname maps to known nappId, restoring fresh", {
+      raw,
+      nappId: petNappId
+    })
     const win = restore(stage, petNappId, currentSigner, {
       ...makeLaunchOpts(),
       petname: raw
@@ -1147,8 +1198,15 @@ async function launchFromInput(raw) {
       `Couldn't resolve "${raw}" — try a pubkey, npub, nprofile, naddr, or nsite hostname`
     )
   }
-  const { nappId, files, title, manifest, listing } = await fetchNsite(resolved, setStatus)
-  console.debug("[launch] nsite fetched", { nappId, title, fileCount: files.length, hasManifest: !!manifest, hasListing: !!listing })
+  const result3 = (await fetchNsite(resolved, setStatus)) as unknown as NsiteResult
+  const { nappId, files, title, manifest, listing } = result3
+  console.debug("[launch] nsite fetched", {
+    nappId,
+    title,
+    fileCount: files.length,
+    hasManifest: !!manifest,
+    hasListing: !!listing
+  })
   const petname = title || raw
   console.debug("[launch] launching napp with opts", { nappId, petname })
   const win = await launch(stage, nappId, files, currentSigner, {
@@ -1163,27 +1221,27 @@ async function launchFromInput(raw) {
   win.focus()
 }
 
-form.addEventListener("submit", async e => {
+form.addEventListener("submit", async (e: SubmitEvent) => {
   e.preventDefault()
   hideSuggestions()
-  const raw = input.value.trim()
+  const raw = input!.value.trim()
   if (!raw) return
   try {
     await launchFromInput(raw)
     setStatus(`Launched ${raw}`)
-    input.value = ""
-  } catch (err) {
+    input!.value = ""
+  } catch (err: any) {
     setStatus(`Error: ${err.message}`)
     console.error(err)
   }
 })
 
-localFolderInput.addEventListener("change", async e => {
-  const inputFiles = e.target.files
+localFolderInput.addEventListener("change", async (e: Event) => {
+  const inputFiles = (e.target as HTMLInputElement).files
   if (!inputFiles || inputFiles.length === 0) return
   console.debug("[launch] local folder selected", { fileCount: inputFiles.length })
   try {
-    const { nappId, files, metadata } = await collectLocalFolder(inputFiles, setStatus)
+    const { nappId, files, metadata } = await collectLocalFolder(inputFiles!, setStatus)
     console.debug("[launch] local folder collected", { nappId, fileCount: files.length, metadata })
     const petname = metadata?.name || nappId
     const win = await launch(stage, nappId, files, currentSigner, {
@@ -1194,10 +1252,10 @@ localFolderInput.addEventListener("change", async e => {
     if (metadata?.actions?.length) persist.setHandlers(nappId, metadata.actions)
     win.focus()
     setStatus(`Launched ${petname}`)
-  } catch (err) {
+  } catch (err: any) {
     setStatus(`Error: ${err.message}`)
     console.error(err)
   } finally {
-    e.target.value = ""
+    ;(e.target as HTMLInputElement).value = ""
   }
 })

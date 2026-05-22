@@ -2,9 +2,11 @@ export const id = "apps"
 export const title = "Apps"
 export const slash = "/apps"
 
-export function mount(container, ctx) {
+import type { SystemCtx } from "../types.js"
+
+export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `<div class="apps-list"></div>`
-  const listEl = container.querySelector(".apps-list")
+  const listEl = container.querySelector(".apps-list")!
 
   function render() {
     const apps = ctx.apps.list()
@@ -21,8 +23,8 @@ export function mount(container, ctx) {
     for (const app of apps) {
       const card = document.createElement("div")
       card.className = "apps-card"
-      card.addEventListener("mouseup", e => {
-        if (e.target.closest("button")) return
+      card.addEventListener("mouseup", (e: MouseEvent) => {
+        if ((e.target as HTMLElement).closest("button")) return
         ctx.launchAppInfo(app)
       })
 
@@ -92,7 +94,7 @@ export function mount(container, ctx) {
           ctx.setStatus?.(`Apps: deleting ${app.nappId}…`)
           await ctx.uninstall(app.nappId)
           ctx.setStatus?.(`Apps: delete finished for ${app.nappId}`)
-        } catch (err) {
+        } catch (err: any) {
           ctx.setStatus?.(`Apps: delete failed for ${app.nappId}: ${err?.message || String(err)}`)
           del.disabled = false
           del.textContent = "error"
@@ -107,7 +109,7 @@ export function mount(container, ctx) {
 
       head.append(titles, actions)
       card.appendChild(head)
-      listEl.appendChild(card)
+      listEl!.appendChild(card)
     }
   }
 

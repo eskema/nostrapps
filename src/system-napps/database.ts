@@ -9,7 +9,9 @@ const VARIADIC_FIELDS = [
   { key: "tags", label: "tags", placeholder: "e=value or #e=value", tagPairs: true }
 ]
 
-export function mount(container, ctx) {
+import type { SystemCtx } from "../types.js"
+
+export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
     <div class="db-panel">
       <form class="db-form">
@@ -37,31 +39,31 @@ export function mount(container, ctx) {
     </div>
   `
 
-  const form = container.querySelector(".db-form")
-  const variadicEl = container.querySelector(".db-variadic-fields")
-  const statusEl = container.querySelector(".db-status")
-  const resultsEl = container.querySelector(".db-results")
+  const form = container.querySelector(".db-form") as HTMLFormElement
+  const variadicEl = container.querySelector(".db-variadic-fields") as HTMLElement
+  const statusEl = container.querySelector(".db-status") as HTMLElement
+  const resultsEl = container.querySelector(".db-results") as HTMLElement
 
-  function setStatus(msg) {
+  function setStatus(msg: string | undefined) {
     statusEl.textContent = msg || ""
     statusEl.hidden = !msg
   }
 
-  function syncVariadicRows(wrapper) {
+  function syncVariadicRows(wrapper: HTMLElement) {
     const inputs = [...wrapper.querySelectorAll("input")]
     while (inputs.length < 1) {
       wrapper.appendChild(
-        makeVariadicInput(wrapper, wrapper.dataset.fieldKey, wrapper.dataset.placeholder)
+        makeVariadicInput(wrapper, wrapper.dataset.fieldKey || "", wrapper.dataset.placeholder || "")
       )
-      inputs.push(wrapper.lastElementChild)
+      inputs.push(wrapper.lastElementChild as HTMLInputElement)
     }
 
     let filled = inputs.filter(input => input.value.trim() !== "").length
     while (filled === inputs.length) {
       wrapper.appendChild(
-        makeVariadicInput(wrapper, wrapper.dataset.fieldKey, wrapper.dataset.placeholder)
+        makeVariadicInput(wrapper, wrapper.dataset.fieldKey || "", wrapper.dataset.placeholder || "")
       )
-      inputs.push(wrapper.lastElementChild)
+      inputs.push(wrapper.lastElementChild as HTMLInputElement)
       filled = inputs.filter(input => input.value.trim() !== "").length
     }
 
@@ -70,11 +72,11 @@ export function mount(container, ctx) {
       inputs[inputs.length - 1].value.trim() === "" &&
       inputs[inputs.length - 2].value.trim() === ""
     ) {
-      inputs.pop().remove()
+      inputs.pop()!.remove()
     }
   }
 
-  function makeVariadicInput(wrapper, fieldKey, placeholder) {
+  function makeVariadicInput(wrapper: HTMLElement, fieldKey: string, placeholder: string) {
     const input = document.createElement("input")
     input.type = "text"
     input.name = fieldKey
@@ -103,14 +105,14 @@ export function mount(container, ctx) {
     variadicEl.appendChild(fieldEl)
   }
 
-  function readVariadic(name) {
-    return [...form.querySelectorAll(`input[name="${name}"]`)]
+  function readVariadic(name: string) {
+    return [...(form.querySelectorAll(`input[name="${name}"]`) as unknown as HTMLInputElement[])]
       .map(input => input.value.trim())
       .filter(Boolean)
   }
 
-  function parseNumber(name) {
-    const raw = form.elements[name].value.trim()
+  function parseNumber(name: string) {
+    const raw = (form.elements.namedItem(name) as HTMLInputElement).value.trim()
     if (!raw) return undefined
     const value = Number(raw)
     if (!Number.isFinite(value)) throw new Error(`${name} must be number`)
@@ -118,8 +120,7 @@ export function mount(container, ctx) {
   }
 
   function buildFilter() {
-    const filter = {}
-
+    const filter: Record<string, unknown> = {}
     const ids = readVariadic("ids")
     if (ids.length) filter.ids = ids
 
@@ -135,8 +136,8 @@ export function mount(container, ctx) {
       })
     }
 
-    const tags = readVariadic("tags")
-    for (const pair of tags) {
+    const tagValues: string[] = readVariadic("tags") as string[]
+    for (const pair of tagValues) {
       const idx = pair.indexOf("=")
       if (idx <= 0 || idx === pair.length - 1) {
         throw new Error(`Invalid tag filter: ${pair}`)
@@ -145,7 +146,8 @@ export function mount(container, ctx) {
       const value = pair.slice(idx + 1).trim()
       if (!key || !value) throw new Error(`Invalid tag filter: ${pair}`)
       if (key.startsWith("#")) key = key.slice(1)
-      filter[`#${key}`] = [...(filter[`#${key}`] || []), value]
+      const existing = (filter[`#${key}`] as string[]) || []
+      filter[`#${key}`] = [...existing, value]
     }
 
     const since = parseNumber("since")
@@ -158,7 +160,7 @@ export function mount(container, ctx) {
     return filter
   }
 
-  function renderResults(events) {
+  function renderResults(events: any[]) {
     resultsEl.innerHTML = ""
 
     if (events.length === 0) {
@@ -186,7 +188,7 @@ export function mount(container, ctx) {
       </thead>
       <tbody></tbody>
     `
-    const tbody = table.querySelector("tbody")
+    const tbody = table.querySelector("tbody")!
 
     for (const event of events) {
       const tr = document.createElement("tr")
@@ -236,7 +238,7 @@ export function mount(container, ctx) {
       const events = await ctx.database.query(filter)
       setStatus(`${events.length} result${events.length === 1 ? "" : "s"}`)
       renderResults(events)
-    } catch (err) {
+    } catch (err: any) {
       setStatus(`Error: ${err?.message || String(err)}`)
     }
   })

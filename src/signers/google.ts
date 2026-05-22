@@ -7,11 +7,11 @@ import { bytesToHex } from "@noble/hashes/utils.js"
 const CENTRAL_URL = "https://auth.njump.me"
 const OPERATORS = ["https://po.njump.me", "https://po.fiatjaf.com"]
 
-const utf8 = new TextEncoder()
+const utf8_encode = (s: string) => new TextEncoder().encode(s)
 
 // Throw a descriptive error including any body text so failures from central
 // or operators are debuggable in the launcher's status log.
-async function assertOk(resp, label) {
+async function assertOk(resp: Response, label: string) {
   if (resp.ok) return
   let body = ""
   try {
@@ -23,7 +23,7 @@ async function assertOk(resp, label) {
 // GET /account: returns the parsed account body when one exists for this
 // Google identity, null on 404 (no account yet), and throws on any other
 // error so the caller can surface it.
-async function tryFetchAccount(central, token) {
+async function tryFetchAccount(central: string, token: string) {
   const resp = await fetch(`${central}/account`, {
     headers: { Authorization: "Token " + token }
   })
@@ -42,9 +42,14 @@ async function tryFetchAccount(central, token) {
 //
 // `skipInitialList`: when we *just* registered the account we know the
 // profile list is empty, so skip the first GET and go straight to POST.
-async function fetchDefaultBunkerUri(central, token, log, { skipInitialList = false } = {}) {
-  const findDefault = profiles =>
-    Array.isArray(profiles) ? profiles.find(p => p?.name === "default") : null
+async function fetchDefaultBunkerUri(
+  central: string,
+  token: string,
+  log: (msg: string) => void,
+  { skipInitialList = false }: { skipInitialList?: boolean } = {}
+): Promise<string> {
+  const findDefault = (profiles: any[]) =>
+    Array.isArray(profiles) ? profiles.find((p: any) => p?.name === "default") : null
 
   const list = async () => {
     const resp = await fetch(`${central}/profiles`, {
@@ -90,7 +95,9 @@ async function fetchDefaultBunkerUri(central, token, log, { skipInitialList = fa
 //     operators, create a default signing profile, and return its bunker.
 // In both cases the returned `bunker://` URI is ready to feed straight
 // into `connectBunkerInput`.
-export async function googleLoginAndCreateBunker({ onProgress } = {}) {
+export async function googleLoginAndCreateBunker({
+  onProgress
+}: { onProgress?: (msg: string) => void } = {}): Promise<string> {
   const log = onProgress || (() => {})
   const central = CENTRAL_URL
   const operators = OPERATORS
@@ -98,37 +105,45 @@ export async function googleLoginAndCreateBunker({ onProgress } = {}) {
   // 1. OAuth popup — central redirects to Google then posts the resulting
   //    token back via window.postMessage.
   log("Opening Google login…")
-  const popup = window.open(`${central}/login/google`, "PomegranateOAuth", "width=600,height=600")
+  const popup = window.open(
+    `${central}/login/google`,
+    "PomegranateOAuth",
+    "width=600,height=600"
+  ) as Window | null
   if (!popup) throw new Error("Popup blocked")
 
-  const token = await new Promise((resolve, reject) => {
+  const token = await new Promise<string>((resolve, reject) => {
     let settled = false
     const monitor = window.setInterval(() => {
       if (settled || !popup.closed) return
       finish(null, new Error("Login cancelled"))
     }, 250)
-    function finish(value, err) {
+    function finish(value: string | null, err?: Error) {
       if (settled) return
       settled = true
       window.clearInterval(monitor)
       window.removeEventListener("message", handler)
       if (err) reject(err)
-      else resolve(value)
+      else resolve(value!)
     }
-    function handler(event) {
+    function handler(event: MessageEvent) {
       // Filter inline (rather than `{ once: true }`) so an unrelated
       // postMessage from another tab doesn't kill our listener before the
       // real auth response arrives. `event.source === popup` further
       // narrows it to *our* popup vs. another same-origin window.
-      if (event.origin !== central || event.source !== popup || !event.data?.token) {
+      if (
+        event.origin !== central ||
+        (event.source as Window) !== popup ||
+        !(event.data as any)?.token
+      ) {
         return
       }
       try {
         popup.close()
       } catch {}
-      finish(event.data.token)
+      finish((event.data as any).token as string)
     }
-    window.addEventListener("message", handler)
+    ;(window as any).addEventListener("message", handler)
   })
 
   // 2. Existing account? Skip the whole sharding dance and just hand back
@@ -147,9 +162,11 @@ export async function googleLoginAndCreateBunker({ onProgress } = {}) {
   // the email so the user can later log into the recovery popups.
   let email = ""
   try {
-    const parsed = JSON.parse(atob(token))
+    const parsed = JSON.parse(atob(token)) as { tags?: string[][] }
     const emailTag = Array.isArray(parsed?.tags)
-      ? parsed.tags.find(t => Array.isArray(t) && t[0] === "email" && typeof t[1] === "string")
+      ? parsed.tags.find(
+          (t: string[]) => Array.isArray(t) && t[0] === "email" && typeof t[1] === "string"
+        )
       : null
     email = emailTag?.[1] ?? ""
   } catch {}
@@ -158,7 +175,11 @@ export async function googleLoginAndCreateBunker({ onProgress } = {}) {
   log("Generating key…")
   const secretKey = generateSecretKey()
   // trustedKeyDeal wants the secret as a bigint — big-endian-decode the 32 bytes.
-  const masterSkBignum = Array.from(secretKey).reduce((acc, byte) => (acc << 8n) + BigInt(byte), 0n)
+  const bytes = Array.from(secretKey) as number[]
+  const masterSkBignum: bigint = bytes.reduce(
+    (acc: bigint, byte: number) => (acc << 8n) + BigInt(byte),
+    0n
+  )
   const threshold = Math.ceil((operators.length * 7) / 12)
   log("Splitting secret…")
   const { shards } = trustedKeyDeal(masterSkBignum, threshold, operators.length)
@@ -214,7 +235,7 @@ export async function googleLoginAndCreateBunker({ onProgress } = {}) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Pomegranate-Operator-Token": bytesToHex(sha256(utf8.encode(session + ":" + op)))
+        "X-Pomegranate-Operator-Token": bytesToHex(sha256(utf8_encode(session + ":" + op)))
       },
       body: JSON.stringify(event)
     })

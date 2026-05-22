@@ -1,6 +1,9 @@
 import { guessMime } from "./mime.js"
 
-export async function collectLocalFolder(fileList, onProgress = () => {}) {
+export async function collectLocalFolder(
+  fileList: FileList,
+  onProgress: (msg: string) => void = () => {}
+) {
   const files = Array.from(fileList)
   if (files.length === 0) throw new Error("No files selected")
 
@@ -33,7 +36,7 @@ export async function collectLocalFolder(fileList, onProgress = () => {}) {
   return { nappId, files: out, metadata }
 }
 
-function parseMetadata(raw) {
+function parseMetadata(raw: { actions?: string[]; id?: string; name?: string; icon?: string }) {
   const actions = []
   if (Array.isArray(raw.actions)) {
     actions.push(...raw.actions.filter(a => typeof a === "string" && a.length))
@@ -46,7 +49,7 @@ function parseMetadata(raw) {
   }
 }
 
-function slug(s) {
+function slug(s: string): string {
   return s
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")

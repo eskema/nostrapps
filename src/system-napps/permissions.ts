@@ -5,13 +5,13 @@ export const id = "permissions"
 export const title = "Permissions"
 export const slash = "/permissions"
 
-export function mount(container) {
+export function mount(container: HTMLElement) {
   container.innerHTML = `
     <div class="perm-list" data-section="decisions"></div>
     <div class="perm-list" data-section="handlers"></div>
   `
-  const decisionsEl = container.querySelector('[data-section="decisions"]')
-  const handlersEl = container.querySelector('[data-section="handlers"]')
+  const decisionsEl = container.querySelector('[data-section="decisions"]')!
+  const handlersEl = container.querySelector('[data-section="handlers"]')!
 
   function renderDecisions() {
     decisionsEl.innerHTML = ""
@@ -24,7 +24,7 @@ export function mount(container) {
       decisionsEl.appendChild(empty)
       return
     }
-    for (const [nappId, methods] of entries) {
+    for (const [nappId, methods] of entries as [string, Record<string, string>][]) {
       const group = document.createElement("div")
       group.className = "perm-group"
 
@@ -41,7 +41,7 @@ export function mount(container) {
       head.appendChild(clearAll)
       group.appendChild(head)
 
-      for (const [method, decision] of Object.entries(methods)) {
+      for (const [method, decision] of Object.entries(methods) as [string, string][]) {
         const row = document.createElement("div")
         row.className = "perm-row"
         const m = document.createElement("code")
@@ -81,8 +81,9 @@ export function mount(container) {
       return
     }
 
-    for (const [key, target] of entries) {
-      // key shape: "<caller>|<type>|<value>"
+    for (const entry of entries) {
+      const key = entry[0] as string
+      const target = entry[1] as string
       const [caller, type, value] = key.split("|")
       const row = document.createElement("div")
       row.className = "perm-row"

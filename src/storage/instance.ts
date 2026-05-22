@@ -2,7 +2,7 @@ const DB_NAME = "nostrapps-data"
 const DB_VERSION = 1
 const STORE = "instance"
 
-let dbPromise
+let dbPromise: Promise<IDBDatabase> | null
 
 function openDB() {
   if (dbPromise) return dbPromise
@@ -20,7 +20,7 @@ function openDB() {
   return dbPromise
 }
 
-export async function get(instanceId, key) {
+export async function get(instanceId: string, key: string): Promise<unknown> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly")
@@ -30,9 +30,9 @@ export async function get(instanceId, key) {
   })
 }
 
-export async function set(instanceId, key, value) {
+export async function set(instanceId: string, key: string, value: unknown): Promise<void> {
   const db = await openDB()
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.objectStore(STORE).put({ instanceId, key, value })
     tx.oncomplete = () => resolve()
@@ -40,9 +40,9 @@ export async function set(instanceId, key, value) {
   })
 }
 
-export async function del(instanceId, key) {
+export async function del(instanceId: string, key: string): Promise<void> {
   const db = await openDB()
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.objectStore(STORE).delete([instanceId, key])
     tx.oncomplete = () => resolve()
@@ -50,20 +50,20 @@ export async function del(instanceId, key) {
   })
 }
 
-export async function keys(instanceId) {
+export async function keys(instanceId: string): Promise<string[]> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly")
     const range = IDBKeyRange.bound([instanceId, ""], [instanceId, "\uffff"])
     const req = tx.objectStore(STORE).getAllKeys(range)
-    req.onsuccess = () => resolve(req.result.map(k => k[1]))
+    req.onsuccess = () => resolve(req.result.map(k => (k as [string, string])[1]))
     req.onerror = () => reject(req.error)
   })
 }
 
-export async function clear(instanceId) {
+export async function clear(instanceId: string): Promise<void> {
   const db = await openDB()
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     const range = IDBKeyRange.bound([instanceId, ""], [instanceId, "\uffff"])
     tx.objectStore(STORE).delete(range)

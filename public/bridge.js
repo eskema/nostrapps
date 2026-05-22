@@ -65,7 +65,6 @@
   window.nostr = {
     getPublicKey: () => rpc("getPublicKey"),
     signEvent: evt => rpc("signEvent", evt),
-    getRelays: () => rpc("getRelays"),
     nip04: {
       encrypt: (pubkey, plaintext) => rpc("nip04.encrypt", { pubkey, plaintext }),
       decrypt: (pubkey, ciphertext) => rpc("nip04.decrypt", { pubkey, ciphertext })

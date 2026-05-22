@@ -76,7 +76,6 @@ A napp is any folder with an `index.html`. Inside the iframe you get:
 // NIP-07 signer, forwarded to your extension via the launcher
 window.nostr.getPublicKey()
 window.nostr.signEvent(evt)
-window.nostr.getRelays()
 window.nostr.nip04.encrypt|decrypt(pubkey, text)
 window.nostr.nip44.encrypt|decrypt(pubkey, text)
 

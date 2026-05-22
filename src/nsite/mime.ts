@@ -1,4 +1,4 @@
-const MIME_BY_EXT = {
+const MIME_BY_EXT: Record<string, string> = {
   html: "text/html",
   htm: "text/html",
   js: "application/javascript",
@@ -21,7 +21,7 @@ const MIME_BY_EXT = {
   map: "application/json"
 }
 
-export function guessMime(path) {
+export function guessMime(path: string): string {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase()
   return MIME_BY_EXT[ext] || "application/octet-stream"
 }

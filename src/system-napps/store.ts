@@ -25,12 +25,18 @@ const DEFAULT_RELAYS = [
   "wss://relay.nostrapps.com/favorites"
 ]
 
-export function mount(container, ctx, opts = {}) {
+import type { SystemCtx } from "../types.js"
+
+export function mount(
+  container: HTMLElement,
+  ctx: SystemCtx,
+  opts: { initial?: { relays?: string[] }; onStateChange?: (state: any) => void } = {}
+) {
   let filter = ""
-  let events = []
-  let relays = sanitizeRelays(opts.initial?.relays)
+  let events: any[] = []
+  let relays = sanitizeRelays((opts.initial as { relays?: string[] })?.relays || [])
   let cancelled = false
-  let sub = null
+  let sub: any = null
   let sawEose = false
 
   if (relays.length === 0) relays = [...DEFAULT_RELAYS]
@@ -54,18 +60,18 @@ export function mount(container, ctx, opts = {}) {
     </div>
   `
 
-  const searchEl = container.querySelector(".store-search")
-  const relaysToggleBtn = container.querySelector(".store-relays-toggle")
-  const relaysPanel = container.querySelector(".store-relays")
-  const relaysInput = container.querySelector(".store-relays-input")
-  const relaysSaveBtn = container.querySelector(".store-relays-save")
-  const relaysClearBtn = container.querySelector(".store-relays-clear")
-  const statusEl = container.querySelector(".store-status")
-  const listEl = container.querySelector(".store-list")
+  const searchEl = container.querySelector(".store-search") as HTMLInputElement
+  const relaysToggleBtn = container.querySelector(".store-relays-toggle") as HTMLElement
+  const relaysPanel = container.querySelector(".store-relays") as HTMLElement
+  const relaysInput = container.querySelector(".store-relays-input") as HTMLInputElement
+  const relaysSaveBtn = container.querySelector(".store-relays-save") as HTMLElement
+  const relaysClearBtn = container.querySelector(".store-relays-clear") as HTMLElement
+  const statusEl = container.querySelector(".store-status") as HTMLElement
+  const listEl = container.querySelector(".store-list") as HTMLElement
 
   relaysInput.value = relays.join("\n")
 
-  function setStatus(msg) {
+  function setStatus(msg: string | undefined) {
     statusEl.textContent = msg || ""
     statusEl.hidden = !msg
   }
@@ -83,11 +89,11 @@ export function mount(container, ctx, opts = {}) {
     const listingsByKey = new Map()
     for (const e of events) {
       if (e.kind !== NSITE_LISTING) continue
-      const dTag = e.tags.find(t => t[0] === "d")?.[1] || ""
+      const dTag = e.tags.find((t: any) => t[0] === "d")?.[1] || ""
       listingsByKey.set(`${e.pubkey}:${dTag}`, e)
     }
-    const listingFor = manifest => {
-      const dTag = manifest.tags.find(t => t[0] === "d")?.[1] || ""
+    const listingFor = (manifest: any) => {
+      const dTag = manifest.tags.find((t: any) => t[0] === "d")?.[1] || ""
       return listingsByKey.get(`${manifest.pubkey}:${dTag}`) || null
     }
 
@@ -97,12 +103,13 @@ export function mount(container, ctx, opts = {}) {
       .filter(m => matchesFilter(m, listingFor(m), filter))
       .sort((a, b) => b.created_at - a.created_at)
 
-    let displayed = []
+    let displayed: any[] = []
     // Cards call onChange after an action completes — we re-render the whole
     // list rather than just swapping the card in place, so an uninstalled
     // app in the "installed" tab moves down into "Previously installed"
     // (and an install in any tab gets re-categorized too).
-    const renderOne = evt => listEl.appendChild(renderCard(evt, ctx, listingFor(evt), renderList))
+    const renderOne = (evt: any) =>
+      listEl.appendChild(renderCard(evt, ctx, listingFor(evt), renderList))
 
     if (filtered.length === 0) {
       const empty = document.createElement("div")
@@ -121,7 +128,7 @@ export function mount(container, ctx, opts = {}) {
       if (seenIconPks.has(evt.pubkey)) continue
       const listing = listingFor(evt)
       if (!listing) continue
-      const hasIcon = listing.tags.some(t => t[0] === "icon" && t[1])
+      const hasIcon = listing.tags.some((t: any) => t[0] === "icon" && t[1])
       if (!hasIcon) continue
       seenIconPks.add(evt.pubkey)
       loadBlossomServers(evt.pubkey)
@@ -131,9 +138,9 @@ export function mount(container, ctx, opts = {}) {
           if (servers.length === 0) return
           const icons = listEl.querySelectorAll(
             `[data-listing-pubkey="${evt.pubkey}"] .store-card-icon[data-icon-sha]`
-          )
+          ) as unknown as HTMLImageElement[]
           for (const img of icons) {
-            const sha = img.dataset.iconSha
+            const sha = img.dataset.iconSha!
             const base = servers[0].endsWith("/") ? servers[0].slice(0, -1) : servers[0]
             img.src = `${base}/${sha}`
             // If the first server fails, fall through to the next. If all
@@ -175,33 +182,41 @@ export function mount(container, ctx, opts = {}) {
     }
 
     setStatus(`Subscribing to ${relays.length} relay(s)…`)
-    sub = pool.subscribeMany(relays, { kinds: [NSITE_ROOT, NSITE_NAMED, NSITE_LISTING], limit: 400 }, {
-      label: "apps",
-      onevent(event) {
-        if (cancelled) return
-        if (events.some(existing => existing.id === event.id)) return
-        events.push(event)
-        renderList()
-        if (sawEose) {
-          setStatus(`Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`)
-        } else {
-          setStatus(`Loading from ${relays.length} relay(s)… ${events.length}`)
+    sub = (pool.subscribeMany as any)(
+      relays,
+      { kinds: [NSITE_ROOT, NSITE_NAMED, NSITE_LISTING], limit: 400 },
+      {
+        label: "apps",
+        onevent(event: any) {
+          if (cancelled) return
+          if (events.some((existing: any) => existing.id === event.id)) return
+          events.push(event)
+          renderList()
+          if (sawEose) {
+            setStatus(
+              `Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`
+            )
+          } else {
+            setStatus(`Loading from ${relays.length} relay(s)… ${events.length}`)
+          }
+        },
+        oneose() {
+          if (cancelled) return
+          sawEose = true
+          setStatus(
+            `Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`
+          )
+        },
+        onclose(reason: any) {
+          if (cancelled) return
+          if (reason) setStatus(`Subscription closed: ${reason?.message ?? String(reason)}`)
+        },
+        onerror(err: any) {
+          if (cancelled) return
+          setStatus(`Error: ${err.message}`)
         }
-      },
-      oneose() {
-        if (cancelled) return
-        sawEose = true
-        setStatus(`Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`)
-      },
-      onclose(reason) {
-        if (cancelled) return
-        if (reason) setStatus(`Subscription closed: ${reason.message || String(reason)}`)
-      },
-      onerror(err) {
-        if (cancelled) return
-        setStatus(`Error: ${err.message}`)
       }
-    })
+    )
   }
 
   searchEl.addEventListener("input", () => {
@@ -242,12 +257,12 @@ export function mount(container, ctx, opts = {}) {
   }
 }
 
-function renderCard(evt, ctx, listing = null, onChange = null) {
-  const tag = k => evt.tags.find(t => t[0] === k)?.[1] || ""
+function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = null) {
+  const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || ""
   const dTag = tag("d")
   const source = tag("source")
   const date = new Date(evt.created_at * 1000).toLocaleDateString()
-  const pathCount = evt.tags.filter(t => t[0] === "path").length
+  const pathCount = evt.tags.filter((t: any) => t[0] === "path").length
   const nappId = computeNappId(evt)
   const installed = ctx.isInstalled?.(nappId) ?? false
   const installedManifest = installed ? ctx.installedManifest?.(nappId) : null
@@ -260,12 +275,18 @@ function renderCard(evt, ctx, listing = null, onChange = null) {
   const listingDescription = localizedListingTag(listing, "description")
   const titleText = listingName || tag("title")
   const description = listingDescription || listingSummary || tag("description")
-  const iconTag = listing?.tags.find(t => t[0] === "icon")
+  const iconTag = listing?.tags.find((t: any) => t[0] === "icon")
   const iconSha = iconTag?.[1]
   const iconMime = iconTag?.[2]
-  const actionTags = listing ? listing.tags.filter(t => t[0] === "action" && t[1]).map(t => t[1]) : []
-  const categoryTags = listing ? listing.tags.filter(t => t[0] === "l" && t[1]).map(t => t[1]) : []
-  const hashtags = listing ? listing.tags.filter(t => t[0] === "t" && t[1]).map(t => t[1]) : []
+  const actionTags = listing
+    ? listing.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
+    : []
+  const categoryTags = listing
+    ? listing.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
+    : []
+  const hashtags = listing
+    ? listing.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1])
+    : []
 
   const card = document.createElement("div")
   card.className = "store-card"
@@ -330,7 +351,7 @@ function renderCard(evt, ctx, listing = null, onChange = null) {
   const actions = document.createElement("div")
   actions.className = "store-actions"
 
-  const performAction = async (btn, action) => {
+  const performAction = async (btn: HTMLButtonElement, action: string) => {
     btn.disabled = true
     btn.textContent =
       action === "update" ? "updating…" : action === "uninstall" ? "uninstalling…" : "launching…"
@@ -366,7 +387,7 @@ function renderCard(evt, ctx, listing = null, onChange = null) {
         card.replaceWith(replacement)
       }
     } catch (err) {
-      btn.title = err?.message || String(err)
+      btn.title = (err as any)?.message || String(err)
       btn.textContent = "error"
       btn.disabled = false
       setTimeout(() => {
@@ -376,7 +397,7 @@ function renderCard(evt, ctx, listing = null, onChange = null) {
     }
   }
 
-  const makeActionBtn = (action, className) => {
+  const makeActionBtn = (action: string, className: string) => {
     const b = document.createElement("button")
     b.type = "button"
     b.className = className
@@ -450,8 +471,8 @@ function renderCard(evt, ctx, listing = null, onChange = null) {
   return card
 }
 
-function computeNappId(evt) {
-  const dTag = evt.tags.find(t => t[0] === "d")?.[1]
+function computeNappId(evt: any) {
+  const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1]
   if (evt.kind === NSITE_NAMED && dTag) {
     return `${evt.pubkey.slice(0, 40)}-${dTag}`
   }
@@ -460,17 +481,17 @@ function computeNappId(evt) {
 
 // ─── helpers ─────────────────────────────────────────────────────
 
-function sanitizeRelays(relays) {
+function sanitizeRelays(relays: string[]): string[] {
   if (!Array.isArray(relays)) return []
   return [...new Set(relays.map(s => (typeof s === "string" ? s.trim() : "")).filter(Boolean))]
 }
 
-function matchesFilter(evt, listing, filter) {
+function matchesFilter(evt: any, listing: any, filter: string) {
   if (!filter) return true
   const fields = [
-    evt.tags.find(t => t[0] === "title")?.[1] || "",
-    evt.tags.find(t => t[0] === "description")?.[1] || "",
-    evt.tags.find(t => t[0] === "d")?.[1] || "",
+    evt.tags.find((t: any) => t[0] === "title")?.[1] || "",
+    evt.tags.find((t: any) => t[0] === "description")?.[1] || "",
+    evt.tags.find((t: any) => t[0] === "d")?.[1] || "",
     evt.pubkey
   ]
   if (listing) {
@@ -492,10 +513,10 @@ function matchesFilter(evt, listing, filter) {
 
 // Picks the best language variant of a listing's tag (name, summary,
 // description). Tag shape: ["<name>", "<value>", "<lang?>"].
-function localizedListingTag(listing, tagName) {
+function localizedListingTag(listing: any, tagName: string) {
   if (!listing) return null
   const matches = listing.tags.filter(
-    t => t[0] === tagName && typeof t[1] === "string" && t[1].length > 0
+    (t: any) => t[0] === tagName && typeof t[1] === "string" && t[1].length > 0
   )
   if (matches.length === 0) return null
   const userLang =
@@ -503,15 +524,15 @@ function localizedListingTag(listing, tagName) {
       ? navigator.language.slice(0, 2).toLowerCase()
       : "en"
   return (
-    matches.find(t => (t[2] || "").toLowerCase() === userLang)?.[1] ||
-    matches.find(t => !t[2] || t[2].toLowerCase() === "en")?.[1] ||
+    matches.find((t: any) => (t[2] || "").toLowerCase() === userLang)?.[1] ||
+    matches.find((t: any) => !t[2] || t[2].toLowerCase() === "en")?.[1] ||
     matches[0][1]
   )
 }
 
 // Renders a category label like "napp.utilities:office" into a friendlier
 // "office · utilities" form for the chip text.
-function formatCategory(label) {
+function formatCategory(label: string) {
   const m = /^napp\.([^:]+):(.+)$/.exec(label)
   if (!m) return label
   return `${m[2]} · ${m[1]}`

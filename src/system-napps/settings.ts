@@ -4,7 +4,9 @@ export const slash = "/settings"
 
 const GOOGLE_LABEL = "log in with google"
 
-export function mount(container, ctx) {
+import type { SystemCtx } from "../types.js"
+
+export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
     <div class="settings-panel">
       <div class="settings-row">
@@ -62,30 +64,30 @@ export function mount(container, ctx) {
     </div>
   `
 
-  const themeBtns = container.querySelectorAll(".settings-theme button")
-  const connectedEl = container.querySelector(".settings-account-connected")
-  const disconnectedEl = container.querySelector(".settings-account-disconnected")
-  const pubkeyEl = container.querySelector(".settings-pubkey")
-  const accountTypeEl = container.querySelector(".settings-account-type")
-  const disconnectBtn = container.querySelector(".settings-disconnect-btn")
-  const connectExtBtn = container.querySelector(".settings-connect-extension")
-  const bunkerToggleBtn = container.querySelector(".settings-connect-bunker-toggle")
-  const googleBtn = container.querySelector(".settings-connect-google")
-  const googleError = container.querySelector(".settings-google-error")
-  const bunkerForm = container.querySelector(".settings-bunker-form")
-  const bunkerInput = container.querySelector(".settings-bunker-input")
-  const bunkerSubmit = container.querySelector(".settings-bunker-submit")
-  const bunkerCancel = container.querySelector(".settings-bunker-cancel")
-  const bunkerError = container.querySelector(".settings-bunker-error")
-  const resetBtn = container.querySelector(".settings-reset-btn")
+  const themeBtns = container.querySelectorAll(".settings-theme button") as unknown as HTMLElement[]
+  const connectedEl = container.querySelector(".settings-account-connected") as HTMLElement
+  const disconnectedEl = container.querySelector(".settings-account-disconnected") as HTMLElement
+  const pubkeyEl = container.querySelector(".settings-pubkey") as HTMLElement
+  const accountTypeEl = container.querySelector(".settings-account-type") as HTMLElement
+  const disconnectBtn = container.querySelector(".settings-disconnect-btn") as HTMLElement
+  const connectExtBtn = container.querySelector(".settings-connect-extension") as HTMLElement
+  const bunkerToggleBtn = container.querySelector(".settings-connect-bunker-toggle") as HTMLElement
+  const googleBtn = container.querySelector(".settings-connect-google") as HTMLElement
+  const googleError = container.querySelector(".settings-google-error") as HTMLElement
+  const bunkerForm = container.querySelector(".settings-bunker-form") as HTMLElement
+  const bunkerInput = container.querySelector(".settings-bunker-input") as HTMLInputElement
+  const bunkerSubmit = container.querySelector(".settings-bunker-submit") as HTMLElement
+  const bunkerCancel = container.querySelector(".settings-bunker-cancel") as HTMLElement
+  const bunkerError = container.querySelector(".settings-bunker-error") as HTMLElement
+  const resetBtn = container.querySelector(".settings-reset-btn") as HTMLElement
 
-  function renderTheme(choice) {
+  function renderTheme(choice: string) {
     for (const btn of themeBtns) {
       btn.classList.toggle("active", btn.dataset.choice === choice)
     }
   }
 
-  function renderAccount(pk) {
+  function renderAccount(pk: string | null) {
     if (pk) {
       connectedEl.hidden = false
       disconnectedEl.hidden = true
@@ -104,13 +106,13 @@ export function mount(container, ctx) {
     }
   }
 
-  function showBunkerError(msg) {
+  function showBunkerError(msg: string) {
     bunkerError.textContent = msg
     bunkerError.hidden = false
   }
 
   for (const btn of themeBtns) {
-    btn.addEventListener("click", () => ctx.theme.set(btn.dataset.choice))
+    btn.addEventListener("click", () => ctx.theme.set(btn.dataset.choice!))
   }
 
   disconnectBtn.addEventListener("click", () => ctx.disconnect())
@@ -137,7 +139,7 @@ export function mount(container, ctx) {
       // On success the account.subscribe callback re-renders the
       // connected state; nothing to do here.
       await ctx.connectGoogle()
-    } catch (err) {
+    } catch (err: any) {
       googleError.textContent = err?.message || String(err)
       googleError.hidden = false
     } finally {
@@ -173,7 +175,7 @@ export function mount(container, ctx) {
     bunkerSubmit.textContent = "connecting…"
     try {
       await ctx.connectBunker(uri)
-    } catch (err) {
+    } catch (err: any) {
       showBunkerError(err?.message || String(err))
     } finally {
       bunkerSubmit.disabled = false

@@ -1,3 +1,12 @@
+import type {
+  NappWindow,
+  NappWindowState,
+  StageBounds,
+  PackCell,
+  CellRect,
+  GridRect,
+  MessageData
+} from "../types.js"
 import { getStageBounds, packCellSnap, bestFitPack, capturePackSnapshot } from "./host.js"
 
 let zIndexCounter = 1
@@ -14,14 +23,14 @@ function ensureFocusTracker() {
   // Cross-origin iframes don't reliably fire `focus` when their content is
   // clicked, so we poll document.activeElement instead. Whenever the focus
   // lands on a different napp iframe, bring its window to the front.
-  let lastFocused = null
+  let lastFocused: Element | null = null
   function tick() {
     const el = document.activeElement
     if (el && el.tagName === "IFRAME") {
       const root = el.closest(".napp-window")
       if (root && root !== lastFocused) {
         lastFocused = root
-        bringToFront(root)
+        bringToFront(root as HTMLElement)
       }
     } else {
       lastFocused = null
@@ -44,9 +53,24 @@ export function createNappWindow({
   onStateChange,
   onReorder,
   initial,
-  bodyElement, // when provided, mount this DOM node instead of an iframe
-  system = false // trusted in-bundle napp; hides destroy + instance id, no rename
-}) {
+  bodyElement,
+  system = false
+}: {
+  nappId: string
+  instanceId: string
+  origin?: string
+  src?: string
+  petname?: string
+  sandbox?: string
+  onMessage?: (data: MessageData, iframe: HTMLIFrameElement) => void
+  onClose?: (instanceId: string) => void
+  onDestroy?: (instanceId: string) => void
+  onStateChange?: (state: NappWindowState) => void
+  onReorder?: () => void
+  initial?: Partial<NappWindowState>
+  bodyElement?: HTMLElement
+  system?: boolean
+}): NappWindow {
   const root = document.createElement("div")
   root.className = "napp-window"
   // Pack-mode weight: more-recently-touched windows are "stamped" earlier
@@ -90,7 +114,7 @@ export function createNappWindow({
   body.className = "napp-body"
   if (system) body.classList.add("napp-body-system")
 
-  let iframe = null
+  let iframe: HTMLIFrameElement | null = null
   if (bodyElement) {
     body.appendChild(bodyElement)
   } else {
@@ -99,11 +123,11 @@ export function createNappWindow({
     // window.name is cross-origin readable from inside the iframe, so the bridge
     // can pick up the instance id without us polluting the URL.
     iframe.name = instanceId || ""
-    iframe.src = src
+    iframe.src = src || ""
     body.appendChild(iframe)
   }
 
-  const resizeHandles = {}
+  const resizeHandles: Record<string, HTMLElement> = {}
   const RESIZE_DIRS = ["n", "s", "e", "w", "ne", "nw", "se", "sw"]
   for (const dir of RESIZE_DIRS) {
     const h = document.createElement("div")
@@ -145,9 +169,9 @@ export function createNappWindow({
     bringToFront(root)
   }
 
-  let messageHandler = null
+  let messageHandler: ((event: MessageEvent) => void) | null = null
   if (onMessage && iframe) {
-    messageHandler = event => {
+    messageHandler = (event: MessageEvent) => {
       if (event.origin !== origin) return
       const data = event.data
       if (!data || data.instanceId !== instanceId) return
@@ -235,7 +259,7 @@ export function createNappWindow({
   if (!system) {
     titleEl.addEventListener("dblclick", e => {
       e.stopPropagation()
-      startRename(titleEl, newName => {
+      startRename(titleEl, (newName: string | null) => {
         if (newName) notifyState()
       })
     })
@@ -255,7 +279,7 @@ export function createNappWindow({
   return { root, iframe, close, destroy, getState, focus, notifyState }
 }
 
-function startRename(el, onDone) {
+function startRename(el: HTMLElement, onDone: (name: string | null) => void) {
   const original = el.textContent
   el.contentEditable = "plaintext-only"
   el.classList.add("editing")
@@ -263,8 +287,8 @@ function startRename(el, onDone) {
   const range = document.createRange()
   range.selectNodeContents(el)
   const sel = window.getSelection()
-  sel.removeAllRanges()
-  sel.addRange(range)
+  sel!.removeAllRanges()
+  sel!.addRange(range)
 
   const finish = () => {
     el.contentEditable = "false"
@@ -281,7 +305,7 @@ function startRename(el, onDone) {
     }
   }
 
-  const onKey = e => {
+  const onKey = (e: KeyboardEvent) => {
     if (e.key === "Enter") {
       e.preventDefault()
       el.blur()
@@ -295,7 +319,7 @@ function startRename(el, onDone) {
   el.addEventListener("blur", finish)
 }
 
-function makeBtn(label, title) {
+function makeBtn(label: string, title: string) {
   const btn = document.createElement("button")
   btn.type = "button"
   btn.textContent = label
@@ -309,7 +333,7 @@ function nextPosition() {
   return { left: 40 + positionOffset, top: 40 + positionOffset }
 }
 
-function bringToFront(el) {
+function bringToFront(el: HTMLElement) {
   zIndexCounter++
   const z = el.classList.contains("pinned") ? PIN_BASE + zIndexCounter : zIndexCounter
   el.style.zIndex = String(z)
@@ -321,7 +345,7 @@ function isCompact() {
   return window.matchMedia("(max-width: 723px)").matches
 }
 
-function snapLayout(zone, w, h) {
+function snapLayout(zone: string, w: number, h: number) {
   switch (zone) {
     case "top":
       return { left: 0, top: 0, width: w, height: h / 2 }
@@ -344,7 +368,7 @@ function snapLayout(zone, w, h) {
   }
 }
 
-function detectSnapZone(x, y, w, h) {
+function detectSnapZone(x: number, y: number, w: number, h: number) {
   const EDGE = 24
   const CORNER = 56
   const nearTop = y < EDGE
@@ -364,7 +388,7 @@ function detectSnapZone(x, y, w, h) {
   return null
 }
 
-function setupDrag(root, handle, onDone, onReorder) {
+function setupDrag(root: HTMLElement, handle: HTMLElement, onDone: (() => void) | undefined, onReorder: (() => void) | undefined) {
   // Desktop float drag: small threshold so the cursor feels responsive.
   // Mobile reorder: bigger threshold + a hold timer so a quick flick to
   // scroll/swipe doesn't accidentally enter reorder mode.
@@ -376,7 +400,7 @@ function setupDrag(root, handle, onDone, onReorder) {
   // user has to actually stop, not just hover. Lets you drag through edges
   // and corners without auto-snapping.
   const SNAP_HOVER_MS = 300
-  let mode = null // 'float' or 'reorder'
+  let mode: string | null = null // 'float' or 'reorder'
   let pending = false
   let dragging = false
   let reordering = false
@@ -384,8 +408,8 @@ function setupDrag(root, handle, onDone, onReorder) {
   let startY = 0
   let startLeft = 0
   let startTop = 0
-  let snapZone = null
-  let snapPreview = null
+  let snapZone: string | null = null
+  let snapPreview: HTMLElement | null = null
   // Reorder-mode finger tracking. anchorY is the offset from the window's
   // natural top to the finger at drag start; we keep that offset constant by
   // applying a translateY so the window stays under the finger even as the
@@ -401,7 +425,7 @@ function setupDrag(root, handle, onDone, onReorder) {
   let dragRaf = 0
   let lastClientX = 0
   let lastClientY = 0
-  let cachedStageRect = null
+  let cachedStageRect: DOMRect | null = null
   // Inner content width/height after stage padding. `position: absolute`
   // children are measured from the padding edge, so this is also the bound
   // we clamp to.
@@ -424,13 +448,13 @@ function setupDrag(root, handle, onDone, onReorder) {
   // `snapZone` is the *armed* zone (preview shown, will snap on release).
   // The hover timer promotes pending → armed after SNAP_HOVER_MS so quick
   // drags through the corners don't accidentally snap.
-  let pendingZone = null
+  let pendingZone: string | null = null
   let snapTimer = 0
 
   // Pack-mode drop placeholder (Packery-style ghost showing the snap target
   // while the user drags). Created on first move when stage is in pack mode,
   // updated each rAF, removed on drag end.
-  let packPlaceholder = null
+  let packPlaceholder: HTMLElement | null = null
   // Last cell key (e.g. "1,2,2,1") the dragged window snapped to. Used to
   // throttle live-pack — we only re-pack neighbors when the dragged
   // window crosses a cell boundary, not every pointermove.
@@ -439,14 +463,14 @@ function setupDrag(root, handle, onDone, onReorder) {
   // window to where it started, so the user can revert by dragging back —
   // displaced windows return to their original cells when the dragged
   // window stops blocking them.
-  let packSnapshot = null
+  let packSnapshot: Map<any, any> | null = null
 
   // Pin the dragged window so its `anchorY` offset stays under `clientY`.
   // We clear the current transform before reading the rect — that way we
   // measure the *natural* top directly, which is immune to any browser
   // quirks around getBoundingClientRect + just-applied transforms (we've
   // hit those on iOS), so translateY can never accumulate drift.
-  function pinToFinger(clientY) {
+  function pinToFinger(clientY: number) {
     const desiredTop = clientY - anchorY
     root.style.transform = ""
     const naturalTop = root.getBoundingClientRect().top
@@ -458,7 +482,7 @@ function setupDrag(root, handle, onDone, onReorder) {
   // pointermove (touch can fire 100+/sec; the screen only paints at ~60).
   let pinRaf = 0
   let pinClientY = 0
-  function schedulePin(clientY) {
+  function schedulePin(clientY: number) {
     pinClientY = clientY
     if (pinRaf) return
     pinRaf = requestAnimationFrame(() => {
@@ -467,7 +491,7 @@ function setupDrag(root, handle, onDone, onReorder) {
     })
   }
 
-  function updateSnapPreview(zone, stage /*, stageRect */) {
+  function updateSnapPreview(zone: string | null, stage: HTMLElement | null) {
     if (!zone) {
       snapPreview?.remove()
       snapPreview = null
@@ -475,27 +499,27 @@ function setupDrag(root, handle, onDone, onReorder) {
     }
     // Snap layout is in content-area coords (excluding stage padding) so it
     // matches what the dropped window will land at.
-    const { width: w, height: h, padL, padT } = getStageBounds(stage)
+    const { width: w, height: h, padL, padT } = getStageBounds(stage!)
     const layout = snapLayout(zone, w, h)
     if (!layout) return
     if (!snapPreview) {
       snapPreview = document.createElement("div")
       snapPreview.className = "snap-preview"
-      stage.appendChild(snapPreview)
+      stage!.appendChild(snapPreview)
     }
     // Offset by padding (so the preview sits inside the gutter, matching the
     // final window position) and by scroll (so we target the visible region,
     // not the top of the stage's scrolled content).
-    snapPreview.style.left = `${layout.left + padL + stage.scrollLeft}px`
-    snapPreview.style.top = `${layout.top + padT + stage.scrollTop}px`
+    snapPreview.style.left = `${layout.left + padL + stage!.scrollLeft}px`
+    snapPreview.style.top = `${layout.top + padT + stage!.scrollTop}px`
     snapPreview.style.width = `${layout.width}px`
     snapPreview.style.height = `${layout.height}px`
   }
 
-  handle.addEventListener("pointerdown", e => {
+  handle.addEventListener("pointerdown", (e: PointerEvent) => {
     if (e.button !== 0) return
-    if (e.target.closest("button")) return
-    if (e.target.isContentEditable) return
+    if ((e.target as HTMLElement).closest("button")) return
+    if ((e.target as HTMLElement).isContentEditable) return
     if (root.classList.contains("maximized")) return
     pending = true
     startX = e.clientX
@@ -534,7 +558,7 @@ function setupDrag(root, handle, onDone, onReorder) {
     }
   })
 
-  handle.addEventListener("pointermove", e => {
+  handle.addEventListener("pointermove", (e: PointerEvent) => {
     if (!pending && !dragging && !reordering) return
     const dx = e.clientX - startX
     const dy = e.clientY - startY
@@ -567,7 +591,9 @@ function setupDrag(root, handle, onDone, onReorder) {
       }
       const stage = root.parentElement
       if (!stage) return
-      const all = Array.from(stage.children).filter(c => c.classList?.contains("napp-window"))
+      const all = Array.from(stage.children).filter(
+        (c): c is HTMLElement => c instanceof HTMLElement && c.classList?.contains("napp-window")
+      )
       const siblings = all.filter(c => c !== root)
       let insertBefore = null
       for (const sib of siblings) {
@@ -734,7 +760,7 @@ function setupDrag(root, handle, onDone, onReorder) {
     }
     if (snapZone) {
       snapZone = null
-      updateSnapPreview(null, root.parentElement, cachedStageRect)
+      updateSnapPreview(null, root.parentElement)
     }
     if (zone) {
       // Schedule arm after the cursor has been still for SNAP_HOVER_MS.
@@ -744,13 +770,13 @@ function setupDrag(root, handle, onDone, onReorder) {
         snapTimer = 0
         if (pendingZone === zone) {
           snapZone = zone
-          updateSnapPreview(zone, root.parentElement, cachedStageRect)
+          updateSnapPreview(zone, root.parentElement)
         }
       }, SNAP_HOVER_MS)
     }
   }
 
-  const end = e => {
+  const end = (e: PointerEvent) => {
     const wasDragging = dragging
     const wasReordering = reordering
     const finalZone = snapZone
@@ -799,7 +825,7 @@ function setupDrag(root, handle, onDone, onReorder) {
     if (finalZone) {
       const stage = root.parentElement
       if (stage) {
-        const { width: w, height: h, padL, padT } = getStageBounds(stage)
+    const { width: w, height: h, padL, padT } = getStageBounds(stage!)
         const layout = snapLayout(finalZone, w, h)
         if (layout) {
           // snapLayout returns positions in content-area coords (0 = inside
@@ -846,7 +872,7 @@ function setupDrag(root, handle, onDone, onReorder) {
   handle.addEventListener("pointercancel", end)
 }
 
-function setupResize(root, handle, dir, onDone) {
+function setupResize(root: HTMLElement, handle: HTMLElement, dir: string, onDone: (() => void) | undefined) {
   const MIN_W = 240
   // Just a soft floor for drag-resize; the window's CSS `min-height:
   // fit-content` is what actually clamps the rendered size to the napp's
@@ -867,11 +893,11 @@ function setupResize(root, handle, dir, onDone) {
   let startW = 0
   let startH = 0
   // Pack-mode placeholder + reflow tracking (mirrors setupDrag).
-  let packPlaceholder = null
+  let packPlaceholder: HTMLElement | null = null
   let lastPackKey = ""
-  let packSnapshot = null
+  let packSnapshot: Map<any, any> | null = null
 
-  handle.addEventListener("pointerdown", e => {
+  handle.addEventListener("pointerdown", (e: PointerEvent) => {
     if (e.button !== 0) return
     if (root.classList.contains("maximized")) return
     if (root.classList.contains("minimized") && purelyVertical) return
@@ -911,7 +937,7 @@ function setupResize(root, handle, dir, onDone) {
     e.stopPropagation()
   })
 
-  handle.addEventListener("pointermove", e => {
+  handle.addEventListener("pointermove", (e: PointerEvent) => {
     if (!resizing) return
     const minimized = root.classList.contains("minimized")
     const dx = e.clientX - startX
@@ -997,7 +1023,7 @@ function setupResize(root, handle, dir, onDone) {
     }
   })
 
-  const end = e => {
+  const end = (e: PointerEvent) => {
     if (!resizing) return
     resizing = false
     if (handle.hasPointerCapture?.(e.pointerId)) {

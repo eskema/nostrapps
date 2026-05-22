@@ -1,6 +1,6 @@
 const PUBKEY_KEY = "nostrapps:pubkey"
 const TYPE_KEY = "nostrapps:signerType" // 'nip07' | 'nip46'
-const listeners = new Set()
+const listeners = new Set<(pk: string | null) => void>()
 
 export function getPubkey() {
   return localStorage.getItem(PUBKEY_KEY)
@@ -10,7 +10,7 @@ export function getType() {
   return localStorage.getItem(TYPE_KEY) || null
 }
 
-export function setAccount(pk, type) {
+export function setAccount(pk: string | null, type: string | null) {
   if (pk) localStorage.setItem(PUBKEY_KEY, pk)
   else localStorage.removeItem(PUBKEY_KEY)
   if (type) localStorage.setItem(TYPE_KEY, type)
@@ -19,7 +19,7 @@ export function setAccount(pk, type) {
 }
 
 // Back-compat helper used by older callers; assumes nip07 if no type known.
-export function setPubkey(pk) {
+export function setPubkey(pk: string | null) {
   setAccount(pk, getType() || "nip07")
 }
 
@@ -34,7 +34,7 @@ function notify() {
   for (const fn of listeners) fn(pk)
 }
 
-export function subscribe(fn) {
+export function subscribe(fn: (pk: string | null) => void) {
   listeners.add(fn)
   return () => listeners.delete(fn)
 }

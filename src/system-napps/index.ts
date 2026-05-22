@@ -7,7 +7,10 @@ import * as database from "./database.js"
 import * as appInfo from "./app-info.js"
 import * as uploader from "./uploader.js"
 
-const napps = [settings, logs, permissions, store, apps, database, uploader]
+import type { SystemNappDef } from "../types.js"
+
+const napps = [settings, logs, permissions, store, apps, database, uploader] satisfies SystemNappDef[]
+const _appInfoCheck = appInfo satisfies SystemNappDef
 
 // Slash actions are like system napps but they fire a one-shot side effect
 // (e.g. opening a file picker) instead of mounting a window.
@@ -16,18 +19,24 @@ const actions = [
     id: "folder",
     title: "Load folder",
     slash: "/folder",
-    run(ctx) {
+    run(ctx: any) {
       ctx.loadFolder()
     }
   }
 ]
 
-export const registry = Object.fromEntries(napps.map(s => [s.id, s]))
+export type { SystemNappDef as SystemNapp }
+
+export const registry: Record<string, SystemNappDef> = Object.fromEntries(napps.map(s => [s.id, s]))
 registry[appInfo.id] = appInfo
 export const list = napps
 
 export const actionRegistry = Object.fromEntries(actions.map(a => [a.id, a]))
 export const actionList = actions
 
-export const slashCommands = Object.fromEntries(napps.map(s => [s.slash, s.id]))
-export const slashActions = Object.fromEntries(actions.map(a => [a.slash, a.id]))
+export const slashCommands: Record<string, string> = Object.fromEntries(
+  napps.map(s => [s.slash, s.id])
+)
+export const slashActions: Record<string, string> = Object.fromEntries(
+  actions.map(a => [a.slash, a.id])
+)

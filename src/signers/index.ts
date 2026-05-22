@@ -4,7 +4,7 @@ import { nip46Signer, restoreBunkerSigner, hasStoredBunker } from "./nip46.js"
 
 // Resolves to whichever signer is currently selected, based on persisted
 // account type. The returned object exposes the standard shape:
-//   { getPublicKey, signEvent, getRelays, nip04: {encrypt, decrypt}, nip44: {...} }
+//   { getPublicKey, signEvent, nip04: {encrypt, decrypt}, nip44: {...} }
 //
 // All methods are async-tolerant; the host's RPC dispatch awaits them.
 export function currentSigner() {

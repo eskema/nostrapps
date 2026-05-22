@@ -23,7 +23,10 @@ const FALLBACK_RELAYS = [
   "wss://relay.primal.net"
 ]
 
-export async function fetchNsite(target, onProgress = () => {}) {
+export async function fetchNsite(
+  target: string | { pubkey: string; kind?: number; dTag?: string },
+  onProgress: (msg: string) => void = () => {}
+) {
   const t = typeof target === "string" ? { pubkey: target } : target
   const { pubkey, kind, dTag } = t
   if (!pubkey) throw new Error("fetchNsite: no pubkey")
@@ -36,7 +39,7 @@ export async function fetchNsite(target, onProgress = () => {}) {
   return fetchRootOrLegacy(pubkey, onProgress)
 }
 
-async function fetchRootOrLegacy(pubkey, onProgress) {
+async function fetchRootOrLegacy(pubkey: string, onProgress: (msg: string) => void) {
   onProgress("Querying relays for nsite events…")
   // include kind 0 (profile) and kind 37348 (NIP-5B listing) so a single
   // round-trip pulls everything we might want for naming/metadata.
@@ -59,7 +62,7 @@ async function fetchRootOrLegacy(pubkey, onProgress) {
   throw new Error("No nsite manifest or file events found for this pubkey")
 }
 
-async function fetchNamedManifest(pubkey, dTag, onProgress) {
+async function fetchNamedManifest(pubkey: string, dTag: string, onProgress: (msg: string) => void) {
   onProgress(`Querying relays for named nsite "${dTag}"…`)
   const filter = {
     kinds: [NSITE_NAMED_KIND, NSITE_LISTING_KIND],
@@ -75,7 +78,7 @@ async function fetchNamedManifest(pubkey, dTag, onProgress) {
 }
 
 // Finds the latest kind 37348 listing for a given (pubkey, dTag) pair.
-function findListing(events, pubkey, dTag) {
+function findListing(events: any[], pubkey: string, dTag: string) {
   let best = null
   for (const e of events) {
     if (e.kind !== NSITE_LISTING_KIND) continue
@@ -88,7 +91,7 @@ function findListing(events, pubkey, dTag) {
 
 // Picks the best `name` tag value from a listing, preferring the user's locale.
 // Tag shape: ["name", "<value>", "<lang?>"]. Multiple tags allowed.
-export function localizedTag(listing, tagName) {
+export function localizedTag(listing: { tags: string[][] } | null, tagName: string): string | null {
   if (!listing) return null
   const matches = listing.tags.filter(
     t => t[0] === tagName && typeof t[1] === "string" && t[1].length > 0
@@ -113,7 +116,7 @@ export function localizedTag(listing, tagName) {
 // We also race it against a hard timeout — outboxFilterRelayBatch can stall
 // internally if the bootstrap relays are unreachable and gadgets has no
 // timeout of its own, which is what was hanging the launch indefinitely.
-async function resolveReqs(pubkeys, filter, onProgress) {
+async function resolveReqs(pubkeys: string[], filter: unknown, onProgress?: (msg: string) => void) {
   let reqs = null
   try {
     reqs = await Promise.race([
@@ -135,8 +138,8 @@ async function resolveReqs(pubkeys, filter, onProgress) {
 // Resolves on EOSE *or* on timeout, whichever comes first. We always resolve
 // (never reject on timeout) so the caller can decide what to do with whatever
 // events came in — usually that's enough to find the manifest.
-function collect(reqs, label) {
-  const events = []
+function collect(reqs: Array<{ url: string; filter: unknown }>, label: string): Promise<any[]> {
+  const events: any[] = []
   return new Promise((resolve, reject) => {
     let done = false
     const finish = () => {
@@ -148,11 +151,11 @@ function collect(reqs, label) {
     const timer = setTimeout(finish, COLLECT_TIMEOUT_MS)
     pool.subscribeMap(reqs, {
       label,
-      onevent(e) {
+      onevent(e: any) {
         events.push(e)
       },
       oneose: finish,
-      onerror: err => {
+      onerror: (err: Error) => {
         if (done) return
         done = true
         clearTimeout(timer)
@@ -162,7 +165,7 @@ function collect(reqs, label) {
   })
 }
 
-function latestOfKind(events, kind, dTag = null) {
+function latestOfKind(events: any[], kind: number, dTag: string | null = null) {
   let best = null
   for (const e of events) {
     if (e.kind !== kind) continue
@@ -173,19 +176,21 @@ function latestOfKind(events, kind, dTag = null) {
 }
 
 async function fetchFromManifest(
-  pubkey,
-  manifest,
-  onProgress,
-  nappIdOverride,
-  extraEvents = [],
-  listing = null
+  pubkey: string,
+  manifest: { tags: string[][] },
+  onProgress: (msg: string) => void,
+  nappIdOverride: string | null,
+  extraEvents: any[] = [],
+  listing: any = null
 ) {
   const paths = manifest.tags.filter(t => t[0] === "path" && t.length >= 3 && t[1] && t[2])
   if (paths.length === 0) {
     throw new Error("Nsite manifest has no path tags")
   }
 
-  const manifestServers = manifest.tags.filter(t => t[0] === "server" && t[1]).map(t => t[1])
+  const manifestServers: string[] = manifest.tags
+    .filter(t => t[0] === "server" && t[1])
+    .map(t => t[1])
   const userServers = (await loadBlossomServers(pubkey)).items ?? []
   const servers = dedupe([...manifestServers, ...userServers])
 
@@ -214,7 +219,12 @@ async function fetchFromManifest(
   return { nappId, files: out, title, manifest, listing }
 }
 
-async function fetchFromFileEvents(pubkey, fileEvents, onProgress, extraEvents = []) {
+async function fetchFromFileEvents(
+  pubkey: string,
+  fileEvents: any[],
+  onProgress: (msg: string) => void,
+  extraEvents: any[] = []
+) {
   const servers = (await loadBlossomServers(pubkey)).items ?? []
   const byPath = latestByPath(fileEvents)
   if (byPath.size === 0) {
@@ -236,7 +246,7 @@ async function fetchFromFileEvents(pubkey, fileEvents, onProgress, extraEvents =
   return { nappId: pubkey.slice(0, 40), files: out, title }
 }
 
-function findProfileName(events, pubkey) {
+function findProfileName(events: any[], pubkey: string): string | null {
   let latest = null
   for (const e of events) {
     if (e.kind !== 0 || e.pubkey !== pubkey) continue
@@ -251,7 +261,7 @@ function findProfileName(events, pubkey) {
   }
 }
 
-async function fetchProfileName(pubkey) {
+async function fetchProfileName(pubkey: string): Promise<string | null> {
   try {
     const reqs = await resolveReqs([pubkey], { kinds: [0] })
     const events = await collect(reqs, "nsite-profile")
@@ -261,7 +271,7 @@ async function fetchProfileName(pubkey) {
   }
 }
 
-function latestByPath(events) {
+function latestByPath(events: any[]): Map<string, any> {
   const map = new Map()
   for (const evt of events) {
     const path = normalizePath(getTag(evt, "d"))
@@ -272,17 +282,17 @@ function latestByPath(events) {
   return map
 }
 
-function normalizePath(p) {
+function normalizePath(p: string | null | undefined): string | null {
   if (!p) return null
   return p.startsWith("/") ? p : `/${p}`
 }
 
-function getTag(evt, name) {
+function getTag(evt: { tags: string[][] }, name: string): string | undefined {
   const t = evt.tags.find(x => x[0] === name)
   return t?.[1]
 }
 
-function dedupe(arr) {
+function dedupe(arr: string[]): string[] {
   const seen = new Set()
   const out = []
   for (const v of arr) {
@@ -293,7 +303,7 @@ function dedupe(arr) {
   return out
 }
 
-async function fetchBlob(servers, sha) {
+async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
   for (const server of servers) {
     try {
       const base = server.endsWith("/") ? server.slice(0, -1) : server

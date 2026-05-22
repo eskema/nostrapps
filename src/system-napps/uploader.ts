@@ -15,11 +15,13 @@ const DEFAULT_RELAYS = [
   "wss://relay.nostrapps.com/favorites"
 ]
 
-export function mount(container, ctx) {
+import type { SystemCtx } from "../types.js"
+
+export function mount(container: HTMLElement, ctx: SystemCtx) {
   let relays = [...DEFAULT_RELAYS]
-  let files = []
-  let metadata = null
-  let eventTemplate = null
+  let files: Array<{ path: string; file: File }> = []
+  let metadata: any = null
+  let eventTemplate: any = null
   let publishing = false
 
   container.innerHTML = `
@@ -45,18 +47,18 @@ export function mount(container, ctx) {
     </div>
   `
 
-  const pickBtn = container.querySelector(".upload-pick-folder")
-  const relaysToggleBtn = container.querySelector(".upload-relays-toggle")
-  const relaysPanel = container.querySelector(".upload-relays")
-  const relaysInput = container.querySelector(".upload-relays-input")
-  const relaysSaveBtn = container.querySelector(".upload-relays-save")
-  const relaysClearBtn = container.querySelector(".upload-relays-clear")
-  const statusEl = container.querySelector(".upload-status")
-  const previewEl = container.querySelector(".upload-preview")
-  const jsonEl = container.querySelector(".upload-json")
-  const publishBtn = container.querySelector(".upload-publish")
+  const pickBtn = container.querySelector(".upload-pick-folder") as HTMLElement
+  const relaysToggleBtn = container.querySelector(".upload-relays-toggle") as HTMLElement
+  const relaysPanel = container.querySelector(".upload-relays") as HTMLElement
+  const relaysInput = container.querySelector(".upload-relays-input") as HTMLInputElement
+  const relaysSaveBtn = container.querySelector(".upload-relays-save") as HTMLElement
+  const relaysClearBtn = container.querySelector(".upload-relays-clear") as HTMLElement
+  const statusEl = container.querySelector(".upload-status") as HTMLElement
+  const previewEl = container.querySelector(".upload-preview") as HTMLElement
+  const jsonEl = container.querySelector(".upload-json") as HTMLElement
+  const publishBtn = container.querySelector(".upload-publish") as HTMLElement
 
-  function setStatus(msg) {
+  function setStatus(msg: string | undefined) {
     statusEl.textContent = msg || ""
     statusEl.hidden = !msg
   }
@@ -65,11 +67,11 @@ export function mount(container, ctx) {
     files = []
     metadata = null
 
-    if (window.showDirectoryPicker) {
+    if ((window as any).showDirectoryPicker) {
       try {
-        const dirHandle = await window.showDirectoryPicker()
+        const dirHandle = await (window as any).showDirectoryPicker()
         await readDir(dirHandle, "")
-      } catch (err) {
+      } catch (err: any) {
         if (err.name !== "AbortError") setStatus(`Error: ${err.message}`)
         return
       }
@@ -79,7 +81,7 @@ export function mount(container, ctx) {
       input.webkitdirectory = true
       input.multiple = true
       input.onchange = async () => {
-        const list = Array.from(input.files)
+        const list = Array.from(input.files!)
         for (const f of list) {
           const relative = f.webkitRelativePath.split("/").slice(1).join("/")
           files.push({ path: relative, file: f })
@@ -98,7 +100,7 @@ export function mount(container, ctx) {
     buildEvent()
   }
 
-  async function readDir(dirHandle, path) {
+  async function readDir(dirHandle: any, path: string) {
     for await (const entry of dirHandle.values()) {
       if (entry.kind === "file") {
         const file = await entry.getFile()
@@ -114,7 +116,7 @@ export function mount(container, ctx) {
     }
   }
 
-  async function computeSha256(file) {
+  async function computeSha256(file: File) {
     const buf = await file.arrayBuffer()
     const hash = await crypto.subtle.digest("SHA-256", buf)
     return Array.from(new Uint8Array(hash))
@@ -202,7 +204,7 @@ export function mount(container, ctx) {
         publishBtn.disabled = false
       }, 3000)
     } catch (err) {
-      setStatus(`Error: ${err.message}`)
+      setStatus(`Error: ${(err as any).message}`)
       publishBtn.textContent = "error"
       setTimeout(() => {
         publishBtn.textContent = "publish"

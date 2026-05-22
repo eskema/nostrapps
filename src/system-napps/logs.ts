@@ -2,11 +2,13 @@ export const id = "logs"
 export const title = "Logs"
 export const slash = "/logs"
 
-export function mount(container, ctx) {
-  container.innerHTML = `<ul class="logs-view"></ul>`
-  const list = container.querySelector(".logs-view")
+import type { SystemCtx } from "../types.js"
 
-  function fmtTime(at) {
+export function mount(container: HTMLElement, ctx: SystemCtx) {
+  container.innerHTML = `<ul class="logs-view"></ul>`
+  const list = container.querySelector(".logs-view")!
+
+  function fmtTime(at: number) {
     return new Date(at).toLocaleTimeString(undefined, { hour12: false })
   }
 
