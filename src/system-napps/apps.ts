@@ -15,7 +15,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     if (apps.length === 0) {
       const empty = document.createElement("div")
       empty.className = "apps-empty"
-      empty.textContent = "No local apps registered yet."
+      empty.textContent = "No apps installed yet."
       listEl.appendChild(empty)
       return
     }

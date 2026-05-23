@@ -16,16 +16,11 @@ const NSITE_LISTING = 37348 // NIP-5B app listing (paired to a manifest by d-tag
 // without changing the slot's dimensions, so loading icons doesn't cause CLS.
 const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
 
-const DEFAULT_RELAYS = [
-  "wss://relay.nostrapps.com",
-  "wss://relay.nostrapps.com/personal",
-  "wss://relay.nostrapps.com/public",
-  "wss://relay.nostrapps.com/internal",
-  "wss://relay.nostrapps.com/favorites"
-]
+const DEFAULT_RELAYS = ["wss://relay.nostrapps.com/personal", "wss://relay.nostrapps.com/internal"]
 
 import type { SystemCtx } from "../types.js"
 import { currentSigner } from "../signers/index.js"
+import { SubCloser } from "@nostr/tools/abstract-pool"
 
 export function mount(
   container: HTMLElement,
@@ -35,8 +30,7 @@ export function mount(
   let filter = ""
   let events: any[] = []
   let relays = sanitizeRelays((opts.initial as { relays?: string[] })?.relays || [])
-  let cancelled = false
-  let sub: any = null
+  let sub: null | SubCloser = null
   let sawEose = false
 
   if (relays.length === 0) relays = [...DEFAULT_RELAYS]
@@ -109,7 +103,7 @@ export function mount(
     // app in the "installed" tab moves down into "Previously installed"
     // (and an install in any tab gets re-categorized too).
     const renderOne = (evt: any) =>
-      listEl.appendChild(renderCard(evt, ctx, listingFor(evt), renderList))
+      listEl.appendChild(renderCard(evt, ctx, relays, listingFor(evt), renderList))
 
     if (filtered.length === 0) {
       const empty = document.createElement("div")
@@ -133,7 +127,6 @@ export function mount(
       seenIconPks.add(evt.pubkey)
       loadBlossomServers(evt.pubkey)
         .then(res => {
-          if (cancelled) return
           const servers = res?.items ?? []
           if (servers.length === 0) return
           const icons = listEl.querySelectorAll(
@@ -163,6 +156,7 @@ export function mount(
   }
 
   function closeSubscription() {
+    console.log("close subscription")
     try {
       sub?.close?.()
     } catch {}
@@ -175,7 +169,6 @@ export function mount(
     sawEose = false
     renderList()
 
-    if (cancelled) return
     if (!relays.length) {
       setStatus("No relays configured.")
       return
@@ -188,7 +181,6 @@ export function mount(
       {
         label: "napps",
         onevent(event: any) {
-          if (cancelled) return
           if (events.some((existing: any) => existing.id === event.id)) return
           events.push(event)
           renderList()
@@ -248,13 +240,18 @@ export function mount(
 
   return {
     unmount() {
-      cancelled = true
       closeSubscription()
     }
   }
 }
 
-function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = null) {
+function renderCard(
+  evt: any,
+  ctx: any,
+  relays: string[],
+  listing: any = null,
+  onChange: any = null
+) {
   const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || ""
   const dTag = tag("d")
   const source = tag("source")
@@ -289,6 +286,10 @@ function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = nul
   card.className = "store-card"
   card.dataset.author = evt.pubkey
   if (listing) card.dataset.listingPubkey = listing.pubkey
+  card.addEventListener("mouseup", (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return
+    ctx.launchSystemNapp("app-info", { params: evt })
+  })
 
   const head = document.createElement("div")
   head.className = "store-card-head"
@@ -335,11 +336,13 @@ function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = nul
   pathsEl.className = "store-paths"
   pathsEl.textContent = `${pathCount} file${pathCount === 1 ? "" : "s"}`
 
-  const kindEl = document.createElement("span")
-  kindEl.className = "store-kind"
-  kindEl.textContent = evt.kind === NSITE_NAMED ? "named" : "root"
-
-  meta.append(author, dateEl, pathsEl, kindEl)
+  meta.append(author, dateEl, pathsEl)
+  for (const action of actionTags) {
+    const chip = document.createElement("span")
+    chip.className = "store-chip store-chip-handler"
+    chip.textContent = action
+    meta.appendChild(chip)
+  }
   titles.appendChild(meta)
 
   // Action buttons. When an update is available we show *both* update and
@@ -347,6 +350,71 @@ function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = nul
   // it). Otherwise it's a single install/uninstall toggle.
   const actions = document.createElement("div")
   actions.className = "store-actions"
+
+  const currentUser = ctx.account?.getPubkey()
+  const isOwn = currentUser && evt.pubkey === currentUser
+  let menuOpen = false
+  let menuEl: HTMLDivElement | null = null
+
+  function closeMenu() {
+    if (menuEl) {
+      menuEl.remove()
+      menuEl = null
+    }
+    menuOpen = false
+  }
+
+  function toggleMenu(e: MouseEvent) {
+    e.stopPropagation()
+    if (menuOpen) {
+      closeMenu()
+      return
+    }
+    menuOpen = true
+    menuEl = document.createElement("div")
+    menuEl.className = "store-card-menu"
+    const btn = document.createElement("button")
+    btn.type = "button"
+    btn.textContent = "request delete"
+    btn.addEventListener("click", async () => {
+      closeMenu()
+      ctx.setStatus?.("Store: requesting deletion of app event…")
+      try {
+        const signer = currentSigner()
+        if (!signer) throw new Error("No signer")
+        const signed = await signer.signEvent({
+          kind: 5,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ["k", String(evt.kind)],
+            ["e", evt.id]
+          ],
+          content: ""
+        })
+        const results = await Promise.allSettled(pool.publish(relays, signed))
+        const ok = results.filter(r => r.status === "fulfilled").length
+        ctx.setStatus?.(`Store: deletion event sent to ${ok}/${relays.length} relays`)
+      } catch (err: any) {
+        ctx.setStatus?.(`Store: deletion failed — ${err.message}`)
+      }
+    })
+    menuEl.appendChild(btn)
+    // close on click outside
+    const onDocClick = (ev: MouseEvent) => {
+      if (menuEl && !menuEl.contains(ev.target as Node)) {
+        closeMenu()
+        document.removeEventListener("click", onDocClick)
+      }
+    }
+    document.addEventListener("click", onDocClick)
+    card.appendChild(menuEl)
+  }
+
+  const menuTrigger = document.createElement("button")
+  menuTrigger.type = "button"
+  menuTrigger.className = "store-card-menu-trigger"
+  menuTrigger.textContent = "···"
+  menuTrigger.addEventListener("click", toggleMenu)
 
   const performAction = async (btn: HTMLButtonElement, action: string) => {
     btn.disabled = true
@@ -380,7 +448,7 @@ function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = nul
       if (onChange) {
         onChange()
       } else {
-        const replacement = renderCard(evt, ctx, listing)
+        const replacement = renderCard(evt, ctx, relays, listing)
         card.replaceWith(replacement)
       }
     } catch (err) {
@@ -414,6 +482,8 @@ function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = nul
   } else {
     actions.append(makeActionBtn("install", "store-install"))
   }
+
+  if (isOwn) actions.append(menuTrigger)
 
   head.append(titles, actions)
   card.appendChild(head)

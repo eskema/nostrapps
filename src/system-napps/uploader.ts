@@ -1,5 +1,8 @@
 import { pool } from "@nostr/gadgets/global"
 import { currentSigner } from "../signers/index.js"
+import { BlossomClient } from "@nostr/tools/nipb7"
+import { EventTemplate } from "@nostr/tools/pure"
+import { loadBlossomServers } from "@nostr/gadgets/lists"
 
 export const id = "uploader"
 export const title = "Uploader"
@@ -10,15 +13,12 @@ const NSITE_NAMED = 35128
 const DEFAULT_RELAYS = [
   "wss://relay.nostrapps.com",
   "wss://relay.nostrapps.com/personal",
-  "wss://relay.nostrapps.com/public",
-  "wss://relay.nostrapps.com/internal",
-  "wss://relay.nostrapps.com/favorites"
+  "wss://relay.nostrapps.com/internal"
 ]
 
 import type { SystemCtx } from "../types.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
-  let relays = [...DEFAULT_RELAYS]
   let files: Array<{ path: string; file: File }> = []
   let metadata: any = null
   let eventTemplate: any = null
@@ -32,11 +32,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       </div>
       <div class="upload-relays" hidden>
         <label class="upload-relays-label">Relays (one per line)</label>
-        <textarea class="upload-relays-input" rows="4" spellcheck="false">${relays.join("\n")}</textarea>
-        <div class="upload-relays-actions">
-          <button type="button" class="upload-relays-save">save</button>
-          <button type="button" class="upload-relays-clear">clear</button>
-        </div>
+        <textarea class="upload-relays-input" rows="4" spellcheck="false">${DEFAULT_RELAYS.join("\n")}</textarea>
+        <label class="upload-protected"><input type="checkbox" class="upload-protected-input"> protected</label>
       </div>
       <div class="upload-status" hidden></div>
       <div class="upload-preview" hidden>
@@ -47,12 +44,11 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     </div>
   `
 
+  const protectedCb = container.querySelector(".upload-protected-input") as HTMLInputElement
   const pickBtn = container.querySelector(".upload-pick-folder") as HTMLElement
   const relaysToggleBtn = container.querySelector(".upload-relays-toggle") as HTMLElement
   const relaysPanel = container.querySelector(".upload-relays") as HTMLElement
   const relaysInput = container.querySelector(".upload-relays-input") as HTMLInputElement
-  const relaysSaveBtn = container.querySelector(".upload-relays-save") as HTMLElement
-  const relaysClearBtn = container.querySelector(".upload-relays-clear") as HTMLElement
   const statusEl = container.querySelector(".upload-status") as HTMLElement
   const previewEl = container.querySelector(".upload-preview") as HTMLElement
   const jsonEl = container.querySelector(".upload-json") as HTMLElement
@@ -116,26 +112,54 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     }
   }
 
-  async function computeSha256(file: File) {
-    const buf = await file.arrayBuffer()
-    const hash = await crypto.subtle.digest("SHA-256", buf)
-    return Array.from(new Uint8Array(hash))
-      .map(b => b.toString(16).padStart(2, "0"))
-      .join("")
-  }
-
   async function buildEvent() {
     if (files.length === 0) {
       setStatus("No files selected.")
       return
     }
 
-    setStatus("Computing hashes…")
+    const signer = currentSigner()
+    if (!signer) {
+      setStatus("No signer connected.")
+      return
+    }
+
+    const pubkey = ctx.account.getPubkey()
+    if (!pubkey) {
+      setStatus("No pubkey available.")
+      return
+    }
+
+    setStatus("Loading blossom servers…")
+    const serverList = (await loadBlossomServers(pubkey)).items ?? []
+    if (serverList.length === 0) {
+      setStatus("No blossom servers configured.")
+      return
+    }
+
+    setStatus("Uploading files…")
     const tags = []
     for (const f of files) {
-      const sha = await computeSha256(f.file)
-      tags.push(["path", f.path, sha, f.file.type || "application/octet-stream"])
+      if (f.path === "metadata.json") continue
+      const results = await Promise.allSettled(
+        serverList.map(s => new BlossomClient(s, signer as any).uploadFile(f.file))
+      )
+      const ok = results.find(r => r.status === "fulfilled") as
+        | PromiseFulfilledResult<any>
+        | undefined
+      if (!ok) {
+        const reasons = results
+          .map(r => (r.status === "rejected" ? (r as PromiseRejectedResult).reason.message : ""))
+          .join("; ")
+        setStatus(`Upload failed for ${f.path}: ${reasons}`)
+        return
+      }
+      const bd = ok.value
+      ctx.setStatus(`Uploaded ${f.path} (${bd.sha256.slice(0, 8)}…)`)
+      tags.push(["path", f.path, bd.sha256, bd.type || f.file.type || "application/octet-stream"])
     }
+
+    if (protectedCb.checked) tags.push(["-"])
 
     if (metadata?.name) tags.push(["title", metadata.name])
     if (metadata?.description) tags.push(["description", metadata.description])
@@ -148,7 +172,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     const kind = metadata?.name ? NSITE_NAMED : NSITE_ROOT
     if (kind === NSITE_NAMED) tags.push(["d", dTag])
 
-    const pubkey = ctx.account.getPubkey() || "0".repeat(64)
     eventTemplate = {
       kind,
       created_at: Math.floor(Date.now() / 1000),
@@ -163,21 +186,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     setStatus(`Ready — ${files.length} files`)
   }
 
+  protectedCb.addEventListener("change", buildEvent)
   relaysToggleBtn.addEventListener("click", () => (relaysPanel.hidden = !relaysPanel.hidden))
-  relaysSaveBtn.addEventListener("click", () => {
-    relays = relaysInput.value
-      .split("\n")
-      .map(s => s.trim())
-      .filter(Boolean)
-    if (relays.length === 0) relays = [...DEFAULT_RELAYS]
-    relaysInput.value = relays.join("\n")
-    relaysPanel.hidden = true
-  })
-  relaysClearBtn.addEventListener("click", () => {
-    relays = [...DEFAULT_RELAYS]
-    relaysInput.value = relays.join("\n")
-    relaysPanel.hidden = true
-  })
 
   pickBtn.addEventListener("click", pickFolder)
 
@@ -193,11 +203,18 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       if (!signer) throw new Error("No signer connected")
       const signed = await signer.signEvent(eventTemplate)
       publishBtn.textContent = "publishing…"
-      setStatus(`Publishing to ${relays.length} relay(s)…`)
+      const relayList = relaysInput.value
+        .split("\n")
+        .map(s => s.trim())
+        .filter(Boolean)
+      if (relayList.length === 0) relayList.push(...DEFAULT_RELAYS)
+      ctx.setStatus("Publishing app event…")
+      setStatus(`Publishing to ${relayList.length} relay(s)…`)
 
-      const results = await Promise.allSettled(pool.publish(relays, signed))
+      const results = await Promise.allSettled(pool.publish(relayList, signed))
       const okCount = results.filter(r => r.status === "fulfilled").length
-      setStatus(`Published to ${okCount}/${relays.length} relays`)
+      ctx.setStatus(`Published app event to ${okCount}/${relayList.length} relays`)
+      setStatus(`Published to ${okCount}/${relayList.length} relays`)
       publishBtn.textContent = "published"
       setTimeout(() => {
         publishBtn.textContent = "publish"

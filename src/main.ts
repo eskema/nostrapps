@@ -37,8 +37,11 @@ import {
 } from "./system-napps/index.js"
 import { Filter } from "@nostr/tools/filter"
 import { pool } from "@nostr/gadgets/global"
+import { EventTemplate } from "@nostr/tools"
 
 pool.trackRelays = true
+pool.automaticallyAuth = (_url: string) =>
+  currentSigner() ? (evt: EventTemplate) => currentSigner()?.signEvent(evt) as any : null
 
 const stage = document.getElementById("stage")!
 const form = document.getElementById("launch-form")!

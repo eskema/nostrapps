@@ -1330,6 +1330,7 @@ body.napp-dragging .napp-body iframe {
   padding: 0.6rem 0.75rem;
   border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
   border-radius: 8px;
+  position: relative;
 }
 
 .store-card-head {
@@ -1695,6 +1696,51 @@ body.napp-dragging .napp-body iframe {
 .store-chip-handler {
   font-family: var(--font-mono);
   background: color-mix(in srgb, #3182ce 18%, transparent);
+}
+
+.store-card-menu-trigger {
+  background: none;
+  border: none;
+  color: color-mix(in srgb, currentColor 40%, transparent);
+  font-size: 1rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  line-height: 1;
+}
+
+.store-card-menu-trigger:hover {
+  color: color-mix(in srgb, currentColor 70%, transparent);
+}
+
+.store-card-menu {
+  position: absolute;
+  right: 0.5rem;
+  top: 2.2rem;
+  z-index: 10;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.store-card-menu button {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.7rem;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.store-card-menu button:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
 /* ─── handler picker ───────────────────────────────────────────── */
@@ -2155,4 +2201,35 @@ body.napp-dragging .napp-body iframe {
 
 .app-info-author-name {
   font-family: var(--font-mono);
+}
+
+.app-info-files {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.app-info-file-list {
+  margin: 0;
+  padding: 0 0 0 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.app-info-file-list li {
+  margin: 0;
+}
+
+.app-info-file-list a {
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  text-decoration: none;
+  font-size: 0.72rem;
+  margin-left: 0.3rem;
+}
+
+.app-info-file-list a:hover {
+  color: color-mix(in srgb, currentColor 75%, transparent);
+  text-decoration: underline;
 }

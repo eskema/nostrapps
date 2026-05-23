@@ -4,6 +4,8 @@ import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
 import { currentSigner } from "../signers/index.js"
 import { Filter } from "@nostr/tools/filter"
 import { NostrEvent } from "@nostr/tools/pure"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex } from "@noble/hashes/utils.js"
 
 const NSITE_NAMED_KIND = 35128
 const NSITE_LISTING_KIND = 37348
@@ -126,13 +128,19 @@ function getTag(evt: { tags: string[][] }, name: string): string | undefined {
 }
 
 async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
-  for (const server of servers) {
+  let i = 0
+  while (i < servers.length) {
+    const server = servers[i]
     try {
       const base = server.endsWith("/") ? server.slice(0, -1) : server
-      const res = await fetch(`${base}/${sha}`)
-      if (res.ok) return await res.blob()
+      const res = await fetch(`${base}/${sha}`, { signal: AbortSignal.timeout(10000) })
+      if (!res.ok) { i++; continue }
+      const blob = await res.blob()
+      const buf = await blob.arrayBuffer()
+      if (bytesToHex(sha256(new Uint8Array(buf))) !== sha) { i++; continue }
+      return blob
     } catch {
-      // try next server
+      servers.push(servers.splice(i, 1)[0])
     }
   }
   return null
