@@ -25,7 +25,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       card.className = "apps-card"
       card.addEventListener("mouseup", (e: MouseEvent) => {
         if ((e.target as HTMLElement).closest("button")) return
-        ctx.launchSystemNapp("app-info", { params: app })
+        ctx.launchSystemNapp("app-info", { params: app.event })
       })
 
       const head = document.createElement("div")
@@ -53,10 +53,10 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
         meta.appendChild(openEl)
       }
 
-      if (app.manifest?.createdAt) {
-        const manifestDate = document.createElement("span")
-        manifestDate.textContent = new Date(app.manifest.createdAt * 1000).toLocaleDateString()
-        meta.appendChild(manifestDate)
+      if (app.event?.created_at) {
+        const dateEl = document.createElement("span")
+        dateEl.textContent = new Date(app.event.created_at * 1000).toLocaleDateString()
+        meta.appendChild(dateEl)
       }
 
       titles.appendChild(meta)

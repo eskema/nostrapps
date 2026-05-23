@@ -134,10 +134,16 @@ async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
     try {
       const base = server.endsWith("/") ? server.slice(0, -1) : server
       const res = await fetch(`${base}/${sha}`, { signal: AbortSignal.timeout(10000) })
-      if (!res.ok) { i++; continue }
+      if (!res.ok) {
+        i++
+        continue
+      }
       const blob = await res.blob()
       const buf = await blob.arrayBuffer()
-      if (bytesToHex(sha256(new Uint8Array(buf))) !== sha) { i++; continue }
+      if (bytesToHex(sha256(new Uint8Array(buf))) !== sha) {
+        i++
+        continue
+      }
       return blob
     } catch {
       servers.push(servers.splice(i, 1)[0])

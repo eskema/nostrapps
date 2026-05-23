@@ -5,46 +5,37 @@ export const title = "App Info"
 export const singleton = false
 export const slash = ""
 
-function computeNappId(evt: any) {
-  const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1]
-  if (evt.kind === 35128 && dTag) return `${evt.pubkey.slice(0, 40)}-${dTag}`
-  return evt.pubkey.slice(0, 40)
-}
-
 import type { SystemCtx } from "../types.js"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
+import { computeNappId } from "../persistence.js"
 
 export async function mount(
   container: HTMLElement,
   _ctx: SystemCtx,
   opts: { params?: any; onStateChange?: (state: any) => void } = {}
 ) {
-  const data = opts.params
-  if (!data) {
+  const evt = opts.params
+  if (!evt || typeof evt.kind !== "number") {
     container.innerHTML = `<div class="app-info-empty">No app data provided.</div>`
     return
   }
 
-  console.log("data", data)
-
-  const isEvent = typeof data.kind === "number"
-  const nappId = data.nappId || (isEvent ? computeNappId(data) : "")
-  const kind = isEvent ? data.kind : data.manifest?.kind || "unknown"
-  const pubkey = isEvent ? data.pubkey : data.manifest?.pubkey || "unknown"
-  const dTag = isEvent
-    ? data.tags.find((t: any) => t[0] === "d")?.[1] || ""
-    : data.manifest?.dTag || ""
-  const title = isEvent ? data.tags.find((t: any) => t[0] === "title")?.[1] || "" : data.name || ""
-  const description = isEvent ? data.tags.find((t: any) => t[0] === "description")?.[1] || "" : ""
-  const source = isEvent ? data.tags.find((t: any) => t[0] === "source")?.[1] || "" : ""
-  const pathTags = isEvent ? data.tags.filter((t: any) => t[0] === "path" && t[1] && t[2]) : []
-  const serverTagUrls = isEvent ? data.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1]) : []
-  const blossomServers = pathTags.length > 0 ? (await loadBlossomServers(pubkey).catch(() => ({ items: [] as string[] }))).items : []
+  const nappId = computeNappId(evt)
+  const kind = evt.kind
+  const pubkey = evt.pubkey
+  const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1] || ""
+  const title = evt.tags.find((t: any) => t[0] === "title")?.[1] || ""
+  const description = evt.tags.find((t: any) => t[0] === "description")?.[1] || ""
+  const source = evt.tags.find((t: any) => t[0] === "source")?.[1] || ""
+  const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
+  const serverTagUrls = evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1])
+  const blossomServers =
+    pathTags.length > 0
+      ? (await loadBlossomServers(pubkey).catch(() => ({ items: [] as string[] }))).items
+      : []
   const servers = [...new Set([...serverTagUrls, ...blossomServers])]
-  const createdAt = isEvent ? data.created_at : data.manifest?.createdAt || 0
-  const handlers =
-    data.handlers ||
-    (isEvent ? data.tags.filter((t: any) => t[0] === "action").map((t: any) => t[1]) : [])
+  const createdAt = evt.created_at
+  const handlers = evt.tags.filter((t: any) => t[0] === "action").map((t: any) => t[1])
 
   container.innerHTML = `
     <div class="app-info-panel">
@@ -68,15 +59,21 @@ export async function mount(
         <div class="app-info-files">
           <div class="app-info-row"><span>files (${pathTags.length}):</span></div>
           <ul class="app-info-file-list">
-            ${pathTags.map((t: string[]) => {
-              const path = t[1]
-              const sha = t[2]
-              return `<li><code>${path}</code> ${servers.map((url: string) => {
-                let hostname = url
-                try { hostname = new URL(url).hostname } catch {}
-                return `<a href="${url}/${sha}" target="_blank" rel="noopener noreferrer">${hostname}</a>`
-              }).join(" ")}</li>`
-            }).join("")}
+            ${pathTags
+              .map((t: string[]) => {
+                const path = t[1]
+                const sha = t[2]
+                return `<li><code>${path}</code> ${servers
+                  .map((url: string) => {
+                    let hostname = url
+                    try {
+                      hostname = new URL(url).hostname
+                    } catch {}
+                    return `<a href="${url}/${sha}" target="_blank" rel="noopener noreferrer">${hostname}</a>`
+                  })
+                  .join(" ")}</li>`
+              })
+              .join("")}
           </ul>
         </div>
       `

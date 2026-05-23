@@ -25,7 +25,7 @@ import { googleLoginAndCreateBunker } from "./signers/google.js"
 import * as account from "./account.js"
 import { mountDialog, clearDecisions } from "./permissions.js"
 import * as persist from "./persistence.js"
-import * as instanceStore from "./storage/instance.js"
+import * as handlers from "./handlers.js"
 import * as nostrdb from "./store.js"
 import type { SuggestionItem, NsiteResult, NappWindowState, SystemCtx } from "./types.js"
 import {
@@ -166,12 +166,15 @@ function notifyAppsChanged() {
 }
 
 const apps = {
+  events() {
+    return persist.getInstalledEvents()
+  },
   list() {
     return persist.readKnown().map((nappId: string) => ({
       nappId,
       name: friendlyNameFor(nappId),
-      handlers: persist.getHandlers(nappId),
-      manifest: persist.getInstalledManifest(nappId),
+      handlers: handlers.getHandlers(nappId),
+      event: persist.getInstalledEventForNappId(nappId),
       openCount: persist.readOpen().filter(s => s.nappId === nappId).length
     }))
   },
@@ -245,8 +248,9 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   persist.forgetHistory(nappId)
   for (const p of petnameKeys) persist.forgetHistory(p)
   clearDecisions(nappId)
-  persist.forgetInstalledManifest(nappId)
-  persist.forgetHandlers(nappId)
+  const installedEvent = persist.getInstalledEventForNappId(nappId)
+  if (installedEvent) persist.forgetInstalledEvent(installedEvent.id)
+  handlers.removeApp(nappId)
   setStatus(`${actionLabel} ${nappId}…`)
   try {
     await wipe(nappId)
@@ -365,7 +369,6 @@ async function uninstallNapp(nappId: string) {
     for (const s of persist.readOpen()) {
       if (s.nappId === nappId) {
         persist.removeOpen(s.instanceId)
-        instanceStore.clear(s.instanceId).catch(() => {})
       }
     }
 
@@ -375,22 +378,6 @@ async function uninstallNapp(nappId: string) {
   } finally {
     uninstallingNapps.delete(nappId)
     refreshSuggestions()
-  }
-}
-
-function manifestInfoFromEvent(
-  evt:
-    | { pubkey: string; kind: number; tags: string[][]; id: string; created_at: number }
-    | null
-    | undefined
-) {
-  if (!evt) return null
-  return {
-    pubkey: evt.pubkey,
-    kind: evt.kind,
-    dTag: evt.tags.find(t => t[0] === "d")?.[1] || null,
-    eventId: evt.id,
-    createdAt: evt.created_at
   }
 }
 
@@ -423,8 +410,8 @@ async function updateNapp(target: { pubkey: string; dTag: string; relayHints: st
   const label = title || nappId
   setStatus(`Updating ${label}…`)
   await reinstallFiles(nappId, files, setStatus, label)
-  if (manifest) persist.setInstalledManifest(nappId, manifestInfoFromEvent(manifest))
-  persist.setHandlers(nappId, capabilitiesFromListing(listing))
+  if (manifest) persist.storeInstalledEvent(manifest)
+  handlers.addApp(nappId, capabilitiesFromListing(listing))
   const reloaded = reloadIframesByNappId(nappId)
   setStatus(
     `Updated ${label}` +
@@ -439,7 +426,7 @@ async function runNappAction(callerNappId: string, name: string, payload: unknow
   if (typeof name !== "string" || !name) {
     throw new Error("napp.action: action name is required")
   }
-  const candidates = persist.findHandlersForAction(name).filter(id => id !== callerNappId)
+  const candidates = handlers.findHandlersForAction(name).filter(id => id !== callerNappId)
   if (candidates.length === 0) {
     throw new Error(`No app registered for action "${name}"`)
   }
@@ -542,14 +529,11 @@ async function ensureNappOpen(nappId: string) {
     return existing
   }
 
-  const info = persist.getInstalledManifest(nappId)
-  if (info?.pubkey) {
-    console.debug("[launch] ensureNappOpen: fresh launch from manifest", { nappId, target: info })
-    const target = {
-      pubkey: info.pubkey,
-      dTag: info.dTag,
-      relayHints: []
-    }
+  const event = persist.getInstalledEventForNappId(nappId)
+  if (event) {
+    const dTag = event.tags.find(t => t[0] === "d")?.[1] || ""
+    console.debug("[launch] ensureNappOpen: fresh launch from installed event", { nappId, dTag })
+    const target = { pubkey: event.pubkey, dTag, relayHints: [] }
     const result2 = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
     const { listing } = result2
     const petname = result2.title || nappId
@@ -558,9 +542,8 @@ async function ensureNappOpen(nappId: string) {
       petname
     })
     trackOpened(result2.nappId, win)
-    if (result2.manifest)
-      persist.setInstalledManifest(result2.nappId, manifestInfoFromEvent(result2.manifest))
-    persist.setHandlers(result2.nappId, capabilitiesFromListing(listing))
+    if (result2.manifest) persist.storeInstalledEvent(result2.manifest)
+    handlers.addApp(result2.nappId, capabilitiesFromListing(listing))
     win.focus()
     return win
   }
@@ -595,7 +578,6 @@ const systemCtx: SystemCtx = {
   isInstalled: (nappId: string) => persist.readKnown().includes(nappId),
   wasInstalled: (nappId: string) => persist.readInstallLog().includes(nappId),
   uninstall: (nappId: string) => uninstallNapp(nappId),
-  installedManifest: (nappId: string) => persist.getInstalledManifest(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
 }
 
@@ -989,7 +971,6 @@ function makeLaunchOpts() {
     onDestroy: (instanceId: string) => {
       const entry = persist.readOpen().find(s => s.instanceId === instanceId)
       persist.removeOpen(instanceId)
-      instanceStore.clear(instanceId).catch(() => {})
       if (entry?.nappId) {
         const stillUsed = persist.readOpen().some(s => s.nappId === entry.nappId)
         if (!stillUsed && !uninstallingNapps.has(entry.nappId)) {
@@ -1065,6 +1046,7 @@ async function init() {
   // If the user is paired with a bunker, get the connection warm in the
   // background. First sign request will wait if it's still connecting.
   reconnectIfNeeded().catch(err => setStatus(`Bunker reconnect failed: ${err.message}`))
+  handlers.init()
   await restoreAll()
   maybeBootstrap()
   // Restore doesn't fire onStateChange — kick the packer manually so a
@@ -1185,8 +1167,8 @@ async function launchFromInput(raw: string): Promise<void> {
   trackOpened(nappId, win)
   if (raw && raw !== petname) persist.setPetname(raw, nappId)
   persist.pushHistory(raw)
-  if (manifest) persist.setInstalledManifest(nappId, manifestInfoFromEvent(manifest))
-  persist.setHandlers(nappId, capabilitiesFromListing(listing))
+  if (manifest) persist.storeInstalledEvent(manifest)
+  handlers.addApp(nappId, capabilitiesFromListing(listing))
   win.focus()
 }
 
@@ -1218,7 +1200,7 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       petname
     })
     trackOpened(nappId, win)
-    if (metadata?.actions?.length) persist.setHandlers(nappId, metadata.actions)
+    if (metadata?.actions?.length) handlers.addApp(nappId, metadata.actions)
     win.focus()
     setStatus(`Launched ${petname}`)
   } catch (err: any) {

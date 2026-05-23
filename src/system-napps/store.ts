@@ -259,9 +259,9 @@ function renderCard(
   const pathCount = evt.tags.filter((t: any) => t[0] === "path").length
   const nappId = computeNappId(evt)
   const installed = ctx.isInstalled?.(nappId) ?? false
-  const installedManifest = installed ? ctx.installedManifest?.(nappId) : null
-  const updateAvailable =
-    installed && installedManifest && installedManifest.createdAt < evt.created_at
+  const installedEvents = ctx.apps.events?.() ?? []
+  const installedEvent = installedEvents.find((e: any) => computeNappId(e) === nappId)
+  const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
 
   // NIP-5B: prefer listing fields over manifest fallbacks.
   const listingName = localizedListingTag(listing, "name")

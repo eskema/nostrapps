@@ -102,20 +102,6 @@ export interface SystemNappDef {
   ): { unmount(): void } | void
 }
 
-export interface AppInfo {
-  nappId: string
-  name: string
-  handlers: string[]
-  manifest: {
-    pubkey: string
-    kind: number
-    dTag?: string | null
-    eventId: string
-    createdAt: number
-  } | null
-  openCount: number
-}
-
 export interface SystemCtx {
   account: {
     getPubkey(): string | null
@@ -123,7 +109,14 @@ export interface SystemCtx {
     subscribe(fn: (pk: string | null) => void): () => void
   }
   apps: {
-    list(): AppInfo[]
+    list(): Array<{
+      event: NostrEvent | null
+      nappId: string
+      name: string
+      handlers: string[]
+      openCount: number
+    }>
+    events(): NostrEvent[]
     subscribe(fn: () => void): () => void
   }
   database: {
@@ -150,8 +143,7 @@ export interface SystemCtx {
   isInstalled(nappId: string): boolean
   wasInstalled(nappId: string): boolean
   uninstall(nappId: string): Promise<void>
-  installedManifest(nappId: string): unknown
-  update(target: { pubkey: string; kind?: number; dTag?: string }): Promise<void>
+  update(target: { pubkey: string; dTag: string; relayHints?: string[] }): Promise<void>
 }
 
 export interface NsiteFile {

@@ -98,6 +98,38 @@ window.nostrdb.event(id)
 window.nostrdb.replaceable(kind, author, identifier?)
 ```
 
+You also get data-loading helpers executed on the host via `@nostr/gadgets`:
+
+```js
+// NIP-51 lists
+window.napp.utils.loadRelayList(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadFollowsList(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadMuteList(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadBookmarks(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadPins(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadBlossomServers(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadEmojis(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadFavoriteRelays(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadFavoriteScrolls(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadWikiAuthors(pubkey, hints?, refreshStyle?, defaultItems?)
+window.napp.utils.loadWikiRelays(pubkey, hints?, refreshStyle?, defaultItems?)
+
+// Addressable sets
+window.napp.utils.loadFollowSets(pubkey, hints?, forceUpdate?)
+window.napp.utils.loadFollowPacks(pubkey, hints?, forceUpdate?)
+window.napp.utils.loadRelaySets(pubkey, hints?, forceUpdate?)
+window.napp.utils.loadEmojiSets(pubkey, hints?, forceUpdate?)
+
+// Profile metadata
+window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrUser
+```
+
+Each function's signature matches `@nostr/gadgets` exactly. The call is forwarded to the host, which runs the real query against the shared relay pool and caches the result.
+
+The host also pushes runtime signals to every napp via `postMessage`. Bridge.js relays them:
+
+- **`napp-theme-change`**: sets `document.documentElement.dataset.theme` to `"light"` or `"dark"`. Sent when the launcher's theme changes, so the napp can adjust its own styles.
+
 For data tied to the app rather than a specific window, use the napp's own `localStorage` or `indexedDB`. Each napp lives at its own origin so everything is naturally isolated.
 
 ### Origin sandboxing
@@ -117,9 +149,9 @@ The `nappId` is derived from the manifest: for a root manifest (kind 15128) it's
 
 ### How updates work
 
-When the launcher installs a napp it remembers the manifest event's `id` and `created_at`. The store compares that against the latest manifest cached from your relays. Newer `created_at` means an update is available.
+When the launcher installs a napp it stores the full manifest event keyed by its event `id`. The store compares the stored event's `created_at` against the latest manifest from your relays. Newer `created_at` means an update is available.
 
-Clicking update re-fetches the manifest and blobs, reuses the boot iframe to swap the files store atomically (the install handler clears the store before writing), updates the saved manifest version, and then reassigns `iframe.src` on every open window of that napp so the new files take effect right away.
+Clicking update re-fetches the manifest and blobs, reuses the boot iframe to swap the files store atomically (the install handler clears the store before writing), writes the new manifest event, and then reassigns `iframe.src` on every open window of that napp so the new files take effect right away.
 
 ### How destroy works
 
@@ -153,13 +185,14 @@ All in `localStorage`, prefixed with `nostrapps:`:
 - `known` — recently launched nappIds
 - `petnames` — petname to nappId map
 - `installLog` — every nappId ever installed (kept across destroy, used for the store's "previously installed" section)
-- `installedManifests` — per-nappId manifest version, used for update detection
+- `installed` — full manifest events keyed by event id, used for update detection
+- `handlers` — per-nappId action handler registry (NIP-5B)
+- `handlerPrefs` — per-caller scoped action handler preferences
 - `history` — recent raw inputs typed into the launch box
 - `permissions` — per-nappId per-method allow/deny decisions
 - `theme` — `light`, `dark`, or absent (= auto)
 - `bootstrapped` — set after the first launcher load auto-opens the system napps
 - `pubkey` — the connected pubkey
-- `store:cache` — cached nsite events from the store's last refresh
 - `store:relays` — custom relay list for the store, if any
 
 Per-instance KV (`window.nostr.instance.*`) lives in the launcher's IndexedDB instead, keyed by instanceId.

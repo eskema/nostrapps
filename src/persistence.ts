@@ -1,3 +1,4 @@
+import { NostrEvent } from "@nostr/tools"
 import { NappWindowState } from "./types"
 
 const OPEN_KEY = "nostrapps:open"
@@ -5,8 +6,7 @@ const HISTORY_KEY = "nostrapps:history"
 const KNOWN_KEY = "nostrapps:known"
 const PETNAMES_KEY = "nostrapps:petnames"
 const INSTALL_LOG_KEY = "nostrapps:installLog"
-const INSTALLED_MANIFESTS_KEY = "nostrapps:installedManifests"
-const HANDLERS_KEY = "nostrapps:handlers" // { nappId: string[] }
+const INSTALLED_KEY = "nostrapps:installed"
 const HANDLER_PREFS_KEY = "nostrapps:handlerPrefs" // { '<caller>|<type>|<key>': nappId }
 const HISTORY_LIMIT = 20
 
@@ -93,74 +93,46 @@ export function readInstallLog() {
   return Array.isArray(raw) ? raw : []
 }
 
-// Per-nappId info about *which* manifest version is currently installed,
-// used to detect when a relay has a newer one and offer an update.
-// info shape: { pubkey, kind, dTag?: string|null, eventId, createdAt }
-function readInstalledManifests() {
-  const raw = readJson(INSTALLED_MANIFESTS_KEY, {})
+export function computeNappId(event: { kind: number; pubkey: string; tags: string[][] }): string {
+  const dTag = event.tags.find(t => t[0] === "d")?.[1]
+  if (event.kind === 35128 && dTag) return `${event.pubkey.slice(0, 40)}-${dTag}`
+  return event.pubkey.slice(0, 40)
+}
+
+// Full events keyed by event.id, used to detect updates and re-fetch.
+function readInstalled() {
+  const raw = readJson(INSTALLED_KEY, {})
   return raw && typeof raw === "object" ? raw : {}
 }
 
-export function getInstalledManifest(nappId: string) {
-  return readInstalledManifests()[nappId] || null
+export function storeInstalledEvent(event: { id: string }) {
+  if (!event?.id) return
+  const all = readInstalled()
+  all[event.id] = event
+  writeJson(INSTALLED_KEY, all)
 }
 
-export function setInstalledManifest(nappId: string, info: any) {
-  if (!nappId || !info) return
-  const all = readInstalledManifests()
-  all[nappId] = info
-  writeJson(INSTALLED_MANIFESTS_KEY, all)
+export function getInstalledEvent(eventId: string) {
+  return readInstalled()[eventId] || null
 }
 
-export function forgetInstalledManifest(nappId: string) {
-  const all = readInstalledManifests()
-  if (nappId in all) {
-    delete all[nappId]
-    writeJson(INSTALLED_MANIFESTS_KEY, all)
+export function getInstalledEvents(): any[] {
+  return Object.values(readInstalled())
+}
+
+export function forgetInstalledEvent(eventId: string) {
+  const all = readInstalled()
+  if (eventId in all) {
+    delete all[eventId]
+    writeJson(INSTALLED_KEY, all)
   }
 }
 
-// ─── handler registry (actions) ──
-
-function readHandlers() {
-  const raw = readJson(HANDLERS_KEY, {})
-  return raw && typeof raw === "object" ? raw : {}
-}
-
-export function setHandlers(nappId: string, actions: string[]) {
-  if (!nappId) return
-  const all = readHandlers()
-  const valid = Array.isArray(actions) ? actions.filter(a => typeof a === "string" && a.length) : []
-  if (valid.length === 0) {
-    delete all[nappId]
-  } else {
-    all[nappId] = [...new Set(valid)]
+export function getInstalledEventForNappId(nappId: string): NostrEvent | null {
+  for (const event of getInstalledEvents()) {
+    if (computeNappId(event) === nappId) return event
   }
-  writeJson(HANDLERS_KEY, all)
-}
-
-export function forgetHandlers(nappId: string) {
-  const all = readHandlers()
-  if (nappId in all) {
-    delete all[nappId]
-    writeJson(HANDLERS_KEY, all)
-  }
-}
-
-export function findHandlersForAction(action: string) {
-  if (typeof action !== "string" || !action) return []
-  const all = readHandlers()
-  const out = []
-  for (const [nappId, actions] of Object.entries(all)) {
-    if (Array.isArray(actions) && actions.includes(action)) out.push(nappId)
-  }
-  return out
-}
-
-export function getHandlers(nappId: string) {
-  if (typeof nappId !== "string" || !nappId) return []
-  const actions = readHandlers()[nappId]
-  return Array.isArray(actions) ? actions : []
+  return null
 }
 
 // "I last picked nappId X to handle <action 'edit:30023'> from <caller Y>".

@@ -15,7 +15,6 @@ import type {
 
 import { isGated, requireApproval } from "../permissions.js"
 import * as store from "../store.js"
-import * as instanceStore from "../storage/instance.js"
 import { createNappWindow } from "./napp-window.js"
 import {
   loadBlossomServers,
@@ -36,6 +35,10 @@ import { loadNostrUser } from "@nostr/gadgets/metadata"
 const BOOT_TIMEOUT_MS = 10_000
 
 const openWindows = new Map<string, NappWindow>()
+
+let iframeCallSerial = 1
+let nappIdSerial = 1
+let instanceIdSerial = 1
 
 export function nappOriginFor(nappId: string): string {
   const port = location.port ? `:${location.port}` : ""
@@ -130,7 +133,8 @@ export function callIframe(
     return Promise.reject(new Error(`No iframe for instance ${instanceId}`))
   }
   const origin = nappOriginFor(win.root.dataset.nappId!)
-  const requestId = crypto.randomUUID()
+  const requestId = `${iframeCallSerial++}`
+
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingDispatches.delete(requestId)
@@ -211,7 +215,7 @@ export function launchSystem(
 
   let win: NappWindow | null = null
   const instanceId =
-    opts.instanceId || singleton ? `system:${sysId}` : `system:${sysId}:${crypto.randomUUID()}`
+    opts.instanceId || singleton ? `system:${sysId}` : `system:${sysId}:${instanceIdSerial++}`
   const bodyElement = document.createElement("div")
   bodyElement.className = `system-napp-content system-napp-${sysId}`
 
@@ -256,7 +260,7 @@ function mount(
   opts: LaunchOpts = {}
 ) {
   const {
-    instanceId = crypto.randomUUID(),
+    instanceId = `${nappIdSerial++}`,
     petname,
     onProgress = () => {},
     onStateChange,
@@ -1040,7 +1044,7 @@ async function handleRpc(
     | { action(callerNappId: string, name: string, payload: unknown): Promise<unknown> }
     | undefined
 ) {
-  const { id, method, params, instanceId } = data
+  const { id, method, params } = data
   try {
     if (isGated(method!)) {
       const allowed = await requireApproval(nappId, method!)
@@ -1050,14 +1054,7 @@ async function handleRpc(
     // (`() => currentSigner()`). The getter form lets the user hot-swap
     // signer types (NIP-07 ↔ NIP-46) without forcing a napp reload.
     const resolvedSigner = typeof signer === "function" ? signer() : signer
-    const result = await dispatch(
-      resolvedSigner,
-      method!,
-      params,
-      instanceId!,
-      nappId,
-      dispatchHandlers
-    )
+    const result = await dispatch(resolvedSigner, method!, params, nappId, dispatchHandlers)
     iframe.contentWindow?.postMessage({ __nostrapps: "rpc-result", id, result }, "*")
   } catch (err: any) {
     iframe.contentWindow?.postMessage(
@@ -1071,7 +1068,6 @@ function dispatch(
   signer: Signer,
   method: string,
   params: any,
-  instanceId: string,
   callerNappId: string,
   dispatchHandlers:
     | { action(callerNappId: string, name: string, payload: unknown): Promise<unknown> }
@@ -1090,14 +1086,6 @@ function dispatch(
       return signer.nip44.encrypt(params.pubkey, params.plaintext)
     case "nip44.decrypt":
       return signer.nip44.decrypt(params.pubkey, params.ciphertext)
-    case "instance.get":
-      return instanceStore.get(instanceId, params.key)
-    case "instance.set":
-      return instanceStore.set(instanceId, params.key, params.value)
-    case "instance.delete":
-      return instanceStore.del(instanceId, params.key)
-    case "instance.keys":
-      return instanceStore.keys(instanceId)
     case "nostrdb.add":
       return store.add(params.event)
     case "nostrdb.query":
