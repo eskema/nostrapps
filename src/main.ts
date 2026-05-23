@@ -13,7 +13,8 @@ import {
   findOpenWindowByNappId,
   callIframe,
   tileWindows,
-  bestFitPack
+  bestFitPack,
+  broadcastTheme
 } from "./sandbox/host.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
@@ -132,6 +133,7 @@ const theme = {
   }
 }
 applyTheme(theme.get())
+theme.subscribe(() => broadcastTheme())
 
 // ─── log bus ────────────────────────────────────────────────────
 // Each entry is `{ at: msTimestamp, msg: string }`. Consumers (currently
@@ -1068,6 +1070,7 @@ async function init() {
   // Restore doesn't fire onStateChange — kick the packer manually so a
   // session that resumed in pack mode lands cleanly.
   if (packModeOn) maybeRepack()
+  broadcastTheme()
 }
 init()
 

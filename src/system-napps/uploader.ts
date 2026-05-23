@@ -1,7 +1,6 @@
 import { pool } from "@nostr/gadgets/global"
 import { currentSigner } from "../signers/index.js"
 import { BlossomClient } from "@nostr/tools/nipb7"
-import { EventTemplate } from "@nostr/tools/pure"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
 
 export const id = "uploader"

@@ -28,14 +28,9 @@ import {
   loadPins,
   loadRelayList,
   loadWikiAuthors,
-  loadWikiRelays,
+  loadWikiRelays
 } from "@nostr/gadgets/lists"
-import {
-  loadEmojiSets,
-  loadFollowPacks,
-  loadFollowSets,
-  loadRelaySets,
-} from "@nostr/gadgets/sets"
+import { loadEmojiSets, loadFollowPacks, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 
 const BOOT_TIMEOUT_MS = 10_000
@@ -74,6 +69,25 @@ export function restore(
   const origin = nappOriginFor(nappId)
   console.debug("[sandbox] restore", { nappId, origin, opts })
   return mount(stageEl, nappId, origin, signer, opts)
+}
+
+function currentTheme(): "light" | "dark" {
+  const attr = document.documentElement.dataset.theme
+  if (attr === "light" || attr === "dark") return attr
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+}
+
+export function broadcastTheme() {
+  const theme = currentTheme()
+  for (const [, win] of openWindows) {
+    if (win.root) {
+      win.root.style.setProperty("--theme", theme)
+    }
+    if (win.iframe?.contentWindow) {
+      const origin = nappOriginFor(win.root.dataset.nappId!)
+      win.iframe.contentWindow.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
+    }
+  }
 }
 
 export function focusInstance(instanceId: string): boolean {
@@ -1100,15 +1114,30 @@ function dispatch(
       }
       return dispatchHandlers.action(callerNappId, params?.name ?? "", params?.payload)
     case "napp.loadBlossomServers":
-      return loadBlossomServers(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadBlossomServers(
+        params.pubkey,
+        params.hints,
+        params.refreshStyle,
+        params.defaultItems
+      )
     case "napp.loadBookmarks":
       return loadBookmarks(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
     case "napp.loadEmojis":
       return loadEmojis(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
     case "napp.loadFavoriteRelays":
-      return loadFavoriteRelays(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadFavoriteRelays(
+        params.pubkey,
+        params.hints,
+        params.refreshStyle,
+        params.defaultItems
+      )
     case "napp.loadFavoriteScrolls":
-      return loadFavoriteScrolls(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadFavoriteScrolls(
+        params.pubkey,
+        params.hints,
+        params.refreshStyle,
+        params.defaultItems
+      )
     case "napp.loadFollowsList":
       return loadFollowsList(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
     case "napp.loadMuteList":

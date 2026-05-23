@@ -11,7 +11,7 @@ self.addEventListener("fetch", event => {
   event.respondWith(handleFetch(event.request, url))
 })
 
-async function handleFetch(request, url) {
+async function handleFetch(_request, url) {
   let path = url.pathname
   if (path.endsWith("/")) path += "index.html"
 

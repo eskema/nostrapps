@@ -60,6 +60,9 @@
     if (data.__nostrapps === "napp-dispatch-action") {
       handleDispatch(data)
     }
+    if (data.__nostrapps === "napp-theme-change") {
+      document.documentElement.dataset.theme = data.theme
+    }
   })
 
   window.nostr = {
