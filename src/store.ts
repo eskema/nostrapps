@@ -1,9 +1,13 @@
+import { setReplaceableStore } from "@nostr/gadgets/global"
 import { RedEventStore } from "@nostr/gadgets/redstore"
 
 let instance: RedEventStore | null
 
 function getStore() {
-  if (!instance) instance = new RedEventStore(null)
+  if (!instance) {
+    instance = new RedEventStore(null)
+    setReplaceableStore(instance)
+  }
   return instance
 }
 

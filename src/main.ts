@@ -36,6 +36,9 @@ import {
   actionList
 } from "./system-napps/index.js"
 import { Filter } from "@nostr/tools/filter"
+import { pool } from "@nostr/gadgets/global"
+
+pool.trackRelays = true
 
 const stage = document.getElementById("stage")!
 const form = document.getElementById("launch-form")!
@@ -402,12 +405,12 @@ function capabilitiesFromListing(listing: { tags: string[][] } | null | undefine
 // Update flow: re-fetch the manifest + files at the same target, swap them
 // into the napp's existing origin storage (no new window), persist the new
 // version, and force any open iframes to reload so they pick up new files.
-async function updateNapp(target: { pubkey: string; kind?: number; dTag?: string }) {
+async function updateNapp(target: { pubkey: string; dTag: string; relayHints: string[] }) {
   if (!target?.pubkey) throw new Error("updateNapp: missing pubkey")
   console.debug("[launch] updateNapp", {
     pubkey: target.pubkey,
-    kind: target.kind,
-    dTag: target.dTag
+    dTag: target.dTag,
+    relayHints: target.relayHints
   })
   setStatus(`Checking update…`)
   const updateResult = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
@@ -539,8 +542,8 @@ async function ensureNappOpen(nappId: string) {
     console.debug("[launch] ensureNappOpen: fresh launch from manifest", { nappId, target: info })
     const target = {
       pubkey: info.pubkey,
-      kind: info.kind,
-      dTag: info.dTag || undefined
+      dTag: info.dTag,
+      relayHints: []
     }
     const result2 = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
     const { listing } = result2
@@ -588,7 +591,7 @@ const systemCtx: SystemCtx = {
   wasInstalled: (nappId: string) => persist.readInstallLog().includes(nappId),
   uninstall: (nappId: string) => uninstallNapp(nappId),
   installedManifest: (nappId: string) => persist.getInstalledManifest(nappId),
-  update: (target: { pubkey: string; kind?: number; dTag?: string }) => updateNapp(target)
+  update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
 }
 
 function makeSystemLaunchOpts(sysId: string) {

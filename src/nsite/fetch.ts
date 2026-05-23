@@ -1,84 +1,114 @@
 import { pool } from "@nostr/gadgets/global"
 import { guessMime } from "./mime.js"
-import { outboxFilterRelayBatch } from "@nostr/gadgets/outbox"
-import { loadBlossomServers } from "@nostr/gadgets/lists"
+import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
 import { currentSigner } from "../signers/index.js"
+import { Filter } from "@nostr/tools/filter"
+import { NostrEvent } from "@nostr/tools/pure"
 
-const NSITE_FILE_KIND = 34128 // legacy: one event per file (d = path)
-const NSITE_ROOT_KIND = 15128 // NIP-5A: root manifest (replaceable)
-const NSITE_NAMED_KIND = 35128 // NIP-5A: named manifest (parameterized)
-const NSITE_LISTING_KIND = 37348 // NIP-5B: app listing (rich metadata)
+const NSITE_NAMED_KIND = 35128
+const NSITE_LISTING_KIND = 37348
 
-// Cap for any relay subscription. If the pubkey's outbox relays are slow or
-// dead we'd otherwise hang forever waiting on EOSE — bail out with whatever
-// we've collected so far.
 const COLLECT_TIMEOUT_MS = 10000
 
-// Used when outboxFilterRelayBatch returns nothing reachable for the pubkey
-// (no kind 10002 on the bootstrap relays, all outbox relays down, etc.).
-// Same set the store uses, intentionally — these are reasonable fallbacks.
-const FALLBACK_RELAYS = [
-  "wss://relay.damus.io",
-  "wss://relay.nostr.band",
-  "wss://nos.lol",
-  "wss://relay.primal.net"
-]
-
 export async function fetchNsite(
-  target: string | { pubkey: string; kind?: number; dTag?: string },
+  target: { pubkey: string; dTag: string; relayHints: string[] },
   onProgress: (msg: string) => void = () => {}
 ) {
-  const t = typeof target === "string" ? { pubkey: target } : target
-  const { pubkey, kind, dTag } = t
+  console.debug("fetching nsite", target)
+
+  const { pubkey, dTag, relayHints } = target
   if (!pubkey) throw new Error("fetchNsite: no pubkey")
 
-  if (kind === NSITE_NAMED_KIND) {
-    if (!dTag) throw new Error("Named nsite requires d-tag")
-    return fetchNamedManifest(pubkey, dTag, onProgress)
-  }
+  // 1. build filter from input
+  const filter: Filter = { kinds: [NSITE_NAMED_KIND, NSITE_LISTING_KIND], "#d": [dTag] }
 
-  return fetchRootOrLegacy(pubkey, onProgress)
-}
+  onProgress("Querying relays…")
 
-async function fetchRootOrLegacy(pubkey: string, onProgress: (msg: string) => void) {
-  onProgress("Querying relays for nsite events…")
-  // include kind 0 (profile) and kind 37348 (NIP-5B listing) so a single
-  // round-trip pulls everything we might want for naming/metadata.
-  const filter = {
-    kinds: [NSITE_ROOT_KIND, NSITE_FILE_KIND, NSITE_LISTING_KIND, 0]
-  }
-  const reqs = await resolveReqs([pubkey], filter, onProgress)
-  const events = await collect(reqs, "nsite")
+  // 2. resolve relays via loadRelayList + fallback
+  const relayList = await loadRelayList(pubkey)
+  const relayUrls = relayList.items.filter(r => r.write).map((r: { url: string }) => r.url)
+  const relays = [...relayHints, ...relayUrls]
+  const reqs = relays.map((url: string) => ({ url, filter }))
 
-  const manifest = latestOfKind(events, NSITE_ROOT_KIND)
-  if (manifest) {
-    const listing = findListing(events, pubkey, getTag(manifest, "d") || "")
-    return fetchFromManifest(pubkey, manifest, onProgress, null, events, listing)
-  }
+  // 3. collect events
+  const events = await collect(reqs)
 
-  const fileEvents = events.filter(e => e.kind === NSITE_FILE_KIND)
-  if (fileEvents.length) {
-    return fetchFromFileEvents(pubkey, fileEvents, onProgress, events)
-  }
-  throw new Error("No nsite manifest or file events found for this pubkey")
-}
+  // 4. find manifest
+  const manifest = latest(events)
+  if (!manifest) throw new Error(`nsite "${dTag}" not found`)
 
-async function fetchNamedManifest(pubkey: string, dTag: string, onProgress: (msg: string) => void) {
-  onProgress(`Querying relays for named nsite "${dTag}"…`)
-  const filter = {
-    kinds: [NSITE_NAMED_KIND, NSITE_LISTING_KIND],
-    "#d": [dTag]
-  }
-  const reqs = await resolveReqs([pubkey], filter, onProgress)
-  const events = await collect(reqs, "nsite-named")
-  const manifest = latestOfKind(events, NSITE_NAMED_KIND, dTag)
-  if (!manifest) throw new Error(`Named nsite "${dTag}" not found`)
-  const listing = findListing(events, pubkey, dTag)
+  // 5b. have manifest — extract listing and download files
+  const manifestDTag = getTag(manifest, "d") || ""
+  const listing = findListing(events, pubkey, manifestDTag)
   const nappId = `${pubkey.slice(0, 40)}-${dTag}`
-  return fetchFromManifest(pubkey, manifest, onProgress, nappId, [], listing)
+
+  const pathTags = manifest.tags.filter(
+    (t: string[]) => t[0] === "path" && t.length >= 3 && t[1] && t[2]
+  )
+  if (pathTags.length === 0) throw new Error("nsite manifest has no path tags")
+
+  const manifestServers = manifest.tags
+    .filter((t: string[]) => t[0] === "server" && t[1])
+    .map((t: string[]) => t[1])
+  const userServers = (await loadBlossomServers(pubkey)).items ?? []
+  const servers = [...new Set([...manifestServers, ...userServers])].filter(Boolean)
+
+  const files = []
+  for (let i = 0; i < pathTags.length; i++) {
+    const tag = pathTags[i]
+    const path = tag[1].startsWith("/") ? tag[1] : `/${tag[1]}`
+    const sha = tag[2]
+    const mime = tag[3] || guessMime(path)
+    onProgress(`Fetching ${i + 1}/${pathTags.length}: ${path}`)
+    const blob = await fetchBlob(servers, sha)
+    if (!blob) throw new Error(`Could not fetch ${path} (${sha})`)
+    files.push({ path, body: blob, mime })
+  }
+
+  const title = localizedTag(listing, "name") || getTag(manifest, "title")
+
+  return { nappId, files, title, manifest, listing }
 }
 
-// Finds the latest kind 37348 listing for a given (pubkey, dTag) pair.
+// ─── helpers ──────────────────────────────────────────────────────
+
+function collect(reqs: Array<{ url: string; filter: Filter }>): Promise<NostrEvent[]> {
+  const events: NostrEvent[] = []
+  return new Promise((resolve, reject) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve(events)
+    }
+    const timer = setTimeout(finish, COLLECT_TIMEOUT_MS)
+    pool.subscribeMap(reqs, {
+      label: "napp",
+      onevent(e: any) {
+        events.push(e)
+      },
+      onauth(event) {
+        return currentSigner().signEvent(event) as any
+      },
+      oneose: finish,
+      onclose(reasons) {
+        done = true
+        clearTimeout(timer)
+        reject(reasons)
+      }
+    })
+  })
+}
+
+function latest(events: NostrEvent[]): NostrEvent | null {
+  let best = null
+  for (const e of events) {
+    if (!best || e.created_at > best.created_at) best = e
+  }
+  return best
+}
+
 function findListing(events: any[], pubkey: string, dTag: string) {
   let best = null
   for (const e of events) {
@@ -90,8 +120,24 @@ function findListing(events: any[], pubkey: string, dTag: string) {
   return best
 }
 
-// Picks the best `name` tag value from a listing, preferring the user's locale.
-// Tag shape: ["name", "<value>", "<lang?>"]. Multiple tags allowed.
+function getTag(evt: { tags: string[][] }, name: string): string | undefined {
+  const t = evt.tags.find(x => x[0] === name)
+  return t?.[1]
+}
+
+async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
+  for (const server of servers) {
+    try {
+      const base = server.endsWith("/") ? server.slice(0, -1) : server
+      const res = await fetch(`${base}/${sha}`)
+      if (res.ok) return await res.blob()
+    } catch {
+      // try next server
+    }
+  }
+  return null
+}
+
 export function localizedTag(listing: { tags: string[][] } | null, tagName: string): string | null {
   if (!listing) return null
   const matches = listing.tags.filter(
@@ -107,214 +153,4 @@ export function localizedTag(listing: { tags: string[][] } | null, tagName: stri
     matches.find(t => !t[2] || t[2].toLowerCase() === "en")?.[1] ||
     matches[0][1]
   )
-}
-
-// Wrap outboxFilterRelayBatch so a totally empty result (no relays known for
-// this pubkey, or the bootstrap probe timed out) still gives us something to
-// query. Without this fallback the subscription opens against zero relays and
-// `oneose` never fires, hanging the launch.
-//
-// We also race it against a hard timeout — outboxFilterRelayBatch can stall
-// internally if the bootstrap relays are unreachable and gadgets has no
-// timeout of its own, which is what was hanging the launch indefinitely.
-async function resolveReqs(pubkeys: string[], filter: unknown, onProgress?: (msg: string) => void) {
-  let reqs = null
-  try {
-    reqs = await Promise.race([
-      outboxFilterRelayBatch(pubkeys, filter),
-      new Promise(resolve => setTimeout(() => resolve(null), COLLECT_TIMEOUT_MS))
-    ])
-  } catch {
-    reqs = null
-  }
-  // outboxFilterRelayBatch returns Array<{ url, filter }>. Fall back to the
-  // same shape — subscribeMap iterates this directly.
-  if (!Array.isArray(reqs) || reqs.length === 0) {
-    onProgress?.("Outbox lookup yielded nothing — querying default relays…")
-    reqs = FALLBACK_RELAYS.map(url => ({ url, filter }))
-  }
-  return reqs
-}
-
-// Resolves on EOSE *or* on timeout, whichever comes first. We always resolve
-// (never reject on timeout) so the caller can decide what to do with whatever
-// events came in — usually that's enough to find the manifest.
-function collect(reqs: Array<{ url: string; filter: unknown }>, label: string): Promise<any[]> {
-  const events: any[] = []
-  return new Promise((resolve, reject) => {
-    let done = false
-    const finish = () => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      resolve(events)
-    }
-    const timer = setTimeout(finish, COLLECT_TIMEOUT_MS)
-    pool.subscribeMap(reqs, {
-      label,
-      onevent(e: any) {
-        events.push(e)
-      },
-      onauth(event) {
-        return currentSigner().signEvent(event)
-      },
-      oneose: finish,
-      onclose(reasons) {
-        done = true
-        clearTimeout(timer)
-        reject(reasons)
-      }
-    })
-  })
-}
-
-function latestOfKind(events: any[], kind: number, dTag: string | null = null) {
-  let best = null
-  for (const e of events) {
-    if (e.kind !== kind) continue
-    if (dTag !== null && getTag(e, "d") !== dTag) continue
-    if (!best || e.created_at > best.created_at) best = e
-  }
-  return best
-}
-
-async function fetchFromManifest(
-  pubkey: string,
-  manifest: { tags: string[][] },
-  onProgress: (msg: string) => void,
-  nappIdOverride: string | null,
-  extraEvents: any[] = [],
-  listing: any = null
-) {
-  const paths = manifest.tags.filter(t => t[0] === "path" && t.length >= 3 && t[1] && t[2])
-  if (paths.length === 0) {
-    throw new Error("Nsite manifest has no path tags")
-  }
-
-  const manifestServers: string[] = manifest.tags
-    .filter(t => t[0] === "server" && t[1])
-    .map(t => t[1])
-  const userServers = (await loadBlossomServers(pubkey)).items ?? []
-  const servers = dedupe([...manifestServers, ...userServers])
-
-  const out = []
-  let i = 0
-  for (const tag of paths) {
-    i++
-    const path = normalizePath(tag[1])
-    if (!path) continue
-    const sha = tag[2]
-    const mime = tag[3] || guessMime(path)
-    onProgress(`Fetching ${i}/${paths.length}: ${path}`)
-    const blob = await fetchBlob(servers, sha)
-    if (!blob) throw new Error(`Could not fetch ${path} (${sha})`)
-    out.push({ path, body: blob, mime })
-  }
-
-  const nappId = nappIdOverride ?? pubkey.slice(0, 40)
-  // Title resolution order: NIP-5B listing's localized `name` →
-  // manifest's `title` tag → kind 0 profile.
-  const title =
-    localizedTag(listing, "name") ||
-    getTag(manifest, "title") ||
-    findProfileName(extraEvents, pubkey) ||
-    (await fetchProfileName(pubkey))
-  return { nappId, files: out, title, manifest, listing }
-}
-
-async function fetchFromFileEvents(
-  pubkey: string,
-  fileEvents: any[],
-  onProgress: (msg: string) => void,
-  extraEvents: any[] = []
-) {
-  const servers = (await loadBlossomServers(pubkey)).items ?? []
-  const byPath = latestByPath(fileEvents)
-  if (byPath.size === 0) {
-    throw new Error("No nsite files found for this pubkey")
-  }
-  const out = []
-  let i = 0
-  for (const [path, evt] of byPath) {
-    i++
-    onProgress(`Fetching ${i}/${byPath.size}: ${path}`)
-    const sha = getTag(evt, "x") || getTag(evt, "sha256")
-    if (!sha) continue
-    const mime = getTag(evt, "m") || guessMime(path)
-    const blob = await fetchBlob(servers, sha)
-    if (!blob) throw new Error(`Could not fetch ${path} (${sha})`)
-    out.push({ path, body: blob, mime })
-  }
-  const title = findProfileName(extraEvents, pubkey)
-  return { nappId: pubkey.slice(0, 40), files: out, title }
-}
-
-function findProfileName(events: any[], pubkey: string): string | null {
-  let latest = null
-  for (const e of events) {
-    if (e.kind !== 0 || e.pubkey !== pubkey) continue
-    if (!latest || e.created_at > latest.created_at) latest = e
-  }
-  if (!latest) return null
-  try {
-    const meta = JSON.parse(latest.content)
-    return meta.display_name || meta.displayName || meta.name || null
-  } catch {
-    return null
-  }
-}
-
-async function fetchProfileName(pubkey: string): Promise<string | null> {
-  try {
-    const reqs = await resolveReqs([pubkey], { kinds: [0] })
-    const events = await collect(reqs, "nsite-profile")
-    return findProfileName(events, pubkey)
-  } catch {
-    return null
-  }
-}
-
-function latestByPath(events: any[]): Map<string, any> {
-  const map = new Map()
-  for (const evt of events) {
-    const path = normalizePath(getTag(evt, "d"))
-    if (!path) continue
-    const prev = map.get(path)
-    if (!prev || evt.created_at > prev.created_at) map.set(path, evt)
-  }
-  return map
-}
-
-function normalizePath(p: string | null | undefined): string | null {
-  if (!p) return null
-  return p.startsWith("/") ? p : `/${p}`
-}
-
-function getTag(evt: { tags: string[][] }, name: string): string | undefined {
-  const t = evt.tags.find(x => x[0] === name)
-  return t?.[1]
-}
-
-function dedupe(arr: string[]): string[] {
-  const seen = new Set()
-  const out = []
-  for (const v of arr) {
-    if (!v || seen.has(v)) continue
-    seen.add(v)
-    out.push(v)
-  }
-  return out
-}
-
-async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
-  for (const server of servers) {
-    try {
-      const base = server.endsWith("/") ? server.slice(0, -1) : server
-      const res = await fetch(`${base}/${sha}`)
-      if (res.ok) return await res.blob()
-    } catch {
-      // try next server
-    }
-  }
-  return null
 }

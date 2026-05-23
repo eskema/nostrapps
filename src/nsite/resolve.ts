@@ -6,43 +6,47 @@ import { decode } from "@nostr/tools/nip19"
 //     pubkeyB36 = 50-char lowercase base36 of the 32-byte pubkey
 //     dTag      = 1..13 chars of [a-z0-9-]
 
-export function resolveInput(input: string): { pubkey: string; kind?: number; dTag?: string } {
+export function resolveInput(input: string): {
+  pubkey: string
+  dTag: string
+  relayHints: string[]
+} {
   const s = input.trim()
   if (!s) throw new Error("empty input")
 
-  if (/^[0-9a-f]{64}$/i.test(s)) {
-    return { pubkey: s.toLowerCase() }
-  }
-
-  if (/^(npub1|nprofile1|naddr1)/i.test(s)) {
-    return resolveBech32(s.toLowerCase())
+  if (/^naddr1/i.test(s)) {
+    return resolveNaddr(s.toLowerCase())
   }
 
   if (looksLikeHostOrUrl(s)) {
     return resolveHostname(s)
   }
 
-  throw new Error(`Unrecognized input format`)
+  throw new Error("Unrecognized input format — expected naddr1 or nsite hostname")
 }
 
-function resolveBech32(s: string): { pubkey: string; kind?: number; dTag?: string } {
+function resolveNaddr(s: string): {
+  pubkey: string
+  kind: number
+  dTag: string
+  relayHints: string[]
+} {
   const decoded = decode(s)
-  switch (decoded.type) {
-    case "npub":
-      return { pubkey: decoded.data as string }
-    case "nprofile": {
-      const profile = decoded.data as { pubkey: string }
-      return { pubkey: profile.pubkey }
-    }
-    case "naddr": {
-      const addr = decoded.data as { pubkey: string; kind: number; identifier: string }
-      if (addr.kind === 35128)
-        return { pubkey: addr.pubkey, kind: addr.kind, dTag: addr.identifier }
-      if (addr.kind === 15128) return { pubkey: addr.pubkey, kind: addr.kind }
-      throw new Error(`Unsupported naddr kind: ${addr.kind}`)
-    }
-    default:
-      throw new Error(`Unsupported bech32 type: ${decoded.type}`)
+  if (decoded.type !== "naddr") throw new Error("Not an naddr")
+  const addr = decoded.data as {
+    pubkey: string
+    kind: number
+    identifier: string
+    relays?: string[]
+  }
+  if (addr.kind !== 35128) {
+    throw new Error(`Unsupported naddr kind: ${addr.kind}`)
+  }
+  return {
+    pubkey: addr.pubkey,
+    kind: addr.kind,
+    dTag: addr.identifier,
+    relayHints: addr.relays ?? []
   }
 }
 
@@ -52,7 +56,11 @@ function looksLikeHostOrUrl(s: string): boolean {
   return false
 }
 
-function resolveHostname(input: string): { pubkey: string; kind?: number; dTag?: string } {
+function resolveHostname(input: string): {
+  pubkey: string
+  dTag: string
+  relayHints: string[]
+} {
   const host = input
     .replace(/^https?:\/\//i, "")
     .split("/")[0]
@@ -60,21 +68,13 @@ function resolveHostname(input: string): { pubkey: string; kind?: number; dTag?:
   const label = host.split(".")[0]
   if (!label) throw new Error(`No hostname label in "${input}"`)
 
-  if (label.startsWith("npub1")) {
-    const decoded = decode(label)
-    if (decoded.type !== "npub") {
-      throw new Error(`Expected npub label, got ${decoded.type}`)
-    }
-    return { pubkey: decoded.data as string, kind: 15128 }
-  }
-
   // <50 base36 chars><1..13 chars [a-z0-9-]>
   const m = label.match(/^([0-9a-z]{50})([a-z0-9-]{1,13})$/)
   if (m) {
     return {
       pubkey: pubkeyB36ToHex(m[1]),
-      kind: 35128,
-      dTag: m[2]
+      dTag: m[2],
+      relayHints: []
     }
   }
 

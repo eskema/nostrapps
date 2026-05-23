@@ -7,7 +7,6 @@ export const id = "store"
 export const title = "Store"
 export const slash = "/store"
 
-const NSITE_ROOT = 15128
 const NSITE_NAMED = 35128
 const NSITE_LISTING = 37348 // NIP-5B app listing (paired to a manifest by d-tag)
 
@@ -98,7 +97,7 @@ export function mount(
       return listingsByKey.get(`${manifest.pubkey}:${dTag}`) || null
     }
 
-    const manifests = events.filter(e => e.kind === NSITE_ROOT || e.kind === NSITE_NAMED)
+    const manifests = events.filter(e => e.kind === NSITE_NAMED)
     const filtered = manifests
       .filter(m => !(ctx.isInstalled?.(computeNappId(m)) ?? false))
       .filter(m => matchesFilter(m, listingFor(m), filter))
@@ -185,9 +184,9 @@ export function mount(
     setStatus(`Subscribing to ${relays.length} relay(s)…`)
     sub = pool.subscribeMany(
       relays,
-      { kinds: [NSITE_ROOT, NSITE_NAMED, NSITE_LISTING], limit: 400 },
+      { kinds: [NSITE_NAMED, NSITE_LISTING], limit: 400 },
       {
-        label: "apps",
+        label: "napps",
         onevent(event: any) {
           if (cancelled) return
           if (events.some((existing: any) => existing.id === event.id)) return
@@ -211,7 +210,7 @@ export function mount(
           setStatus(`Subscriptions closed: ${reasons}`)
         },
         onauth(event) {
-          return currentSigner().signEvent(event)
+          return currentSigner().signEvent(event) as any
         }
       }
     )
@@ -362,14 +361,14 @@ function renderCard(evt: any, ctx: any, listing: any = null, onChange: any = nul
         })
       } else if (action === "uninstall") {
         await ctx.uninstall(nappId)
-      } else {
+      } else if (action === "install") {
         const raw =
           evt.kind === NSITE_NAMED
             ? naddrEncode({
                 pubkey: evt.pubkey,
                 kind: NSITE_NAMED,
                 identifier: dTag,
-                relays: []
+                relays: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
               })
             : npubEncode(evt.pubkey)
         await ctx.launchFromInput(raw)
