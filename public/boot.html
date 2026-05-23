@@ -23,7 +23,7 @@
       window.addEventListener("error", e => reportError(e.error || e.message))
       window.addEventListener("unhandledrejection", e => reportError(e.reason))
       ;(async () => {
-        const DB_NAME = "nostrapps-napp"
+        const DB_NAME = `files-${location.origin.split("://")[1]}`
         const DB_VERSION = 1
         const STORE = "files"
 

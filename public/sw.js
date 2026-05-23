@@ -1,4 +1,4 @@
-const DB_NAME = "nostrapps-napp"
+const DB_NAME = `files-${self.location.origin}`
 const DB_VERSION = 1
 const STORE = "files"
 
