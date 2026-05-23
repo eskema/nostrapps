@@ -1,4 +1,4 @@
-const DB_NAME = `files-${self.location.origin}`
+const DB_NAME = `files-${self.location.origin.split("://")[1]}`
 const DB_VERSION = 1
 const STORE = "files"
 

@@ -7,8 +7,7 @@ import { NostrEvent } from "@nostr/tools/pure"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
 
-const NSITE_NAMED_KIND = 35128
-const NSITE_LISTING_KIND = 37348
+export const NSITE_NAMED_KIND = 35128
 
 const COLLECT_TIMEOUT_MS = 10000
 
@@ -22,7 +21,7 @@ export async function fetchNsite(
   if (!pubkey) throw new Error("fetchNsite: no pubkey")
 
   // 1. build filter from input
-  const filter: Filter = { kinds: [NSITE_NAMED_KIND, NSITE_LISTING_KIND], "#d": [dTag] }
+  const filter: Filter = { kinds: [NSITE_NAMED_KIND], "#d": [dTag] }
 
   onProgress("Querying relays…")
 
@@ -37,12 +36,10 @@ export async function fetchNsite(
 
   // 4. find manifest
   const manifest = latest(events)
-  if (!manifest) throw new Error(`nsite "${dTag}" not found`)
+  if (!manifest) throw new Error(`napp "${dTag}" not found`)
 
-  // 5b. have manifest — extract listing and download files
-  const manifestDTag = getTag(manifest, "d") || ""
-  const listing = findListing(events, pubkey, manifestDTag)
-  const nappId = `${pubkey.slice(0, 40)}-${dTag}`
+  // 5. have manifest — download files
+  const nappId = `${pubkey.slice(0, 16)}~${dTag}`
 
   const pathTags = manifest.tags.filter(
     (t: string[]) => t[0] === "path" && t.length >= 3 && t[1] && t[2]
@@ -67,9 +64,11 @@ export async function fetchNsite(
     files.push({ path, body: blob, mime })
   }
 
-  const title = localizedTag(listing, "name") || getTag(manifest, "title")
+  const title = localizedTag(manifest, "title") || getTag(manifest, "title")
 
-  return { nappId, files, title, manifest, listing }
+  const singleton = manifest.tags.some((t: string[]) => t[0] === "singleton")
+
+  return { nappId, files, title, manifest, singleton }
 }
 
 // ─── helpers ──────────────────────────────────────────────────────
@@ -111,17 +110,6 @@ function latest(events: NostrEvent[]): NostrEvent | null {
   return best
 }
 
-function findListing(events: any[], pubkey: string, dTag: string) {
-  let best = null
-  for (const e of events) {
-    if (e.kind !== NSITE_LISTING_KIND) continue
-    if (e.pubkey !== pubkey) continue
-    if ((getTag(e, "d") || "") !== dTag) continue
-    if (!best || e.created_at > best.created_at) best = e
-  }
-  return best
-}
-
 function getTag(evt: { tags: string[][] }, name: string): string | undefined {
   const t = evt.tags.find(x => x[0] === name)
   return t?.[1]
@@ -152,9 +140,9 @@ async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
   return null
 }
 
-export function localizedTag(listing: { tags: string[][] } | null, tagName: string): string | null {
-  if (!listing) return null
-  const matches = listing.tags.filter(
+export function localizedTag(event: { tags: string[][] } | null, tagName: string): string | null {
+  if (!event) return null
+  const matches = event.tags.filter(
     t => t[0] === tagName && typeof t[1] === "string" && t[1].length > 0
   )
   if (matches.length === 0) return null

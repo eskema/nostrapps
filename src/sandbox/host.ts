@@ -37,12 +37,22 @@ const BOOT_TIMEOUT_MS = 10_000
 const openWindows = new Map<string, NappWindow>()
 
 let iframeCallSerial = 1
-let nappIdSerial = 1
 let instanceIdSerial = 1
+
+function hostSlugForNappId(nappId: string): string {
+  const [pubkey16 = "napp", dTag = ""] = nappId.split(/[~/]/, 2)
+  let hash = 2166136261
+  for (let i = 0; i < dTag.length; i++) {
+    hash ^= dTag.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  const suffix = (hash >>> 0).toString(16).padStart(8, "0")
+  return `${pubkey16}-${suffix}`
+}
 
 export function nappOriginFor(nappId: string): string {
   const port = location.port ? `:${location.port}` : ""
-  return `${location.protocol}//${nappId}.napps.localhost${port}`
+  return `${location.protocol}//${hostSlugForNappId(nappId)}.napps.localhost${port}`
 }
 
 export async function launch(
@@ -52,6 +62,13 @@ export async function launch(
   signer: Signer | SignerGetter,
   opts: LaunchOpts = {}
 ) {
+  if (opts.singleton) {
+    const existing = findOpenWindowByNappId(nappId)
+    if (existing) {
+      existing.focus?.()
+      return existing
+    }
+  }
   const origin = nappOriginFor(nappId)
   const onProgress = opts.onProgress ?? (() => {})
   const label = opts.petname || nappId
@@ -69,6 +86,13 @@ export function restore(
   signer: Signer | SignerGetter,
   opts: LaunchOpts = {}
 ) {
+  if (opts.singleton) {
+    const existing = findOpenWindowByNappId(nappId)
+    if (existing) {
+      existing.focus?.()
+      return existing
+    }
+  }
   const origin = nappOriginFor(nappId)
   console.debug("[sandbox] restore", { nappId, origin, opts })
   return mount(stageEl, nappId, origin, signer, opts)
@@ -260,7 +284,7 @@ function mount(
   opts: LaunchOpts = {}
 ) {
   const {
-    instanceId = `${nappIdSerial++}`,
+    instanceId = opts.singleton ? nappId : `${instanceIdSerial++}`,
     petname,
     onProgress = () => {},
     onStateChange,

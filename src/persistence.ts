@@ -3,11 +3,11 @@ import { NappWindowState } from "./types"
 
 const OPEN_KEY = "nostrapps:open"
 const HISTORY_KEY = "nostrapps:history"
-const KNOWN_KEY = "nostrapps:known"
 const PETNAMES_KEY = "nostrapps:petnames"
-const INSTALL_LOG_KEY = "nostrapps:installLog"
 const INSTALLED_KEY = "nostrapps:installed"
 const HANDLER_PREFS_KEY = "nostrapps:handlerPrefs" // { '<caller>|<type>|<key>': nappId }
+const LEGACY_KNOWN_KEY = "nostrapps:known"
+const LEGACY_INSTALL_LOG_KEY = "nostrapps:installLog"
 const HISTORY_LIMIT = 20
 
 function readJson(key: string, fallback: any): any {
@@ -20,6 +20,11 @@ function readJson(key: string, fallback: any): any {
 
 function writeJson(key: string, value: any) {
   localStorage.setItem(key, JSON.stringify(value))
+}
+
+function dropLegacyInstallKeys() {
+  localStorage.removeItem(LEGACY_KNOWN_KEY)
+  localStorage.removeItem(LEGACY_INSTALL_LOG_KEY)
 }
 
 export function readOpen(): NappWindowState[] {
@@ -71,68 +76,56 @@ export function forgetHistory(value: string) {
   )
 }
 
-export function readKnown() {
-  return readJson(KNOWN_KEY, [])
-}
-
-export function rememberKnown(nappId: string) {
-  const prev = readKnown().filter((n: string) => n !== nappId)
-  prev.unshift(nappId)
-  writeJson(KNOWN_KEY, prev.slice(0, 100))
-  // Also append to the permanent install log (never pruned by uninstall),
-  // so the store can show "ever installed" history.
-  const log = readInstallLog()
-  if (!log.includes(nappId)) {
-    log.push(nappId)
-    writeJson(INSTALL_LOG_KEY, log)
-  }
-}
-
-export function readInstallLog() {
-  const raw = readJson(INSTALL_LOG_KEY, [])
-  return Array.isArray(raw) ? raw : []
-}
-
 export function computeNappId(event: { kind: number; pubkey: string; tags: string[][] }): string {
   const dTag = event.tags.find(t => t[0] === "d")?.[1]
-  if (event.kind === 35128 && dTag) return `${event.pubkey.slice(0, 40)}-${dTag}`
-  return event.pubkey.slice(0, 40)
+  return `${event.pubkey.slice(0, 16)}~${dTag || ""}`
+}
+
+export function isSingletonEvent(event: { tags?: string[][] } | null | undefined): boolean {
+  if (!event?.tags) return false
+  return event.tags.some(t => t[0] === "singleton")
 }
 
 // Full events keyed by event.id, used to detect updates and re-fetch.
 function readInstalled() {
+  dropLegacyInstallKeys()
   const raw = readJson(INSTALLED_KEY, {})
-  return raw && typeof raw === "object" ? raw : {}
+  if (!raw || typeof raw !== "object") return {}
+  const normalized: Record<string, NostrEvent> = {}
+  for (const value of Object.values(raw)) {
+    if (!value || typeof value !== "object") continue
+    const event = value as NostrEvent
+    if (!event.pubkey || !Array.isArray(event.tags)) continue
+    normalized[computeNappId(event)] = event
+  }
+  return normalized
 }
 
-export function storeInstalledEvent(event: { id: string }) {
+export function storeInstalledEvent(event: NostrEvent) {
   if (!event?.id) return
   const all = readInstalled()
-  all[event.id] = event
+  all[computeNappId(event)] = event
   writeJson(INSTALLED_KEY, all)
 }
 
-export function getInstalledEvent(eventId: string) {
-  return readInstalled()[eventId] || null
+export function getInstalledNappIds(): string[] {
+  return Object.keys(readInstalled())
 }
 
 export function getInstalledEvents(): any[] {
   return Object.values(readInstalled())
 }
 
-export function forgetInstalledEvent(eventId: string) {
+export function forgetInstalledNapp(nappId: string) {
   const all = readInstalled()
-  if (eventId in all) {
-    delete all[eventId]
+  if (nappId in all) {
+    delete all[nappId]
     writeJson(INSTALLED_KEY, all)
   }
 }
 
 export function getInstalledEventForNappId(nappId: string): NostrEvent | null {
-  for (const event of getInstalledEvents()) {
-    if (computeNappId(event) === nappId) return event
-  }
-  return null
+  return readInstalled()[nappId] || null
 }
 
 // "I last picked nappId X to handle <action 'edit:30023'> from <caller Y>".
@@ -171,13 +164,6 @@ export function readHandlerPrefsAll() {
 
 export function clearHandlerPrefs() {
   writeJson(HANDLER_PREFS_KEY, {})
-}
-
-export function forgetKnown(nappId: string) {
-  writeJson(
-    KNOWN_KEY,
-    readKnown().filter((n: string) => n !== nappId)
-  )
 }
 
 export function readPetnames() {

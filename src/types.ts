@@ -157,7 +157,7 @@ export interface NsiteResult {
   files: NsiteFile[]
   title: string | null
   manifest?: NostrEvent | null
-  listing?: NostrEvent | null
+  singleton?: boolean
 }
 
 export type SystemLaunchOpts = {
@@ -173,6 +173,7 @@ export type SystemLaunchOpts = {
 
 export type LaunchOpts = {
   instanceId?: string
+  singleton?: boolean
   petname?: string
   params?: any
   position?: Position

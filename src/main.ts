@@ -170,7 +170,7 @@ const apps = {
     return persist.getInstalledEvents()
   },
   list() {
-    return persist.readKnown().map((nappId: string) => ({
+    return persist.getInstalledNappIds().map((nappId: string) => ({
       nappId,
       name: friendlyNameFor(nappId),
       handlers: handlers.getHandlers(nappId),
@@ -243,13 +243,11 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   const petnameKeys = Object.entries(persist.readPetnames())
     .filter(([, mapped]) => mapped === nappId)
     .map(([petname]) => petname)
-  persist.forgetKnown(nappId)
   persist.forgetPetnamesForNapp(nappId)
   persist.forgetHistory(nappId)
   for (const p of petnameKeys) persist.forgetHistory(p)
   clearDecisions(nappId)
-  const installedEvent = persist.getInstalledEventForNappId(nappId)
-  if (installedEvent) persist.forgetInstalledEvent(installedEvent.id)
+  persist.forgetInstalledNapp(nappId)
   handlers.removeApp(nappId)
   setStatus(`${actionLabel} ${nappId}…`)
   try {
@@ -269,8 +267,7 @@ async function factoryReset() {
 
   // 1. Wipe each napp origin we've ever touched.
   const allNappIds = new Set<string>()
-  for (const id of persist.readKnown()) allNappIds.add(id)
-  for (const id of persist.readInstallLog()) allNappIds.add(id)
+  for (const id of persist.getInstalledNappIds()) allNappIds.add(id)
   for (const s of persist.readOpen()) {
     if (s.nappId && !s.system) allNappIds.add(s.nappId)
   }
@@ -356,7 +353,7 @@ function loadFolder() {
 }
 
 async function uninstallNapp(nappId: string) {
-  const wasKnown = persist.readKnown().includes(nappId)
+  const wasInstalled = !!persist.getInstalledEventForNappId(nappId)
   uninstallingNapps.add(nappId)
 
   // Destroy any open windows; their onDestroy chain runs the per-instance
@@ -372,7 +369,7 @@ async function uninstallNapp(nappId: string) {
       }
     }
 
-    if (wasKnown) {
+    if (wasInstalled) {
       await finalizeNappRemoval(nappId, "Uninstalling")
     }
   } finally {
@@ -381,17 +378,23 @@ async function uninstallNapp(nappId: string) {
   }
 }
 
-// NIP-5B: read `handle` (kind → `view:{kind}`) and `action` (named) capability
-// tags off the listing event so the launcher can route inter-app calls.
-function capabilitiesFromListing(listing: { tags: string[][] } | null | undefined): string[] {
-  if (!listing) return []
+function capabilitiesFromEvent(event: { tags: string[][] } | null | undefined): string[] {
+  if (!event) return []
   const actions = []
-  for (const t of listing.tags) {
+  for (const t of event.tags) {
     if (t[0] === "action" && typeof t[1] === "string" && t[1]) {
       actions.push(t[1])
     }
   }
   return actions
+}
+
+function singletonFromEvent(event: { tags?: string[][] } | null | undefined): boolean {
+  return persist.isSingletonEvent(event)
+}
+
+function singletonForNappId(nappId: string): boolean {
+  return singletonFromEvent(persist.getInstalledEventForNappId(nappId))
 }
 
 // Update flow: re-fetch the manifest + files at the same target, swap them
@@ -406,12 +409,12 @@ async function updateNapp(target: { pubkey: string; dTag: string; relayHints: st
   })
   setStatus(`Checking update…`)
   const updateResult = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
-  const { nappId, files, title, manifest, listing } = updateResult
+  const { nappId, files, title, manifest } = updateResult
   const label = title || nappId
   setStatus(`Updating ${label}…`)
   await reinstallFiles(nappId, files, setStatus, label)
   if (manifest) persist.storeInstalledEvent(manifest)
-  handlers.addApp(nappId, capabilitiesFromListing(listing))
+  handlers.addApp(nappId, capabilitiesFromEvent(manifest))
   const reloaded = reloadIframesByNappId(nappId)
   setStatus(
     `Updated ${label}` +
@@ -535,15 +538,15 @@ async function ensureNappOpen(nappId: string) {
     console.debug("[launch] ensureNappOpen: fresh launch from installed event", { nappId, dTag })
     const target = { pubkey: event.pubkey, dTag, relayHints: [] }
     const result2 = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
-    const { listing } = result2
     const petname = result2.title || nappId
     const win = await launch(stage, result2.nappId, result2.files, currentSigner, {
       ...makeLaunchOpts(),
+      singleton: !!result2.singleton,
       petname
     })
     trackOpened(result2.nappId, win)
     if (result2.manifest) persist.storeInstalledEvent(result2.manifest)
-    handlers.addApp(result2.nappId, capabilitiesFromListing(listing))
+    handlers.addApp(result2.nappId, capabilitiesFromEvent(result2.manifest))
     win.focus()
     return win
   }
@@ -575,8 +578,8 @@ const systemCtx: SystemCtx = {
   launchSystemNapp,
   // Use a thunk so the reference resolves to the function declared later.
   launchFromInput: (raw: string) => launchFromInput(raw),
-  isInstalled: (nappId: string) => persist.readKnown().includes(nappId),
-  wasInstalled: (nappId: string) => persist.readInstallLog().includes(nappId),
+  isInstalled: (nappId: string) => !!persist.getInstalledEventForNappId(nappId),
+  wasInstalled: (nappId: string) => !!persist.getInstalledEventForNappId(nappId),
   uninstall: (nappId: string) => uninstallNapp(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
 }
@@ -674,7 +677,7 @@ function buildSuggestionItems(): SuggestionItem[] {
     out.push({ source: "name", nappId: nappId as string, petname })
   }
 
-  for (const v of persist.readKnown()) {
+  for (const v of persist.getInstalledNappIds()) {
     const key = `napp:${v}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -845,6 +848,7 @@ async function launchFresh(nappId: string, petname: string) {
   console.debug("[launch] launchFresh", { nappId, petname })
   const win = restore(stage, nappId, currentSigner, {
     ...makeLaunchOpts(),
+    singleton: singletonForNappId(nappId),
     petname: petname && petname !== nappId ? petname : nappId
   })
   trackOpened(nappId, win)
@@ -862,7 +866,8 @@ async function launchSession(instanceId: string) {
   if (focusInstance(instanceId)) return
   const win = restore(stage, session.nappId, currentSigner, {
     ...makeLaunchOpts(),
-    instanceId: session.instanceId,
+    instanceId: singletonForNappId(session.nappId) ? session.nappId : session.instanceId,
+    singleton: singletonForNappId(session.nappId),
     petname: session.petname,
     position: session.position,
     status: session.status,
@@ -915,7 +920,6 @@ function trackOpened(nappId: string, win: any) {
     instanceId: state.instanceId,
     petname: state.petname
   })
-  persist.rememberKnown(nappId)
   bringToTopOfStack(win.root)
   persist.updateOpen(state.instanceId, state)
   persistDomOrder()
@@ -1011,7 +1015,8 @@ async function restoreAll() {
       }
       const win = restore(stage, state.nappId, currentSigner, {
         ...makeLaunchOpts(),
-        instanceId: state.instanceId,
+        instanceId: singletonForNappId(state.nappId) ? state.nappId : state.instanceId,
+        singleton: singletonForNappId(state.nappId),
         petname: state.petname,
         params: state.params,
         position: state.position,
@@ -1046,7 +1051,7 @@ async function init() {
   // If the user is paired with a bunker, get the connection warm in the
   // background. First sign request will wait if it's still connecting.
   reconnectIfNeeded().catch(err => setStatus(`Bunker reconnect failed: ${err.message}`))
-  handlers.init()
+  await handlers.init()
   await restoreAll()
   maybeBootstrap()
   // Restore doesn't fire onStateChange — kick the packer manually so a
@@ -1097,7 +1102,8 @@ async function launchFromInput(raw: string): Promise<void> {
     })
     const win = restore(stage, existing.nappId, currentSigner, {
       ...makeLaunchOpts(),
-      instanceId: existing.instanceId,
+      instanceId: singletonForNappId(existing.nappId) ? existing.nappId : existing.instanceId,
+      singleton: singletonForNappId(existing.nappId),
       petname: existing.petname,
       position: existing.position,
       status: existing.status,
@@ -1119,6 +1125,7 @@ async function launchFromInput(raw: string): Promise<void> {
     })
     const win = restore(stage, petNappId, currentSigner, {
       ...makeLaunchOpts(),
+      singleton: singletonForNappId(petNappId),
       petname: raw
     })
     trackOpened(petNappId, win)
@@ -1126,11 +1133,12 @@ async function launchFromInput(raw: string): Promise<void> {
     return
   }
 
-  const known = new Set(persist.readKnown())
+  const known = new Set(persist.getInstalledNappIds())
   if (known.has(raw)) {
     console.debug("[launch] raw matches known nappId, restoring fresh", { raw })
     const win = restore(stage, raw, currentSigner, {
       ...makeLaunchOpts(),
+      singleton: singletonForNappId(raw),
       petname: raw
     })
     trackOpened(raw, win)
@@ -1150,25 +1158,25 @@ async function launchFromInput(raw: string): Promise<void> {
   }
 
   const result3 = (await fetchNsite(resolved, setStatus)) as unknown as NsiteResult
-  const { nappId, files, title, manifest, listing } = result3
+  const { nappId, files, title, manifest, singleton } = result3
   console.debug("[launch] nsite fetched", {
     nappId,
     title,
     fileCount: files.length,
-    hasManifest: !!manifest,
-    hasListing: !!listing
+    hasManifest: !!manifest
   })
   const petname = title || raw
   console.debug("[launch] launching napp with opts", { nappId, petname })
   const win = await launch(stage, nappId, files, currentSigner, {
     ...makeLaunchOpts(),
+    singleton: !!singleton,
     petname
   })
   trackOpened(nappId, win)
   if (raw && raw !== petname) persist.setPetname(raw, nappId)
   persist.pushHistory(raw)
   if (manifest) persist.storeInstalledEvent(manifest)
-  handlers.addApp(nappId, capabilitiesFromListing(listing))
+  handlers.addApp(nappId, capabilitiesFromEvent(manifest))
   win.focus()
 }
 

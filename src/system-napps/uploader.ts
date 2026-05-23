@@ -7,8 +7,6 @@ export const id = "uploader"
 export const title = "Uploader"
 export const slash = "/upload"
 
-const NSITE_ROOT = 15128
-const NSITE_NAMED = 35128
 const DEFAULT_RELAYS = [
   "wss://relay.nostrapps.com",
   "wss://relay.nostrapps.com/personal",
@@ -16,6 +14,7 @@ const DEFAULT_RELAYS = [
 ]
 
 import type { SystemCtx } from "../types.js"
+import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   let files: Array<{ path: string; file: File }> = []
@@ -129,6 +128,11 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       return
     }
 
+    if (!metadata?.id) {
+      setStatus(`metadata.json is missing the "id"`)
+      return
+    }
+
     setStatus("Loading blossom servers…")
     const serverList = (await loadBlossomServers(pubkey)).items ?? []
     if (serverList.length === 0) {
@@ -167,12 +171,10 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       for (const a of metadata.actions) tags.push(["action", a])
     }
 
-    const dTag = metadata?.id
-    const kind = metadata?.name ? NSITE_NAMED : NSITE_ROOT
-    if (kind === NSITE_NAMED) tags.push(["d", dTag])
+    tags.push(["d", metadata.id])
 
     eventTemplate = {
-      kind,
+      kind: NSITE_NAMED_KIND,
       created_at: Math.floor(Date.now() / 1000),
       tags,
       content: "",

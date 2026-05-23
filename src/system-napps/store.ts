@@ -1,14 +1,11 @@
 import { pool } from "@nostr/gadgets/global"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
-import { npubEncode, naddrEncode } from "@nostr/tools/nip19"
+import { naddrEncode } from "@nostr/tools/nip19"
 import "nostr-web-components"
 
 export const id = "store"
 export const title = "Store"
 export const slash = "/store"
-
-const NSITE_NAMED = 35128
-const NSITE_LISTING = 37348 // NIP-5B app listing (paired to a manifest by d-tag)
 
 // Transparent 1×1 SVG used as the initial src for icon/avatar slots so the
 // browser doesn't render a broken-image glyph while async loads are pending.
@@ -21,6 +18,7 @@ const DEFAULT_RELAYS = ["wss://relay.nostrapps.com/personal", "wss://relay.nostr
 import type { SystemCtx } from "../types.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
+import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 
 export function mount(
   container: HTMLElement,
@@ -77,24 +75,9 @@ export function mount(
   function renderList() {
     listEl.innerHTML = ""
 
-    // Cached events include both manifests (15128/35128) and NIP-5B listings
-    // (37348). Pair them by (pubkey, d-tag) so the rendered cards are driven
-    // by manifests but enriched with their listing's metadata.
-    const listingsByKey = new Map()
-    for (const e of events) {
-      if (e.kind !== NSITE_LISTING) continue
-      const dTag = e.tags.find((t: any) => t[0] === "d")?.[1] || ""
-      listingsByKey.set(`${e.pubkey}:${dTag}`, e)
-    }
-    const listingFor = (manifest: any) => {
-      const dTag = manifest.tags.find((t: any) => t[0] === "d")?.[1] || ""
-      return listingsByKey.get(`${manifest.pubkey}:${dTag}`) || null
-    }
-
-    const manifests = events.filter(e => e.kind === NSITE_NAMED)
+    const manifests = events.filter(e => e.kind === NSITE_NAMED_KIND)
     const filtered = manifests
-      .filter(m => !(ctx.isInstalled?.(computeNappId(m)) ?? false))
-      .filter(m => matchesFilter(m, listingFor(m), filter))
+      .filter(m => matchesFilter(m, filter))
       .sort((a, b) => b.created_at - a.created_at)
 
     let displayed: any[] = []
@@ -102,8 +85,7 @@ export function mount(
     // list rather than just swapping the card in place, so an uninstalled
     // app in the "installed" tab moves down into "Previously installed"
     // (and an install in any tab gets re-categorized too).
-    const renderOne = (evt: any) =>
-      listEl.appendChild(renderCard(evt, ctx, relays, listingFor(evt), renderList))
+    const renderOne = (evt: any) => listEl.appendChild(renderCard(evt, ctx, relays, renderList))
 
     if (filtered.length === 0) {
       const empty = document.createElement("div")
@@ -116,13 +98,11 @@ export function mount(
     for (const evt of filtered) renderOne(evt)
     displayed = filtered
 
-    // Lazy-load Blossom icons for unique authors that published a listing.
+    // Lazy-load Blossom icons for unique authors that published app manifests.
     const seenIconPks = new Set()
     for (const evt of displayed) {
       if (seenIconPks.has(evt.pubkey)) continue
-      const listing = listingFor(evt)
-      if (!listing) continue
-      const hasIcon = listing.tags.some((t: any) => t[0] === "icon" && t[1])
+      const hasIcon = evt.tags.some((t: any) => t[0] === "icon" && t[1])
       if (!hasIcon) continue
       seenIconPks.add(evt.pubkey)
       loadBlossomServers(evt.pubkey)
@@ -130,7 +110,7 @@ export function mount(
           const servers = res?.items ?? []
           if (servers.length === 0) return
           const icons = listEl.querySelectorAll(
-            `[data-listing-pubkey="${evt.pubkey}"] .store-card-icon[data-icon-sha]`
+            `[data-author="${evt.pubkey}"] .store-card-icon[data-icon-sha]`
           ) as unknown as HTMLImageElement[]
           for (const img of icons) {
             const sha = img.dataset.iconSha!
@@ -177,7 +157,7 @@ export function mount(
     setStatus(`Subscribing to ${relays.length} relay(s)…`)
     sub = pool.subscribeMany(
       relays,
-      { kinds: [NSITE_NAMED, NSITE_LISTING], limit: 400 },
+      { kinds: [NSITE_NAMED_KIND], limit: 400 },
       {
         label: "napps",
         onevent(event: any) {
@@ -202,6 +182,7 @@ export function mount(
           setStatus(`Subscriptions closed: ${reasons}`)
         },
         onauth(event) {
+          debugger
           return currentSigner().signEvent(event) as any
         }
       }
@@ -245,13 +226,7 @@ export function mount(
   }
 }
 
-function renderCard(
-  evt: any,
-  ctx: any,
-  relays: string[],
-  listing: any = null,
-  onChange: any = null
-) {
+function renderCard(evt: any, ctx: any, relays: string[], onChange: any = null) {
   const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || ""
   const dTag = tag("d")
   const source = tag("source")
@@ -263,29 +238,19 @@ function renderCard(
   const installedEvent = installedEvents.find((e: any) => computeNappId(e) === nappId)
   const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
 
-  // NIP-5B: prefer listing fields over manifest fallbacks.
-  const listingName = localizedListingTag(listing, "name")
-  const listingSummary = localizedListingTag(listing, "summary")
-  const listingDescription = localizedListingTag(listing, "description")
-  const titleText = listingName || tag("title")
-  const description = listingDescription || listingSummary || tag("description")
-  const iconTag = listing?.tags.find((t: any) => t[0] === "icon")
+  const titleText = localizedEventTag(evt, "title") || tag("title")
+  const description =
+    localizedEventTag(evt, "description") || localizedEventTag(evt, "summary") || tag("description")
+  const iconTag = evt.tags.find((t: any) => t[0] === "icon")
   const iconSha = iconTag?.[1]
   const iconMime = iconTag?.[2]
-  const actionTags = listing
-    ? listing.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
-    : []
-  const categoryTags = listing
-    ? listing.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
-    : []
-  const hashtags = listing
-    ? listing.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1])
-    : []
+  const actionTags = evt.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
+  const categoryTags = evt.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
+  const hashtags = evt.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1])
 
   const card = document.createElement("div")
   card.className = "store-card"
   card.dataset.author = evt.pubkey
-  if (listing) card.dataset.listingPubkey = listing.pubkey
   card.addEventListener("mouseup", (e: MouseEvent) => {
     if ((e.target as HTMLElement).closest("button")) return
     ctx.launchSystemNapp("app-info", { params: evt })
@@ -430,15 +395,12 @@ function renderCard(
       } else if (action === "uninstall") {
         await ctx.uninstall(nappId)
       } else if (action === "install") {
-        const raw =
-          evt.kind === NSITE_NAMED
-            ? naddrEncode({
-                pubkey: evt.pubkey,
-                kind: NSITE_NAMED,
-                identifier: dTag,
-                relays: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
-              })
-            : npubEncode(evt.pubkey)
+        const raw = naddrEncode({
+          pubkey: evt.pubkey,
+          kind: NSITE_NAMED_KIND,
+          identifier: dTag,
+          relays: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
+        })
         await ctx.launchFromInput(raw)
       }
       // Re-render the whole list so the card lands in the right section
@@ -448,7 +410,7 @@ function renderCard(
       if (onChange) {
         onChange()
       } else {
-        const replacement = renderCard(evt, ctx, relays, listing)
+        const replacement = renderCard(evt, ctx, relays)
         card.replaceWith(replacement)
       }
     } catch (err) {
@@ -472,13 +434,23 @@ function renderCard(
     return b
   }
 
+  const makeDisabledBtn = (label: string, className: string) => {
+    const b = document.createElement("button")
+    b.type = "button"
+    b.className = className
+    b.textContent = label
+    b.disabled = true
+    b.setAttribute("aria-disabled", "true")
+    return b
+  }
+
   if (updateAvailable) {
     actions.append(
       makeActionBtn("update", "store-install update-available"),
-      makeActionBtn("uninstall", "store-install installed")
+      makeDisabledBtn("installed", "store-install installed")
     )
   } else if (installed) {
-    actions.append(makeActionBtn("uninstall", "store-install installed"))
+    actions.append(makeDisabledBtn("installed", "store-install installed"))
   } else {
     actions.append(makeActionBtn("install", "store-install"))
   }
@@ -541,10 +513,7 @@ function renderCard(
 
 function computeNappId(evt: any) {
   const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1]
-  if (evt.kind === NSITE_NAMED && dTag) {
-    return `${evt.pubkey.slice(0, 40)}-${dTag}`
-  }
-  return evt.pubkey.slice(0, 40)
+  return `${evt.pubkey.slice(0, 16)}~${dTag || ""}`
 }
 
 // ─── helpers ─────────────────────────────────────────────────────
@@ -554,7 +523,7 @@ function sanitizeRelays(relays: string[]): string[] {
   return [...new Set(relays.map(s => (typeof s === "string" ? s.trim() : "")).filter(Boolean))]
 }
 
-function matchesFilter(evt: any, listing: any, filter: string) {
+function matchesFilter(evt: any, filter: string) {
   if (!filter) return true
   const fields = [
     evt.tags.find((t: any) => t[0] === "title")?.[1] || "",
@@ -562,28 +531,24 @@ function matchesFilter(evt: any, listing: any, filter: string) {
     evt.tags.find((t: any) => t[0] === "d")?.[1] || "",
     evt.pubkey
   ]
-  if (listing) {
-    for (const t of listing.tags) {
-      if (
-        (t[0] === "name" ||
-          t[0] === "summary" ||
-          t[0] === "description" ||
-          t[0] === "l" ||
-          t[0] === "t") &&
-        typeof t[1] === "string"
-      ) {
-        fields.push(t[1])
-      }
+  for (const t of evt.tags) {
+    if (
+      (t[0] === "title" ||
+        t[0] === "summary" ||
+        t[0] === "description" ||
+        t[0] === "l" ||
+        t[0] === "t") &&
+      typeof t[1] === "string"
+    ) {
+      fields.push(t[1])
     }
   }
   return fields.some(f => f.toLowerCase().includes(filter))
 }
 
-// Picks the best language variant of a listing's tag (name, summary,
-// description). Tag shape: ["<name>", "<value>", "<lang?>"].
-function localizedListingTag(listing: any, tagName: string) {
-  if (!listing) return null
-  const matches = listing.tags.filter(
+function localizedEventTag(evt: any, tagName: string) {
+  if (!evt) return null
+  const matches = evt.tags.filter(
     (t: any) => t[0] === tagName && typeof t[1] === "string" && t[1].length > 0
   )
   if (matches.length === 0) return null

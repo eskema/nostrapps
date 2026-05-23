@@ -186,7 +186,6 @@ All in `localStorage`, prefixed with `nostrapps:`:
 - `petnames` — petname to nappId map
 - `installLog` — every nappId ever installed (kept across destroy, used for the store's "previously installed" section)
 - `installed` — full manifest events keyed by event id, used for update detection
-- `handlers` — per-nappId action handler registry (NIP-5B)
 - `handlerPrefs` — per-caller scoped action handler preferences
 - `history` — recent raw inputs typed into the launch box
 - `permissions` — per-nappId per-method allow/deny decisions
