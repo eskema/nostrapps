@@ -17,6 +17,26 @@ import { isGated, requireApproval } from "../permissions.js"
 import * as store from "../store.js"
 import * as instanceStore from "../storage/instance.js"
 import { createNappWindow } from "./napp-window.js"
+import {
+  loadBlossomServers,
+  loadBookmarks,
+  loadEmojis,
+  loadFavoriteRelays,
+  loadFavoriteScrolls,
+  loadFollowsList,
+  loadMuteList,
+  loadPins,
+  loadRelayList,
+  loadWikiAuthors,
+  loadWikiRelays,
+} from "@nostr/gadgets/lists"
+import {
+  loadEmojiSets,
+  loadFollowPacks,
+  loadFollowSets,
+  loadRelaySets,
+} from "@nostr/gadgets/sets"
+import { loadNostrUser } from "@nostr/gadgets/metadata"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -1079,6 +1099,38 @@ function dispatch(
         throw new Error("napp.action dispatch is not configured")
       }
       return dispatchHandlers.action(callerNappId, params?.name ?? "", params?.payload)
+    case "napp.loadBlossomServers":
+      return loadBlossomServers(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadBookmarks":
+      return loadBookmarks(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadEmojis":
+      return loadEmojis(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadFavoriteRelays":
+      return loadFavoriteRelays(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadFavoriteScrolls":
+      return loadFavoriteScrolls(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadFollowsList":
+      return loadFollowsList(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadMuteList":
+      return loadMuteList(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadPins":
+      return loadPins(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadRelayList":
+      return loadRelayList(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadWikiAuthors":
+      return loadWikiAuthors(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadWikiRelays":
+      return loadWikiRelays(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+    case "napp.loadEmojiSets":
+      return loadEmojiSets(params.pubkey, params.hints, params.forceUpdate)
+    case "napp.loadFollowPacks":
+      return loadFollowPacks(params.pubkey, params.hints, params.forceUpdate)
+    case "napp.loadFollowSets":
+      return loadFollowSets(params.pubkey, params.hints, params.forceUpdate)
+    case "napp.loadRelaySets":
+      return loadRelaySets(params.pubkey, params.hints, params.forceUpdate)
+    case "napp.loadNostrUser":
+      return loadNostrUser(params)
     default:
       throw new Error(`unsupported method: ${method}`)
   }

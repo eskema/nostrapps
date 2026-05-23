@@ -101,6 +101,44 @@
   //   window.napp.onAction = async (name, payload) => { ... return value }
   window.napp = {
     action: (name, payload) => rpc("napp.action", { name, payload }),
-    onAction: null
+    onAction: null,
+    // Data-loading helpers executed on the host via @nostr/gadgets.
+    // Signatures match the original library functions.
+    utils: {
+      // ── lists ──────────────────────────────────────
+      loadBlossomServers: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadBlossomServers", { pubkey, hints, refreshStyle, defaultItems }),
+      loadBookmarks: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadBookmarks", { pubkey, hints, refreshStyle, defaultItems }),
+      loadEmojis: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadEmojis", { pubkey, hints, refreshStyle, defaultItems }),
+      loadFavoriteRelays: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadFavoriteRelays", { pubkey, hints, refreshStyle, defaultItems }),
+      loadFavoriteScrolls: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadFavoriteScrolls", { pubkey, hints, refreshStyle, defaultItems }),
+      loadFollowsList: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadFollowsList", { pubkey, hints, refreshStyle, defaultItems }),
+      loadMuteList: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadMuteList", { pubkey, hints, refreshStyle, defaultItems }),
+      loadPins: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadPins", { pubkey, hints, refreshStyle, defaultItems }),
+      loadRelayList: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadRelayList", { pubkey, hints, refreshStyle, defaultItems }),
+      loadWikiAuthors: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadWikiAuthors", { pubkey, hints, refreshStyle, defaultItems }),
+      loadWikiRelays: (pubkey, hints, refreshStyle, defaultItems) =>
+        rpc("napp.loadWikiRelays", { pubkey, hints, refreshStyle, defaultItems }),
+      // ── sets ───────────────────────────────────────
+      loadEmojiSets: (pubkey, hints, forceUpdate) =>
+        rpc("napp.loadEmojiSets", { pubkey, hints, forceUpdate }),
+      loadFollowPacks: (pubkey, hints, forceUpdate) =>
+        rpc("napp.loadFollowPacks", { pubkey, hints, forceUpdate }),
+      loadFollowSets: (pubkey, hints, forceUpdate) =>
+        rpc("napp.loadFollowSets", { pubkey, hints, forceUpdate }),
+      loadRelaySets: (pubkey, hints, forceUpdate) =>
+        rpc("napp.loadRelaySets", { pubkey, hints, forceUpdate }),
+      // ── metadata ───────────────────────────────────
+      loadNostrUser: request => rpc("napp.loadNostrUser", request)
+    }
   }
 })()
