@@ -166,6 +166,7 @@ export type SystemLaunchOpts = {
   params?: any
   position?: Position
   status?: Status
+  singleton?: true
   onStateChange?: (state: NappWindowState) => void
   onReorder?: () => void
   onClose?: (instanceId: string) => void
@@ -183,9 +184,6 @@ export type LaunchOpts = {
   onReorder?: () => void
   onClose?: (instanceId: string) => void
   onDestroy?: (instanceId: string) => void
-  dispatchHandlers?: {
-    action(callerNappId: string, name: string, payload: unknown): Promise<unknown>
-  }
 }
 
 export interface PackCell {

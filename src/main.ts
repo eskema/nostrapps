@@ -521,8 +521,8 @@ function escapeHtml(s: string): string {
   )
 }
 
-// Make sure a window for nappId is open and focused. Tries (in order):
-// already-open, closed-session-reopen, fresh launch from installed manifest.
+// Make sure a window for nappId is open and focused. Tries already-open,
+// then restore from already-installed assets.
 async function ensureNappOpen(nappId: string) {
   console.debug("[launch] ensureNappOpen", { nappId })
   const existing = findOpenWindowByNappId(nappId)
@@ -534,19 +534,14 @@ async function ensureNappOpen(nappId: string) {
 
   const event = persist.getInstalledEventForNappId(nappId)
   if (event) {
-    const dTag = event.tags.find(t => t[0] === "d")?.[1] || ""
-    console.debug("[launch] ensureNappOpen: fresh launch from installed event", { nappId, dTag })
-    const target = { pubkey: event.pubkey, dTag, relayHints: [] }
-    const result2 = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
-    const petname = result2.title || nappId
-    const win = await launch(stage, result2.nappId, result2.files, currentSigner, {
+    const petname = friendlyNameFor(nappId)
+    console.debug("[launch] ensureNappOpen: restoring from installed assets", { nappId, petname })
+    const win = restore(stage, nappId, currentSigner, {
       ...makeLaunchOpts(),
-      singleton: !!result2.singleton,
+      singleton: singletonFromEvent(event),
       petname
     })
-    trackOpened(result2.nappId, win)
-    if (result2.manifest) persist.storeInstalledEvent(result2.manifest)
-    handlers.addApp(result2.nappId, capabilitiesFromEvent(result2.manifest))
+    trackOpened(nappId, win)
     win.focus()
     return win
   }
@@ -955,10 +950,6 @@ function persistDomOrder() {
 function makeLaunchOpts() {
   return {
     onProgress: setStatus,
-    dispatchHandlers: {
-      action: (callerNappId: string, name: string, payload: unknown) =>
-        runNappAction(callerNappId, name, payload)
-    },
     onStateChange: (state: NappWindowState) => {
       persist.updateOpen(state.instanceId, state)
       if (state.petname && state.petname !== state.nappId) {
@@ -1048,6 +1039,7 @@ async function init() {
   setStatus(
     "Ready — try /store, /apps, /database, /upload, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host"
   )
+  handlers.setActionDispatcher(runNappAction)
   // If the user is paired with a bunker, get the connection warm in the
   // background. First sign request will wait if it's still connecting.
   reconnectIfNeeded().catch(err => setStatus(`Bunker reconnect failed: ${err.message}`))

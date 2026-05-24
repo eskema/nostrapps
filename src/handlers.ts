@@ -5,6 +5,9 @@ const actionMap = new Map<string, string[]>()
 // nappId → actions for reverse lookup
 const nappActions = new Map<string, string[]>()
 const subs = new Set<() => void>()
+let actionDispatcher:
+  | ((callerNappId: string, name: string, payload: unknown) => Promise<unknown>)
+  | null = null
 
 function emit() {
   for (const fn of subs) fn()
@@ -75,6 +78,19 @@ export function removeApp(nappId: string) {
 export function findHandlersForAction(action: string): string[] {
   if (typeof action !== "string" || !action) return []
   return [...(actionMap.get(action) || [])]
+}
+
+export function setActionDispatcher(
+  fn: ((callerNappId: string, name: string, payload: unknown) => Promise<unknown>) | null
+) {
+  actionDispatcher = fn
+}
+
+export function dispatchAction(callerNappId: string, name: string, payload: unknown) {
+  if (!actionDispatcher) {
+    throw new Error("napp.action dispatch is not configured")
+  }
+  return actionDispatcher(callerNappId, name, payload)
 }
 
 export function getHandlers(nappId: string): string[] {

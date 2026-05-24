@@ -14,6 +14,7 @@ import type {
 } from "../types.js"
 
 import { isGated, requireApproval } from "../permissions.js"
+import { dispatchAction } from "../handlers.js"
 import * as store from "../store.js"
 import { createNappWindow } from "./napp-window.js"
 import {
@@ -111,8 +112,16 @@ export function broadcastTheme() {
       win.root.style.setProperty("--theme", theme)
     }
     if (win.iframe?.contentWindow) {
-      const origin = nappOriginFor(win.root.dataset.nappId!)
-      win.iframe.contentWindow.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
+      try {
+        const origin = new URL(win.iframe.src, location.href).origin
+        win.iframe.contentWindow.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
+      } catch (err) {
+        console.warn("[sandbox] broadcastTheme failed", {
+          nappId: win.root.dataset.nappId,
+          src: win.iframe.src,
+          err
+        })
+      }
     }
   }
 }
@@ -145,7 +154,6 @@ export function findOpenWindowByNappId(nappId: string): NappWindow | null {
 // requestId; the iframe replies with that id once `window.napp.onAction`
 // has run.
 const pendingDispatches = new Map<string, { resolve(v: unknown): void; reject(e: Error): void }>()
-const DISPATCH_TIMEOUT_MS = 30_000
 
 export function callIframe(
   instanceId: string,
@@ -156,24 +164,27 @@ export function callIframe(
   if (!win || !win.iframe) {
     return Promise.reject(new Error(`No iframe for instance ${instanceId}`))
   }
-  const origin = nappOriginFor(win.root.dataset.nappId!)
+  const origin = new URL(win.iframe.src).origin
   const requestId = `${iframeCallSerial++}`
 
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingDispatches.delete(requestId)
-      reject(new Error(`${type} timed out`))
-    }, DISPATCH_TIMEOUT_MS)
+    pendingDispatches.delete(requestId)
     pendingDispatches.set(requestId, {
       resolve: result => {
-        clearTimeout(timer)
         resolve(result)
       },
       reject: err => {
-        clearTimeout(timer)
         reject(err)
       }
     })
+    if (type === "napp-dispatch-action") {
+      console.debug("[sandbox] dispatching action to iframe", {
+        instanceId,
+        nappId: win.root.dataset.nappId,
+        requestId,
+        name: data.name
+      })
+    }
     win.iframe!.contentWindow?.postMessage({ __nostrapps: type, requestId, ...data }, origin)
   })
 }
@@ -307,7 +318,7 @@ function mount(
     onMessage: (data, iframe) => {
       if (!data) return
       if (data.__nostrapps === "rpc") {
-        handleRpc(data, iframe, signer, nappId, opts.dispatchHandlers)
+        handleRpc(data, iframe, signer, nappId)
         return
       }
       if (
@@ -1063,10 +1074,7 @@ async function handleRpc(
   data: MessageData,
   iframe: HTMLIFrameElement,
   signer: Signer | SignerGetter,
-  nappId: string,
-  dispatchHandlers:
-    | { action(callerNappId: string, name: string, payload: unknown): Promise<unknown> }
-    | undefined
+  nappId: string
 ) {
   const { id, method, params } = data
   try {
@@ -1078,7 +1086,7 @@ async function handleRpc(
     // (`() => currentSigner()`). The getter form lets the user hot-swap
     // signer types (NIP-07 ↔ NIP-46) without forcing a napp reload.
     const resolvedSigner = typeof signer === "function" ? signer() : signer
-    const result = await dispatch(resolvedSigner, method!, params, nappId, dispatchHandlers)
+    const result = await dispatch(resolvedSigner, method!, params, nappId)
     iframe.contentWindow?.postMessage({ __nostrapps: "rpc-result", id, result }, "*")
   } catch (err: any) {
     iframe.contentWindow?.postMessage(
@@ -1088,15 +1096,7 @@ async function handleRpc(
   }
 }
 
-function dispatch(
-  signer: Signer,
-  method: string,
-  params: any,
-  callerNappId: string,
-  dispatchHandlers:
-    | { action(callerNappId: string, name: string, payload: unknown): Promise<unknown> }
-    | undefined
-) {
+function dispatch(signer: Signer, method: string, params: any, callerNappId: string) {
   switch (method) {
     case "getPublicKey":
       return signer.getPublicKey()
@@ -1121,10 +1121,7 @@ function dispatch(
     case "nostrdb.replaceable":
       return store.replaceable(params.kind, params.author, params.identifier)
     case "napp.action":
-      if (!dispatchHandlers?.action) {
-        throw new Error("napp.action dispatch is not configured")
-      }
-      return dispatchHandlers.action(callerNappId, params?.name ?? "", params?.payload)
+      return dispatchAction(callerNappId, params?.name ?? "", params?.payload)
     case "napp.loadBlossomServers":
       return loadBlossomServers(
         params.pubkey,
