@@ -42,15 +42,18 @@ const openWindows = new Map<string, NappWindow>()
 
 let iframeCallSerial = 1
 let instanceIdSerial = 1
+export function setInstanceIdSerial(val: number) {
+  instanceIdSerial = val
+}
 
 const readyWaits = new Map<string, Promise<void>>()
 const readyResolve = new Map<string, () => void>()
-const registeredActions = new Map<string, Array<{ id: string; pattern: string }>>()
+const registeredActions = new Map<string, Array<{ idx: number; pattern: string }>>()
 const actionWaiters = new Map<
   string,
   Array<{
     name: string
-    resolve(entry: { id: string; pattern: string }): void
+    resolve(entry: { idx: number; pattern: string }): void
     reject(err: Error): void
   }>
 >()
@@ -67,11 +70,9 @@ function findRegisteredAction(instanceId: string, name: string) {
   )
 }
 
-function addRegisteredAction(instanceId: string, entry: { id: string; pattern: string }) {
+function addRegisteredAction(instanceId: string, entry: { idx: number; pattern: string }) {
   const list = registeredActions.get(instanceId) || []
-  const existing = list.findIndex(item => item.id === entry.id)
-  if (existing >= 0) list[existing] = entry
-  else list.push(entry)
+  list.push(entry)
   registeredActions.set(instanceId, list)
 
   const waiters = actionWaiters.get(instanceId)
@@ -147,7 +148,7 @@ export async function waitForRegisteredAction(instanceId: string, name: string) 
   await waitReady(instanceId)
   const afterReady = findRegisteredAction(instanceId, name)
   if (afterReady) return afterReady
-  return await new Promise<{ id: string; pattern: string }>((resolve, reject) => {
+  return await new Promise<{ idx: number; pattern: string }>((resolve, reject) => {
     const waiters = actionWaiters.get(instanceId) || []
     waiters.push({ name, resolve, reject })
     actionWaiters.set(instanceId, waiters)
@@ -250,7 +251,6 @@ const pendingDispatches = new Map<string, { resolve(v: unknown): void; reject(e:
 
 export async function callIframe(
   instanceId: string,
-  type: string,
   data: Record<string, unknown> = {}
 ): Promise<unknown> {
   await waitReady(instanceId)
@@ -275,31 +275,27 @@ export async function callIframe(
         reject(err)
       }
     })
-    if (type === "napp-dispatch-action") {
-      const name = typeof data.name === "string" ? data.name : ""
-      console.debug("[sandbox] dispatching action to iframe", {
-        instanceId,
-        nappId: win.root.dataset.nappId,
-        requestId,
-        name
-      })
-    }
+    const name = typeof data.name === "string" ? data.name : ""
+    console.debug("[sandbox] dispatching action to iframe", {
+      instanceId,
+      nappId: win.root.dataset.nappId,
+      requestId,
+      name
+    })
     ;(async () => {
       let extra = {}
-      if (type === "napp-dispatch-action") {
-        const name = typeof data.name === "string" ? data.name : ""
-        const handler = await waitForRegisteredAction(instanceId, name)
-        extra = { handlerId: handler.id }
-      }
+      const name = typeof data.name === "string" ? data.name : ""
+      const { idx } = await waitForRegisteredAction(instanceId, name)
+      extra = { idx }
       win.iframe!.contentWindow?.postMessage(
-        { __nostrapps: type, requestId, ...data, ...extra },
+        { __nostrapps: "napp-dispatch-action", requestId, ...data, ...extra },
         origin
       )
     })().catch(fail)
   })
 }
 
-function settleDispatch(data: MessageData) {
+function settleDispatch(data: Extract<MessageData, { __nostrapps: "napp-dispatch-result" }>) {
   const p = pendingDispatches.get(data.requestId!)
   if (!p) return
   pendingDispatches.delete(data.requestId!)
@@ -437,8 +433,8 @@ function mount(
         return
       }
       if (data.__nostrapps === "napp-action-registered") {
-        if (typeof data.id === "string" && typeof data.pattern === "string") {
-          addRegisteredAction(instanceId, { id: data.id, pattern: data.pattern })
+        if (typeof data.idx === "number" && typeof data.pattern === "string") {
+          addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
         }
         return
       }
@@ -446,10 +442,7 @@ function mount(
         handleRpc(data, iframe, signer, nappId)
         return
       }
-      if (
-        data.__nostrapps === "napp-dispatch-result" ||
-        data.__nostrapps === "napp-dispatch-error"
-      ) {
+      if (data.__nostrapps === "napp-dispatch-result") {
         settleDispatch(data)
         return
       }
@@ -1199,7 +1192,7 @@ function waitForMessage(
 }
 
 async function handleRpc(
-  data: MessageData,
+  data: Extract<MessageData, { __nostrapps: "rpc" }>,
   iframe: HTMLIFrameElement,
   signer: Signer | SignerGetter,
   nappId: string

@@ -69,20 +69,45 @@ export type NappWindow = {
   systemId?: string
 }
 
-export interface MessageData {
-  __nostrapps?: string
-  id?: string
-  method?: string
-  params?: Record<string, unknown>
-  instanceId?: string
-  requestId?: string
-  result?: unknown
-  error?: string
-  name?: string
-  payload?: unknown
-  pattern?: string
-  handlerId?: string
-}
+export type MessageData =
+  | {
+      __nostrapps: "napp-action-registered"
+      instanceId: string
+      idx: number
+      pattern: string
+    }
+  | {
+      __nostrapps: "napp-dispatch-action"
+      requestId: string
+      idx: number
+      name: string
+      payload: unknown
+    }
+  | {
+      __nostrapps: "napp-dispatch-result"
+      requestId: string
+      result?: unknown
+      error?: string
+    }
+  | {
+      __nostrapps: "rpc"
+      id: string
+      method: string
+      params: any
+    }
+  | {
+      __nostrapps: "rpc-result"
+      id: string
+      result: unknown
+    }
+  | {
+      __nostrapps: "napp-ready"
+      instanceId: string
+    }
+  | {
+      __nostrapps: "napp-theme-change"
+      theme: string
+    }
 
 export interface SuggestionItem {
   source: "system" | "action" | "open" | "name" | "napp"

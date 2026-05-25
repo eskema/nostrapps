@@ -14,7 +14,8 @@ import {
   bestFitPack,
   broadcastTheme,
   nappOriginFor,
-  bootNapp
+  bootNapp,
+  setInstanceIdSerial
 } from "./sandbox/host.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
@@ -433,15 +434,22 @@ async function runNappAction(callerNappId: string, name: string, payload: unknow
   })
   const instanceId = win.getState().instanceId
   persist.appendLoadedAction(instanceId, name, payload)
-  return await callIframe(instanceId, "napp-dispatch-action", {
+  setStatus(
+    `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}, ${JSON.stringify(payload)}`
+  )
+  const result = await callIframe(instanceId, {
     name,
     payload
   })
+  if (result) {
+    setStatus(`Action "${name}" result: ${JSON.stringify(result)}`)
+  }
+  return result
 }
 
 async function replayLoadedActions(instanceId: string) {
   for (const action of persist.getLoadedActions(instanceId)) {
-    await callIframe(instanceId, "napp-dispatch-action", action)
+    await callIframe(instanceId, action)
   }
 }
 
@@ -1042,6 +1050,14 @@ async function init() {
   // background. First sign request will wait if it's still connecting.
   reconnectIfNeeded().catch(err => setStatus(`Bunker reconnect failed: ${err.message}`))
   await handlers.init()
+  // Bump instanceIdSerial past any existing numeric instanceIds so new
+  // windows don't collide with persisted entries.
+  let maxId = 0
+  for (const s of persist.readOpen()) {
+    const n = parseInt(s.instanceId, 10)
+    if (!isNaN(n) && n > maxId) maxId = n
+  }
+  setInstanceIdSerial(maxId + 1)
   await restoreAll()
   maybeBootstrap()
   // Restore doesn't fire onStateChange — kick the packer manually so a
