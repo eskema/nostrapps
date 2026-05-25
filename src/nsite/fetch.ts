@@ -6,6 +6,7 @@ import { Filter } from "@nostr/tools/filter"
 import { NostrEvent } from "@nostr/tools/pure"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
+import { NsiteResult } from "../types.js"
 
 export const NSITE_NAMED_KIND = 35128
 
@@ -14,7 +15,7 @@ const COLLECT_TIMEOUT_MS = 10000
 export async function fetchNsite(
   target: { pubkey: string; dTag: string; relayHints: string[] },
   onProgress: (msg: string) => void = () => {}
-) {
+): Promise<NsiteResult> {
   console.debug("fetching nsite", target)
 
   const { pubkey, dTag, relayHints } = target
@@ -64,8 +65,7 @@ export async function fetchNsite(
     files.push({ path, body: blob, mime })
   }
 
-  const title = localizedTag(manifest, "title") || getTag(manifest, "title")
-
+  const title = getTag(manifest, "title") || null
   const singleton = manifest.tags.some((t: string[]) => t[0] === "singleton")
 
   return { nappId, files, title, manifest, singleton }
@@ -138,21 +138,4 @@ async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
     }
   }
   return null
-}
-
-export function localizedTag(event: { tags: string[][] } | null, tagName: string): string | null {
-  if (!event) return null
-  const matches = event.tags.filter(
-    t => t[0] === tagName && typeof t[1] === "string" && t[1].length > 0
-  )
-  if (matches.length === 0) return null
-  const userLang =
-    typeof navigator !== "undefined" && navigator.language
-      ? navigator.language.slice(0, 2).toLowerCase()
-      : "en"
-  return (
-    matches.find(t => (t[2] || "").toLowerCase() === userLang)?.[1] ||
-    matches.find(t => !t[2] || t[2].toLowerCase() === "en")?.[1] ||
-    matches[0][1]
-  )
 }

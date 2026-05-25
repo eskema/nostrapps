@@ -32,6 +32,9 @@ import {
 } from "@nostr/gadgets/lists"
 import { loadEmojiSets, loadFollowPacks, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
+import { loadRelayInfo } from "@nostr/gadgets/relays"
+import { getInstalledEventForNappId, isSingletonEvent, updateOpen } from "../persistence.js"
+import { currentSigner } from "../signers/index.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -40,63 +43,153 @@ const openWindows = new Map<string, NappWindow>()
 let iframeCallSerial = 1
 let instanceIdSerial = 1
 
-function hostSlugForNappId(nappId: string): string {
-  const [pubkey16 = "napp", dTag = ""] = nappId.split(/[~/]/, 2)
-  let hash = 2166136261
-  for (let i = 0; i < dTag.length; i++) {
-    hash ^= dTag.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
+const readyWaits = new Map<string, Promise<void>>()
+const readyResolve = new Map<string, () => void>()
+const registeredActions = new Map<string, Array<{ id: string; pattern: string }>>()
+const actionWaiters = new Map<
+  string,
+  Array<{
+    name: string
+    resolve(entry: { id: string; pattern: string }): void
+    reject(err: Error): void
+  }>
+>()
+
+function matchesActionPattern(pattern: string, name: string): boolean {
+  return pattern === "*" || pattern === name
+}
+
+function findRegisteredAction(instanceId: string, name: string) {
+  return (
+    (registeredActions.get(instanceId) || []).find(entry =>
+      matchesActionPattern(entry.pattern, name)
+    ) || null
+  )
+}
+
+function addRegisteredAction(instanceId: string, entry: { id: string; pattern: string }) {
+  const list = registeredActions.get(instanceId) || []
+  const existing = list.findIndex(item => item.id === entry.id)
+  if (existing >= 0) list[existing] = entry
+  else list.push(entry)
+  registeredActions.set(instanceId, list)
+
+  const waiters = actionWaiters.get(instanceId)
+  if (!waiters?.length) return
+  const pending = []
+  for (const waiter of waiters) {
+    if (matchesActionPattern(entry.pattern, waiter.name)) waiter.resolve(entry)
+    else pending.push(waiter)
   }
-  const suffix = (hash >>> 0).toString(16).padStart(8, "0")
-  return `${pubkey16}-${suffix}`
+  if (pending.length === 0) actionWaiters.delete(instanceId)
+  else actionWaiters.set(instanceId, pending)
+}
+
+function clearInstanceActionState(
+  instanceId: string,
+  reason = "Window closed before action registered"
+) {
+  registeredActions.delete(instanceId)
+  const waiters = actionWaiters.get(instanceId)
+  if (waiters?.length) {
+    for (const waiter of waiters) waiter.reject(new Error(reason))
+  }
+  actionWaiters.delete(instanceId)
+}
+
+function clearReady(instanceId: string) {
+  readyWaits.delete(instanceId)
+  readyResolve.delete(instanceId)
+}
+
+function clearInstanceRuntimeState(
+  instanceId: string,
+  reason = "Window closed before action registered"
+) {
+  clearReady(instanceId)
+  clearInstanceActionState(instanceId, reason)
+}
+
+function resetInstanceRuntimeState(
+  instanceId: string,
+  reason = "Window reloaded before action registered"
+) {
+  clearInstanceRuntimeState(instanceId, reason)
+  trackReady(instanceId)
+}
+
+function trackReady(instanceId: string) {
+  if (!readyWaits.has(instanceId)) {
+    readyWaits.set(
+      instanceId,
+      new Promise<void>(resolve => {
+        readyResolve.set(instanceId, resolve)
+      })
+    )
+  }
+}
+
+function resolveReady(instanceId: string) {
+  const resolve = readyResolve.get(instanceId)
+  if (resolve) {
+    readyResolve.delete(instanceId)
+    resolve()
+  }
+}
+
+export function waitReady(instanceId: string): Promise<void> {
+  return readyWaits.get(instanceId) || Promise.resolve()
+}
+
+export async function waitForRegisteredAction(instanceId: string, name: string) {
+  const existing = findRegisteredAction(instanceId, name)
+  if (existing) return existing
+  await waitReady(instanceId)
+  const afterReady = findRegisteredAction(instanceId, name)
+  if (afterReady) return afterReady
+  return await new Promise<{ id: string; pattern: string }>((resolve, reject) => {
+    const waiters = actionWaiters.get(instanceId) || []
+    waiters.push({ name, resolve, reject })
+    actionWaiters.set(instanceId, waiters)
+  })
 }
 
 export function nappOriginFor(nappId: string): string {
   const port = location.port ? `:${location.port}` : ""
-  return `${location.protocol}//${hostSlugForNappId(nappId)}.napps.localhost${port}`
+  const slug = nappId.slice(0, 63).replace(/[^a-zA-Z0-9.-]/g, "-")
+  return `${location.protocol}//${slug}.napps.localhost${port}`
 }
 
-export async function launch(
-  stageEl: HTMLElement,
-  nappId: string,
-  files: NsiteFile[],
-  signer: Signer | SignerGetter,
-  opts: LaunchOpts = {}
-) {
-  if (opts.singleton) {
+export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchOpts = {}) {
+  const singleton = singletonForNappId(nappId)
+
+  if (singleton) {
     const existing = findOpenWindowByNappId(nappId)
     if (existing) {
       existing.focus?.()
       return existing
     }
   }
+
   const origin = nappOriginFor(nappId)
-  const onProgress = opts.onProgress ?? (() => {})
-  const label = opts.petname || nappId
+  const win = mount(stageEl, nappId, singleton, origin, currentSigner, opts)
+  const st = win.getState()
+  console.debug("[launch] trackOpened", {
+    nappId,
+    instanceId: st.instanceId,
+    petname: st.petname
+  })
+  updateOpen(st.instanceId, st)
 
-  console.debug("[sandbox] launch", { nappId, label, fileCount: files.length, origin, opts })
-  onProgress(`Booting ${label}…`)
-  await bootNapp(origin, files, onProgress, label)
-
-  return mount(stageEl, nappId, origin, signer, opts)
+  return win
 }
 
-export function restore(
-  stageEl: HTMLElement,
-  nappId: string,
-  signer: Signer | SignerGetter,
-  opts: LaunchOpts = {}
-) {
-  if (opts.singleton) {
-    const existing = findOpenWindowByNappId(nappId)
-    if (existing) {
-      existing.focus?.()
-      return existing
-    }
-  }
-  const origin = nappOriginFor(nappId)
-  console.debug("[sandbox] restore", { nappId, origin, opts })
-  return mount(stageEl, nappId, origin, signer, opts)
+function singletonFromEvent(event: { tags?: string[][] } | null | undefined): boolean {
+  return isSingletonEvent(event)
+}
+
+function singletonForNappId(nappId: string): boolean {
+  return singletonFromEvent(getInstalledEventForNappId(nappId))
 }
 
 function currentTheme(): "light" | "dark" {
@@ -113,7 +206,7 @@ export function broadcastTheme() {
     }
     if (win.iframe?.contentWindow) {
       try {
-        const origin = new URL(win.iframe.src, location.href).origin
+        const origin = new URL(win.iframe.src).origin
         win.iframe.contentWindow.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
       } catch (err) {
         console.warn("[sandbox] broadcastTheme failed", {
@@ -155,19 +248,24 @@ export function findOpenWindowByNappId(nappId: string): NappWindow | null {
 // has run.
 const pendingDispatches = new Map<string, { resolve(v: unknown): void; reject(e: Error): void }>()
 
-export function callIframe(
+export async function callIframe(
   instanceId: string,
   type: string,
   data: Record<string, unknown> = {}
 ): Promise<unknown> {
+  await waitReady(instanceId)
   const win = openWindows.get(instanceId)
   if (!win || !win.iframe) {
-    return Promise.reject(new Error(`No iframe for instance ${instanceId}`))
+    throw new Error(`No iframe for instance ${instanceId}`)
   }
   const origin = new URL(win.iframe.src).origin
   const requestId = `${iframeCallSerial++}`
 
   return new Promise((resolve, reject) => {
+    const fail = (err: unknown) => {
+      pendingDispatches.delete(requestId)
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
     pendingDispatches.delete(requestId)
     pendingDispatches.set(requestId, {
       resolve: result => {
@@ -178,14 +276,26 @@ export function callIframe(
       }
     })
     if (type === "napp-dispatch-action") {
+      const name = typeof data.name === "string" ? data.name : ""
       console.debug("[sandbox] dispatching action to iframe", {
         instanceId,
         nappId: win.root.dataset.nappId,
         requestId,
-        name: data.name
+        name
       })
     }
-    win.iframe!.contentWindow?.postMessage({ __nostrapps: type, requestId, ...data }, origin)
+    ;(async () => {
+      let extra = {}
+      if (type === "napp-dispatch-action") {
+        const name = typeof data.name === "string" ? data.name : ""
+        const handler = await waitForRegisteredAction(instanceId, name)
+        extra = { handlerId: handler.id }
+      }
+      win.iframe!.contentWindow?.postMessage(
+        { __nostrapps: type, requestId, ...data, ...extra },
+        origin
+      )
+    })().catch(fail)
   })
 }
 
@@ -218,6 +328,7 @@ export function reloadIframesByNappId(nappId: string): number {
   let count = 0
   for (const win of openWindows.values()) {
     if (win.root.dataset.nappId === nappId && win.iframe) {
+      resetInstanceRuntimeState(win.root.dataset.instanceId || "")
       win.iframe.src = win.iframe.src
       count++
     }
@@ -271,6 +382,7 @@ export function launchSystem(
     onClose: () => {
       handle && handle.unmount?.()
       openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
       if (singleton) systemSingletons.delete(sysId)
       opts.onClose?.(instanceId)
     },
@@ -290,12 +402,13 @@ export function launchSystem(
 function mount(
   stageEl: HTMLElement,
   nappId: string,
+  singleton: boolean,
   origin: string,
   signer: Signer | SignerGetter,
   opts: LaunchOpts = {}
 ) {
   const {
-    instanceId = opts.singleton ? nappId : `${instanceIdSerial++}`,
+    instanceId = singleton ? nappId : opts.instanceId ? opts.instanceId : `${instanceIdSerial++}`,
     petname,
     onProgress = () => {},
     onStateChange,
@@ -317,6 +430,18 @@ function mount(
     status,
     onMessage: (data, iframe) => {
       if (!data) return
+      if (data.__nostrapps === "napp-ready") {
+        resolveReady(data.instanceId!)
+        const theme = currentTheme()
+        iframe.contentWindow?.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
+        return
+      }
+      if (data.__nostrapps === "napp-action-registered") {
+        if (typeof data.id === "string" && typeof data.pattern === "string") {
+          addRegisteredAction(instanceId, { id: data.id, pattern: data.pattern })
+        }
+        return
+      }
       if (data.__nostrapps === "rpc") {
         handleRpc(data, iframe, signer, nappId)
         return
@@ -331,10 +456,12 @@ function mount(
     },
     onClose: () => {
       openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
       onClose?.(instanceId)
     },
     onDestroy: () => {
       openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
       onDestroy?.(instanceId)
     },
     onStateChange,
@@ -342,6 +469,7 @@ function mount(
   })
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
+  resetInstanceRuntimeState(instanceId, "Window remounted before action registered")
   ensureStageObserver(stageEl)
   clampToStage(win.root, stageEl)
   return win
@@ -1015,7 +1143,7 @@ export async function wipe(nappId: string): Promise<void> {
   }
 }
 
-async function bootNapp(
+export async function bootNapp(
   origin: string,
   files: NsiteFile[],
   onProgress: (msg: string) => void,
@@ -1167,6 +1295,8 @@ function dispatch(signer: Signer, method: string, params: any, callerNappId: str
       return loadFollowSets(params.pubkey, params.hints, params.forceUpdate)
     case "napp.loadRelaySets":
       return loadRelaySets(params.pubkey, params.hints, params.forceUpdate)
+    case "napp.loadRelayInfo":
+      return loadRelayInfo(params.url, params.refreshStyle)
     case "napp.loadNostrUser":
       return loadNostrUser(params)
     default:

@@ -1,5 +1,6 @@
 ;(() => {
   const pending = new Map()
+  let actionSerial = 1
   // Prefer iframe.name (set by the launcher cross-origin) so we don't pollute
   // the URL with a query string that napps might echo into their own routing.
   // Fall back to the legacy `?__instance=` for back-compat.
@@ -37,10 +38,36 @@
     )
   }
 
-  async function handleDispatch(data) {
-    const fn = window.napp?.onAction
+  const actionHandlers = Object.create(null)
+  let legacyOnAction = null
+  let legacyOnActionId = ""
+
+  function registerAction(pattern, fn) {
+    if (typeof pattern !== "string" || !pattern) {
+      throw new Error("window.napp.registerAction: pattern is required")
+    }
     if (typeof fn !== "function") {
-      throw new Error("window.napp.onAction is not registered")
+      throw new Error("window.napp.registerAction: handler must be function")
+    }
+    const id = `${actionSerial++}`
+    actionHandlers[id] = fn
+    window.parent.postMessage(
+      {
+        __nostrapps: "napp-action-registered",
+        id,
+        pattern,
+        instanceId: INSTANCE_ID
+      },
+      "*"
+    )
+    return id
+  }
+
+  async function handleDispatch(data) {
+    const fn =
+      (typeof data.handlerId === "string" && actionHandlers[data.handlerId]) || window.napp?.onAction
+    if (typeof fn !== "function") {
+      throw new Error("No registered action handler matched this dispatch")
     }
     const result = await fn(data.name, data.payload)
     reply(data.requestId, true, result ?? null)
@@ -102,9 +129,10 @@
   //   window.napp.action(name, payload) — call a registered action handler
   // Receiving apps register:
   //   window.napp.onAction = async (name, payload) => { ... return value }
-  window.napp = {
+  const napp = {
     action: (name, payload) => rpc("napp.action", { name, payload }),
-    onAction: null,
+    registerAction,
+    actionHandlers,
     // Data-loading helpers executed on the host via @nostr/gadgets.
     // Signatures match the original library functions.
     utils: {
@@ -140,8 +168,30 @@
         rpc("napp.loadFollowSets", { pubkey, hints, forceUpdate }),
       loadRelaySets: (pubkey, hints, forceUpdate) =>
         rpc("napp.loadRelaySets", { pubkey, hints, forceUpdate }),
+      // ── relays ──────────────────────────────────────
+      loadRelayInfo: (url, refreshStyle) => rpc("napp.loadRelayInfo", { url, refreshStyle }),
       // ── metadata ───────────────────────────────────
       loadNostrUser: request => rpc("napp.loadNostrUser", request)
     }
   }
+
+  Object.defineProperty(napp, "onAction", {
+    get() {
+      return legacyOnAction
+    },
+    set(fn) {
+      legacyOnAction = fn
+      if (typeof fn !== "function") {
+        if (legacyOnActionId) delete actionHandlers[legacyOnActionId]
+        return
+      }
+      if (!legacyOnActionId) {
+        legacyOnActionId = registerAction("*", fn)
+      } else {
+        actionHandlers[legacyOnActionId] = fn
+      }
+    }
+  })
+
+  window.napp = napp
 })()

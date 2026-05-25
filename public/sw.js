@@ -36,13 +36,27 @@ async function handleFetch(_request, url) {
 }
 
 function injectBridge(html) {
-  const tag = '<script src="/bridge.js"></script>'
-  const headMatch = html.match(/<head[^>]*>/i)
+  const bridgeTag = '<script src="/bridge.js"></script>'
+  const readyTag =
+    '<script>window.parent.postMessage({ __nostrapps: "napp-ready", instanceId: (window.name||"") }, "*")</script>'
+
+  let result = html
+  const headMatch = result.match(/<head[^>]*>/i)
   if (headMatch) {
     const idx = headMatch.index + headMatch[0].length
-    return html.slice(0, idx) + tag + html.slice(idx)
+    result = result.slice(0, idx) + bridgeTag + result.slice(idx)
+  } else {
+    result = bridgeTag + result
   }
-  return tag + html
+
+  const endIdx = result.indexOf("</html>")
+  if (endIdx >= 0) {
+    result = result.slice(0, endIdx) + readyTag + result.slice(endIdx)
+  } else {
+    result = result + readyTag
+  }
+
+  return result
 }
 
 function openDB() {

@@ -19,6 +19,7 @@ import type { SystemCtx } from "../types.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
+import { NostrEvent } from "@nostr/tools"
 
 export function mount(
   container: HTMLElement,
@@ -226,7 +227,7 @@ export function mount(
   }
 }
 
-function renderCard(evt: any, ctx: any, relays: string[], onChange: any = null) {
+function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange: any = null) {
   const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || ""
   const dTag = tag("d")
   const source = tag("source")
@@ -389,8 +390,8 @@ function renderCard(evt: any, ctx: any, relays: string[], onChange: any = null) 
       if (action === "update") {
         await ctx.update({
           pubkey: evt.pubkey,
-          kind: evt.kind,
-          dTag: dTag || undefined
+          dTag: dTag,
+          relayHints: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
         })
       } else if (action === "uninstall") {
         await ctx.uninstall(nappId)
@@ -401,7 +402,7 @@ function renderCard(evt: any, ctx: any, relays: string[], onChange: any = null) 
           identifier: dTag,
           relays: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
         })
-        await ctx.launchFromInput(raw)
+        await ctx.install(raw)
       }
       // Re-render the whole list so the card lands in the right section
       // for the current filter (e.g. uninstalling in "installed" moves

@@ -40,6 +40,7 @@ export type NappWindowState = {
   status: Status
   position?: Position
   params?: any
+  loadedActions?: Array<{ name: string; payload: unknown }>
 }
 
 export type Status = {
@@ -77,6 +78,10 @@ export interface MessageData {
   requestId?: string
   result?: unknown
   error?: string
+  name?: string
+  payload?: unknown
+  pattern?: string
+  handlerId?: string
 }
 
 export interface SuggestionItem {
@@ -139,9 +144,9 @@ export interface SystemCtx {
   loadFolder(): void
   setStatus(msg: string): void
   launchSystemNapp(sysId: string, opts?: { params?: any }): NappWindow
-  launchFromInput(raw: string): Promise<void>
   isInstalled(nappId: string): boolean
   wasInstalled(nappId: string): boolean
+  install(nappId: string): Promise<string>
   uninstall(nappId: string): Promise<void>
   update(target: { pubkey: string; dTag: string; relayHints?: string[] }): Promise<void>
 }
@@ -174,7 +179,6 @@ export type SystemLaunchOpts = {
 
 export type LaunchOpts = {
   instanceId?: string
-  singleton?: boolean
   petname?: string
   params?: any
   position?: Position

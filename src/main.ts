@@ -3,18 +3,18 @@ import "@fontsource-variable/source-serif-4"
 import "@fontsource-variable/source-code-pro"
 import {
   launch,
-  restore,
   focusInstance,
   launchSystem,
   wipe,
   destroyByNappId,
   reinstallFiles,
   reloadIframesByNappId,
-  findOpenWindowByNappId,
   callIframe,
   tileWindows,
   bestFitPack,
-  broadcastTheme
+  broadcastTheme,
+  nappOriginFor,
+  bootNapp
 } from "./sandbox/host.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
@@ -27,7 +27,13 @@ import { mountDialog, clearDecisions } from "./permissions.js"
 import * as persist from "./persistence.js"
 import * as handlers from "./handlers.js"
 import * as nostrdb from "./store.js"
-import type { SuggestionItem, NsiteResult, NappWindowState, SystemCtx } from "./types.js"
+import type {
+  SuggestionItem,
+  NsiteResult,
+  NappWindowState,
+  SystemCtx,
+  NappWindow
+} from "./types.js"
 import {
   registry as systemRegistry,
   slashCommands,
@@ -240,12 +246,7 @@ async function disconnect(): Promise<void> {
 const uninstallingNapps = new Set<string>()
 
 async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling") {
-  const petnameKeys = Object.entries(persist.readPetnames())
-    .filter(([, mapped]) => mapped === nappId)
-    .map(([petname]) => petname)
   persist.forgetPetnamesForNapp(nappId)
-  persist.forgetHistory(nappId)
-  for (const p of petnameKeys) persist.forgetHistory(p)
   clearDecisions(nappId)
   persist.forgetInstalledNapp(nappId)
   handlers.removeApp(nappId)
@@ -352,8 +353,8 @@ function loadFolder() {
   localFolderInput.click()
 }
 
-async function uninstallNapp(nappId: string) {
-  const wasInstalled = !!persist.getInstalledEventForNappId(nappId)
+async function uninstall(nappId: string) {
+  const wasInstalled = !!persist.getInstalledAppForNappId(nappId)
   uninstallingNapps.add(nappId)
 
   // Destroy any open windows; their onDestroy chain runs the per-instance
@@ -387,14 +388,6 @@ function capabilitiesFromEvent(event: { tags: string[][] } | null | undefined): 
     }
   }
   return actions
-}
-
-function singletonFromEvent(event: { tags?: string[][] } | null | undefined): boolean {
-  return persist.isSingletonEvent(event)
-}
-
-function singletonForNappId(nappId: string): boolean {
-  return singletonFromEvent(persist.getInstalledEventForNappId(nappId))
 }
 
 // Update flow: re-fetch the manifest + files at the same target, swap them
@@ -433,12 +426,23 @@ async function runNappAction(callerNappId: string, name: string, payload: unknow
   if (candidates.length === 0) {
     throw new Error(`No app registered for action "${name}"`)
   }
-  const target = await pickHandler(callerNappId, name, candidates)
-  const win = await ensureNappOpen(target)
-  return await callIframe(win.getState().instanceId, "napp-dispatch-action", {
+  const nappId = await pickHandler(callerNappId, name, candidates)
+  const win = await launch(stage, nappId, {
+    ...makeLaunchOpts(),
+    petname: friendlyNameFor(nappId)
+  })
+  const instanceId = win.getState().instanceId
+  persist.appendLoadedAction(instanceId, name, payload)
+  return await callIframe(instanceId, "napp-dispatch-action", {
     name,
     payload
   })
+}
+
+async function replayLoadedActions(instanceId: string) {
+  for (const action of persist.getLoadedActions(instanceId)) {
+    await callIframe(instanceId, "napp-dispatch-action", action)
+  }
 }
 
 async function pickHandler(
@@ -447,13 +451,14 @@ async function pickHandler(
   candidates: string[]
 ): Promise<string> {
   if (candidates.length === 1) {
-    persist.setHandlerPref(callerNappId, "action", actionName, candidates[0])
     return candidates[0]
   }
   const remembered = persist.getHandlerPref(callerNappId, "action", actionName)
   if (remembered && candidates.includes(remembered)) return remembered
   const choice = await showHandlerPicker(actionName, candidates)
-  persist.setHandlerPref(callerNappId, "action", actionName, choice)
+  if (await confirmRememberHandlerChoice(actionName, choice)) {
+    persist.setHandlerPref(callerNappId, "action", actionName, choice)
+  }
   return choice
 }
 
@@ -507,6 +512,39 @@ function showHandlerPicker(actionName: string, candidates: string[]): Promise<st
   })
 }
 
+function confirmRememberHandlerChoice(actionName: string, nappId: string): Promise<boolean> {
+  return new Promise<boolean>(resolve => {
+    const dialog = document.createElement("dialog")
+    dialog.className = "handler-picker"
+    dialog.innerHTML = `
+      <form method="dialog" class="handler-picker-form">
+        <h3>${escapeHtml(`Remember app choice for "${actionName}"?`)}</h3>
+        <p>
+          Use <strong>${escapeHtml(friendlyNameFor(nappId))}</strong>
+          for future <code>${escapeHtml(actionName)}</code> requests from this app?
+        </p>
+        <menu class="handler-picker-actions">
+          <button type="button" class="handler-picker-no">not now</button>
+          <button type="button" class="handler-picker-yes">remember</button>
+        </menu>
+      </form>
+    `
+    document.body.appendChild(dialog)
+    const finish = (value: boolean) => {
+      dialog.remove()
+      resolve(value)
+    }
+    dialog.addEventListener("close", () => finish(false), { once: true })
+    ;(dialog.querySelector(".handler-picker-no") as HTMLElement).addEventListener("click", () => {
+      dialog.close()
+    })
+    ;(dialog.querySelector(".handler-picker-yes") as HTMLElement).addEventListener("click", () => {
+      finish(true)
+    })
+    dialog.showModal()
+  })
+}
+
 function escapeHtml(s: string): string {
   return String(s).replace(
     /[&<>"']/g,
@@ -519,35 +557,6 @@ function escapeHtml(s: string): string {
         "'": "&#39;"
       })[c] as string
   )
-}
-
-// Make sure a window for nappId is open and focused. Tries already-open,
-// then restore from already-installed assets.
-async function ensureNappOpen(nappId: string) {
-  console.debug("[launch] ensureNappOpen", { nappId })
-  const existing = findOpenWindowByNappId(nappId)
-  if (existing) {
-    console.debug("[launch] ensureNappOpen: already open, focusing", { nappId })
-    existing.focus?.()
-    return existing
-  }
-
-  const event = persist.getInstalledEventForNappId(nappId)
-  if (event) {
-    const petname = friendlyNameFor(nappId)
-    console.debug("[launch] ensureNappOpen: restoring from installed assets", { nappId, petname })
-    const win = restore(stage, nappId, currentSigner, {
-      ...makeLaunchOpts(),
-      singleton: singletonFromEvent(event),
-      petname
-    })
-    trackOpened(nappId, win)
-    win.focus()
-    return win
-  }
-
-  console.debug("[launch] ensureNappOpen: no install info on file", { nappId })
-  throw new Error(`Cannot open ${nappId}: no install info on file`)
 }
 
 function friendlyNameFor(nappId: string): string {
@@ -572,10 +581,10 @@ const systemCtx: SystemCtx = {
   setStatus,
   launchSystemNapp,
   // Use a thunk so the reference resolves to the function declared later.
-  launchFromInput: (raw: string) => launchFromInput(raw),
-  isInstalled: (nappId: string) => !!persist.getInstalledEventForNappId(nappId),
-  wasInstalled: (nappId: string) => !!persist.getInstalledEventForNappId(nappId),
-  uninstall: (nappId: string) => uninstallNapp(nappId),
+  isInstalled: (nappId: string) => !!persist.getInstalledAppForNappId(nappId),
+  wasInstalled: (nappId: string) => !!persist.getInstalledAppForNappId(nappId),
+  install: (raw: string) => install(raw),
+  uninstall: (nappId: string) => uninstall(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
 }
 
@@ -825,9 +834,20 @@ function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
       } else if (item.instanceId) {
         await launchSession(item.instanceId)
       } else if (item.nappId) {
-        await launchFresh(item.nappId, item.petname || item.nappId)
+        const win = await launch(stage, item.nappId, {
+          ...makeLaunchOpts(),
+          petname: item.petname && item.petname !== item.nappId ? item.petname : item.nappId
+        })
+        syncDOM(win)
+        win.focus()
       } else if (item.raw) {
-        await launchFromInput(item.raw)
+        const nappId = await install(item.raw)
+        const win = await launch(stage, nappId, {
+          ...makeLaunchOpts(),
+          petname: friendlyNameFor(nappId)
+        })
+        syncDOM(win)
+        win.focus()
       }
       setStatus(`Launched ${label}`)
       input!.value = ""
@@ -839,17 +859,6 @@ function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
   return row
 }
 
-async function launchFresh(nappId: string, petname: string) {
-  console.debug("[launch] launchFresh", { nappId, petname })
-  const win = restore(stage, nappId, currentSigner, {
-    ...makeLaunchOpts(),
-    singleton: singletonForNappId(nappId),
-    petname: petname && petname !== nappId ? petname : nappId
-  })
-  trackOpened(nappId, win)
-  win.focus()
-}
-
 async function launchSession(instanceId: string) {
   const session = persist.readOpen().find(s => s.instanceId === instanceId)
   if (!session) throw new Error("Session not found")
@@ -859,19 +868,15 @@ async function launchSession(instanceId: string) {
     petname: session.petname
   })
   if (focusInstance(instanceId)) return
-  const win = restore(stage, session.nappId, currentSigner, {
+  const win = await launch(stage, session.nappId, {
     ...makeLaunchOpts(),
-    instanceId: singletonForNappId(session.nappId) ? session.nappId : session.instanceId,
-    singleton: singletonForNappId(session.nappId),
+    instanceId: session.instanceId,
     petname: session.petname,
     position: session.position,
     status: session.status,
     params: session.params
   })
-  bringToTopOfStack(win.root)
-  persist.updateOpen(session.instanceId, win.getState())
-  persistDomOrder()
-  refreshSuggestions()
+  syncDOM(win)
   win.focus()
 }
 
@@ -906,19 +911,6 @@ function bringToTopOfStack(root: HTMLElement) {
   if (!root || !stage.contains(root)) return
   if (stage.firstElementChild === root) return
   stage.insertBefore(root, stage.firstElementChild)
-}
-
-function trackOpened(nappId: string, win: any) {
-  const state = win.getState()
-  console.debug("[launch] trackOpened", {
-    nappId,
-    instanceId: state.instanceId,
-    petname: state.petname
-  })
-  bringToTopOfStack(win.root)
-  persist.updateOpen(state.instanceId, state)
-  persistDomOrder()
-  refreshSuggestions()
 }
 
 function persistDomOrder() {
@@ -1004,16 +996,22 @@ async function restoreAll() {
         })
         continue
       }
-      const win = restore(stage, state.nappId, currentSigner, {
+      const win = await launch(stage, state.nappId, {
         ...makeLaunchOpts(),
-        instanceId: singletonForNappId(state.nappId) ? state.nappId : state.instanceId,
-        singleton: singletonForNappId(state.nappId),
+        instanceId: state.instanceId,
         petname: state.petname,
         params: state.params,
         position: state.position,
         status: state.status
       })
-      persist.updateOpen(state.instanceId, win.getState())
+      const restoredState = win.getState()
+      persist.updateOpen(state.instanceId, restoredState)
+      void replayLoadedActions(restoredState.instanceId).catch((err: any) => {
+        console.warn("[launch] replayLoadedActions failed", {
+          instanceId: restoredState.instanceId,
+          err
+        })
+      })
     } catch (err: any) {
       setStatus(`Failed to restore ${state.nappId}: ${err.message}`)
     }
@@ -1052,6 +1050,43 @@ async function init() {
   broadcastTheme()
 }
 init()
+
+async function install(raw: string): Promise<string> {
+  let resolved
+  try {
+    resolved = resolveInput(raw)
+    console.debug("[install] input resolved", { raw, resolved })
+  } catch {
+    console.debug("[install] input could not be resolved", { raw })
+    throw new Error(
+      `Couldn't resolve "${raw}" — try a pubkey, npub, nprofile, naddr, or nsite hostname`
+    )
+  }
+
+  const { nappId, files, title, manifest } = await fetchNsite(resolved, setStatus)
+  console.debug("[install] nsite fetched", {
+    nappId,
+    title,
+    fileCount: files.length,
+    hasManifest: !!manifest
+  })
+  const petname = title || raw
+  console.debug("[install] installing napp with opts", { nappId, petname })
+
+  const origin = nappOriginFor(nappId)
+  const onProgress = setStatus
+  const label = title || nappId
+
+  console.debug("[sandbox] install", { nappId, label, origin })
+  onProgress(`Booting ${label}…`)
+  await bootNapp(origin, files, onProgress, label)
+
+  if (raw && raw !== petname) persist.setPetname(raw, nappId)
+  if (manifest) persist.storeInstalledEvent(manifest)
+  handlers.addApp(nappId, capabilitiesFromEvent(manifest))
+
+  return nappId
+}
 
 async function launchFromInput(raw: string): Promise<void> {
   console.debug("[launch] launchFromInput", { raw })
@@ -1092,19 +1127,16 @@ async function launchFromInput(raw: string): Promise<void> {
       instanceId: existing.instanceId,
       petname: existing.petname
     })
-    const win = restore(stage, existing.nappId, currentSigner, {
+
+    const win = await launch(stage, existing.nappId, {
       ...makeLaunchOpts(),
-      instanceId: singletonForNappId(existing.nappId) ? existing.nappId : existing.instanceId,
-      singleton: singletonForNappId(existing.nappId),
+      instanceId: existing.instanceId,
       petname: existing.petname,
       position: existing.position,
       status: existing.status,
       params: existing.params
     })
-    bringToTopOfStack(win.root)
-    persist.updateOpen(existing.instanceId, win.getState())
-    persistDomOrder()
-    refreshSuggestions()
+    syncDOM(win)
     win.focus()
     return
   }
@@ -1115,12 +1147,11 @@ async function launchFromInput(raw: string): Promise<void> {
       raw,
       nappId: petNappId
     })
-    const win = restore(stage, petNappId, currentSigner, {
+    const win = await launch(stage, petNappId, {
       ...makeLaunchOpts(),
-      singleton: singletonForNappId(petNappId),
       petname: raw
     })
-    trackOpened(petNappId, win)
+    syncDOM(win)
     win.focus()
     return
   }
@@ -1128,48 +1159,16 @@ async function launchFromInput(raw: string): Promise<void> {
   const known = new Set(persist.getInstalledNappIds())
   if (known.has(raw)) {
     console.debug("[launch] raw matches known nappId, restoring fresh", { raw })
-    const win = restore(stage, raw, currentSigner, {
+    const win = await launch(stage, raw, {
       ...makeLaunchOpts(),
-      singleton: singletonForNappId(raw),
       petname: raw
     })
-    trackOpened(raw, win)
+    syncDOM(win)
     win.focus()
     return
   }
 
-  let resolved
-  try {
-    resolved = resolveInput(raw)
-    console.debug("[launch] input resolved", { raw, resolved })
-  } catch {
-    console.debug("[launch] input could not be resolved", { raw })
-    throw new Error(
-      `Couldn't resolve "${raw}" — try a pubkey, npub, nprofile, naddr, or nsite hostname`
-    )
-  }
-
-  const result3 = (await fetchNsite(resolved, setStatus)) as unknown as NsiteResult
-  const { nappId, files, title, manifest, singleton } = result3
-  console.debug("[launch] nsite fetched", {
-    nappId,
-    title,
-    fileCount: files.length,
-    hasManifest: !!manifest
-  })
-  const petname = title || raw
-  console.debug("[launch] launching napp with opts", { nappId, petname })
-  const win = await launch(stage, nappId, files, currentSigner, {
-    ...makeLaunchOpts(),
-    singleton: !!singleton,
-    petname
-  })
-  trackOpened(nappId, win)
-  if (raw && raw !== petname) persist.setPetname(raw, nappId)
-  persist.pushHistory(raw)
-  if (manifest) persist.storeInstalledEvent(manifest)
-  handlers.addApp(nappId, capabilitiesFromEvent(manifest))
-  win.focus()
+  console.log("[launch] unknown app")
 }
 
 form.addEventListener("submit", async (e: SubmitEvent) => {
@@ -1194,14 +1193,31 @@ localFolderInput.addEventListener("change", async (e: Event) => {
   try {
     const { nappId, files, metadata } = await collectLocalFolder(inputFiles!, setStatus)
     console.debug("[launch] local folder collected", { nappId, fileCount: files.length, metadata })
-    const petname = metadata?.name || nappId
-    const win = await launch(stage, nappId, files, currentSigner, {
+
+    // install(), but from local, not fetching an nsite
+    const origin = nappOriginFor(nappId)
+    const onProgress = setStatus
+    const label = metadata.title || nappId
+    console.debug("[sandbox] install", { nappId, label, origin })
+    setStatus(`Booting ${label}…`)
+    await bootNapp(origin, files, onProgress, label)
+
+    const petname = metadata?.title || metadata?.name || nappId
+    const win = await launch(stage, nappId, {
       ...makeLaunchOpts(),
       petname
     })
-    trackOpened(nappId, win)
-    if (metadata?.actions?.length) handlers.addApp(nappId, metadata.actions)
+    syncDOM(win)
     win.focus()
+
+    if (petname !== nappId) persist.setPetname(petname, nappId)
+    persist.storeInstalledLocalApp({
+      nappId,
+      title: metadata?.title || metadata?.name || null,
+      icon: metadata?.icon || null,
+      actions: metadata?.actions || []
+    })
+    handlers.addApp(nappId, metadata?.actions || [])
     setStatus(`Launched ${petname}`)
   } catch (err: any) {
     setStatus(`Error: ${err.message}`)
@@ -1210,3 +1226,9 @@ localFolderInput.addEventListener("change", async (e: Event) => {
     ;(e.target as HTMLInputElement).value = ""
   }
 })
+
+function syncDOM(win: NappWindow) {
+  bringToTopOfStack(win.root)
+  persistDomOrder()
+  refreshSuggestions()
+}

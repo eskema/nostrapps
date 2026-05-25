@@ -3,8 +3,7 @@ import {
   getStageBounds,
   packCellSnap,
   bestFitPack,
-  capturePackSnapshot,
-  broadcastTheme
+  capturePackSnapshot
 } from "./host.js"
 
 let zIndexCounter = 1
@@ -185,10 +184,6 @@ export function createNappWindow({
       onMessage(data, iframe)
     }
     window.addEventListener("message", messageHandler)
-  }
-
-  if (origin && iframe) {
-    setTimeout(broadcastTheme, 200)
   }
 
   function teardown() {

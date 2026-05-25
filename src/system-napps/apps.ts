@@ -25,6 +25,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       card.className = "apps-card"
       card.addEventListener("mouseup", (e: MouseEvent) => {
         if ((e.target as HTMLElement).closest("button")) return
+        if (!app.event) return
         ctx.launchSystemNapp("app-info", { params: app.event })
       })
 

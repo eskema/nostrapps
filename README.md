@@ -83,13 +83,6 @@ window.nostr.nip44.encrypt|decrypt(pubkey, text)
 window.nostr.pool.query(filters, opts?)
 window.nostr.pool.publish(event, opts?)
 
-// Per-window state. Each window has its own bucket, keyed by instanceId.
-window.nostr.instance.id
-window.nostr.instance.get(key)
-window.nostr.instance.set(key, value)
-window.nostr.instance.delete(key)
-window.nostr.instance.keys()
-
 // Global event store (NIP-DB draft)
 window.nostrdb.add(event)
 window.nostrdb.query(filters)
@@ -120,11 +113,24 @@ window.napp.utils.loadFollowPacks(pubkey, hints?, forceUpdate?)
 window.napp.utils.loadRelaySets(pubkey, hints?, forceUpdate?)
 window.napp.utils.loadEmojiSets(pubkey, hints?, forceUpdate?)
 
+// Relay metadata
+window.napp.utils.loadRelayInfo(url, refreshStyle?)
+
 // Profile metadata
 window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrUser
 ```
 
 Each function's signature matches `@nostr/gadgets` exactly. The call is forwarded to the host, which runs the real query against the shared relay pool and caches the result.
+
+The host also exposes **basic actions** that any napp can call via `window.napp.action(name, payload)`:
+
+| Action               | Payload                   | Does                                                                         |
+| ---                  | ---                       | ---                                                                          |
+| `view:<kind-number>` | `{ event: object or id }` | Opens the given event in a viewer appropriate for its kind                   |
+| `profile`            | `{ pubkey: string }`      | Opens the profile view for the given pubkey                                  |
+| `feed`               | `{ pubkey: string }`      | Opens the feed view for the given pubkey                                     |
+| `relay_feed`         | `{ relays: string[] }`    | Opens a feed view scoped to the given relay URLs                             |
+| `search_profile`     | `{ input?: string }`      | Returns a promise resolving to a pubkey (optionally from user-guided search) |
 
 The host also pushes runtime signals to every napp via `postMessage`. Bridge.js relays them:
 
