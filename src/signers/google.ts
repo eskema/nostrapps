@@ -5,7 +5,7 @@ import { bytesToHex } from "@noble/hashes/utils.js"
 
 // Hardcoded Pomegranate deployment we point this launcher at.
 const CENTRAL_URL = "https://auth.njump.me"
-const OPERATORS = ["https://po.njump.me", "https://po.fiatjaf.com"]
+const OPERATORS = ["https://po.njump.me", "https://po.nostrver.se", "https://po.f7z.io"]
 
 const utf8_encode = (s: string) => new TextEncoder().encode(s)
 
