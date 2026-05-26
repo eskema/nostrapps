@@ -1,10 +1,5 @@
 import type { NappWindow, NappWindowState, MessageData, Position, Status } from "../types.js"
-import {
-  getStageBounds,
-  packCellSnap,
-  bestFitPack,
-  capturePackSnapshot
-} from "./host.js"
+import { getStageBounds, packCellSnap, bestFitPack, capturePackSnapshot } from "./host.js"
 
 let zIndexCounter = 1
 let positionOffset = 0
@@ -35,12 +30,6 @@ function ensureFocusTracker() {
     requestAnimationFrame(tick)
   }
   requestAnimationFrame(tick)
-}
-
-function currentTheme(): "light" | "dark" {
-  const attr = document.documentElement.dataset.theme
-  if (attr === "light" || attr === "dark") return attr
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
 }
 
 export function createNappWindow({

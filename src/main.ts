@@ -177,12 +177,12 @@ const apps = {
     return persist.getInstalledEvents()
   },
   list() {
-    return persist.getInstalledNappIds().map((nappId: string) => ({
-      nappId,
-      name: friendlyNameFor(nappId),
-      handlers: handlers.getHandlers(nappId),
-      event: persist.getInstalledEventForNappId(nappId),
-      openCount: persist.readOpen().filter(s => s.nappId === nappId).length
+    return persist.getInstalledApps().map(app => ({
+      nappId: app.nappId,
+      name: app.petname || app.title || app.nappId,
+      handlers: handlers.getHandlers(app.nappId),
+      event: app.event || null,
+      openCount: persist.readOpen().filter(s => s.nappId === app.nappId).length
     }))
   },
   subscribe(fn: () => void) {
@@ -247,7 +247,6 @@ async function disconnect(): Promise<void> {
 const uninstallingNapps = new Set<string>()
 
 async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling") {
-  persist.forgetPetnamesForNapp(nappId)
   clearDecisions(nappId)
   persist.forgetInstalledNapp(nappId)
   handlers.removeApp(nappId)
@@ -568,7 +567,7 @@ function escapeHtml(s: string): string {
 }
 
 function friendlyNameFor(nappId: string): string {
-  return petnameForNappId(nappId, persist.readPetnames(), persist.readOpen()) || nappId
+  return petnameForNappId(nappId, persist.readOpen()) || nappId
 }
 
 // ─── system napp ctx ────────────────────────────────────────────
@@ -664,7 +663,6 @@ function buildSuggestionItems(): SuggestionItem[] {
   }
 
   const openSessions = persist.readOpen()
-  const petnames = persist.readPetnames()
 
   for (const s of openSessions) {
     if (s.system) continue // shown via systemList row instead
@@ -681,33 +679,22 @@ function buildSuggestionItems(): SuggestionItem[] {
     if (s.nappId) sessionNappIds.add(s.nappId)
   }
 
-  for (const [petname, nappId] of Object.entries(petnames)) {
-    if (sessionNappIds.has(nappId)) continue
-    const key = `name:${petname}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({ source: "name", nappId: nappId as string, petname })
-  }
-
-  for (const v of persist.getInstalledNappIds()) {
-    const key = `napp:${v}`
+  for (const app of persist.getInstalledApps()) {
+    if (sessionNappIds.has(app.nappId)) continue
+    const key = `napp:${app.nappId}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push({
       source: "napp",
-      nappId: v,
-      petname: petnameForNappId(v, petnames, openSessions)
+      nappId: app.nappId,
+      petname: petnameForNappId(app.nappId, openSessions)
     })
   }
 
   return out
 }
 
-function petnameForNappId(
-  nappId: string,
-  petnamesMap: Record<string, string>,
-  sessions: any[]
-): string | null {
+function petnameForNappId(nappId: string, sessions: any[]): string | null {
   // Prefer a petname from any session for this nappId — that's typically the
   // friendliest name (manifest title we set at launch).
   for (const s of sessions) {
@@ -715,21 +702,7 @@ function petnameForNappId(
       return s.petname
     }
   }
-  // Fall back to the inverse petnames map, preferring values that don't look
-  // like raw identifiers (npub/naddr/host) so we surface the friendly title.
-  const candidates = []
-  for (const [petname, mapped] of Object.entries(petnamesMap)) {
-    if (mapped === nappId) candidates.push(petname)
-  }
-  if (candidates.length === 0) return null
-  return candidates.find(p => !looksLikeIdentifier(p)) || candidates[0]
-}
-
-function looksLikeIdentifier(s: string): boolean {
-  if (/^[0-9a-f]{64}$/i.test(s)) return true
-  if (/^(npub1|nprofile1|naddr1)[0-9a-z]+$/i.test(s)) return true
-  if (/^(?:https?:\/\/)?[a-z0-9][a-z0-9-]*\.[a-z0-9.-]+$/i.test(s)) return true
-  return false
+  return persist.getInstalledAppForNappId(nappId)?.petname || null
 }
 
 function itemSearchText(item: SuggestionItem): string {
@@ -952,9 +925,7 @@ function makeLaunchOpts() {
     onProgress: setStatus,
     onStateChange: (state: NappWindowState) => {
       persist.updateOpen(state.instanceId, state)
-      if (state.petname && state.petname !== state.nappId) {
-        persist.setPetname(state.petname, state.nappId)
-      }
+      if (state.petname) persist.setInstalledPetname(state.nappId, state.petname)
       refreshSuggestions()
       maybeRepack()
     },
@@ -1097,8 +1068,7 @@ async function install(raw: string): Promise<string> {
   onProgress(`Booting ${label}…`)
   await bootNapp(origin, files, onProgress, label)
 
-  if (raw && raw !== petname) persist.setPetname(raw, nappId)
-  if (manifest) persist.storeInstalledEvent(manifest)
+  if (manifest) persist.storeInstalledEvent(manifest, petname)
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
 
   return nappId
@@ -1218,22 +1188,24 @@ localFolderInput.addEventListener("change", async (e: Event) => {
     setStatus(`Booting ${label}…`)
     await bootNapp(origin, files, onProgress, label)
 
-    const petname = metadata?.title || metadata?.name || nappId
+    const petname = metadata?.title || nappId
+
+    persist.storeInstalledLocalApp({
+      nappId,
+      title: metadata?.title || null,
+      icon: metadata?.icon || null,
+      petname,
+      actions: metadata?.actions || [],
+      singleton: metadata.singleton
+    })
+    handlers.addApp(nappId, metadata?.actions || [])
+
     const win = await launch(stage, nappId, {
       ...makeLaunchOpts(),
       petname
     })
     syncDOM(win)
     win.focus()
-
-    if (petname !== nappId) persist.setPetname(petname, nappId)
-    persist.storeInstalledLocalApp({
-      nappId,
-      title: metadata?.title || metadata?.name || null,
-      icon: metadata?.icon || null,
-      actions: metadata?.actions || []
-    })
-    handlers.addApp(nappId, metadata?.actions || [])
     setStatus(`Launched ${petname}`)
   } catch (err: any) {
     setStatus(`Error: ${err.message}`)

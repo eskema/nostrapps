@@ -109,8 +109,18 @@ export type MessageData =
       theme: string
     }
 
+export type InstalledApp = {
+  nappId: string
+  icon: string
+  title: string
+  petname: string
+  singleton: boolean
+  actions: string[]
+  event?: NostrEvent
+}
+
 export interface SuggestionItem {
-  source: "system" | "action" | "open" | "name" | "napp"
+  source: "system" | "action" | "open" | "napp"
   nappId?: string
   instanceId?: string
   petname?: string | null

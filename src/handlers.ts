@@ -13,24 +13,6 @@ function emit() {
   for (const fn of subs) fn()
 }
 
-function actionsFromInstalledApp(app: any): string[] {
-  if (!app) return []
-  if (Array.isArray(app.actions)) {
-    return [...new Set(app.actions.filter((a: unknown) => typeof a === "string" && a.length))]
-  }
-  if (!Array.isArray(app.tags)) return []
-  const out = []
-  for (const t of app.tags) {
-    if (t[0] === "action" && typeof t[1] === "string" && t[1]) out.push(t[1])
-  }
-  return [...new Set(out)]
-}
-
-function nappIdFromInstalledApp(app: persist.InstalledApp): string {
-  if ("nappId" in app && typeof app.nappId === "string" && app.nappId) return app.nappId
-  return persist.computeNappId(app)
-}
-
 function setAppActions(nappId: string, actions: string[]) {
   const old = nappActions.get(nappId)
   if (old) {
@@ -57,7 +39,7 @@ export async function init() {
   actionMap.clear()
   nappActions.clear()
   for (const app of persist.getInstalledApps()) {
-    setAppActions(nappIdFromInstalledApp(app), actionsFromInstalledApp(app))
+    setAppActions(app.nappId, app.actions)
   }
   emit()
 }

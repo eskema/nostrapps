@@ -33,7 +33,7 @@ import {
 import { loadEmojiSets, loadFollowPacks, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 import { loadRelayInfo } from "@nostr/gadgets/relays"
-import { getInstalledEventForNappId, isSingletonEvent, updateOpen } from "../persistence.js"
+import { getInstalledAppForNappId, updateOpen } from "../persistence.js"
 import { currentSigner } from "../signers/index.js"
 
 const BOOT_TIMEOUT_MS = 10_000
@@ -164,6 +164,8 @@ export function nappOriginFor(nappId: string): string {
 export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchOpts = {}) {
   const singleton = singletonForNappId(nappId)
 
+  if (singleton === null) throw new Error(`failed to launch uninstalled app ${nappId}`)
+
   if (singleton) {
     const existing = findOpenWindowByNappId(nappId)
     if (existing) {
@@ -185,12 +187,9 @@ export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchO
   return win
 }
 
-function singletonFromEvent(event: { tags?: string[][] } | null | undefined): boolean {
-  return isSingletonEvent(event)
-}
-
-function singletonForNappId(nappId: string): boolean {
-  return singletonFromEvent(getInstalledEventForNappId(nappId))
+function singletonForNappId(nappId: string): boolean | null {
+  const app = getInstalledAppForNappId(nappId)
+  return app ? app.singleton : null
 }
 
 function currentTheme(): "light" | "dark" {

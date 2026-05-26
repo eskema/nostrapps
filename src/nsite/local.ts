@@ -26,8 +26,7 @@ export async function collectLocalFolder(
     if (path === "/metadata.json") {
       try {
         const text = await file.text()
-        const parsed = JSON.parse(text)
-        metadata = parseMetadata(parsed)
+        metadata = JSON.parse(text)
       } catch {
         throw new Error("metadata.json is not valid JSON")
       }
@@ -39,26 +38,16 @@ export async function collectLocalFolder(
 
   const nappId = `local~${slug(metadata.id)}`
 
-  return { nappId, files: out, metadata }
-}
-
-function parseMetadata(raw: {
-  actions?: string[]
-  id?: string
-  title?: string
-  name?: string
-  icon?: string
-}) {
-  const actions = []
-  if (Array.isArray(raw.actions)) {
-    actions.push(...raw.actions.filter(a => typeof a === "string" && a.length))
-  }
   return {
-    id: raw.id,
-    title: raw.title,
-    name: raw.name,
-    icon: typeof raw.icon === "string" && raw.icon ? raw.icon : null,
-    actions: [...new Set(actions)]
+    nappId,
+    files: out,
+    metadata: metadata as {
+      id: string
+      title?: string
+      icon?: string
+      singleton?: boolean
+      actions: string[]
+    }
   }
 }
 

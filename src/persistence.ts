@@ -1,23 +1,9 @@
 import { NostrEvent } from "@nostr/tools"
-import { NappWindowState } from "./types"
-
-export type LocalInstalledApp = {
-  local: true
-  nappId: string
-  title: string | null
-  icon: string | null
-  actions: string[]
-  created_at: number
-}
-
-export type InstalledApp = NostrEvent | LocalInstalledApp
+import { InstalledApp, NappWindowState } from "./types"
 
 const OPEN_KEY = "nostrapps:open"
-const PETNAMES_KEY = "nostrapps:petnames"
 const INSTALLED_KEY = "nostrapps:installed"
 const HANDLER_PREFS_KEY = "nostrapps:handlerPrefs" // { '<caller>|<type>|<key>': nappId }
-const LEGACY_KNOWN_KEY = "nostrapps:known"
-const LEGACY_INSTALL_LOG_KEY = "nostrapps:installLog"
 
 function readJson(key: string, fallback: any): any {
   try {
@@ -31,25 +17,12 @@ function writeJson(key: string, value: any) {
   localStorage.setItem(key, JSON.stringify(value))
 }
 
-function dropLegacyInstallKeys() {
-  localStorage.removeItem(LEGACY_KNOWN_KEY)
-  localStorage.removeItem(LEGACY_INSTALL_LOG_KEY)
-}
-
-function dropLegacyLoadedKey() {
-  localStorage.removeItem("nostrapps:loaded")
+function sanitizeString(value: unknown): string {
+  return typeof value === "string" ? value : ""
 }
 
 export function readOpen(): NappWindowState[] {
-  dropLegacyLoadedKey()
-  const raw = readJson(OPEN_KEY, [])
-  if (!Array.isArray(raw)) {
-    return []
-  }
-  return raw.map((entry: any) => ({
-    ...entry,
-    loadedActions: Array.isArray(entry?.loadedActions) ? entry.loadedActions : []
-  }))
+  return readJson(OPEN_KEY, [])
 }
 
 export function writeOpen(napps: NappWindowState[]) {
@@ -102,85 +75,57 @@ export function computeNappId(event: { kind: number; pubkey: string; tags: strin
   return `${event.pubkey.slice(0, 16)}~${dTag || ""}`
 }
 
-export function isSingletonEvent(event: { tags?: string[][] } | null | undefined): boolean {
-  if (!event?.tags) return false
-  return event.tags.some(t => t[0] === "singleton")
+function writeInstalled(all: Record<string, Omit<InstalledApp, "nappId">>) {
+  writeJson(INSTALLED_KEY, all)
 }
 
-function isNostrEvent(value: unknown): value is NostrEvent {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    !!(value as NostrEvent).pubkey &&
-    Array.isArray((value as NostrEvent).tags)
-  )
+function readInstalled(): Record<string, InstalledApp> {
+  return readJson(INSTALLED_KEY, {})
 }
 
-function isLocalInstalledApp(value: unknown): value is LocalInstalledApp {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    (value as LocalInstalledApp).local === true &&
-    typeof (value as LocalInstalledApp).nappId === "string"
-  )
-}
-
-// Installed apps keyed by nappId. Remote apps store full manifest events.
-// Local folder apps store a small launcher-side record instead.
-function readInstalled() {
-  dropLegacyInstallKeys()
-  const raw = readJson(INSTALLED_KEY, {})
-  if (!raw || typeof raw !== "object") return {}
-  const normalized: Record<string, InstalledApp> = {}
-  for (const value of Object.values(raw)) {
-    if (isLocalInstalledApp(value)) {
-      normalized[value.nappId] = {
-        local: true,
-        nappId: value.nappId,
-        title: typeof value.title === "string" && value.title ? value.title : null,
-        icon: typeof value.icon === "string" && value.icon ? value.icon : null,
-        actions: Array.isArray(value.actions)
-          ? [...new Set(value.actions.filter(a => typeof a === "string" && a))]
-          : [],
-        created_at:
-          typeof value.created_at === "number" && Number.isFinite(value.created_at)
-            ? value.created_at
-            : Math.floor(Date.now() / 1000)
-      }
-      continue
-    }
-    if (!isNostrEvent(value)) continue
-    normalized[computeNappId(value)] = value
-  }
-  return normalized
-}
-
-export function storeInstalledEvent(event: NostrEvent) {
+export function storeInstalledEvent(event: NostrEvent, petname?: string) {
   if (!event?.id) return
   const all = readInstalled()
-  all[computeNappId(event)] = event
-  writeJson(INSTALLED_KEY, all)
+  const nappId = computeNappId(event)
+  const existing = all[nappId]
+
+  const title = event.tags.find(t => t[0] === "title")?.[1] || ""
+  all[nappId] = {
+    nappId,
+    icon: event.tags.find(t => t[0] === "icon")?.[1] || "",
+    title,
+    petname: petname || existing?.petname || title || nappId,
+    singleton: event.tags.some(t => t[0] === "singleton"),
+    actions: event.tags.filter(t => t[0] === "action" && t[1]).map(t => t[1]),
+    event
+  }
+  writeInstalled(
+    Object.fromEntries(Object.entries(all).map(([id, entry]) => [id, stripNappId(entry)]))
+  )
 }
 
 export function storeInstalledLocalApp(app: {
   nappId: string
   title?: string | null
   icon?: string | null
+  petname?: string | null
+  singleton?: boolean
   actions?: string[]
 }) {
   if (!app?.nappId) return
   const all = readInstalled()
+
   all[app.nappId] = {
-    local: true,
     nappId: app.nappId,
-    title: typeof app.title === "string" && app.title ? app.title : null,
-    icon: typeof app.icon === "string" && app.icon ? app.icon : null,
-    actions: Array.isArray(app.actions)
-      ? [...new Set(app.actions.filter(a => typeof a === "string" && a))]
-      : [],
-    created_at: Math.floor(Date.now() / 1000)
+    title: sanitizeString(app.title),
+    icon: sanitizeString(app.icon),
+    petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
+    actions: app.actions || [],
+    singleton: !!app.singleton
   }
-  writeJson(INSTALLED_KEY, all)
+  writeInstalled(
+    Object.fromEntries(Object.entries(all).map(([id, entry]) => [id, stripNappId(entry)]))
+  )
 }
 
 export function getInstalledNappIds(): string[] {
@@ -192,24 +137,39 @@ export function getInstalledApps(): InstalledApp[] {
 }
 
 export function getInstalledEvents(): NostrEvent[] {
-  return getInstalledApps().filter(isNostrEvent)
+  return getInstalledApps()
+    .map(app => app.event)
+    .filter((event): event is NostrEvent => !!event)
 }
 
 export function forgetInstalledNapp(nappId: string) {
   const all = readInstalled()
   if (nappId in all) {
     delete all[nappId]
-    writeJson(INSTALLED_KEY, all)
+    writeInstalled(
+      Object.fromEntries(Object.entries(all).map(([id, entry]) => [id, stripNappId(entry)]))
+    )
   }
 }
 
 export function getInstalledEventForNappId(nappId: string): NostrEvent | null {
-  const entry = readInstalled()[nappId]
-  return isNostrEvent(entry) ? entry : null
+  return readInstalled()[nappId]?.event || null
 }
 
 export function getInstalledAppForNappId(nappId: string): InstalledApp | null {
   return readInstalled()[nappId] || null
+}
+
+export function setInstalledPetname(nappId: string, petname: string) {
+  if (!nappId || !petname) return
+
+  const all = readInstalled()
+  if (!all[nappId]) return
+
+  all[nappId].petname = petname
+  writeInstalled(
+    Object.fromEntries(Object.entries(all).map(([id, value]) => [id, stripNappId(value)]))
+  )
 }
 
 // "I last picked nappId X to handle <action 'edit:30023'> from <caller Y>".
@@ -250,30 +210,13 @@ export function clearHandlerPrefs() {
   writeJson(HANDLER_PREFS_KEY, {})
 }
 
-export function readPetnames() {
-  const raw = readJson(PETNAMES_KEY, {})
-  return raw && typeof raw === "object" ? raw : {}
-}
-
-export function setPetname(petname: string, nappId: string) {
-  if (!petname || !nappId) return
-  const all = readPetnames()
-  all[petname] = nappId
-  writeJson(PETNAMES_KEY, all)
-}
-
-export function forgetPetnamesForNapp(nappId: string) {
-  const all = readPetnames()
-  let changed = false
-  for (const [petname, mapped] of Object.entries(all)) {
-    if (mapped === nappId) {
-      delete all[petname]
-      changed = true
-    }
-  }
-  if (changed) writeJson(PETNAMES_KEY, all)
-}
-
 export function getNappIdForPetname(petname: string) {
-  return readPetnames()[petname] ?? null
+  if (!petname) return null
+  const app = getInstalledApps().find(app => app.petname === petname)
+  return app?.nappId || null
+}
+
+function stripNappId(app: InstalledApp): Omit<InstalledApp, "nappId"> {
+  const { nappId: _nappId, ...entry } = app
+  return entry
 }
