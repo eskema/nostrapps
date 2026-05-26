@@ -127,6 +127,7 @@
   // Receiving apps register:
   //   window.napp.onAction = async (name, payload) => { ... return value }
   const napp = {
+    instanceId: INSTANCE_ID,
     action: (name, payload) => rpc("napp.action", { name, payload }),
     registerAction,
     actionHandlers,
