@@ -1054,7 +1054,8 @@ async function install(raw: string): Promise<string> {
     fileCount: files.length,
     hasManifest: !!manifest
   })
-  const petname = title || raw
+  const dTag = manifest?.tags.find((t: any) => t[0] === "d")?.[1]
+  const petname = title || dTag || raw
   console.debug("[install] installing napp with opts", { nappId, petname })
 
   const origin = nappOriginFor(nappId)

@@ -63,7 +63,7 @@ async function handleFetch(req, url) {
     }
   } else {
     const db = await openDB()
-    const record = new Promise((resolve, reject) => {
+    const record = await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly")
       const req = tx.objectStore(STORE).get(path)
       req.onsuccess = () => {

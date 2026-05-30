@@ -57,13 +57,7 @@ export function mount(
   }
 
   installedTab.addEventListener("click", () => switchTab("installed"))
-  discoverTab.addEventListener("click", () => {
-    if (!discoverFetched) {
-      discoverFetched = true
-      startDiscoverSubscription()
-    }
-    switchTab("discover")
-  })
+  discoverTab.addEventListener("click", () => switchTab("discover"))
 
   // ─── Installed tab ─────────────────────────────────────────────
 
@@ -363,7 +357,10 @@ export function mount(
 
     renderList()
     emitDiscoverState()
-    if (discoverFetched) startDiscoverSubscription()
+    if (!discoverFetched) {
+      discoverFetched = true
+      startDiscoverSubscription()
+    }
   }
 
   // ─── Render ────────────────────────────────────────────────────
