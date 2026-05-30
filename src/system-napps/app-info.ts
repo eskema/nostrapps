@@ -9,7 +9,7 @@ import type { SystemCtx } from "../types.js"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
 import { computeNappId } from "../persistence.js"
 
-export async function mount(
+export function mount(
   container: HTMLElement,
   _ctx: SystemCtx,
   opts: { params?: any; onStateChange?: (state: any) => void } = {}
@@ -20,24 +20,27 @@ export async function mount(
     return
   }
 
-  const nappId = computeNappId(evt)
-  const kind = evt.kind
-  const pubkey = evt.pubkey
-  const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1] || ""
-  const title = evt.tags.find((t: any) => t[0] === "title")?.[1] || ""
-  const description = evt.tags.find((t: any) => t[0] === "description")?.[1] || ""
-  const source = evt.tags.find((t: any) => t[0] === "source")?.[1] || ""
-  const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
-  const serverTagUrls = evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1])
-  const blossomServers =
-    pathTags.length > 0
-      ? (await loadBlossomServers(pubkey).catch(() => ({ items: [] as string[] }))).items
-      : []
-  const servers = [...new Set([...serverTagUrls, ...blossomServers])]
-  const createdAt = evt.created_at
-  const handlers = evt.tags.filter((t: any) => t[0] === "action").map((t: any) => t[1])
+  ;(async () => {
+    const nappId = computeNappId(evt)
+    const kind = evt.kind
+    const pubkey = evt.pubkey
+    const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1] || ""
+    const title = evt.tags.find((t: any) => t[0] === "title")?.[1] || ""
+    const description = evt.tags.find((t: any) => t[0] === "description")?.[1] || ""
+    const source = evt.tags.find((t: any) => t[0] === "source")?.[1] || ""
+    const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
+    const serverTagUrls = evt.tags
+      .filter((t: any) => t[0] === "server" && t[1])
+      .map((t: any) => t[1])
+    const blossomServers =
+      pathTags.length > 0
+        ? (await loadBlossomServers(pubkey).catch(() => ({ items: [] as string[] }))).items
+        : []
+    const servers = [...new Set([...serverTagUrls, ...blossomServers])]
+    const createdAt = evt.created_at
+    const handlers = evt.tags.filter((t: any) => t[0] === "action").map((t: any) => t[1])
 
-  container.innerHTML = `
+    container.innerHTML = `
     <div class="app-info-panel">
       <h2 class="app-info-title">${title || "(untitled)"}</h2>
       <div class="app-info-id"><code>${nappId}</code></div>
@@ -90,6 +93,5 @@ export async function mount(
       }
     </div>
   `
-
-  opts.onStateChange?.({ data })
+  })()
 }

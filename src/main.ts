@@ -15,11 +15,14 @@ import {
   broadcastTheme,
   nappOriginFor,
   bootNapp,
+  bootDevApp,
+  setDevHandle,
+  removeDevHandle,
   setInstanceIdSerial
 } from "./sandbox/host.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
-import { collectLocalFolder } from "./nsite/local.js"
+import { collectLocalFolder, slug } from "./nsite/local.js"
 import { currentSigner, reconnectIfNeeded } from "./signers/index.js"
 import { connectBunkerInput, disconnectBunkerSigner } from "./signers/nip46.js"
 import { googleLoginAndCreateBunker } from "./signers/google.js"
@@ -250,6 +253,7 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   clearDecisions(nappId)
   persist.forgetInstalledNapp(nappId)
   handlers.removeApp(nappId)
+  removeDevHandle(nappId)
   setStatus(`${actionLabel} ${nappId}…`)
   try {
     await wipe(nappId)
@@ -586,6 +590,7 @@ const systemCtx: SystemCtx = {
   factoryReset,
   loadFolder,
   setStatus,
+  installDevApp,
   launchSystemNapp,
   // Use a thunk so the reference resolves to the function declared later.
   isInstalled: (nappId: string) => !!persist.getInstalledAppForNappId(nappId),
@@ -1072,6 +1077,51 @@ async function install(raw: string): Promise<string> {
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
 
   return nappId
+}
+
+async function installDevApp() {
+  try {
+    setStatus("Pick directory with metadata.json…")
+    const dirHandle = await window.showDirectoryPicker!()
+    setStatus("Reading metadata.json…")
+    const metaFileHandle = await dirHandle.getFileHandle("metadata.json")
+    const metaFile = await metaFileHandle.getFile()
+    const metadata = JSON.parse(await metaFile.text())
+
+    if (!metadata?.id) throw new Error("metadata.json must contain an .id field")
+
+    const nappId = `dev~${slug(metadata.id)}`
+    const origin = nappOriginFor(nappId)
+    const onProgress = setStatus
+    const label = metadata.title || nappId
+    const petname = metadata.title || nappId
+
+    setStatus(`Booting dev ${label}…`)
+    await bootDevApp(origin, nappId, onProgress, label)
+
+    setDevHandle(nappId, dirHandle)
+
+    persist.storeDevApp({
+      nappId,
+      title: metadata.title || null,
+      icon: metadata.icon || null,
+      petname,
+      actions: metadata.actions || [],
+      singleton: metadata.singleton
+    })
+    handlers.addApp(nappId, metadata.actions || [])
+
+    const win = await launch(stage, nappId, {
+      ...makeLaunchOpts(),
+      petname
+    })
+    syncDOM(win)
+    win.focus()
+    setStatus(`Launched dev ${petname}`)
+  } catch (err: any) {
+    setStatus(`Error: ${err.message}`)
+    console.error(err)
+  }
 }
 
 async function launchFromInput(raw: string): Promise<void> {

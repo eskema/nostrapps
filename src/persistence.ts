@@ -21,27 +21,68 @@ function sanitizeString(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
 
-export function readOpen(): NappWindowState[] {
+// ─── Dev open entries (in-memory only) ──────────────────
+const devOpenEntries: NappWindowState[] = []
+
+function isDevNappId(nappId: string): boolean {
+  return nappId.startsWith("dev~")
+}
+
+function readOpenFromStorage(): NappWindowState[] {
   return readJson(OPEN_KEY, [])
 }
 
-export function writeOpen(napps: NappWindowState[]) {
+function writeOpenToStorage(napps: NappWindowState[]) {
   writeJson(OPEN_KEY, napps)
 }
 
-export function updateOpen(instanceId: string, state: NappWindowState) {
-  const all = readOpen()
-  const idx = all.findIndex(n => n.instanceId === instanceId)
-  if (idx >= 0) {
-    all[idx] = { ...all[idx], ...state }
-  } else {
-    all.push(state)
+export function readOpen(): NappWindowState[] {
+  return [...readOpenFromStorage(), ...devOpenEntries]
+}
+
+export function writeOpen(napps: NappWindowState[]) {
+  const stored: NappWindowState[] = []
+  devOpenEntries.length = 0
+  for (const n of napps) {
+    if (isDevNappId(n.nappId)) {
+      devOpenEntries.push(n)
+    } else {
+      stored.push(n)
+    }
   }
-  writeOpen(all)
+  writeOpenToStorage(stored)
+}
+
+export function updateOpen(instanceId: string, state: NappWindowState) {
+  // Check dev entries first
+  const devIdx = devOpenEntries.findIndex(n => n.instanceId === instanceId)
+  if (devIdx >= 0) {
+    devOpenEntries[devIdx] = { ...devOpenEntries[devIdx], ...state }
+    return
+  }
+  // Check if this is a dev nappId — if so, add to in-memory
+  if (isDevNappId(state.nappId)) {
+    devOpenEntries.push(state)
+    return
+  }
+  // Otherwise use localStorage
+  const stored = readOpenFromStorage()
+  const idx = stored.findIndex(n => n.instanceId === instanceId)
+  if (idx >= 0) {
+    stored[idx] = { ...stored[idx], ...state }
+  } else {
+    stored.push(state)
+  }
+  writeOpenToStorage(stored)
 }
 
 export function removeOpen(instanceId: string) {
-  writeOpen(readOpen().filter(n => n.instanceId !== instanceId))
+  const devIdx = devOpenEntries.findIndex(n => n.instanceId === instanceId)
+  if (devIdx >= 0) {
+    devOpenEntries.splice(devIdx, 1)
+    return
+  }
+  writeOpenToStorage(readOpenFromStorage().filter(n => n.instanceId !== instanceId))
 }
 
 export function getLoadedActions(instanceId: string): Array<{ name: string; payload: unknown }> {
@@ -49,15 +90,28 @@ export function getLoadedActions(instanceId: string): Array<{ name: string; payl
 }
 
 export function appendLoadedAction(instanceId: string, name: string, payload: unknown) {
-  const all = readOpen()
-  const idx = all.findIndex(n => n.instanceId === instanceId)
+  // Check dev entries
+  const devIdx = devOpenEntries.findIndex(n => n.instanceId === instanceId)
+  if (devIdx >= 0) {
+    const current = Array.isArray(devOpenEntries[devIdx].loadedActions)
+      ? devOpenEntries[devIdx].loadedActions
+      : []
+    devOpenEntries[devIdx] = {
+      ...devOpenEntries[devIdx],
+      loadedActions: [...current, { name, payload }]
+    }
+    return
+  }
+  // Otherwise use localStorage
+  const stored = readOpenFromStorage()
+  const idx = stored.findIndex(n => n.instanceId === instanceId)
   if (idx < 0) return
-  const current = Array.isArray(all[idx].loadedActions) ? all[idx].loadedActions : []
-  all[idx] = {
-    ...all[idx],
+  const current = Array.isArray(stored[idx].loadedActions) ? stored[idx].loadedActions : []
+  stored[idx] = {
+    ...stored[idx],
     loadedActions: [...current, { name, payload }]
   }
-  writeOpen(all)
+  writeOpenToStorage(stored)
 }
 
 export function findSessionByPetname(petname: string): NappWindowState | null {
@@ -129,11 +183,26 @@ export function storeInstalledLocalApp(app: {
 }
 
 export function getInstalledNappIds(): string[] {
-  return Object.keys(readInstalled())
+  const ids = Object.keys(readInstalled())
+  for (const nappId of devApps.keys()) {
+    if (!ids.includes(nappId)) ids.push(nappId)
+  }
+  return ids
 }
 
 export function getInstalledApps(): InstalledApp[] {
-  return Object.values(readInstalled())
+  const apps = Object.values(readInstalled())
+  for (const dev of devApps.values()) {
+    apps.push({
+      nappId: dev.nappId,
+      icon: dev.icon,
+      title: dev.title,
+      petname: dev.petname,
+      singleton: dev.singleton,
+      actions: dev.actions
+    })
+  }
+  return apps
 }
 
 export function getInstalledEvents(): NostrEvent[] {
@@ -150,6 +219,7 @@ export function forgetInstalledNapp(nappId: string) {
       Object.fromEntries(Object.entries(all).map(([id, entry]) => [id, stripNappId(entry)]))
     )
   }
+  forgetDevApp(nappId)
 }
 
 export function getInstalledEventForNappId(nappId: string): NostrEvent | null {
@@ -157,7 +227,20 @@ export function getInstalledEventForNappId(nappId: string): NostrEvent | null {
 }
 
 export function getInstalledAppForNappId(nappId: string): InstalledApp | null {
-  return readInstalled()[nappId] || null
+  const fromStorage = readInstalled()[nappId]
+  if (fromStorage) return fromStorage
+  const dev = devApps.get(nappId)
+  if (dev) {
+    return {
+      nappId: dev.nappId,
+      icon: dev.icon,
+      title: dev.title,
+      petname: dev.petname,
+      singleton: dev.singleton,
+      actions: dev.actions
+    }
+  }
+  return null
 }
 
 export function setInstalledPetname(nappId: string, petname: string) {
@@ -219,4 +302,40 @@ export function getNappIdForPetname(petname: string) {
 function stripNappId(app: InstalledApp): Omit<InstalledApp, "nappId"> {
   const { nappId: _nappId, ...entry } = app
   return entry
+}
+
+// ─── Dev apps (in-memory only) ──────────────────────────
+
+export interface DevAppData {
+  nappId: string
+  title: string
+  icon: string
+  petname: string
+  singleton: boolean
+  actions: string[]
+}
+
+const devApps = new Map<string, DevAppData>()
+
+export function storeDevApp(app: {
+  nappId: string
+  title?: string | null
+  icon?: string | null
+  petname?: string | null
+  singleton?: boolean
+  actions?: string[]
+}) {
+  if (!app?.nappId) return
+  devApps.set(app.nappId, {
+    nappId: app.nappId,
+    title: sanitizeString(app.title),
+    icon: sanitizeString(app.icon),
+    petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
+    singleton: !!app.singleton,
+    actions: app.actions || []
+  })
+}
+
+export function forgetDevApp(nappId: string) {
+  devApps.delete(nappId)
 }

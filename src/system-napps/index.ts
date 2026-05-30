@@ -18,7 +18,7 @@ const napps = [
   database,
   uploader
 ] satisfies SystemNappDef[]
-const _appInfoCheck = appInfo satisfies SystemNappDef
+const _ = appInfo satisfies SystemNappDef
 
 // Slash actions are like system napps but they fire a one-shot side effect
 // (e.g. opening a file picker) instead of mounting a window.
@@ -29,6 +29,14 @@ const actions = [
     slash: "/folder",
     run(ctx: any) {
       ctx.loadFolder()
+    }
+  },
+  {
+    id: "dev",
+    title: "Load dev app",
+    slash: "/dev",
+    run(ctx: any) {
+      ctx.installDevApp()
     }
   }
 ]

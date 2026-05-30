@@ -15,6 +15,7 @@ declare global {
         decrypt(pubkey: string, ciphertext: string): Promise<string>
       }
     }
+    showDirectoryPicker?(): Promise<FileSystemDirectoryHandle>
   }
 }
 
@@ -184,6 +185,7 @@ export interface SystemCtx {
   install(nappId: string): Promise<string>
   uninstall(nappId: string): Promise<void>
   update(target: { pubkey: string; dTag: string; relayHints?: string[] }): Promise<void>
+  installDevApp(): Promise<void>
 }
 
 export interface NsiteFile {

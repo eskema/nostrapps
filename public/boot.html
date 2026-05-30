@@ -166,6 +166,45 @@
                 event.origin
               )
             }
+          } else if (data.__nostrapps === "napp-dev-install") {
+            try {
+              event.source.postMessage({ __nostrapps: "napp-dev-install-done" }, event.origin)
+
+              // Keep this iframe alive as relay between SW and host
+              // Listen for file requests from SW
+              navigator.serviceWorker.addEventListener("message", swEvent => {
+                if (swEvent.data?.__nostrapps === "sw-read-file") {
+                  window.parent.postMessage(
+                    {
+                      __nostrapps: "napp-dev-read-file",
+                      nappId: data.nappId,
+                      path: swEvent.data.path,
+                      requestId: swEvent.data.requestId
+                    },
+                    "*"
+                  )
+                }
+              })
+              // Listen for file responses from host and forward to SW
+              window.addEventListener("message", hostEvent => {
+                if (hostEvent.data?.__nostrapps === "napp-dev-file-result") {
+                  if (navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({
+                      __nostrapps: "sw-file-result",
+                      requestId: hostEvent.data.requestId,
+                      body: hostEvent.data.body,
+                      mime: hostEvent.data.mime,
+                      error: hostEvent.data.error
+                    })
+                  }
+                }
+              })
+            } catch (err) {
+              event.source.postMessage(
+                { __nostrapps: "napp-dev-install-error", error: err.message },
+                event.origin
+              )
+            }
           } else if (data.__nostrapps === "napp-wipe") {
             try {
               await wipeAll()

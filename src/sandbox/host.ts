@@ -156,9 +156,8 @@ export async function waitForRegisteredAction(instanceId: string, name: string) 
 }
 
 export function nappOriginFor(nappId: string): string {
-  const port = location.port ? `:${location.port}` : ""
   const slug = nappId.slice(0, 63).replace(/[^a-zA-Z0-9.-]/g, "-")
-  return `${location.protocol}//${slug}.napps.localhost${port}`
+  return `${location.protocol}//${slug}.${location.host}`
 }
 
 export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchOpts = {}) {
@@ -1164,6 +1163,106 @@ export async function bootNapp(
     boot.remove()
   }
 }
+
+// ─── Dev apps ───────────────────────────────────────────
+
+const devHandles = new Map<string, FileSystemDirectoryHandle>()
+const devBootIframes = new Map<string, HTMLIFrameElement>()
+
+export function setDevHandle(nappId: string, handle: FileSystemDirectoryHandle) {
+  devHandles.set(nappId, handle)
+}
+
+export function removeDevHandle(nappId: string) {
+  devHandles.delete(nappId)
+  const boot = devBootIframes.get(nappId)
+  if (boot) {
+    boot.remove()
+    devBootIframes.delete(nappId)
+  }
+}
+
+export function getDevHandle(nappId: string): FileSystemDirectoryHandle | null {
+  return devHandles.get(nappId) || null
+}
+
+export async function bootDevApp(
+  origin: string,
+  nappId: string,
+  onProgress: (msg: string) => void,
+  label: string
+) {
+  console.debug("[sandbox] bootDevApp", { origin, label })
+  const boot = document.createElement("iframe")
+  boot.src = `${origin}/boot.html`
+  boot.style.display = "none"
+  document.body.appendChild(boot)
+  devBootIframes.set(nappId, boot)
+
+  try {
+    const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
+    if (ready.__nostrapps === "napp-boot-error") {
+      throw new Error(`Napp boot failed: ${ready.error}`)
+    }
+
+    onProgress(`Registering dev app ${label}…`)
+    boot.contentWindow!.postMessage({ __nostrapps: "napp-dev-install", nappId }, origin)
+
+    const result = await waitForMessage(origin, "napp-dev-install-done", "napp-dev-install-error")
+    if (result.__nostrapps === "napp-dev-install-error") {
+      throw new Error(result.error)
+    }
+  } finally {
+    // Keep boot iframe alive as relay between SW and host
+  }
+}
+
+// Listen for file requests from dev app SW (relayed through boot iframe)
+window.addEventListener("message", async event => {
+  const data = event.data
+  if (!data || data.__nostrapps !== "napp-dev-read-file") return
+
+  const { nappId, path, requestId } = data
+  const dirHandle = devHandles.get(nappId)
+
+  if (!dirHandle) {
+    ;(event.source as Window)?.postMessage(
+      { __nostrapps: "napp-dev-file-result", requestId, error: "No handle for " + nappId },
+      "*"
+    )
+    return
+  }
+
+  try {
+    const parts = path.replace(/^\//, "").split("/").filter(Boolean)
+    if (parts.length === 0) throw new Error("Empty path")
+
+    let handle: FileSystemDirectoryHandle | FileSystemFileHandle = dirHandle
+    for (let i = 0; i < parts.length - 1; i++) {
+      handle = await (handle as FileSystemDirectoryHandle).getDirectoryHandle(parts[i])
+    }
+    const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(
+      parts[parts.length - 1]
+    )
+    const file = await fileHandle.getFile()
+    const body = await file.arrayBuffer()
+
+    ;(event.source as Window)?.postMessage(
+      {
+        __nostrapps: "napp-dev-file-result",
+        requestId,
+        body,
+        mime: file.type || "application/octet-stream"
+      },
+      "*"
+    )
+  } catch (err: any) {
+    ;(event.source as Window)?.postMessage(
+      { __nostrapps: "napp-dev-file-result", requestId, error: err.message },
+      "*"
+    )
+  }
+})
 
 function waitForMessage(
   expectedOrigin: string,

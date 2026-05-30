@@ -2,8 +2,29 @@ const DB_NAME = `files-${self.location.origin.split("://")[1]}`
 const DB_VERSION = 1
 const STORE = "files"
 
+const pendingFileReads = new Map()
+
 self.addEventListener("install", () => self.skipWaiting())
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()))
+
+self.addEventListener("message", event => {
+  const data = event.data
+  if (!data) return
+
+  if (data.__nostrapps === "sw-file-result") {
+    const pending = pendingFileReads.get(data.requestId)
+    if (pending) {
+      pendingFileReads.delete(data.requestId)
+      clearTimeout(pending.timer)
+      if (data.error) {
+        pending.reject(new Error(data.error))
+      } else {
+        pending.resolve(data)
+      }
+    }
+    return
+  }
+})
 
 self.addEventListener("fetch", event => {
   const url = new URL(event.request.url)
@@ -11,27 +32,95 @@ self.addEventListener("fetch", event => {
   event.respondWith(handleFetch(event.request, url))
 })
 
-async function handleFetch(_request, url) {
+async function handleFetch(req, url) {
   let path = url.pathname
   if (path.endsWith("/")) path += "index.html"
 
-  const record = await getFile(path)
-  if (!record) {
-    // Can't pass a navigation-mode Request to fetch(); refetch by URL.
-    return fetch(url.href)
+  if (path === "/boot.html") return fetch(req)
+  if (path === "/sw.js") return fetch(req)
+  if (path === "/bridge.js") return fetch(req)
+
+  if (url.host.startsWith("dev-")) {
+    try {
+      const devFile = await requestFileFromHost(path)
+      if (devFile) {
+        const mime = devFile.mime || "application/octet-stream"
+        if (mime.startsWith("text/html")) {
+          const text =
+            typeof devFile.body === "string" ? devFile.body : await new Blob([devFile.body]).text()
+          return new Response(injectBridge(text), {
+            status: 200,
+            headers: { "Content-Type": mime }
+          })
+        }
+        return new Response(devFile.body, {
+          status: 200,
+          headers: { "Content-Type": mime }
+        })
+      }
+    } catch {
+      // file not in dev handle, fall through to network fetch
+    }
+  } else {
+    const db = await openDB()
+    const record = new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly")
+      const req = tx.objectStore(STORE).get(path)
+      req.onsuccess = () => {
+        const result = req.result ?? null
+        try {
+          db.close()
+        } catch {}
+        resolve(result)
+      }
+      req.onerror = () => {
+        try {
+          db.close()
+        } catch {}
+        reject(req.error)
+      }
+    })
+    if (record) {
+      const mime = record.mime || "application/octet-stream"
+      if (mime.startsWith("text/html")) {
+        const text = typeof record.body === "string" ? record.body : await record.body.text()
+        return new Response(injectBridge(text), {
+          status: 200,
+          headers: { "Content-Type": mime }
+        })
+      }
+      return new Response(record.body, {
+        status: 200,
+        headers: { "Content-Type": mime }
+      })
+    }
   }
 
-  const mime = record.mime || "application/octet-stream"
-  if (mime.startsWith("text/html")) {
-    const text = typeof record.body === "string" ? record.body : await record.body.text()
-    return new Response(injectBridge(text), {
-      status: 200,
-      headers: { "Content-Type": mime }
+  return new Response(`file ${url} not found`, {
+    status: 404
+  })
+}
+
+let serial = 1
+async function requestFileFromHost(path) {
+  return new Promise((resolve, reject) => {
+    const requestId = `${serial++}`
+    const timer = setTimeout(() => {
+      pendingFileReads.delete(requestId)
+      reject(new Error("Timeout requesting " + path))
+    }, 25000)
+
+    pendingFileReads.set(requestId, { resolve, reject, timer })
+
+    self.clients.matchAll().then(clients => {
+      for (const client of clients) {
+        client.postMessage({
+          __nostrapps: "sw-read-file",
+          requestId,
+          path
+        })
+      }
     })
-  }
-  return new Response(record.body, {
-    status: 200,
-    headers: { "Content-Type": mime }
   })
 }
 
@@ -70,26 +159,5 @@ function openDB() {
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
-  })
-}
-
-async function getFile(path) {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, "readonly")
-    const req = tx.objectStore(STORE).get(path)
-    req.onsuccess = () => {
-      const result = req.result ?? null
-      try {
-        db.close()
-      } catch {}
-      resolve(result)
-    }
-    req.onerror = () => {
-      try {
-        db.close()
-      } catch {}
-      reject(req.error)
-    }
   })
 }
