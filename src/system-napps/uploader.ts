@@ -6,6 +6,7 @@ import { loadBlossomServers } from "@nostr/gadgets/lists"
 export const id = "uploader"
 export const title = "Uploader"
 export const slash = "/upload"
+export const singleton = false
 
 const DEFAULT_RELAYS = [
   "wss://relay.nostrapps.com",
@@ -16,7 +17,11 @@ const DEFAULT_RELAYS = [
 import type { SystemCtx } from "../types.js"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 
-export function mount(container: HTMLElement, ctx: SystemCtx) {
+export function mount(
+  container: HTMLElement,
+  ctx: SystemCtx,
+  opts: { params?: any; onStateChange?: (state: any) => void } = {}
+) {
   let files: Array<{ path: string; file: File }> = []
   let metadata: any = null
   let eventTemplate: any = null
@@ -24,11 +29,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
   container.innerHTML = `
     <div class="upload-panel">
-      <div class="upload-toolbar">
-        <button type="button" class="upload-pick-folder">Pick folder</button>
-        <button type="button" class="upload-relays-toggle" title="Configure relays">⚙</button>
-      </div>
-      <div class="upload-relays" hidden>
+      <div class="upload-relays">
         <label class="upload-relays-label">Relays (one per line)</label>
         <textarea class="upload-relays-input" rows="4" spellcheck="false">${DEFAULT_RELAYS.join("\n")}</textarea>
         <label class="upload-protected"><input type="checkbox" class="upload-protected-input"> protected</label>
@@ -43,9 +44,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   `
 
   const protectedCb = container.querySelector(".upload-protected-input") as HTMLInputElement
-  const pickBtn = container.querySelector(".upload-pick-folder") as HTMLElement
-  const relaysToggleBtn = container.querySelector(".upload-relays-toggle") as HTMLElement
-  const relaysPanel = container.querySelector(".upload-relays") as HTMLElement
   const relaysInput = container.querySelector(".upload-relays-input") as HTMLInputElement
   const statusEl = container.querySelector(".upload-status") as HTMLElement
   const previewEl = container.querySelector(".upload-preview") as HTMLElement
@@ -55,43 +53,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   function setStatus(msg: string | undefined) {
     statusEl.textContent = msg || ""
     statusEl.hidden = !msg
-  }
-
-  async function pickFolder() {
-    files = []
-    metadata = null
-
-    if ((window as any).showDirectoryPicker) {
-      try {
-        const dirHandle = await (window as any).showDirectoryPicker()
-        await readDir(dirHandle, "")
-      } catch (err: any) {
-        if (err.name !== "AbortError") setStatus(`Error: ${err.message}`)
-        return
-      }
-    } else {
-      const input = document.createElement("input")
-      input.type = "file"
-      input.webkitdirectory = true
-      input.multiple = true
-      input.onchange = async () => {
-        const list = Array.from(input.files!)
-        for (const f of list) {
-          const relative = f.webkitRelativePath.split("/").slice(1).join("/")
-          files.push({ path: relative, file: f })
-          if (relative === "metadata.json") {
-            try {
-              metadata = JSON.parse(await f.text())
-            } catch {}
-          }
-        }
-        buildEvent()
-      }
-      input.click()
-      return
-    }
-
-    buildEvent()
   }
 
   async function readDir(dirHandle: any, path: string) {
@@ -109,6 +70,34 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       }
     }
   }
+
+  // Accept initial data from params
+  ;(async () => {
+    const initial = opts.params
+    if (!initial) {
+      setStatus("No data provided.")
+      return
+    }
+
+    if (typeof initial.getDirectoryHandle === "function") {
+      // FileSystemDirectoryHandle for dev~ apps
+      await readDir(initial, "")
+      buildEvent()
+    } else if (Array.isArray(initial)) {
+      // Pre-read files array for local~ apps
+      files = initial
+      const metaEntry = initial.find(f => f.path === "metadata.json")
+      if (metaEntry) {
+        try {
+          const blob = metaEntry.file instanceof Blob ? metaEntry.file : new Blob([metaEntry.file])
+          metadata = JSON.parse(await blob.text())
+        } catch {}
+      }
+      buildEvent()
+    } else {
+      setStatus("Invalid data provided.")
+    }
+  })()
 
   async function buildEvent() {
     if (files.length === 0) {
@@ -188,9 +177,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   }
 
   protectedCb.addEventListener("change", buildEvent)
-  relaysToggleBtn.addEventListener("click", () => (relaysPanel.hidden = !relaysPanel.hidden))
-
-  pickBtn.addEventListener("click", pickFolder)
 
   publishBtn.addEventListener("click", async () => {
     if (publishing || !eventTemplate || !ctx.account.getPubkey()) return

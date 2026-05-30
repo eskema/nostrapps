@@ -1,10 +1,7 @@
 import * as settings from "./settings.js"
 import * as logs from "./logs.js"
-import * as permissions from "./permissions.js"
-import * as store from "./store.js"
 import * as apps from "./apps.js"
 import * as database from "./database.js"
-import * as appInfo from "./app-info.js"
 import * as uploader from "./uploader.js"
 
 import type { SystemNappDef } from "../types.js"
@@ -12,13 +9,9 @@ import type { SystemNappDef } from "../types.js"
 const napps = [
   settings,
   logs,
-  permissions,
-  store,
   apps,
-  database,
-  uploader
+  database
 ] satisfies SystemNappDef[]
-const _ = appInfo satisfies SystemNappDef
 
 // Slash actions are like system napps but they fire a one-shot side effect
 // (e.g. opening a file picker) instead of mounting a window.
@@ -44,7 +37,7 @@ const actions = [
 export type { SystemNappDef as SystemNapp }
 
 export const registry: Record<string, SystemNappDef> = Object.fromEntries(napps.map(s => [s.id, s]))
-registry[appInfo.id] = appInfo
+registry[uploader.id] = uploader
 export const list = napps
 
 export const actionRegistry = Object.fromEntries(actions.map(a => [a.id, a]))

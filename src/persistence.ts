@@ -191,10 +191,24 @@ export function getInstalledNappIds(): string[] {
 }
 
 export function getInstalledApps(): InstalledApp[] {
-  const apps = Object.values(readInstalled())
-  for (const dev of devApps.values()) {
+  const apps: InstalledApp[] = []
+
+  const installed = readInstalled()
+  for (const nappId in installed) {
+    const app = installed[nappId]
     apps.push({
-      nappId: dev.nappId,
+      nappId: nappId,
+      icon: app.icon,
+      title: app.title,
+      petname: app.petname,
+      singleton: app.singleton,
+      actions: app.actions
+    })
+  }
+
+  for (const [nappId, dev] of devApps) {
+    apps.push({
+      nappId: nappId,
       icon: dev.icon,
       title: dev.title,
       petname: dev.petname,
@@ -202,6 +216,7 @@ export function getInstalledApps(): InstalledApp[] {
       actions: dev.actions
     })
   }
+
   return apps
 }
 
@@ -232,7 +247,7 @@ export function getInstalledAppForNappId(nappId: string): InstalledApp | null {
   const dev = devApps.get(nappId)
   if (dev) {
     return {
-      nappId: dev.nappId,
+      nappId: nappId,
       icon: dev.icon,
       title: dev.title,
       petname: dev.petname,
@@ -307,7 +322,6 @@ function stripNappId(app: InstalledApp): Omit<InstalledApp, "nappId"> {
 // ─── Dev apps (in-memory only) ──────────────────────────
 
 export interface DevAppData {
-  nappId: string
   title: string
   icon: string
   petname: string
@@ -327,7 +341,6 @@ export function storeDevApp(app: {
 }) {
   if (!app?.nappId) return
   devApps.set(app.nappId, {
-    nappId: app.nappId,
     title: sanitizeString(app.title),
     icon: sanitizeString(app.icon),
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,

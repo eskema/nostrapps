@@ -175,25 +175,6 @@ function notifyAppsChanged() {
   }
 }
 
-const apps = {
-  events() {
-    return persist.getInstalledEvents()
-  },
-  list() {
-    return persist.getInstalledApps().map(app => ({
-      nappId: app.nappId,
-      name: app.petname || app.title || app.nappId,
-      handlers: handlers.getHandlers(app.nappId),
-      event: app.event || null,
-      openCount: persist.readOpen().filter(s => s.nappId === app.nappId).length
-    }))
-  },
-  subscribe(fn: () => void) {
-    appSubs.add(fn)
-    return () => appSubs.delete(fn)
-  }
-}
-
 // ─── account actions ────────────────────────────────────────────
 async function connect(): Promise<void> {
   try {
@@ -577,7 +558,18 @@ function friendlyNameFor(nappId: string): string {
 // ─── system napp ctx ────────────────────────────────────────────
 const systemCtx: SystemCtx = {
   account,
-  apps,
+  apps: {
+    events() {
+      return persist.getInstalledEvents()
+    },
+    list() {
+      return persist.getInstalledApps()
+    },
+    subscribe(fn: () => void) {
+      appSubs.add(fn)
+      return () => appSubs.delete(fn)
+    }
+  },
   database: {
     query: (filter: Filter) => nostrdb.query(filter)
   },
@@ -1019,7 +1011,7 @@ function maybeBootstrap() {
 
 async function init() {
   setStatus(
-    "Ready — try /store, /apps, /database, /upload, /settings, /logs, /permissions, /folder, or enter a pubkey/npub/nsite host"
+    "Ready — try /apps, /database, /upload, /settings, /logs, /folder, or enter a pubkey/npub/nsite host"
   )
   handlers.setActionDispatcher(runNappAction)
   // If the user is paired with a bunker, get the connection warm in the

@@ -24,6 +24,7 @@ if (import.meta.hot) {
       await old.close()
     } catch {}
     try {
+      // @ts-ignore
       old.worker?.terminate?.()
     } catch {}
   })

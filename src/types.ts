@@ -150,13 +150,7 @@ export interface SystemCtx {
     subscribe(fn: (pk: string | null) => void): () => void
   }
   apps: {
-    list(): Array<{
-      event: NostrEvent | null
-      nappId: string
-      name: string
-      handlers: string[]
-      openCount: number
-    }>
+    list(): Array<InstalledApp>
     events(): NostrEvent[]
     subscribe(fn: () => void): () => void
   }
