@@ -47,7 +47,8 @@ export function createNappWindow({
   position,
   status,
   bodyElement,
-  system = false
+  system = false,
+  loading = false
 }: {
   nappId: string
   instanceId: string
@@ -64,6 +65,7 @@ export function createNappWindow({
   status?: Status
   bodyElement?: HTMLElement
   system?: boolean
+  loading?: boolean
 }): NappWindow {
   const root = document.createElement("div")
   root.className = "napp-window"
@@ -108,17 +110,23 @@ export function createNappWindow({
   body.className = "napp-body"
   if (system) body.classList.add("napp-body-system")
 
-  let iframe: HTMLIFrameElement | null = null
+  const iframeRef = { current: null as HTMLIFrameElement | null }
   if (bodyElement) {
     body.appendChild(bodyElement)
+  } else if (loading) {
+    const spinner = document.createElement("div")
+    spinner.className = "napp-loading"
+    spinner.innerHTML = '<div class="napp-loading-spinner"></div>'
+    body.appendChild(spinner)
   } else {
-    iframe = document.createElement("iframe")
+    const iframe = document.createElement("iframe")
     iframe.sandbox = sandbox
     // window.name is cross-origin readable from inside the iframe, so the bridge
     // can pick up the instance id without us polluting the URL.
     iframe.name = instanceId || ""
     iframe.src = src || ""
     body.appendChild(iframe)
+    iframeRef.current = iframe
   }
 
   const resizeHandles: Record<string, HTMLElement> = {}
@@ -165,11 +173,13 @@ export function createNappWindow({
   }
 
   let messageHandler: ((event: MessageEvent) => void) | null = null
-  if (onMessage && iframe) {
+  if (onMessage) {
     messageHandler = (event: MessageEvent) => {
-      if (event.origin !== origin) return
+      if (!origin || event.origin !== origin) return
       const data = event.data
       if (!data || data.instanceId !== instanceId) return
+      const iframe = iframeRef.current
+      if (!iframe) return
       onMessage(data, iframe)
     }
     window.addEventListener("message", messageHandler)
@@ -216,6 +226,7 @@ export function createNappWindow({
 
   function focus() {
     bringToFront(root)
+    const iframe = iframeRef.current
     if (iframe) iframe.focus()
     else root.focus({ preventScroll: true })
   }
@@ -266,7 +277,7 @@ export function createNappWindow({
 
   ensureFocusTracker()
   root.addEventListener("pointerdown", () => bringToFront(root))
-  iframe?.addEventListener("focus", () => bringToFront(root))
+  iframeRef.current?.addEventListener("focus", () => bringToFront(root))
   // Persist zIndex changes so the stack ordering survives reloads.
   root.addEventListener("napp-zindex-change", () => notifyState())
 
@@ -275,7 +286,18 @@ export function createNappWindow({
     setupResize(root, resizeHandles[dir], dir, notifyState)
   }
 
-  return { root, iframe, close, destroy, getState, focus, notifyState }
+  function setIframe(src: string, sandboxVal?: string) {
+    body.innerHTML = ''
+    const newIframe = document.createElement("iframe")
+    newIframe.sandbox = sandboxVal || sandbox
+    newIframe.name = instanceId || ""
+    newIframe.src = src
+    body.appendChild(newIframe)
+    iframeRef.current = newIframe
+    newIframe.addEventListener("focus", () => bringToFront(root))
+  }
+
+  return { root, iframe: iframeRef.current, body, titleEl, close, destroy, getState, focus, notifyState, setIframe }
 }
 
 function startRename(el: HTMLElement, onDone: (name: string | null) => void) {

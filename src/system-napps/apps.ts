@@ -132,43 +132,69 @@ export function mount(
         const pub = document.createElement("button")
         pub.type = "button"
         pub.textContent = "publish"
-        pub.style.marginRight = "8px"
         pub.addEventListener("mouseup", () => {
           ctx.launchSystemNapp("uploader", { params: getDevHandle(app.nappId) })
         })
         actions.appendChild(pub)
+      } else if (app.nappId.startsWith("temp~")) {
+        const inst = document.createElement("button")
+        inst.type = "button"
+        inst.textContent = "install"
+        inst.addEventListener("mouseup", async () => {
+          inst.disabled = true
+          inst.textContent = "installing…"
+          try {
+            const raw = app.nappId.slice(5)
+            ctx.setStatus?.(`Apps: installing ${raw}…`)
+            await ctx.install(raw)
+            ctx.setStatus?.(`Apps: installed ${raw}`)
+            renderInstalled()
+          } catch (err: any) {
+            ctx.setStatus?.(
+              `Apps: install failed for ${app.nappId}: ${err?.message || String(err)}`
+            )
+            inst.disabled = false
+            inst.textContent = "error"
+            inst.title = err?.message || String(err)
+            setTimeout(() => {
+              inst.textContent = "install"
+              inst.removeAttribute("title")
+            }, 3000)
+          }
+        })
+        actions.appendChild(inst)
+      } else {
+        const del = document.createElement("button")
+        del.type = "button"
+        del.textContent = "delete"
+        del.addEventListener("mouseup", async () => {
+          ctx.setStatus?.(`Apps: delete requested for ${app.nappId}`)
+          const ok = window.confirm(
+            `Delete ${app.petname || app.title || app.nappId}?\n\nThis removes local app files, windows, permissions, and stored state for this app.`
+          )
+          if (!ok) {
+            ctx.setStatus?.(`Apps: delete cancelled for ${app.nappId}`)
+            return
+          }
+          del.disabled = true
+          del.textContent = "deleting…"
+          try {
+            ctx.setStatus?.(`Apps: deleting ${app.nappId}…`)
+            await ctx.uninstall(app.nappId)
+            ctx.setStatus?.(`Apps: delete finished for ${app.nappId}`)
+          } catch (err: any) {
+            ctx.setStatus?.(`Apps: delete failed for ${app.nappId}: ${err?.message || String(err)}`)
+            del.disabled = false
+            del.textContent = "error"
+            del.title = err?.message || String(err)
+            setTimeout(() => {
+              del.textContent = "delete"
+              del.removeAttribute("title")
+            }, 3000)
+          }
+        })
+        actions.appendChild(del)
       }
-
-      const del = document.createElement("button")
-      del.type = "button"
-      del.textContent = "delete"
-      del.addEventListener("mouseup", async () => {
-        ctx.setStatus?.(`Apps: delete requested for ${app.nappId}`)
-        const ok = window.confirm(
-          `Delete ${app.petname || app.title || app.nappId}?\n\nThis removes local app files, windows, permissions, and stored state for this app.`
-        )
-        if (!ok) {
-          ctx.setStatus?.(`Apps: delete cancelled for ${app.nappId}`)
-          return
-        }
-        del.disabled = true
-        del.textContent = "deleting…"
-        try {
-          ctx.setStatus?.(`Apps: deleting ${app.nappId}…`)
-          await ctx.uninstall(app.nappId)
-          ctx.setStatus?.(`Apps: delete finished for ${app.nappId}`)
-        } catch (err: any) {
-          ctx.setStatus?.(`Apps: delete failed for ${app.nappId}: ${err?.message || String(err)}`)
-          del.disabled = false
-          del.textContent = "error"
-          del.title = err?.message || String(err)
-          setTimeout(() => {
-            del.textContent = "delete"
-            del.removeAttribute("title")
-          }, 3000)
-        }
-      })
-      actions.appendChild(del)
 
       head.append(titles, actions)
       card.appendChild(head)

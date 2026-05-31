@@ -40,7 +40,7 @@ async function handleFetch(req, url) {
   if (path === "/sw.js") return fetch(req)
   if (path === "/bridge.js") return fetch(req)
 
-  if (url.host.startsWith("dev-")) {
+  if (url.host.startsWith("dev-") || url.host.startsWith("temp-")) {
     try {
       const devFile = await requestFileFromHost(path)
       if (devFile) {

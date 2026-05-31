@@ -647,6 +647,26 @@ button {
   display: block;
 }
 
+.napp-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.napp-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: napp-spin 0.7s linear infinite;
+}
+
+@keyframes napp-spin {
+  to { transform: rotate(360deg); }
+}
+
 .napp-resize-handle {
   position: absolute;
   touch-action: none;
@@ -1076,7 +1096,9 @@ body.napp-dragging .napp-body iframe {
   font-size: 1rem;
   font-weight: 600;
   font-family: var(--font-serif);
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .apps-meta {
@@ -1110,6 +1132,9 @@ body.napp-dragging .napp-body iframe {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .store-naddr {
@@ -1444,7 +1469,9 @@ body.napp-dragging .napp-body iframe {
   font-size: 1rem;
   font-weight: 600;
   font-family: var(--font-serif);
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .store-meta {
@@ -1511,6 +1538,9 @@ body.napp-dragging .napp-body iframe {
   line-height: 1.4;
   font-family: var(--font-serif);
   opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .store-source {

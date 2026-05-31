@@ -5,6 +5,7 @@ import {
   launch,
   focusInstance,
   launchSystem,
+  mountWithLoading,
   wipe,
   destroyByNappId,
   reinstallFiles,
@@ -17,6 +18,7 @@ import {
   bootNapp,
   bootDevApp,
   setDevHandle,
+  setTempFiles,
   removeDevHandle,
   setInstanceIdSerial
 } from "./sandbox/host.js"
@@ -1144,7 +1146,46 @@ async function launchFromInput(raw: string): Promise<void> {
     return
   }
 
-  console.log("[launch] unknown app")
+  // ── temp install: show loading window immediately ──
+  const suffix = raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/[^a-z0-9._~-]/g, "-")
+  const nappId = `temp~${suffix}`
+  const petname = friendlyNameFor(nappId)
+
+  const win = mountWithLoading(stage, nappId, nappOriginFor(nappId), {
+    petname,
+    ...makeLaunchOpts()
+  })
+  syncDOM(win)
+  win.focus()
+
+  try {
+    const resolved = resolveInput(raw)
+    const { files, title, manifest, singleton } = await fetchNsite(resolved, setStatus)
+    const label = title || nappId
+    const origin = nappOriginFor(nappId)
+
+    if (title) win.titleEl.textContent = title
+
+    setTempFiles(nappId, files)
+    setStatus(`Booting temp ${label}…`)
+    await bootDevApp(origin, nappId, setStatus, label)
+
+    win.setIframe(`${origin}/`)
+
+    persist.storeDevApp({
+      nappId,
+      title: title || null,
+      icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1] || null,
+      petname: title || resolved.dTag || nappId,
+      actions: capabilitiesFromEvent(manifest),
+      singleton
+    })
+    handlers.addApp(nappId, capabilitiesFromEvent(manifest))
+    input!.value = ""
+  } catch (err: any) {
+    win.destroy()
+    throw err
+  }
 }
 
 form.addEventListener("submit", async (e: SubmitEvent) => {

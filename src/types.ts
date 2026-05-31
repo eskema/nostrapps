@@ -62,11 +62,14 @@ export type Position = {
 export type NappWindow = {
   root: HTMLDivElement
   iframe: HTMLIFrameElement | null
+  body: HTMLDivElement
+  titleEl: HTMLSpanElement
   close(): void
   destroy(): void
   getState(): NappWindowState
   focus(): void
   notifyState(): void
+  setIframe(src: string, sandbox?: string): void
   systemId?: string
 }
 

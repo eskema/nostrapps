@@ -105,7 +105,8 @@
     count: filters => rpc("nostrdb.count", { filters }),
     event: id => rpc("nostrdb.event", { id }),
     replaceable: (kind, author, identifier) =>
-      rpc("nostrdb.replaceable", { kind, author, identifier })
+      rpc("nostrdb.replaceable", { kind, author, identifier }),
+    supports: async () => []
   }
 
   // Inter-app calling. Everything is an action.

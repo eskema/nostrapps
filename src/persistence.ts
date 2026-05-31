@@ -23,8 +23,8 @@ function sanitizeString(value: unknown): string {
 // ─── Dev open entries (in-memory only) ──────────────────
 const devOpenEntries: NappWindowState[] = []
 
-function isDevNappId(nappId: string): boolean {
-  return nappId.startsWith("dev~")
+function isEphemeralNappId(nappId: string): boolean {
+  return nappId.startsWith("dev~") || nappId.startsWith("temp~")
 }
 
 function readOpenFromStorage(): NappWindowState[] {
@@ -43,7 +43,7 @@ export function writeOpen(napps: NappWindowState[]) {
   const stored: NappWindowState[] = []
   devOpenEntries.length = 0
   for (const n of napps) {
-    if (isDevNappId(n.nappId)) {
+    if (isEphemeralNappId(n.nappId)) {
       devOpenEntries.push(n)
     } else {
       stored.push(n)
@@ -59,8 +59,8 @@ export function updateOpen(instanceId: string, state: NappWindowState) {
     devOpenEntries[devIdx] = { ...devOpenEntries[devIdx], ...state }
     return
   }
-  // Check if this is a dev nappId — if so, add to in-memory
-  if (isDevNappId(state.nappId)) {
+  // Check if this is an ephemeral nappId — if so, add to in-memory
+  if (isEphemeralNappId(state.nappId)) {
     devOpenEntries.push(state)
     return
   }

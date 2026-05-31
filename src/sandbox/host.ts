@@ -466,6 +466,75 @@ function mount(
   return win
 }
 
+export function mountWithLoading(
+  stageEl: HTMLElement,
+  nappId: string,
+  origin: string,
+  opts: LaunchOpts = {}
+): NappWindow {
+  const {
+    instanceId = `${instanceIdSerial++}`,
+    petname,
+    onStateChange,
+    onReorder,
+    onClose,
+    onDestroy,
+    position,
+    status
+  } = opts
+
+  const win = createNappWindow({
+    nappId,
+    instanceId,
+    origin,
+    petname,
+    loading: true,
+    position,
+    status,
+    onMessage: (data, iframe) => {
+      if (!data) return
+      if (data.__nostrapps === "napp-ready") {
+        resolveReady(data.instanceId!)
+        const theme = currentTheme()
+        iframe.contentWindow?.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
+        return
+      }
+      if (data.__nostrapps === "napp-action-registered") {
+        if (typeof data.idx === "number" && typeof data.pattern === "string") {
+          addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
+        }
+        return
+      }
+      if (data.__nostrapps === "rpc") {
+        handleRpc(data, iframe, currentSigner, nappId)
+        return
+      }
+      if (data.__nostrapps === "napp-dispatch-result") {
+        settleDispatch(data)
+        return
+      }
+    },
+    onClose: () => {
+      openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
+      onClose?.(instanceId)
+    },
+    onDestroy: () => {
+      openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
+      onDestroy?.(instanceId)
+    },
+    onStateChange,
+    onReorder
+  })
+  stageEl.appendChild(win.root)
+  openWindows.set(instanceId, win)
+  resetInstanceRuntimeState(instanceId, "Loading window created")
+  ensureStageObserver(stageEl)
+  clampToStage(win.root, stageEl)
+  return win
+}
+
 // Lay every visible (non-minimized) window out as a non-overlapping
 // partition that fills the inner area. Each call shuffles + repartitions,
 // so clicking the tile button repeatedly produces fresh layouts.
@@ -1167,14 +1236,23 @@ export async function bootNapp(
 // ─── Dev apps ───────────────────────────────────────────
 
 const devHandles = new Map<string, FileSystemDirectoryHandle>()
+const tempFiles = new Map<string, Map<string, NsiteFile>>()
 const devBootIframes = new Map<string, HTMLIFrameElement>()
 
 export function setDevHandle(nappId: string, handle: FileSystemDirectoryHandle) {
   devHandles.set(nappId, handle)
 }
 
+export function setTempFiles(nappId: string, files: NsiteFile[]) {
+  tempFiles.set(
+    nappId,
+    new Map(files.map(file => [file.path.startsWith("/") ? file.path : `/${file.path}`, file]))
+  )
+}
+
 export function removeDevHandle(nappId: string) {
   devHandles.delete(nappId)
+  tempFiles.delete(nappId)
   const boot = devBootIframes.get(nappId)
   if (boot) {
     boot.remove()
@@ -1224,16 +1302,33 @@ window.addEventListener("message", async event => {
 
   const { nappId, path, requestId } = data
   const dirHandle = devHandles.get(nappId)
+  const tempAppFiles = tempFiles.get(nappId)
 
-  if (!dirHandle) {
+  if (!dirHandle && !tempAppFiles) {
     ;(event.source as Window)?.postMessage(
-      { __nostrapps: "napp-dev-file-result", requestId, error: "No handle for " + nappId },
+      { __nostrapps: "napp-dev-file-result", requestId, error: "No files for " + nappId },
       "*"
     )
     return
   }
 
   try {
+    const tempFile = tempAppFiles?.get(path.startsWith("/") ? path : `/${path}`)
+    if (tempFile) {
+      ;(event.source as Window)?.postMessage(
+        {
+          __nostrapps: "napp-dev-file-result",
+          requestId,
+          body: await tempFile.body.arrayBuffer(),
+          mime: tempFile.mime || "application/octet-stream"
+        },
+        "*"
+      )
+      return
+    }
+
+    if (!dirHandle) throw new Error("File not found: " + path)
+
     const parts = path.replace(/^\//, "").split("/").filter(Boolean)
     if (parts.length === 0) throw new Error("Empty path")
 
