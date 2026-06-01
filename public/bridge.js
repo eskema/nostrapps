@@ -1,12 +1,7 @@
 ;(() => {
   const pending = new Map()
-  // Prefer iframe.name (set by the launcher cross-origin) so we don't pollute
-  // the URL with a query string that napps might echo into their own routing.
-  // Fall back to the legacy `?__instance=` for back-compat.
-  const INSTANCE_ID =
-    (typeof window.name === "string" && window.name) ||
-    new URLSearchParams(location.search).get("__instance") ||
-    ""
+  // iframe.name (set by the launcher cross-origin)
+  const INSTANCE_ID = window.name
 
   function rpc(method, params) {
     const id = crypto.randomUUID()
@@ -103,13 +98,6 @@
     pool: {
       query: (filters, opts) => rpc("pool.query", { filters, opts }),
       publish: (event, opts) => rpc("pool.publish", { event, opts })
-    },
-    instance: {
-      id: INSTANCE_ID,
-      get: key => rpc("instance.get", { key }),
-      set: (key, value) => rpc("instance.set", { key, value }),
-      delete: key => rpc("instance.delete", { key }),
-      keys: () => rpc("instance.keys")
     }
   }
 
@@ -123,12 +111,12 @@
   }
 
   // Inter-app calling. Everything is an action.
-  //   window.napp.action(name, payload) — call a registered action handler
+  //   window.napp.action(name, payload, options?) — call a registered action handler
   // Receiving apps register:
-  //   window.napp.onAction = async (name, payload) => { ... return value }
+  //   window.napp.registerAction(pattern, handler) — handle incoming action dispatches
   const napp = {
-    instanceId: INSTANCE_ID,
-    action: (name, payload) => rpc("napp.action", { name, payload }),
+    instance: INSTANCE_ID,
+    action: (name, payload, options) => rpc("napp.action", { name, payload, options }),
     registerAction,
     actionHandlers,
     // Data-loading helpers executed on the host via @nostr/gadgets.

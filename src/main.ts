@@ -403,10 +403,22 @@ async function updateNapp(target: { pubkey: string; dTag: string; relayHints: st
 
 // ─── inter-app calling (actions) ────────────────────────────────
 
-async function runNappAction(callerNappId: string, name: string, payload: unknown) {
+async function runNappAction(
+  callerNappId: string,
+  name: string,
+  payload: unknown,
+  options?: { instance?: string }
+) {
   if (typeof name !== "string" || !name) {
     throw new Error("napp.action: action name is required")
   }
+
+  if (options?.instance) {
+    persist.appendLoadedAction(options.instance, name, payload)
+    const result = await callIframe(options.instance, { name, payload })
+    return result
+  }
+
   const candidates = handlers.findHandlersForAction(name).filter(id => id !== callerNappId)
   const nappId =
     candidates.length === 1

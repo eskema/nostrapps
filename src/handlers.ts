@@ -6,7 +6,7 @@ const actionMap = new Map<string, string[]>()
 const nappActions = new Map<string, string[]>()
 const subs = new Set<() => void>()
 let actionDispatcher:
-  | ((callerNappId: string, name: string, payload: unknown) => Promise<unknown>)
+  | ((callerNappId: string, name: string, payload: unknown, options?: { instance?: string }) => Promise<unknown>)
   | null = null
 
 function emit() {
@@ -72,16 +72,16 @@ export function findHandlersForAction(action: string): string[] {
 }
 
 export function setActionDispatcher(
-  fn: ((callerNappId: string, name: string, payload: unknown) => Promise<unknown>) | null
+  fn: ((callerNappId: string, name: string, payload: unknown, options?: { instance?: string }) => Promise<unknown>) | null
 ) {
   actionDispatcher = fn
 }
 
-export function dispatchAction(callerNappId: string, name: string, payload: unknown) {
+export function dispatchAction(callerNappId: string, name: string, payload: unknown, options?: { instance?: string }) {
   if (!actionDispatcher) {
     throw new Error("napp.action dispatch is not configured")
   }
-  return actionDispatcher(callerNappId, name, payload)
+  return actionDispatcher(callerNappId, name, payload, options)
 }
 
 export function getHandlers(nappId: string): string[] {

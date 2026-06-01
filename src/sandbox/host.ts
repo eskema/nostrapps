@@ -1340,7 +1340,7 @@ function dispatch(signer: Signer, method: string, params: any, callerNappId: str
     case "nostrdb.replaceable":
       return store.replaceable(params.kind, params.author, params.identifier)
     case "napp.action":
-      return dispatchAction(callerNappId, params?.name ?? "", params?.payload)
+      return dispatchAction(callerNappId, params?.name ?? "", params?.payload, params?.options)
     case "napp.loadBlossomServers":
       return loadBlossomServers(
         params.pubkey,

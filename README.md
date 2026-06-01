@@ -122,7 +122,7 @@ window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrU
 
 Each function's signature matches `@nostr/gadgets` exactly. The call is forwarded to the host, which runs the real query against the shared relay pool and caches the result.
 
-The host also exposes **basic actions** that any napp can call via `window.napp.action(name, payload)`:
+The host also exposes **basic actions** that any napp can call via `window.napp.action(name, payload, options?)`:
 
 | Action               | Payload                   | Does                                                                         |
 | ---                  | ---                       | ---                                                                          |
@@ -131,6 +131,10 @@ The host also exposes **basic actions** that any napp can call via `window.napp.
 | `feed`               | `{ pubkeys: string[] }`   | Opens the feed view for the given pubkey                                     |
 | `relay_feed`         | `{ relays: string[] }`    | Opens a feed view scoped to the given relay URLs                             |
 | `search_profile`     | `{ input?: string }`      | Returns a promise resolving to a pubkey (optionally from user-guided search) |
+
+Pass `{ instance: "<instanceId>" }` as the third argument to route the action directly to a specific running instance instead of launching a new one.
+
+Each napp also gets its instance id at `window.napp.instance` (a string, unique per window).
 
 The host also pushes runtime signals to every napp via `postMessage`. Bridge.js relays them:
 
