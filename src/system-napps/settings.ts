@@ -7,6 +7,7 @@ const GOOGLE_LABEL = "log in with google"
 import type { SystemCtx } from "../types.js"
 import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
+import { dispatchAction } from "../handlers.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
@@ -31,7 +32,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
         <span class="settings-label">Account</span>
         <div class="settings-account">
           <div class="settings-account-connected" hidden>
-            <code class="settings-pubkey"></code>
+            <nostr-name class="settings-pubkey" style="cursor:pointer"></nostr-name>
             <span class="settings-account-type"></span>
             <button type="button" class="settings-disconnect-btn">disconnect</button>
           </div>
@@ -98,8 +99,11 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     if (pk) {
       connectedEl.hidden = false
       disconnectedEl.hidden = true
-      pubkeyEl.textContent = pk.slice(0, 8)
-      pubkeyEl.title = pk
+      pubkeyEl.setAttribute("pubkey", pk)
+      pubkeyEl.onclick = e => {
+        e.stopPropagation()
+        dispatchAction("settings", "profile", pk).catch(() => {})
+      }
       const type = ctx.account.getType?.()
       accountTypeEl.textContent = type === "nip46" ? "bunker" : "extension"
     } else {
