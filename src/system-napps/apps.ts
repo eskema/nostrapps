@@ -264,7 +264,8 @@ export function mount(
       return
     }
 
-    setStatus(`Subscribing to ${relays.length} relay(s)…`)
+    const relaysDisplay = relays.map(r => r.replace(/^wss?:\/\//, ""))
+    setStatus(`Relays: ${relaysDisplay.join(", ")}`)
     sub = pool.subscribeMany(
       relays,
       { kinds: [NSITE_NAMED_KIND], limit: 400 },
@@ -276,16 +277,16 @@ export function mount(
           renderList()
           if (sawEose) {
             setStatus(
-              `Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`
+              `Relays: ${relaysDisplay.join(", ")} — ${events.length} event${events.length === 1 ? "" : "s"}`
             )
           } else {
-            setStatus(`Loading from ${relays.length} relay(s)… ${events.length}`)
+            setStatus(`Relays: ${relaysDisplay.join(", ")} — loading… ${events.length}`)
           }
         },
         oneose() {
           sawEose = true
           setStatus(
-            `Watching ${relays.length} relay(s) — ${events.length} event${events.length === 1 ? "" : "s"}`
+            `Relays: ${relaysDisplay.join(", ")} — ${events.length} event${events.length === 1 ? "" : "s"}`
           )
         },
         onclose(reasons: string[]) {
@@ -391,10 +392,8 @@ export function mount(
 // ─── Detail rendering for installed app cards ────────────────────
 
 async function renderDetail(evt: any): Promise<string> {
-  const kind = evt.kind
   const pubkey = evt.pubkey
   const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1] || ""
-  const title = evt.tags.find((t: any) => t[0] === "title")?.[1] || ""
   const description = evt.tags.find((t: any) => t[0] === "description")?.[1] || ""
   const source = evt.tags.find((t: any) => t[0] === "source")?.[1] || ""
   const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
@@ -409,17 +408,10 @@ async function renderDetail(evt: any): Promise<string> {
 
   return `
     <div class="apps-detail-section">
-      <div class="apps-detail-row"><span>kind:</span> <code>${kind}</code></div>
       ${dTag ? `<div class="apps-detail-row"><span>d-tag:</span> <code>${esc(dTag)}</code></div>` : ""}
       ${createdAt ? `<div class="apps-detail-row"><span>created at:</span> <span>${new Date(createdAt * 1000).toLocaleString()}</span></div>` : ""}
       ${source ? `<div class="apps-detail-row"><span>source:</span> <a href="${esc(source)}" target="_blank" rel="noopener noreferrer">${esc(source)}</a></div>` : ""}
-      <div class="apps-detail-row">
-        <span>author:</span>
-        <div class="apps-detail-author">
-          <nostr-picture pubkey="${pubkey}" class="apps-detail-author-pic"></nostr-picture>
-          <nostr-name pubkey="${pubkey}" class="apps-detail-author-name"></nostr-name>
-        </div>
-      </div>
+
     </div>
     ${description ? `<div class="apps-detail-section"><p class="apps-detail-desc">${esc(description)}</p></div>` : ""}
     ${
@@ -434,10 +426,7 @@ async function renderDetail(evt: any): Promise<string> {
               const sha = t[2]
               return `<li><code>${esc(path)}</code> ${servers
                 .map((url: string) => {
-                  let hostname = url
-                  try {
-                    hostname = new URL(url).hostname
-                  } catch {}
+                  let hostname = new URL(url).host
                   return `<a href="${url}/${sha}" target="_blank" rel="noopener noreferrer">${esc(hostname)}</a>`
                 })
                 .join(" ")}</li>`
@@ -474,13 +463,18 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
   const installedEvent = installedEvents.find((e: any) => computeNappId(e) === nappId)
   const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
 
-  const titleText = localizedEventTag(evt, "title") || tag("title")
-  const description =
-    localizedEventTag(evt, "description") || localizedEventTag(evt, "summary") || tag("description")
+  const title = tag("title")
+  const description = tag("description")
   const iconTag = evt.tags.find((t: any) => t[0] === "icon")
   const iconSha = iconTag?.[1]
   const iconMime = iconTag?.[2]
-  const actionTags = evt.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
+  const seenOnRelays = Array.from(pool.seenOn.get(evt.id) || []).map((r: any) => r.url)
+  const naddr = naddrEncode({
+    pubkey: evt.pubkey,
+    kind: NSITE_NAMED_KIND,
+    identifier: dTag,
+    relays: seenOnRelays
+  })
   const categoryTags = evt.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
   const hashtags = evt.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1])
 
@@ -506,7 +500,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
 
   const h = document.createElement("h3")
   h.className = "store-title"
-  h.textContent = titleText || (dTag ? `(${dTag})` : "(untitled site)")
+  h.textContent = title || `(${dTag})`
   titles.appendChild(h)
 
   const meta = document.createElement("div")
@@ -536,10 +530,11 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
   pathsEl.textContent = `${pathCount} file${pathCount === 1 ? "" : "s"}`
 
   meta.append(author, dateEl, pathsEl)
-  for (const action of actionTags) {
+  for (const relay of seenOnRelays) {
     const chip = document.createElement("span")
-    chip.className = "store-chip store-chip-handler"
-    chip.textContent = action
+    chip.className = "store-chip store-chip-relay"
+    chip.textContent = relay.replace(/^wss?:\/\//, "")
+    chip.title = relay
     meta.appendChild(chip)
   }
   titles.appendChild(meta)
@@ -693,16 +688,13 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     card.appendChild(desc)
   }
 
-  if (actionTags.length > 0) {
-    const handlers = document.createElement("div")
-    handlers.className = "store-handlers"
-    for (const action of actionTags) {
-      const chip = document.createElement("span")
-      chip.className = "store-chip store-chip-handler"
-      chip.textContent = action
-      handlers.appendChild(chip)
-    }
-    card.appendChild(handlers)
+  if (naddr) {
+    const naddrEl = document.createElement("div")
+    naddrEl.className = "store-naddr"
+    const codeEl = document.createElement("code")
+    codeEl.textContent = naddr
+    naddrEl.appendChild(codeEl)
+    card.appendChild(naddrEl)
   }
 
   if (categoryTags.length || hashtags.length) {
@@ -792,23 +784,6 @@ function matchesFilter(evt: any, filter: string) {
     }
   }
   return fields.some(f => f.toLowerCase().includes(filter))
-}
-
-function localizedEventTag(evt: any, tagName: string) {
-  if (!evt) return null
-  const matches = evt.tags.filter(
-    (t: any) => t[0] === tagName && typeof t[1] === "string" && t[1].length > 0
-  )
-  if (matches.length === 0) return null
-  const userLang =
-    typeof navigator !== "undefined" && navigator.language
-      ? navigator.language.slice(0, 2).toLowerCase()
-      : "en"
-  return (
-    matches.find((t: any) => (t[2] || "").toLowerCase() === userLang)?.[1] ||
-    matches.find((t: any) => !t[2] || t[2].toLowerCase() === "en")?.[1] ||
-    matches[0][1]
-  )
 }
 
 function formatCategory(label: string) {

@@ -3,7 +3,6 @@ import { InstalledApp, NappWindowState } from "./types"
 
 const OPEN_KEY = "nostrapps:open"
 const INSTALLED_KEY = "nostrapps:installed"
-const HANDLER_PREFS_KEY = "nostrapps:handlerPrefs" // { '<caller>|<type>|<key>': nappId }
 
 function readJson(key: string, fallback: any): any {
   try {
@@ -268,44 +267,6 @@ export function setInstalledPetname(nappId: string, petname: string) {
   writeInstalled(
     Object.fromEntries(Object.entries(all).map(([id, value]) => [id, stripNappId(value)]))
   )
-}
-
-// "I last picked nappId X to handle <action 'edit:30023'> from <caller Y>".
-// The caller pin makes prefs scoped, so picking an editor for napp A doesn't
-// automatically apply when napp B asks for the same action.
-
-function readHandlerPrefs() {
-  const raw = readJson(HANDLER_PREFS_KEY, {})
-  return raw && typeof raw === "object" ? raw : {}
-}
-
-function prefKey(callerNappId: string | null, type: string, key: string) {
-  return `${callerNappId || "*"}|${type}|${key}`
-}
-
-export function getHandlerPref(callerNappId: string | null, type: string, key: string) {
-  return readHandlerPrefs()[prefKey(callerNappId, type, key)] ?? null
-}
-
-export function setHandlerPref(
-  callerNappId: string | null,
-  type: string,
-  key: string,
-  nappId: string | null
-) {
-  const all = readHandlerPrefs()
-  const k = prefKey(callerNappId, type, key)
-  if (nappId) all[k] = nappId
-  else delete all[k]
-  writeJson(HANDLER_PREFS_KEY, all)
-}
-
-export function readHandlerPrefsAll() {
-  return readHandlerPrefs()
-}
-
-export function clearHandlerPrefs() {
-  writeJson(HANDLER_PREFS_KEY, {})
 }
 
 export function getNappIdForPetname(petname: string) {

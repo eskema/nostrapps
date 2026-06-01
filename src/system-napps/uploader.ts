@@ -148,7 +148,7 @@ export function mount(
       }
       const bd = ok.value
       ctx.setStatus(`Uploaded ${f.path} (${bd.sha256.slice(0, 8)}…)`)
-      tags.push(["path", f.path, bd.sha256, bd.type || f.file.type || "application/octet-stream"])
+      tags.push(["path", f.path, bd.sha256])
     }
 
     if (protectedCb.checked) tags.push(["-"])

@@ -128,7 +128,7 @@ The host also exposes **basic actions** that any napp can call via `window.napp.
 | ---                  | ---                       | ---                                                                          |
 | `view:<kind-number>` | `{ event: object or id }` | Opens the given event in a viewer appropriate for its kind                   |
 | `profile`            | `{ pubkey: string }`      | Opens the profile view for the given pubkey                                  |
-| `feed`               | `{ pubkey: string }`      | Opens the feed view for the given pubkey                                     |
+| `feed`               | `{ pubkeys: string[] }`   | Opens the feed view for the given pubkey                                     |
 | `relay_feed`         | `{ relays: string[] }`    | Opens a feed view scoped to the given relay URLs                             |
 | `search_profile`     | `{ input?: string }`      | Returns a promise resolving to a pubkey (optionally from user-guided search) |
 

@@ -21,8 +21,6 @@ export async function collectLocalFolder(
     const mime = file.type || guessMime(path)
     out.push({ path, body: file, mime })
 
-    console.log("path", file.name, "~", path)
-
     if (path === "/metadata.json") {
       try {
         const text = await file.text()

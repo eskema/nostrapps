@@ -6,7 +6,6 @@ const GOOGLE_LABEL = "log in with google"
 
 import type { SystemCtx } from "../types.js"
 import * as perms from "../permissions.js"
-import * as persist from "../persistence.js"
 import * as handlers from "../handlers.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
@@ -253,44 +252,11 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
   function renderHandlerPrefs() {
     handlersEl.innerHTML = ""
-    const all = persist.readHandlerPrefsAll()
-    const entries = Object.entries(all)
 
     const heading = document.createElement("h4")
     heading.className = "store-section-heading"
-    heading.textContent = "Handler choices"
+    heading.textContent = "Action handlers"
     handlersEl.appendChild(heading)
-
-    if (entries.length === 0) {
-      const empty = document.createElement("div")
-      empty.className = "perm-empty"
-      empty.textContent =
-        "No remembered action picks yet. Picks are saved when an app calls window.napp.action() and you choose between options."
-      handlersEl.appendChild(empty)
-    } else {
-      for (const entry of entries) {
-        const key = entry[0] as string
-        const target = entry[1] as string
-        const [caller, type, value] = key.split("|")
-        const row = document.createElement("div")
-        row.className = "perm-row"
-        const desc = document.createElement("span")
-        desc.className = "perm-method"
-        desc.textContent = `${caller || "(any)"} → ${type}:${value}`
-        const t = document.createElement("code")
-        t.className = "perm-napp-id"
-        t.textContent = target
-        const f = document.createElement("button")
-        f.type = "button"
-        f.textContent = "forget"
-        f.addEventListener("click", () => {
-          persist.setHandlerPref(caller, type, value, null)
-          renderHandlerPrefs()
-        })
-        row.append(desc, t, f)
-        handlersEl.appendChild(row)
-      }
-    }
 
     const debug = document.createElement("details")
     debug.className = "perm-group"

@@ -408,10 +408,10 @@ async function runNappAction(callerNappId: string, name: string, payload: unknow
     throw new Error("napp.action: action name is required")
   }
   const candidates = handlers.findHandlersForAction(name).filter(id => id !== callerNappId)
-  if (candidates.length === 0) {
-    throw new Error(`No app registered for action "${name}"`)
-  }
-  const nappId = await pickHandler(callerNappId, name, candidates)
+  const nappId =
+    candidates.length === 1
+      ? candidates[0]
+      : await pickHandler(callerNappId, name, payload, candidates)
   const win = await launch(stage, nappId, {
     ...makeLaunchOpts(),
     petname: friendlyNameFor(nappId)
@@ -440,115 +440,38 @@ async function replayLoadedActions(instanceId: string) {
 async function pickHandler(
   callerNappId: string,
   actionName: string,
+  payload: unknown,
   candidates: string[]
 ): Promise<string> {
-  if (candidates.length === 1) {
-    return candidates[0]
-  }
-  const remembered = persist.getHandlerPref(callerNappId, "action", actionName)
-  if (remembered && candidates.includes(remembered)) return remembered
-  const choice = await showHandlerPicker(actionName, candidates)
-  if (await confirmRememberHandlerChoice(actionName, choice)) {
-    persist.setHandlerPref(callerNappId, "action", actionName, choice)
-  }
-  return choice
-}
-
-// Promise-based modal that asks the user to pick one of `candidates`.
-function showHandlerPicker(actionName: string, candidates: string[]): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const dialog = document.createElement("dialog")
-    dialog.className = "handler-picker"
-    const heading = `Pick an app for "${actionName}"`
-    const list = candidates
-      .map(
-        id => `
-          <li>
-            <button type="button" data-pick="${id}">
-              <span class="handler-pet">${escapeHtml(friendlyNameFor(id))}</span>
-              <code class="handler-id">${escapeHtml(id)}</code>
-            </button>
-          </li>`
-      )
-      .join("")
-    dialog.innerHTML = `
-      <form method="dialog" class="handler-picker-form">
-        <h3>${escapeHtml(heading)}</h3>
-        <ul class="handler-picker-list">${list}</ul>
-        <menu class="handler-picker-actions">
-          <button type="button" value="cancel" class="handler-picker-cancel">cancel</button>
-        </menu>
-      </form>
-    `
-    document.body.appendChild(dialog)
+    let win: NappWindow | null = null
     let settled = false
-    dialog.addEventListener("close", () => {
-      dialog.remove()
-      if (!settled) reject(new Error("Picker dismissed"))
-    })
-    ;(dialog.querySelector(".handler-picker-cancel") as HTMLElement).addEventListener(
-      "click",
-      () => {
-        dialog.close()
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      fn()
+      win?.close()
+    }
+    win = launchSystemNapp("handler", {
+      persistent: false,
+      params: {
+        name: actionName,
+        payload,
+        callerNappId,
+        candidates,
+        select(nappId: string) {
+          if (!candidates.includes(nappId)) return
+          finish(() => resolve(nappId))
+        },
+        cancel() {
+          finish(() => reject(new Error("Action handler selection cancelled")))
+        }
       }
-    )
-    for (const btn of dialog.querySelectorAll<HTMLElement>("[data-pick]")) {
-      btn.addEventListener("click", () => {
-        settled = true
-        const pick = btn.dataset.pick
-        dialog.close()
-        resolve(pick || "")
-      })
-    }
-    dialog.showModal()
-  })
-}
-
-function confirmRememberHandlerChoice(actionName: string, nappId: string): Promise<boolean> {
-  return new Promise<boolean>(resolve => {
-    const dialog = document.createElement("dialog")
-    dialog.className = "handler-picker"
-    dialog.innerHTML = `
-      <form method="dialog" class="handler-picker-form">
-        <h3>${escapeHtml(`Remember app choice for "${actionName}"?`)}</h3>
-        <p>
-          Use <strong>${escapeHtml(friendlyNameFor(nappId))}</strong>
-          for future <code>${escapeHtml(actionName)}</code> requests from this app?
-        </p>
-        <menu class="handler-picker-actions">
-          <button type="button" class="handler-picker-no">not now</button>
-          <button type="button" class="handler-picker-yes">remember</button>
-        </menu>
-      </form>
-    `
-    document.body.appendChild(dialog)
-    const finish = (value: boolean) => {
-      dialog.remove()
-      resolve(value)
-    }
-    dialog.addEventListener("close", () => finish(false), { once: true })
-    ;(dialog.querySelector(".handler-picker-no") as HTMLElement).addEventListener("click", () => {
-      dialog.close()
     })
-    ;(dialog.querySelector(".handler-picker-yes") as HTMLElement).addEventListener("click", () => {
-      finish(true)
-    })
-    dialog.showModal()
+    if (candidates.length === 0) {
+      setStatus(`No handler for action "${actionName}" from ${friendlyNameFor(callerNappId)}`)
+    }
   })
-}
-
-function escapeHtml(s: string): string {
-  return String(s).replace(
-    /[&<>"']/g,
-    c =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-      })[c] as string
-  )
 }
 
 function friendlyNameFor(nappId: string): string {
@@ -611,12 +534,21 @@ function makeSystemLaunchOpts(sysId: string) {
   }
 }
 
-function launchSystemNapp(sysId: string, { params }: { params?: any } = {}) {
+function launchSystemNapp(
+  sysId: string,
+  { params, persistent = true }: { params?: any; persistent?: boolean } = {}
+) {
   const def = systemRegistry[sysId]
   if (!def) throw new Error(`Unknown system napp: ${sysId}`)
   console.debug("[launch] launchSystemNapp", { sysId, title: def.title, params })
+  const launchOpts = persistent
+    ? makeSystemLaunchOpts(sysId)
+    : {
+        onReorder: persistDomOrder,
+        onClose: () => refreshSuggestions()
+      }
   const win = launchSystem(stage, sysId, def, systemCtx, {
-    ...makeSystemLaunchOpts(sysId),
+    ...launchOpts,
     params
   })!
   bringToTopOfStack(win.root)
@@ -624,13 +556,15 @@ function launchSystemNapp(sysId: string, { params }: { params?: any } = {}) {
   // restored on the next reload even if the user never interacts with it.
   const state = win.getState()
 
-  persist.updateOpen(state.instanceId, {
-    ...state,
-    system: true,
-    systemId: sysId,
-    params
-  })
-  persistDomOrder()
+  if (persistent) {
+    persist.updateOpen(state.instanceId, {
+      ...state,
+      system: true,
+      systemId: sysId,
+      params
+    })
+    persistDomOrder()
+  }
   refreshSuggestions()
   return win
 }

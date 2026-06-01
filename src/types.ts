@@ -173,7 +173,7 @@ export interface SystemCtx {
   factoryReset(): Promise<void>
   loadFolder(): void
   setStatus(msg: string): void
-  launchSystemNapp(sysId: string, opts?: { params?: any }): NappWindow
+  launchSystemNapp(sysId: string, opts?: { params?: any; persistent?: boolean }): NappWindow
   isInstalled(nappId: string): boolean
   wasInstalled(nappId: string): boolean
   install(nappId: string): Promise<string>
