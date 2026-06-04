@@ -3,7 +3,7 @@ import { RedEventStore } from "@nostr/gadgets/redstore"
 
 let instance: RedEventStore | null
 
-function getStore() {
+export function getStore() {
   if (!instance) {
     instance = new RedEventStore(null)
     setReplaceableStore(instance)

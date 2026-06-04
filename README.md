@@ -79,10 +79,6 @@ window.nostr.signEvent(evt)
 window.nostr.nip04.encrypt|decrypt(pubkey, text)
 window.nostr.nip44.encrypt|decrypt(pubkey, text)
 
-// Shared relay pool, managed by the launcher
-window.nostr.pool.query(filters, opts?)
-window.nostr.pool.publish(event, opts?)
-
 // Global event store (NIP-DB draft)
 window.nostrdb.add(event)
 window.nostrdb.query(filters)
@@ -168,55 +164,3 @@ Clicking update re-fetches the manifest and blobs, reuses the boot iframe to swa
 Close keeps the session and its per-instance state. Destroy is the full nuke. The launcher forgets the session, all its petnames, the install log entry, and any cached permission decisions. Then a hidden boot iframe at the napp's origin clears every IndexedDB on that origin, plus `localStorage`, `sessionStorage`, every CacheStorage entry, and every service worker registration. Reinstalling later starts from a clean slate.
 
 There's a confirm prompt before all that happens.
-
-### Permissions
-
-These RPC methods prompt on first use per napp:
-
-- `signEvent`
-- `nip04.encrypt`, `nip04.decrypt`
-- `nip44.encrypt`, `nip44.decrypt`
-- `pool.publish`
-
-The dialog gives you Allow once, Allow always, Deny once, Deny always. The "always" answers are cached. `/permissions` shows the full list and lets you revoke any of them.
-
-### Running locally
-
-```bash
-npm install
-npm run dev
-```
-
-### Persistence keys
-
-All in `localStorage`, prefixed with `nostrapps:`:
-
-- `open` — array of session entries (open and closed)
-- `known` — recently launched nappIds
-- `petnames` — petname to nappId map
-- `installLog` — every nappId ever installed (kept across destroy, used for the store's "previously installed" section)
-- `installed` — full manifest events keyed by event id, used for update detection
-- `handlerPrefs` — per-caller scoped action handler preferences
-- `history` — recent raw inputs typed into the launch box
-- `permissions` — per-nappId per-method allow/deny decisions
-- `theme` — `light`, `dark`, or absent (= auto)
-- `bootstrapped` — set after the first launcher load auto-opens the system napps
-- `pubkey` — the connected pubkey
-- `store:relays` — custom relay list for the store, if any
-
-Per-instance KV (`window.nostr.instance.*`) lives in the launcher's IndexedDB instead, keyed by instanceId.
-
-### Stack
-
-Vanilla JS with Vite. `@nostr/tools` and `@nostr/gadgets` for the protocol bits. `@nostr/gadgets/redstore` (OPFS-backed SQLite via a Web Worker) powers the global event store. No framework.
-
-## Roadmap
-
-- NIP-46 (bunker) signer
-- Streaming `nostrdb.subscribe()`
-- Publishing nsites from inside the launcher
-- Desktop wrapper
-
-## License
-
-[Unlicense](LICENSE) — released into the public domain. Do whatever you want with it.

@@ -8,6 +8,7 @@ import type { SystemCtx } from "../types.js"
 import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
+import { startOutbox, stopOutbox } from "../outbox.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
@@ -97,6 +98,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
   function renderAccount(pk: string | null) {
     if (pk) {
+      startOutbox(pk).catch(() => {})
       connectedEl.hidden = false
       disconnectedEl.hidden = true
       pubkeyEl.setAttribute("pubkey", pk)
@@ -107,6 +109,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       const type = ctx.account.getType?.()
       accountTypeEl.textContent = type === "nip46" ? "bunker" : "extension"
     } else {
+      stopOutbox()
       connectedEl.hidden = true
       disconnectedEl.hidden = false
       bunkerForm.hidden = true

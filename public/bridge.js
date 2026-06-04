@@ -78,9 +78,11 @@
     }
     if (data.__nostrapps === "napp-dispatch-action") {
       handleDispatch(data)
+      return
     }
     if (data.__nostrapps === "napp-theme-change") {
       document.documentElement.dataset.theme = data.theme
+      return
     }
   })
 
@@ -94,10 +96,6 @@
     nip44: {
       encrypt: (pubkey, plaintext) => rpc("nip44.encrypt", { pubkey, plaintext }),
       decrypt: (pubkey, ciphertext) => rpc("nip44.decrypt", { pubkey, ciphertext })
-    },
-    pool: {
-      query: (filters, opts) => rpc("pool.query", { filters, opts }),
-      publish: (event, opts) => rpc("pool.publish", { event, opts })
     }
   }
 

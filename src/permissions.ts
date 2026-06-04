@@ -5,8 +5,7 @@ const GATED_METHODS = new Set([
   "nip04.encrypt",
   "nip04.decrypt",
   "nip44.encrypt",
-  "nip44.decrypt",
-  "pool.publish"
+  "nip44.decrypt"
 ])
 
 export function isGated(method: string) {

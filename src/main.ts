@@ -50,6 +50,7 @@ import { Filter } from "@nostr/tools/filter"
 import { pool } from "@nostr/gadgets/global"
 import { EventTemplate } from "@nostr/tools"
 
+
 pool.trackRelays = true
 pool.automaticallyAuth = (_url: string) =>
   currentSigner() ? (evt: EventTemplate) => currentSigner()?.signEvent(evt) as any : null
