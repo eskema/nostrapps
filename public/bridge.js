@@ -82,6 +82,15 @@
     }
     if (data.__nostrapps === "napp-theme-change") {
       document.documentElement.dataset.theme = data.theme
+      // Apply the launcher's resolved color tokens as inline custom properties.
+      // Inline styles on :root outrank any stylesheet `:root[data-theme=...]`
+      // rule, so a napp that uses var(--surface)/var(--text) tracks the launcher
+      // automatically — no need to hardcode matching colors in each napp.
+      if (data.vars) {
+        for (const key in data.vars) {
+          document.documentElement.style.setProperty("--" + key, data.vars[key])
+        }
+      }
       return
     }
   })

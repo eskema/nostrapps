@@ -48,6 +48,11 @@ export function setInstanceIdSerial(val: number) {
 
 const readyWaits = new Map<string, Promise<void>>()
 const readyResolve = new Map<string, () => void>()
+// Instances whose iframe has signalled napp-ready (so its document is loaded at
+// the napp origin). Until then the iframe is still on about:blank, whose origin
+// is the launcher's — posting there with the napp origin logs an uncatchable
+// "target origin does not match" error. broadcastTheme skips non-ready ones.
+const readyInstances = new Set<string>()
 const registeredActions = new Map<string, Array<{ idx: number; pattern: string }>>()
 const actionWaiters = new Map<
   string,
@@ -101,6 +106,7 @@ function clearInstanceActionState(
 function clearReady(instanceId: string) {
   readyWaits.delete(instanceId)
   readyResolve.delete(instanceId)
+  readyInstances.delete(instanceId)
 }
 
 function clearInstanceRuntimeState(
@@ -131,6 +137,7 @@ function trackReady(instanceId: string) {
 }
 
 function resolveReady(instanceId: string) {
+  readyInstances.add(instanceId)
   const resolve = readyResolve.get(instanceId)
   if (resolve) {
     readyResolve.delete(instanceId)
@@ -197,16 +204,35 @@ function currentTheme(): "light" | "dark" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
 }
 
-export function broadcastTheme() {
-  const theme = currentTheme()
-  for (const [, win] of openWindows) {
-    if (win.root) {
-      win.root.style.setProperty("--theme", theme)
+// Theme-change payload forwarded to napps. Carries the theme name plus the
+// launcher's *resolved* color tokens (read from its own computed styles, so the
+// CSS stays the single source of truth) — napps apply these as inline vars and
+// match the launcher without hardcoding any colors of their own.
+function themePayload() {
+  const cs = getComputedStyle(document.documentElement)
+  return {
+    __nostrapps: "napp-theme-change" as const,
+    theme: currentTheme(),
+    vars: {
+      surface: cs.getPropertyValue("--surface").trim(),
+      text: cs.getPropertyValue("--text").trim()
     }
+  }
+}
+
+export function broadcastTheme() {
+  const payload = themePayload()
+  for (const [instanceId, win] of openWindows) {
+    if (win.root) {
+      win.root.style.setProperty("--theme", payload.theme)
+    }
+    // Only post to napps that have signalled ready — others are still on
+    // about:blank (origin mismatch) and will get the theme on their napp-ready.
+    if (!readyInstances.has(instanceId)) continue
     if (win.iframe?.contentWindow) {
       try {
         const origin = new URL(win.iframe.src).origin
-        win.iframe.contentWindow.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
+        win.iframe.contentWindow.postMessage(payload, origin)
       } catch (err) {
         console.warn("[sandbox] broadcastTheme failed", {
           nappId: win.root.dataset.nappId,
@@ -426,8 +452,7 @@ function mount(
       if (!data) return
       if (data.__nostrapps === "napp-ready") {
         resolveReady(data.instanceId!)
-        const theme = currentTheme()
-        iframe.contentWindow?.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
+        iframe.contentWindow?.postMessage(themePayload(), origin)
         return
       }
       if (data.__nostrapps === "napp-action-registered") {
@@ -495,8 +520,7 @@ export function mountWithLoading(
       if (!data) return
       if (data.__nostrapps === "napp-ready") {
         resolveReady(data.instanceId!)
-        const theme = currentTheme()
-        iframe.contentWindow?.postMessage({ __nostrapps: "napp-theme-change", theme }, origin)
+        iframe.contentWindow?.postMessage(themePayload(), origin)
         return
       }
       if (data.__nostrapps === "napp-action-registered") {

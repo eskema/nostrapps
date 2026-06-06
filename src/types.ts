@@ -111,6 +111,9 @@ export type MessageData =
   | {
       __nostrapps: "napp-theme-change"
       theme: string
+      // Resolved color tokens from the launcher's active theme, forwarded so
+      // napps can match the launcher's surface/text without hardcoding values.
+      vars?: Record<string, string>
     }
 
 export type InstalledApp = {
