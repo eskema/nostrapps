@@ -139,6 +139,19 @@
         try {
           await navigator.serviceWorker.register("/sw.js")
           await navigator.serviceWorker.ready
+          // `ready` means the worker is active, but not necessarily *controlling*
+          // this origin yet. The visible napp iframe is created right after boot
+          // finishes; if the SW isn't controlling by then, its request to
+          // <origin>/ falls through to the dev server, which serves the launcher
+          // for any *.localhost host — so the window shows the whole launcher.
+          // Wait for control (the SW calls clients.claim() on activate) before
+          // reporting ready, with a timeout so boot never hangs.
+          if (!navigator.serviceWorker.controller) {
+            await new Promise(resolve => {
+              navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true })
+              setTimeout(resolve, 3000)
+            })
+          }
         } catch (err) {
           reportError(err)
           return
