@@ -180,6 +180,7 @@ export interface SystemCtx {
   loadFolder(): void
   setStatus(msg: string): void
   launchSystemNapp(sysId: string, opts?: { params?: any; persistent?: boolean }): NappWindow
+  launchNapp(nappId: string, petname?: string): Promise<void>
   isInstalled(nappId: string): boolean
   wasInstalled(nappId: string): boolean
   install(nappId: string): Promise<string>

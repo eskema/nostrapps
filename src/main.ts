@@ -522,6 +522,14 @@ const systemCtx: SystemCtx = {
   setStatus,
   installDevApp,
   launchSystemNapp,
+  launchNapp: async (nappId: string, petname?: string) => {
+    const win = await launch(stage, nappId, {
+      ...makeLaunchOpts(),
+      petname: petname || friendlyNameFor(nappId)
+    })
+    syncDOM(win)
+    win.focus()
+  },
   // Use a thunk so the reference resolves to the function declared later.
   isInstalled: (nappId: string) => !!persist.getInstalledAppForNappId(nappId),
   wasInstalled: (nappId: string) => !!persist.getInstalledAppForNappId(nappId),
@@ -1018,6 +1026,7 @@ async function install(raw: string): Promise<string> {
   if (manifest) persist.storeInstalledEvent(manifest, petname)
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
 
+  setStatus(`Installed ${label}`)
   return nappId
 }
 

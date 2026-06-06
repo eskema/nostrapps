@@ -1449,11 +1449,41 @@ body.napp-dragging .napp-body iframe {
   position: relative;
 }
 
+/* `display: flex` above outranks the [hidden] UA rule, so the hidden attribute
+   wouldn't hide a card on its own — make filtering (applyFilter) actually hide. */
+.store-card[hidden] {
+  display: none;
+}
+
 .store-card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+/* Discover card: everything past the head collapses into this <details>, so
+   each card stays as compact as an Installed-tab card until expanded. */
+.store-card-more > summary {
+  cursor: pointer;
+  width: fit-content;
+  opacity: 0.6;
+  font-weight: 600;
+  user-select: none;
+}
+
+.store-card-more > summary:hover {
+  opacity: 1;
+}
+
+.store-card-more[open] > summary {
+  margin-bottom: 0.5rem;
+}
+
+/* Space the stacked detail sections without relying on each element's own
+   margins (block flow keeps the native disclosure marker intact). */
+.store-card-more > :not(summary) {
+  margin-top: 0.4rem;
 }
 
 .store-card-titles {

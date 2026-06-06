@@ -31,7 +31,13 @@ export function mount(
   // ─── Discover tab state ───
   let filter = ""
   let events: any[] = []
-  let relays = [...DEFAULT_RELAYS]
+  const eventIds = new Set<string>() // O(1) dedup of incoming events
+  let pending: any[] = [] // events arrived since the last incremental flush
+  // Restore a previously-saved custom relay list. emitDiscoverState persists it
+  // under the session's `params`, which restore feeds back in via opts.params.
+  // Empty / absent → fall back to the defaults.
+  let relays = sanitizeRelays(opts.params?.relays)
+  if (!relays.length) relays = [...DEFAULT_RELAYS]
   let sub: null | SubCloser = null
   let sawEose = false
 
@@ -170,7 +176,7 @@ export function mount(
         del.addEventListener("mouseup", async () => {
           ctx.setStatus?.(`Apps: delete requested for ${app.nappId}`)
           const ok = window.confirm(
-            `Delete ${app.petname || app.title || app.nappId}?\n\nThis removes local app files, windows, permissions, and stored state for this app.`
+            `Delete ${app.petname || app.title || app.nappId}?\n\nThis closes every open window of this app and erases all of its data — files, settings, permissions, and any storage it created. This cannot be undone.`
           )
           if (!ok) {
             ctx.setStatus?.(`Apps: delete cancelled for ${app.nappId}`)
@@ -209,7 +215,9 @@ export function mount(
   let _listEl: HTMLElement | null = null
 
   function emitDiscoverState() {
-    opts.onStateChange?.({ relays: [...relays] })
+    // Persist under `params` so it round-trips: the host merges this into the
+    // session entry, and restore passes session.params back into mount.
+    opts.onStateChange?.({ params: { relays: [...relays] } })
   }
 
   function setStatus(msg: string | undefined) {
@@ -218,29 +226,12 @@ export function mount(
     _statusEl.hidden = !msg
   }
 
-  function renderList() {
+  // Resolve and assign icon URLs for a set of events. Queries each unique
+  // author's blossom servers once, then points every matching card icon at it.
+  function loadIcons(evts: any[]) {
     if (!_listEl) return
-    _listEl.innerHTML = ""
-
-    const manifests = events.filter(e => e.kind === NSITE_NAMED_KIND)
-    const filtered = manifests
-      .filter(m => matchesFilter(m, filter))
-      .sort((a, b) => b.created_at - a.created_at)
-
-    const renderOne = (evt: any) => _listEl!.appendChild(renderCard(evt, ctx, relays, renderList))
-
-    if (filtered.length === 0) {
-      const empty = document.createElement("div")
-      empty.className = "store-empty"
-      empty.textContent = manifests.length === 0 ? "No napps found." : "No matches."
-      _listEl.appendChild(empty)
-      return
-    }
-
-    for (const evt of filtered) renderOne(evt)
-
     const seenIconPks = new Set()
-    for (const evt of filtered) {
+    for (const evt of evts) {
       if (seenIconPks.has(evt.pubkey)) continue
       const hasIcon = evt.tags.some((t: any) => t[0] === "icon" && t[1])
       if (!hasIcon) continue
@@ -272,6 +263,110 @@ export function mount(
     }
   }
 
+  // All manifests, sorted newest-first. Filtering is applied as card visibility
+  // (see applyFilter), not by excluding events here — so every manifest gets a
+  // card and the filter can show/hide them without rebuilding.
+  function sortedManifests(evts: any[]) {
+    return evts
+      .filter(e => e.kind === NSITE_NAMED_KIND)
+      .sort((a, b) => b.created_at - a.created_at)
+  }
+
+  // Add / update / remove the placeholder based on whether there are any cards
+  // and whether any are visible under the current filter. Uses :not([hidden])
+  // so it short-circuits instead of counting every card.
+  function refreshEmptyState() {
+    if (!_listEl) return
+    const hasAnyCard = !!_listEl.querySelector(".store-card")
+    const hasVisible = !!_listEl.querySelector(".store-card:not([hidden])")
+    const existing = _listEl.querySelector(".store-empty") as HTMLElement | null
+    const msg = !hasAnyCard ? "No napps found." : !hasVisible ? "No matches." : null
+    if (!msg) {
+      existing?.remove()
+      return
+    }
+    if (existing) {
+      existing.textContent = msg
+    } else {
+      const empty = document.createElement("div")
+      empty.className = "store-empty"
+      empty.textContent = msg
+      _listEl.appendChild(empty)
+    }
+  }
+
+  // Show/hide existing cards against the current filter — no rebuild, no
+  // refetch. O(N) boolean toggles instead of recreating the DOM per keystroke.
+  function applyFilter() {
+    if (!_listEl) return
+    const needle = filter.trim().toLowerCase()
+    const cards = _listEl.querySelectorAll(".store-card") as NodeListOf<HTMLElement>
+    for (const card of cards) {
+      card.hidden = needle ? !(card.dataset.search || "").includes(needle) : false
+    }
+    refreshEmptyState()
+  }
+
+  // Full rebuild. Used for initial paint and relay changes — anything that
+  // replaces the whole event set. Streaming arrivals go through flushPending()
+  // (append) and filter changes through applyFilter() (show/hide).
+  function renderList() {
+    if (!_listEl) return
+    _listEl.innerHTML = ""
+    pending = [] // a full rebuild already covers everything buffered
+
+    const all = sortedManifests(events)
+    const frag = document.createDocumentFragment()
+    for (const evt of all) {
+      const card = renderCard(evt, ctx, relays, renderList)
+      card.hidden = !matchesFilter(evt, filter)
+      frag.appendChild(card)
+    }
+    _listEl.appendChild(frag)
+    loadIcons(all)
+    refreshEmptyState()
+  }
+
+  // Incremental append. Builds cards only for the buffered batch and appends
+  // them in one fragment, leaving existing cards untouched — O(batch) per frame
+  // instead of rebuilding the whole list on every event.
+  let flushScheduled = false
+  function scheduleFlush() {
+    if (flushScheduled) return
+    flushScheduled = true
+    requestAnimationFrame(() => {
+      flushScheduled = false
+      flushPending()
+    })
+  }
+
+  function flushPending() {
+    if (!_listEl || pending.length === 0) return
+    const batch = pending
+    pending = []
+    const toRender = sortedManifests(batch)
+    if (toRender.length === 0) return
+    // Drop the placeholder before the merge so the ref walk only sees cards.
+    _listEl.querySelector(".store-empty")?.remove()
+
+    // Merge the sorted-desc batch into the sorted-desc list. Both are ordered
+    // newest-first, so a single forward walk of the existing cards inserts each
+    // new card in its created_at slot — O(batch + N) and order stays correct
+    // even for late arrivals, instead of dumping the batch at the end. Cards
+    // that don't match the active filter are inserted hidden.
+    let ref = _listEl.firstElementChild
+    for (const evt of toRender) {
+      const card = renderCard(evt, ctx, relays, renderList)
+      card.hidden = !matchesFilter(evt, filter)
+      while (ref && Number((ref as HTMLElement).dataset.createdAt || 0) >= evt.created_at) {
+        ref = ref.nextElementSibling
+      }
+      _listEl.insertBefore(card, ref)
+    }
+    loadIcons(toRender)
+    refreshEmptyState()
+  }
+
   function closeSubscription() {
     try {
       sub?.close?.()
@@ -282,6 +377,8 @@ export function mount(
   function startDiscoverSubscription() {
     closeSubscription()
     events = []
+    eventIds.clear()
+    pending = []
     sawEose = false
     renderList()
 
@@ -298,9 +395,11 @@ export function mount(
       {
         label: "napps",
         onevent(event: any) {
-          if (events.some((existing: any) => existing.id === event.id)) return
+          if (eventIds.has(event.id)) return
+          eventIds.add(event.id)
           events.push(event)
-          renderList()
+          pending.push(event)
+          scheduleFlush()
           if (sawEose) {
             setStatus(
               `Relays: ${relaysDisplay.join(", ")} — ${events.length} event${events.length === 1 ? "" : "s"}`
@@ -311,6 +410,7 @@ export function mount(
         },
         oneose() {
           sawEose = true
+          scheduleFlush()
           setStatus(
             `Relays: ${relaysDisplay.join(", ")} — ${events.length} event${events.length === 1 ? "" : "s"}`
           )
@@ -355,10 +455,16 @@ export function mount(
     const relaysClearBtn = contentEl.querySelector(".store-relays-clear") as HTMLElement
 
     relaysInput.value = relays.join("\n")
+    // Re-seed the search box from the persisted filter so switching away to the
+    // Installed tab and back keeps the input in sync with the (still-filtered) list.
+    searchEl.value = filter
 
     searchEl.addEventListener("input", () => {
-      filter = searchEl.value.trim().toLowerCase()
-      renderList()
+      // Keep the raw text as typed (casing preserved for re-seeding the input);
+      // applyFilter normalizes when comparing. Toggles card visibility instead
+      // of rebuilding the list.
+      filter = searchEl.value
+      applyFilter()
     })
 
     relaysToggleBtn.addEventListener("click", () => {
@@ -507,6 +613,10 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
   const card = document.createElement("div")
   card.className = "store-card"
   card.dataset.author = evt.pubkey
+  // Sort key for incremental insertion (newest first); see flushPending.
+  card.dataset.createdAt = String(evt.created_at)
+  // Search key for show/hide filtering without rebuilding; see applyFilter.
+  card.dataset.search = searchHaystack(evt)
 
   const head = document.createElement("div")
   head.className = "store-card-head"
@@ -551,18 +661,9 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
   dateEl.className = "store-date"
   dateEl.textContent = date
 
-  const pathsEl = document.createElement("span")
-  pathsEl.className = "store-paths"
-  pathsEl.textContent = `${pathCount} file${pathCount === 1 ? "" : "s"}`
-
-  meta.append(author, dateEl, pathsEl)
-  for (const relay of seenOnRelays) {
-    const chip = document.createElement("span")
-    chip.className = "store-chip store-chip-relay"
-    chip.textContent = relay.replace(/^wss?:\/\//, "")
-    chip.title = relay
-    meta.appendChild(chip)
-  }
+  // Keep the head compact like the Installed tab: just author + date. File
+  // count, relays and everything else move into the <details> below.
+  meta.append(author, dateEl)
   titles.appendChild(meta)
 
   const actions = document.createElement("div")
@@ -595,7 +696,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     btn.textContent = "request delete"
     btn.addEventListener("click", async () => {
       closeMenu()
-      ctx.setStatus?.("Store: requesting deletion of app event…")
+      ctx.setStatus?.("Requesting deletion of app event…")
       try {
         const signer = currentSigner()
         if (!signer) throw new Error("No signer")
@@ -610,9 +711,9 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
         })
         const results = await Promise.allSettled(pool.publish(relays, signed))
         const ok = results.filter(r => r.status === "fulfilled").length
-        ctx.setStatus?.(`Store: deletion event sent to ${ok}/${relays.length} relays`)
+        ctx.setStatus?.(`Deletion event sent to ${ok}/${relays.length} relays`)
       } catch (err: any) {
-        ctx.setStatus?.(`Store: deletion failed — ${err.message}`)
+        ctx.setStatus?.(`Deletion failed — ${err.message}`)
       }
     })
     menuEl.appendChild(btn)
@@ -634,8 +735,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
 
   const performAction = async (btn: HTMLButtonElement, action: string) => {
     btn.disabled = true
-    btn.textContent =
-      action === "update" ? "updating…" : action === "uninstall" ? "uninstalling…" : "launching…"
+    btn.textContent = action === "update" ? "updating…" : "launching…"
     try {
       if (action === "update") {
         await ctx.update({
@@ -643,8 +743,13 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
           dTag: dTag,
           relayHints: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
         })
-      } else if (action === "uninstall") {
-        await ctx.uninstall(nappId)
+        // NOTE: an "uninstall" action used to live here, calling ctx.uninstall(nappId)
+        // with no confirm. It was never wired to any button (makeActionBtn is only
+        // ever called with "update"/"install"), so it's commented out to avoid an
+        // unconfirmed wipe path. The confirmed Installed-tab `delete` button is the
+        // sole entry point for wiping an app.
+        // } else if (action === "uninstall") {
+        //   await ctx.uninstall(nappId)
       } else if (action === "install") {
         const raw = naddrEncode({
           pubkey: evt.pubkey,
@@ -652,7 +757,10 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
           identifier: dTag,
           relays: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
         })
-        await ctx.install(raw)
+        const nappId = await ctx.install(raw)
+        // Launch right after install — the boot just completed so the napp's
+        // service worker is freshly active, the best moment to open its window.
+        await ctx.launchNapp?.(nappId, title || dTag || undefined)
       }
       if (onChange) {
         onChange()
@@ -661,8 +769,12 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
         card.replaceWith(replacement)
       }
     } catch (err) {
+      const message = (err as any)?.message || String(err)
       console.error(err)
-      btn.title = (err as any)?.message || String(err)
+      // Surface the failure in /logs, not just the console — an install that
+      // can't fetch its files should leave a timestamped trail.
+      ctx.setStatus?.(`${action} failed for ${title || dTag || nappId} — ${message}`)
+      btn.title = message
       btn.textContent = "error"
       btn.disabled = false
       setTimeout(() => {
@@ -707,11 +819,37 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
   head.append(titles, actions)
   card.appendChild(head)
 
+  // Everything beyond the head (which mirrors the Installed tab: title + meta +
+  // actions) is tucked into a collapsed <details> so each discover card stays
+  // compact until expanded.
+  const more = document.createElement("details")
+  more.className = "store-card-more"
+  const summary = document.createElement("summary")
+  summary.className = "store-card-more-summary"
+  summary.textContent = "details"
+  more.appendChild(summary)
+
+  // File count + the relays this manifest was seen on.
+  const moreMeta = document.createElement("div")
+  moreMeta.className = "store-meta store-more-meta"
+  const pathsEl = document.createElement("span")
+  pathsEl.className = "store-paths"
+  pathsEl.textContent = `${pathCount} file${pathCount === 1 ? "" : "s"}`
+  moreMeta.appendChild(pathsEl)
+  for (const relay of seenOnRelays) {
+    const chip = document.createElement("span")
+    chip.className = "store-chip store-chip-relay"
+    chip.textContent = relay.replace(/^wss?:\/\//, "")
+    chip.title = relay
+    moreMeta.appendChild(chip)
+  }
+  more.appendChild(moreMeta)
+
   if (description) {
     const desc = document.createElement("p")
     desc.className = "store-description"
     desc.textContent = description
-    card.appendChild(desc)
+    more.appendChild(desc)
   }
 
   if (naddr) {
@@ -720,7 +858,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     const codeEl = document.createElement("code")
     codeEl.textContent = naddr
     naddrEl.appendChild(codeEl)
-    card.appendChild(naddrEl)
+    more.appendChild(naddrEl)
   }
 
   if (categoryTags.length || hashtags.length) {
@@ -739,7 +877,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
       chip.textContent = `#${t}`
       chips.appendChild(chip)
     }
-    card.appendChild(chips)
+    more.appendChild(chips)
   }
 
   if (source) {
@@ -749,23 +887,34 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     src.target = "_blank"
     src.rel = "noopener noreferrer"
     src.textContent = "source ↗"
-    card.appendChild(src)
+    more.appendChild(src)
   }
 
   const detailEl = document.createElement("div")
   detailEl.className = "apps-detail"
-  renderDetail(evt).then(html => {
-    detailEl.innerHTML = html
-    const authorEl = detailEl.querySelector(".apps-detail-author") as HTMLElement
-    if (authorEl) {
-      authorEl.style.cursor = "pointer"
-      authorEl.addEventListener("click", e => {
-        e.stopPropagation()
-        dispatchAction("apps", "profile", evt.pubkey).catch(() => {})
-      })
-    }
+  more.appendChild(detailEl)
+
+  // Lazy: renderDetail awaits loadBlossomServers (a relay round-trip). Defer it
+  // until the user actually expands the <details>, so streaming the list doesn't
+  // fire one relay query per card. Load once, on first open.
+  let detailLoaded = false
+  more.addEventListener("toggle", () => {
+    if (!more.open || detailLoaded) return
+    detailLoaded = true
+    renderDetail(evt).then(html => {
+      detailEl.innerHTML = html
+      const authorEl = detailEl.querySelector(".apps-detail-author") as HTMLElement
+      if (authorEl) {
+        authorEl.style.cursor = "pointer"
+        authorEl.addEventListener("click", e => {
+          e.stopPropagation()
+          dispatchAction("apps", "profile", evt.pubkey).catch(() => {})
+        })
+      }
+    })
   })
-  card.appendChild(detailEl)
+
+  card.appendChild(more)
 
   return card
 }
@@ -789,8 +938,10 @@ function sanitizeRelays(relays: string[]): string[] {
   return [...new Set(relays.map(s => (typeof s === "string" ? s.trim() : "")).filter(Boolean))]
 }
 
-function matchesFilter(evt: any, filter: string) {
-  if (!filter) return true
+// The lowercased text a card is searched against. Stored on each card as
+// data-search so filtering can be done by toggling visibility instead of
+// rebuilding, and used by matchesFilter so both stay in sync.
+function searchHaystack(evt: any): string {
   const fields = [
     evt.tags.find((t: any) => t[0] === "title")?.[1] || "",
     evt.tags.find((t: any) => t[0] === "description")?.[1] || "",
@@ -809,7 +960,13 @@ function matchesFilter(evt: any, filter: string) {
       fields.push(t[1])
     }
   }
-  return fields.some(f => f.toLowerCase().includes(filter))
+  return fields.join("\n").toLowerCase()
+}
+
+function matchesFilter(evt: any, filter: string) {
+  const needle = filter.trim().toLowerCase()
+  if (!needle) return true
+  return searchHaystack(evt).includes(needle)
 }
 
 function formatCategory(label: string) {
