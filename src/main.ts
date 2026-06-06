@@ -831,6 +831,10 @@ input!.addEventListener("input", () => {
   else showSuggestions()
 })
 input!.addEventListener("blur", () => {
+  // Debug aid: `window.__pinSuggestions = true` in the console keeps the
+  // dropdown open across blur so it can be inspected in DevTools (clicking the
+  // Elements panel blurs the input, which would otherwise hide it).
+  if ((window as any).__pinSuggestions) return
   setTimeout(hideSuggestions, 150)
 })
 input!.addEventListener("keydown", (e: KeyboardEvent) => {

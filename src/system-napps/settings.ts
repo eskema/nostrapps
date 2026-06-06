@@ -4,6 +4,10 @@ export const slash = "/settings"
 
 const GOOGLE_LABEL = "log in with google"
 
+// Manual build marker shown in Settings. Bump the integer by hand whenever we
+// want to confirm we're looking at a fresh build; the date is just a note.
+const APP_VERSION = "1 · 2026-06-06"
+
 import type { SystemCtx } from "../types.js"
 import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
@@ -70,6 +74,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
       <div class="perm-list" data-section="decisions"></div>
       <div class="perm-list" data-section="handlers"></div>
+
+      <div class="settings-build">build ${APP_VERSION}</div>
     </div>
   `
 
