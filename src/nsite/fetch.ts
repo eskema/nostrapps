@@ -26,10 +26,15 @@ export async function fetchNsite(
 
   onProgress("Querying relays…")
 
-  // 2. resolve relays via loadRelayList + fallback
-  const relayList = await loadRelayList(pubkey)
-  const relayUrls = relayList.items.filter(r => r.write).map((r: { url: string }) => r.url)
-  const relays = [...relayHints, ...relayUrls]
+  // 2. Resolve which relays to query for the manifest. Prefer the explicit
+  // hints (e.g. the relays the Apps store found this event on) and only fall
+  // back to the author's kind-10002 relay list when none were given —
+  // otherwise install fans out to every one of the author's relays.
+  let relays = [...relayHints]
+  if (relays.length === 0) {
+    const relayList = await loadRelayList(pubkey)
+    relays = relayList.items.filter(r => r.write).map((r: { url: string }) => r.url)
+  }
   const reqs = relays.map((url: string) => ({ url, filter }))
 
   // 3. collect events
@@ -47,11 +52,17 @@ export async function fetchNsite(
   )
   if (pathTags.length === 0) throw new Error("nsite manifest has no path tags")
 
+  // Prefer the blossom servers the manifest itself declares. Only consult the
+  // author's blossom list (another relay round-trip) when the manifest names
+  // none, so we don't reach out to relays we weren't asked to use.
   const manifestServers = manifest.tags
     .filter((t: string[]) => t[0] === "server" && t[1])
     .map((t: string[]) => t[1])
-  const userServers = (await loadBlossomServers(pubkey)).items ?? []
-  const servers = [...new Set([...manifestServers, ...userServers])].filter(Boolean)
+  let servers = [...new Set(manifestServers)].filter(Boolean)
+  if (servers.length === 0) {
+    const userServers = (await loadBlossomServers(pubkey)).items ?? []
+    servers = [...new Set(userServers)].filter(Boolean)
+  }
 
   const files = []
   for (let i = 0; i < pathTags.length; i++) {
@@ -61,7 +72,12 @@ export async function fetchNsite(
     const mime = tag[3] || guessMime(path)
     onProgress(`Fetching ${i + 1}/${pathTags.length}: ${path}`)
     const blob = await fetchBlob(servers, sha)
-    if (!blob) throw new Error(`Could not fetch ${path} (${sha})`)
+    if (!blob)
+      throw new Error(
+        `Could not fetch ${path} (${sha}) from any of ${servers.length} server(s): ${
+          servers.join(", ") || "none configured"
+        }`
+      )
     files.push({ path, body: blob, mime })
   }
 
@@ -116,26 +132,30 @@ function getTag(evt: { tags: string[][] }, name: string): string | undefined {
 }
 
 async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
-  let i = 0
-  while (i < servers.length) {
-    const server = servers[i]
+  // Try each server at most once. A throwing server (timeout / network / CORS)
+  // is skipped like any other failure — never retried in place, so an
+  // unreachable server can't spin this loop forever and stall the install.
+  for (const server of servers) {
     try {
       const base = server.endsWith("/") ? server.slice(0, -1) : server
       const res = await fetch(`${base}/${sha}`, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) {
-        i++
+        console.debug("[fetchBlob] miss", { server, sha, status: res.status })
         continue
       }
       const blob = await res.blob()
       const buf = await blob.arrayBuffer()
       if (bytesToHex(sha256(new Uint8Array(buf))) !== sha) {
-        i++
+        console.debug("[fetchBlob] hash mismatch", { server, sha })
         continue
       }
       return blob
-    } catch {
-      servers.push(servers.splice(i, 1)[0])
+    } catch (err) {
+      // network error / timeout / abort — move on to the next server
+      console.debug("[fetchBlob] error", { server, sha, err: String(err) })
+      continue
     }
   }
+  console.warn("[fetchBlob] all servers failed", { sha, servers })
   return null
 }
