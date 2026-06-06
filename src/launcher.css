@@ -13,7 +13,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --surface: #1b1b1f;
+    --surface: #333;
     --text: #ececec;
     color-scheme: dark;
   }
@@ -26,7 +26,7 @@
 }
 
 :root[data-theme="dark"] {
-  --surface: #1b1b1f;
+  --surface: #333;
   --text: #ececec;
   color-scheme: dark;
 }
@@ -345,19 +345,23 @@ button {
 .sugg-napp,
 .sugg-raw {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  /* font-size: 0.85rem; */
 }
 
 .sugg-id {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  opacity: 0.4;
+  /* font-size: 0.72rem; */
+  opacity: 0.5;
 }
 
 .sugg-pet {
-  font-size: 0.85rem;
-  font-weight: 500;
-  opacity: 0.95;
+  font-family: var(--font-serif);
+  font-weight: 900;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  /* font-size: 0.85rem; */
+  /* font-weight: 500; */
+  /* opacity: 0.95; */
 }
 
 .suggestion .source {
@@ -492,14 +496,18 @@ button {
      overflow the stage gutter. */
   box-sizing: border-box;
   background: var(--surface);
-  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  /* border: 1px solid color-mix(in srgb, currentColor 20%, transparent); */
   border-radius: 4px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
   min-width: 240px;
   overflow: hidden;
   transition:
     max-height 220ms ease-in-out,
     box-shadow 220ms ease-in-out;
+}
+
+html[data-theme="dark"] .napp-window {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
 }
 
 .napp-window:focus {
@@ -546,8 +554,8 @@ button {
   min-height: 28px;
   padding: 0 0.35rem 0 0.75rem;
   box-sizing: border-box;
-  background: color-mix(in srgb, currentColor 8%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  /* background: color-mix(in srgb, currentColor 8%, transparent); */
+  /* border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
   cursor: grab;
   user-select: none;
   flex-shrink: 0;
@@ -565,17 +573,19 @@ button {
 .napp-title {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 0.8rem;
+  font-size: 1rem;
   font-family: var(--font-serif);
-  font-weight: 600;
+  font-weight: 900;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
   cursor: inherit;
   transition: color 200ms ease-in-out;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  letter-spacing: .05em;
 }
 
 .napp-title[data-instance]::after {
@@ -626,11 +636,6 @@ button {
 
 .napp-btn[title^="Close"]:hover {
   background: #e9a833;
-  color: white;
-}
-
-.napp-btn-destroy:hover {
-  background: #e33;
   color: white;
 }
 
@@ -928,6 +933,14 @@ body.napp-dragging .napp-body iframe {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+/* Build stamp — de-emphasized via opacity, not a smaller font. */
+.settings-build {
+  margin-top: 0.4rem;
+  font-family: var(--font-mono);
+  opacity: 0.5;
+  user-select: text;
 }
 
 .settings-row {
