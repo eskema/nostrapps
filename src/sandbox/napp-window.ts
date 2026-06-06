@@ -99,10 +99,9 @@ export function createNappWindow({
   const btnPin = makeBtn("•", "Pin on top")
   btnPin.classList.add("napp-btn-pin")
   const btnClose = makeBtn("×", system ? "Close" : "Close (keep state)")
-  const btnDestroy = makeBtn("⌫", "Destroy (wipe state)")
-  btnDestroy.classList.add("napp-btn-destroy")
-  if (system) btnDestroy.hidden = true
-  controls.append(btnMin, btnMax, btnPin, btnClose, btnDestroy)
+  // Destroy (wipe-all) lives only in the Apps window, not on each window —
+  // it's a napp-wide, origin-clearing operation, not a per-window control.
+  controls.append(btnMin, btnMax, btnPin, btnClose)
 
   header.append(titleEl, controls)
 
@@ -226,9 +225,14 @@ export function createNappWindow({
 
   function focus() {
     bringToFront(root)
+    // preventScroll on the focus call so the browser's default focus-scroll
+    // doesn't fight the explicit, controlled scrollIntoView below.
     const iframe = iframeRef.current
-    if (iframe) iframe.focus()
+    if (iframe) iframe.focus({ preventScroll: true })
     else root.focus({ preventScroll: true })
+    // Bring the window into view within the scrollable stage. `nearest` keeps an
+    // already-visible window put and scrolls an off-screen one just enough.
+    root.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" })
   }
 
   const notifyState = () => onStateChange?.(getState())
@@ -236,15 +240,6 @@ export function createNappWindow({
   btnClose.addEventListener("click", e => {
     e.stopPropagation()
     close()
-  })
-  btnDestroy.addEventListener("click", e => {
-    e.stopPropagation()
-    const label = titleEl.textContent || nappId
-    const ok = window.confirm(
-      `Destroy "${label}"?\n\nThis removes the app and wipes all of its data — files, settings, permissions and any storage it created. This cannot be undone.`
-    )
-    if (!ok) return
-    destroy()
   })
   btnMin.addEventListener("click", e => {
     e.stopPropagation()
