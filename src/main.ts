@@ -20,8 +20,11 @@ import {
   setDevHandle,
   setTempFiles,
   removeDevHandle,
-  setInstanceIdSerial
+  setInstanceIdSerial,
+  teardownAllWindows,
+  listOpenWindows
 } from "./sandbox/host.js"
+import { button, chip, icon } from "./system-napps/ui.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
@@ -64,10 +67,21 @@ const suggestions = document.getElementById("suggestions")!
 const localFolderInput = document.getElementById("local-folder") as HTMLInputElement
 const tileBtn = document.getElementById("tile-windows")!
 const packToggleBtn = document.getElementById("pack-toggle")!
+const spacesBar = document.getElementById("spaces-bar")!
+// Swap the placeholder glyphs for consistent SVG icons.
+tileBtn.replaceChildren(icon("tile"))
 
 tileBtn?.addEventListener("click", () => tileWindows(stage))
 
+// ─── spaces (saved window configurations) ──────────────────────
+// The live window set lives in persistence's `open`; each space owns its own
+// `open` snapshot. currentSpaceId tracks which we're showing.
+let currentSpaceId = persist.getCurrentSpaceId()
+
 // ─── pack mode (Packery-style auto-layout on move/resize) ───────
+// PACK_MODE_KEY mirrors the *current* space's pack-mode (updated on toggle, so a
+// reload restores it). Each space's snapshot also stores packMode, applied when
+// switching into it.
 const PACK_MODE_KEY = "nostrapps:packMode"
 let packModeOn = localStorage.getItem(PACK_MODE_KEY) === "1"
 
@@ -104,6 +118,9 @@ function maybeRepack() {
 
 function applyPackMode() {
   packToggleBtn?.setAttribute("aria-pressed", packModeOn ? "true" : "false")
+  // Distinct glyph per state: a 4-quadrant grid when active, the pack-corners
+  // hint when off (opacity alone wasn't a clear enough signal).
+  packToggleBtn?.replaceChildren(icon(packModeOn ? "grid" : "pack"))
   // The drag handler (in napp-window.js) reads this class to decide
   // whether to render a drop placeholder during the drag.
   stage?.classList.toggle("pack-mode", packModeOn)
@@ -431,6 +448,11 @@ async function runNappAction(
     ...makeLaunchOpts(),
     petname: friendlyNameFor(nappId)
   })
+  // Match the other launch paths: register DOM order and (in pack mode) fold the
+  // new window into the grid. Without this an action-launched window stays at its
+  // free-floating launch coordinates instead of being packed.
+  syncDOM(win)
+  maybeRepack()
   const instanceId = win.getState().instanceId
   persist.appendLoadedAction(instanceId, name, payload)
   setStatus(
@@ -589,6 +611,9 @@ function launchSystemNapp(
     persistDomOrder()
   }
   refreshSuggestions()
+  // Fold the new system window into the grid when pack mode is on (fresh launches
+  // don't fire onStateChange, so maybeRepack wouldn't run otherwise).
+  maybeRepack()
   return win
 }
 
@@ -844,6 +869,7 @@ input!.addEventListener("keydown", (e: KeyboardEvent) => {
 function refreshSuggestions() {
   if (!suggestions.hidden) renderSuggestions()
   notifyAppsChanged()
+  scheduleSpacesBar()
 }
 
 function bringToTopOfStack(root: HTMLElement) {
@@ -955,6 +981,186 @@ async function restoreAll() {
   }
 }
 
+// Bump the instance-id serial past any restored numeric ids so freshly created
+// windows don't collide with restored ones.
+function bumpInstanceSerial() {
+  let maxId = 0
+  for (const s of persist.readOpen()) {
+    const n = parseInt(s.instanceId, 10)
+    if (!isNaN(n) && n > maxId) maxId = n
+  }
+  setInstanceIdSerial(maxId + 1)
+}
+
+// Save the current space's live window layout + pack-mode so we can return to it.
+function snapshotCurrentSpace() {
+  persist.saveSpaceState(currentSpaceId, persist.readOpen(), packModeOn)
+}
+
+// Switch to another space: snapshot the current windows, tear them all down,
+// then make the target space live and restore its windows + pack-mode.
+async function switchSpace(targetId: string) {
+  if (targetId === currentSpaceId) return
+  snapshotCurrentSpace()
+  teardownAllWindows()
+  persist.writeOpen(persist.getSpaceOpen(targetId))
+  persist.setCurrentSpaceId(targetId)
+  currentSpaceId = targetId
+  bumpInstanceSerial()
+  packModeOn = persist.getSpacePackMode(targetId)
+  applyPackMode()
+  await restoreAll()
+  if (packModeOn) maybeRepack()
+  refreshSuggestions()
+}
+
+// Create a new (empty) space and switch into it.
+async function createSpaceAndSwitch(name?: string): Promise<string> {
+  const id = persist.createSpace(name)
+  await switchSpace(id)
+  renderSpacesBar()
+  return id
+}
+
+// Commit the current windows as this space's saved layout.
+function saveCurrentSpace() {
+  persist.commitSpaceSaved(currentSpaceId, persist.readOpen(), packModeOn)
+  setStatus("Space saved")
+  renderSpacesBar()
+}
+
+// Revert this space's windows to its last saved layout (loses unsaved changes).
+async function resetCurrentSpace() {
+  const ok = window.confirm(
+    "Reset this space to its saved layout?\n\n" +
+      "Windows you've opened, moved, resized, or closed since the last save will be lost."
+  )
+  if (!ok) return
+  const saved = persist.getSpaceSaved(currentSpaceId)
+  teardownAllWindows()
+  persist.writeOpen(saved.open)
+  persist.saveSpaceState(currentSpaceId, saved.open, saved.packMode)
+  bumpInstanceSerial()
+  packModeOn = saved.packMode
+  applyPackMode()
+  await restoreAll()
+  if (packModeOn) maybeRepack()
+  refreshSuggestions()
+  renderSpacesBar()
+}
+
+// Delete the current space and load whichever space becomes current.
+async function destroyCurrentSpace() {
+  const spaces = persist.listSpaces()
+  if (spaces.length <= 1) {
+    setStatus("Can't delete the only space")
+    return
+  }
+  const name = spaces.find(s => s.id === currentSpaceId)?.name || "this space"
+  const ok = window.confirm(
+    `Delete space "${name}"?\n\n` +
+      "Its windows and saved layout will be permanently removed."
+  )
+  if (!ok) return
+  teardownAllWindows()
+  persist.deleteSpace(currentSpaceId)
+  currentSpaceId = persist.getCurrentSpaceId() // deleteSpace re-points current
+  persist.writeOpen(persist.getSpaceOpen(currentSpaceId))
+  bumpInstanceSerial()
+  packModeOn = persist.getSpacePackMode(currentSpaceId)
+  applyPackMode()
+  await restoreAll()
+  if (packModeOn) maybeRepack()
+  refreshSuggestions()
+  renderSpacesBar()
+}
+
+// ── spaces bar ──────────────────────────────────────────────────
+let spacesBarQueued = false
+function scheduleSpacesBar() {
+  if (spacesBarQueued) return
+  spacesBarQueued = true
+  requestAnimationFrame(() => {
+    spacesBarQueued = false
+    renderSpacesBar()
+  })
+}
+
+function iconButton(name: string, title: string, onClick: () => void) {
+  const b = button({ variant: "ghost", title, onClick })
+  b.appendChild(icon(name))
+  return b
+}
+
+function renderSpacesBar() {
+  spacesBar.innerHTML = ""
+
+  // Far left: controls for the CURRENT space (save / reset / destroy).
+  const controls = document.createElement("div")
+  controls.className = "spaces-controls"
+  controls.append(
+    iconButton("save", "Save this space's layout", saveCurrentSpace),
+    iconButton("reset", "Reset to saved layout", resetCurrentSpace),
+    iconButton("trash", "Delete this space", destroyCurrentSpace)
+  )
+
+  // Then the current space's live windows (taskbar). Click → focus/restore.
+  const winList = document.createElement("div")
+  winList.className = "spaces-windows"
+  for (const w of listOpenWindows()) {
+    winList.appendChild(
+      chip({
+        label: w.petname,
+        title: w.petname,
+        class: w.minimized ? "minimized" : "",
+        onClick: () => focusInstance(w.instanceId)
+      })
+    )
+  }
+
+  // Right: the list of spaces + new-space.
+  const spaceList = document.createElement("div")
+  spaceList.className = "spaces-list"
+  for (const s of persist.listSpaces()) {
+    spaceList.appendChild(
+      chip({
+        label: s.name,
+        active: s.id === currentSpaceId,
+        title: "Switch — double-click to rename",
+        onClick: () => {
+          if (s.id !== currentSpaceId) switchSpace(s.id).then(renderSpacesBar)
+        },
+        onDblClick: () => {
+          const n = window.prompt("Rename space", s.name)
+          if (n != null) {
+            persist.renameSpace(s.id, n)
+            renderSpacesBar()
+          }
+        }
+      })
+    )
+  }
+
+  const right = document.createElement("div")
+  right.className = "spaces-right"
+  right.append(spaceList, iconButton("plus", "New space", () => createSpaceAndSwitch()))
+
+  spacesBar.append(controls, winList, right)
+}
+
+// Console hook (kept as a convenience alongside the bar).
+;(window as any).__spaces = {
+  list: () => persist.listSpaces(),
+  current: () => currentSpaceId,
+  switch: (id: string) => switchSpace(id).then(renderSpacesBar),
+  create: (name?: string) => createSpaceAndSwitch(name),
+  save: () => saveCurrentSpace(),
+  reset: () => resetCurrentSpace(),
+  destroy: () => destroyCurrentSpace(),
+  rename: (id: string, name: string) => (persist.renameSpace(id, name), renderSpacesBar()),
+  remove: (id: string) => (persist.deleteSpace(id), renderSpacesBar())
+}
+
 const BOOTSTRAP_KEY = "nostrapps:bootstrapped"
 function maybeBootstrap() {
   if (localStorage.getItem(BOOTSTRAP_KEY)) return
@@ -981,18 +1187,14 @@ async function init() {
   await handlers.init()
   // Bump instanceIdSerial past any existing numeric instanceIds so new
   // windows don't collide with persisted entries.
-  let maxId = 0
-  for (const s of persist.readOpen()) {
-    const n = parseInt(s.instanceId, 10)
-    if (!isNaN(n) && n > maxId) maxId = n
-  }
-  setInstanceIdSerial(maxId + 1)
+  bumpInstanceSerial()
   await restoreAll()
   maybeBootstrap()
   // Restore doesn't fire onStateChange — kick the packer manually so a
   // session that resumed in pack mode lands cleanly.
   if (packModeOn) maybeRepack()
   broadcastTheme()
+  renderSpacesBar()
 }
 init()
 

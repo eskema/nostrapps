@@ -44,6 +44,24 @@ export type NappWindowState = {
   loadedActions?: Array<{ name: string; payload: unknown }>
 }
 
+// A saved window configuration (a "space" / workspace).
+// `open` is the live working set (what you see / get restored when you switch
+// in); `saved` is the committed snapshot you can reset back to. Switching
+// preserves `open`; Save commits open→saved; Reset reverts open←saved.
+export interface SpaceData {
+  id: string
+  name: string
+  open: NappWindowState[]
+  saved: NappWindowState[]
+  packMode: boolean
+  savedPackMode: boolean
+}
+
+export interface SpacesState {
+  current: string
+  list: SpaceData[]
+}
+
 export type Status = {
   minimized: boolean
   maximized: boolean

@@ -1,8 +1,10 @@
 import { NostrEvent } from "@nostr/tools"
-import { InstalledApp, NappWindowState } from "./types"
+import { InstalledApp, NappWindowState, SpaceData, SpacesState } from "./types"
 
 const OPEN_KEY = "nostrapps:open"
 const INSTALLED_KEY = "nostrapps:installed"
+const SPACES_KEY = "nostrapps:spaces"
+const PACK_MODE_KEY = "nostrapps:packMode"
 
 function readJson(key: string, fallback: any): any {
   try {
@@ -86,6 +88,131 @@ export function removeOpen(instanceId: string) {
 
 export function getLoadedActions(instanceId: string): Array<{ name: string; payload: unknown }> {
   return readOpen().find(n => n.instanceId === instanceId)?.loadedActions || []
+}
+
+// ─── Spaces (saved window configurations) ──────────────────
+// The live/current space's window set stays in `nostrapps:open` (so all the
+// open/* helpers above are unchanged). `nostrapps:spaces` holds the full list of
+// spaces — each with its own `open` snapshot — plus which one is current. A
+// snapshot is written when switching away from a space.
+
+function readSpacesRaw(): SpacesState | null {
+  const v = readJson(SPACES_KEY, null)
+  if (v && typeof v.current === "string" && Array.isArray(v.list) && v.list.length) {
+    // Back-fill fields added later so older saved data keeps working.
+    for (const sp of v.list) {
+      if (!Array.isArray(sp.saved)) sp.saved = sp.open ?? []
+      if (typeof sp.savedPackMode !== "boolean") sp.savedPackMode = !!sp.packMode
+    }
+    return v
+  }
+  return null
+}
+
+// Lazily migrate the legacy single `open` into a "default" space on first use.
+function ensureSpaces(): SpacesState {
+  const existing = readSpacesRaw()
+  if (existing) return existing
+  const open = readOpenFromStorage()
+  const packMode = localStorage.getItem(PACK_MODE_KEY) === "1"
+  const def: SpaceData = { id: "default", name: "default", open, saved: open, packMode, savedPackMode: packMode }
+  const state: SpacesState = { current: "default", list: [def] }
+  writeJson(SPACES_KEY, state)
+  return state
+}
+
+export function getCurrentSpaceId(): string {
+  return ensureSpaces().current
+}
+
+export function listSpaces(): Array<{ id: string; name: string }> {
+  return ensureSpaces().list.map(s => ({ id: s.id, name: s.name }))
+}
+
+export function getSpaceOpen(id: string): NappWindowState[] {
+  return ensureSpaces().list.find(s => s.id === id)?.open ?? []
+}
+
+export function getSpacePackMode(id: string): boolean {
+  return ensureSpaces().list.find(s => s.id === id)?.packMode ?? false
+}
+
+// Persist a space's live window set + pack-mode (called before switching away).
+export function saveSpaceState(id: string, open: NappWindowState[], packMode: boolean) {
+  const state = ensureSpaces()
+  const sp = state.list.find(s => s.id === id)
+  if (!sp) return
+  sp.open = open
+  sp.packMode = packMode
+  writeJson(SPACES_KEY, state)
+}
+
+export function setCurrentSpaceId(id: string) {
+  const state = ensureSpaces()
+  if (!state.list.some(s => s.id === id)) return
+  state.current = id
+  writeJson(SPACES_KEY, state)
+}
+
+export function createSpace(name?: string): string {
+  const state = ensureSpaces()
+  const id = crypto.randomUUID()
+  state.list.push({
+    id,
+    name: name?.trim() || `space ${state.list.length + 1}`,
+    open: [],
+    saved: [],
+    packMode: false,
+    savedPackMode: false
+  })
+  writeJson(SPACES_KEY, state)
+  return id
+}
+
+// Commit the given live state as the space's saved snapshot (the "Save" action).
+export function commitSpaceSaved(id: string, open: NappWindowState[], packMode: boolean) {
+  const state = ensureSpaces()
+  const sp = state.list.find(s => s.id === id)
+  if (!sp) return
+  sp.open = open
+  sp.saved = open
+  sp.packMode = packMode
+  sp.savedPackMode = packMode
+  writeJson(SPACES_KEY, state)
+}
+
+// The saved snapshot to revert to (the "Reset" action).
+export function getSpaceSaved(id: string): { open: NappWindowState[]; packMode: boolean } {
+  const sp = ensureSpaces().list.find(s => s.id === id)
+  return { open: sp?.saved ?? [], packMode: sp?.savedPackMode ?? false }
+}
+
+export function renameSpace(id: string, name: string) {
+  const state = ensureSpaces()
+  const sp = state.list.find(s => s.id === id)
+  if (!sp) return
+  sp.name = name.trim() || sp.name
+  writeJson(SPACES_KEY, state)
+}
+
+export function deleteSpace(id: string) {
+  const state = ensureSpaces()
+  if (state.list.length <= 1) return // keep at least one space
+  state.list = state.list.filter(s => s.id !== id)
+  if (state.current === id) state.current = state.list[0].id
+  writeJson(SPACES_KEY, state)
+}
+
+// Which OTHER space (not the current one) holds an open instance of a system
+// napp. Used to enforce the "one system napp instance, in one space" rule:
+// invoking it navigates there instead of duplicating.
+export function findOtherSpaceWithSystemNapp(systemId: string): string | null {
+  const state = ensureSpaces()
+  for (const sp of state.list) {
+    if (sp.id === state.current) continue
+    if (sp.open.some(o => o.system && o.systemId === systemId)) return sp.id
+  }
+  return null
 }
 
 export function appendLoadedAction(instanceId: string, name: string, payload: unknown) {

@@ -251,6 +251,38 @@ export function focusInstance(instanceId: string): boolean {
   return true
 }
 
+// Close every open window (system napps unmount, iframes detach, singleton
+// registry clears) — used when switching spaces before restoring another set.
+// Each win.close() runs its onClose chain (which removes the session from
+// persistence); callers that are mid-switch overwrite `open` immediately after.
+export function teardownAllWindows() {
+  for (const win of [...openWindows.values()]) {
+    win.close()
+  }
+}
+
+// Snapshot of the live windows, for the spaces bar's window list.
+export function listOpenWindows(): Array<{
+  instanceId: string
+  nappId: string
+  petname: string
+  systemId?: string
+  minimized: boolean
+}> {
+  const out = []
+  for (const [instanceId, win] of openWindows) {
+    const st = win.getState()
+    out.push({
+      instanceId,
+      nappId: st.nappId,
+      petname: st.petname || st.nappId,
+      systemId: win.systemId,
+      minimized: !!st.status.minimized
+    })
+  }
+  return out
+}
+
 export function destroyByNappId(nappId: string): number {
   // Snapshot — destroy() mutates openWindows.
   const targets = []
