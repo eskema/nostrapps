@@ -174,7 +174,8 @@ export function storeInstalledLocalApp(app: {
     icon: sanitizeString(app.icon),
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
     actions: app.actions || [],
-    singleton: !!app.singleton
+    singleton: !!app.singleton,
+    installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(
     Object.fromEntries(Object.entries(all).map(([id, entry]) => [id, stripNappId(entry)]))
@@ -201,7 +202,11 @@ export function getInstalledApps(): InstalledApp[] {
       title: app.title,
       petname: app.petname,
       singleton: app.singleton,
-      actions: app.actions
+      actions: app.actions,
+      // Surface the stored manifest so cards can show author + date (parity with
+      // the discover tab). Local apps have no event but carry an install date.
+      event: app.event,
+      installedAt: app.installedAt
     })
   }
 
@@ -212,7 +217,8 @@ export function getInstalledApps(): InstalledApp[] {
       title: dev.title,
       petname: dev.petname,
       singleton: dev.singleton,
-      actions: dev.actions
+      actions: dev.actions,
+      installedAt: dev.installedAt
     })
   }
 
@@ -288,6 +294,7 @@ export interface DevAppData {
   petname: string
   singleton: boolean
   actions: string[]
+  installedAt: number
 }
 
 const devApps = new Map<string, DevAppData>()
@@ -306,7 +313,8 @@ export function storeDevApp(app: {
     icon: sanitizeString(app.icon),
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
     singleton: !!app.singleton,
-    actions: app.actions || []
+    actions: app.actions || [],
+    installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000)
   })
 }
 

@@ -31,7 +31,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
           </label>
         </div>
         <div class="db-actions">
-          <button type="submit">run query</button>
+          <button type="submit" class="btn btn-outline">run query</button>
         </div>
       </form>
       <div class="db-status"></div>

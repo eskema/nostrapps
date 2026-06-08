@@ -124,6 +124,9 @@ export type InstalledApp = {
   singleton: boolean
   actions: string[]
   event?: NostrEvent
+  // Unix seconds when a local/dev/temp app was added (apps with no manifest
+  // event, so no publish date). Surfaced as the card's date for those.
+  installedAt?: number
 }
 
 export interface SuggestionItem {

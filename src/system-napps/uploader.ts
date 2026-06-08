@@ -38,7 +38,7 @@ export function mount(
       <div class="upload-preview" hidden>
         <h3>Event Preview</h3>
         <pre class="upload-json"></pre>
-        <button type="button" class="upload-publish" disabled>Publish</button>
+        <button type="button" class="btn btn-primary upload-publish" disabled>Publish</button>
       </div>
     </div>
   `

@@ -34,7 +34,7 @@ export function mount(
       </div>
       <div class="handler-candidates"></div>
       <div class="handler-actions">
-        <button type="button" class="handler-cancel">cancel</button>
+        <button type="button" class="btn btn-outline handler-cancel">cancel</button>
       </div>
     </div>
   `

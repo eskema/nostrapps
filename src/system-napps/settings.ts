@@ -28,7 +28,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
       <div class="settings-row settings-reset-row">
         <span class="settings-label">Reset</span>
-        <button type="button" class="settings-reset-btn">
+        <button type="button" class="btn btn-danger settings-reset-btn">
           erase all data
         </button>
       </div>
@@ -39,16 +39,16 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
           <div class="settings-account-connected" hidden>
             <nostr-name class="settings-pubkey" style="cursor:pointer"></nostr-name>
             <span class="settings-account-type"></span>
-            <button type="button" class="settings-disconnect-btn">disconnect</button>
+            <button type="button" class="btn btn-outline settings-disconnect-btn">disconnect</button>
           </div>
           <div class="settings-account-disconnected">
-            <button type="button" class="settings-connect-extension">
+            <button type="button" class="btn btn-outline settings-connect-extension">
               connect with extension
             </button>
-            <button type="button" class="settings-connect-bunker-toggle">
+            <button type="button" class="btn btn-outline settings-connect-bunker-toggle">
               connect with bunker
             </button>
-            <button type="button" class="settings-connect-google">
+            <button type="button" class="btn btn-outline settings-connect-google">
               ${GOOGLE_LABEL}
             </button>
             <div class="settings-google-error" hidden></div>
@@ -61,8 +61,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
                 spellcheck="false"
               />
               <div class="settings-bunker-actions">
-                <button type="submit" class="settings-bunker-submit">connect</button>
-                <button type="button" class="settings-bunker-cancel">cancel</button>
+                <button type="submit" class="btn btn-outline settings-bunker-submit">connect</button>
+                <button type="button" class="btn btn-outline settings-bunker-cancel">cancel</button>
               </div>
               <div class="settings-bunker-error" hidden></div>
             </form>
@@ -267,7 +267,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     handlersEl.innerHTML = ""
 
     const heading = document.createElement("h4")
-    heading.className = "store-section-heading"
+    heading.className = "apps-section-heading"
     heading.textContent = "Action handlers"
     handlersEl.appendChild(heading)
 

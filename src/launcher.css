@@ -9,6 +9,10 @@
   --font-mono: "Source Code Pro Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --surface: #ffffff;
   --text: #111111;
+  /* ── design-system tokens ── */
+  --btn-radius: 4px;
+  --btn-pad-y: 0.35rem;
+  --btn-pad-x: 0.7rem;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -120,6 +124,108 @@ button {
   user-select: none;
 }
 
+/* ─── Design system: buttons ──────────────────────────────────────
+   Shared button styles for system-napp (and other content) buttons.
+   Base `.btn` + a variant: btn-primary | btn-outline | btn-danger |
+   btn-warning | btn-ghost. Layout (align-self, margins) stays on the
+   parent/context, not the variant. See button() in system-napps/ui.ts. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: .8rem;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  /* text-transform: uppercase; */
+  line-height: 1.2;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  border: 1px solid transparent;
+  border-radius: var(--btn-radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--text);
+  color: var(--surface);
+  border-color: var(--text);
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.btn-outline {
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: var(--text);
+  color: var(--surface);
+  border-color: var(--text);
+}
+
+.btn-danger {
+  color: #e33;
+  border-color: color-mix(in srgb, #e33 40%, transparent);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #e33;
+  color: white;
+  border-color: #e33;
+}
+
+.btn-warning {
+  background: #f59e0b;
+  color: #1a1a1a;
+  border-color: #f59e0b;
+  font-weight: 600;
+}
+
+.btn-warning:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* Chip: a selectable .btn (window/space switcher). chip() in ui.ts sets the
+   variant — primary when active, ghost otherwise — and wraps the text in
+   .btn-chip-label so long names truncate instead of widening the bar. */
+.btn-chip {
+  max-width: 12rem;
+  font-size: 1rem;
+  font-weight: 400;
+  gap: 0.3rem;
+}
+
+.btn-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-chip.minimized {
+  opacity: 0.5;
+}
+
 .headerbar button {
   background: transparent;
   /* background-color: var(--surface); */
@@ -159,25 +265,6 @@ button {
   max-width: 1.8rem;
   display: inline-block;
   margin: 0.4rem;
-}
-
-#menu-toggle {
-  display: flex;
-  align-items: center;
-  /* margin-left: auto; */
-  /* padding: 0.25rem 0.55rem; */
-  /* background: transparent; */
-  /* color: inherit; */
-  /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
-  /* border-radius: 6px; */
-  /* font-size: 1rem; */
-  /* line-height: 1; */
-  flex-shrink: 0;
-  /* border-radius: 0; */
-}
-
-#menu-toggle[aria-expanded="true"] {
-  /* background: color-mix(in srgb, currentColor 12%, transparent); */
 }
 
 #main-menu {
@@ -1033,9 +1120,15 @@ body.napp-dragging .napp-body iframe {
 
 /* apps */
 .apps-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  display: grid;
+  grid-gap: 1rem;
+}
+
+/* The per-tab content host (toolbar + list, etc.). Was a separate .apps-panel
+   wrapper; folded in here since both tabs render the same shape. */
+.apps-content {
+  display: grid;
+  grid-gap: 2rem;
 }
 
 .apps-tabs {
@@ -1046,9 +1139,14 @@ body.napp-dragging .napp-body iframe {
 
 .apps-tab {
   flex: 1;
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: .05rem;
+
+  /* padding: 0.5rem 1rem; */
+  /* font: inherit; */
+  /* font-style: italic; */
+  font-family: var(--font-serif);
+  font-size: 1rem;
   font-weight: 500;
   background: transparent;
   color: color-mix(in srgb, currentColor 50%, transparent);
@@ -1060,73 +1158,13 @@ body.napp-dragging .napp-body iframe {
 
 .apps-tab:hover {
   color: color-mix(in srgb, currentColor 75%, transparent);
-  background: color-mix(in srgb, currentColor 5%, transparent);
+  /* background: color-mix(in srgb, currentColor 5%, transparent); */
 }
 
 .apps-tab.active {
   color: inherit;
   border-bottom-color: var(--text);
-  font-weight: 600;
-}
-
-.apps-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.apps-empty {
-  opacity: 0.6;
-  font-style: italic;
-}
-
-.apps-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  border-radius: 8px;
-}
-
-.apps-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.apps-card-titles {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-  flex: 1;
-}
-
-.apps-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  font-family: var(--font-serif);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.apps-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.72rem;
-  opacity: 0.65;
-}
-
-.apps-handlers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  font-weight: 700;
 }
 
 .apps-handler {
@@ -1141,16 +1179,7 @@ body.napp-dragging .napp-body iframe {
   word-break: break-all;
 }
 
-.apps-napp-id {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  opacity: 0.85;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.store-naddr {
+.apps-naddr {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   white-space: nowrap;
@@ -1202,21 +1231,6 @@ body.napp-dragging .napp-body iframe {
 .apps-detail-author-name {
   font-family: var(--font-mono);
   font-size: 0.78rem;
-}
-
-.apps-actions button {
-  padding: 0.2rem 0.55rem;
-  font-size: 0.75rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.apps-actions button:hover {
-  background: var(--text);
-  color: var(--surface);
 }
 
 /* database */
@@ -1278,20 +1292,7 @@ body.napp-dragging .napp-body iframe {
   justify-content: flex-start;
 }
 
-.db-actions button {
-  padding: 0.35rem 0.7rem;
-  font-size: 0.8rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.db-actions button:hover {
-  background: var(--text);
-  color: var(--surface);
-}
+/* run-query button styled by .btn .btn-outline */
 
 .db-status,
 .db-empty {
@@ -1434,41 +1435,78 @@ body.napp-dragging .napp-body iframe {
   opacity: 0.85;
 }
 
-/* ─── store ────────────────────────────────────────────────────── */
-.store-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+/* ─── apps: discover ───────────────────────────────────────────── */
+
+.apps-list {
+  display: grid;
+  grid-gap: 0.5rem;
 }
 
-.store-status {
-  font-size: 0.8rem;
-  opacity: 0.7;
-}
-
-.store-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.store-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+.apps-card {
+  display: grid;
+  grid-gap: .6rem;
   padding: 0.6rem 0.75rem;
-  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  border-radius: 8px;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  /* border-radius: 4px; */
   position: relative;
 }
 
-/* `display: flex` above outranks the [hidden] UA rule, so the hidden attribute
+.apps-card:hover
+{
+  background-color: color-mix(in srgb, currentColor 5%, transparent);
+  cursor: pointer;
+}
+
+/* `display: grid` above outranks the [hidden] UA rule, so the hidden attribute
    wouldn't hide a card on its own — make filtering (applyFilter) actually hide. */
-.store-card[hidden] {
+.apps-card[hidden] {
   display: none;
 }
 
-.store-card-head {
+/* App info window (singleton) — full detail for the card you clicked. */
+.appinfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+
+.appinfo-empty {
+  opacity: 0.6;
+}
+
+.appinfo-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.appinfo-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  object-fit: cover;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.appinfo-titlewrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.appinfo-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.apps-card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1477,7 +1515,7 @@ body.napp-dragging .napp-body iframe {
 
 /* Discover card: everything past the head collapses into this <details>, so
    each card stays as compact as an Installed-tab card until expanded. */
-.store-card-more > summary {
+.apps-card-more > summary {
   cursor: pointer;
   width: fit-content;
   opacity: 0.6;
@@ -1485,39 +1523,43 @@ body.napp-dragging .napp-body iframe {
   user-select: none;
 }
 
-.store-card-more > summary:hover {
+.apps-card-more > summary:hover {
   opacity: 1;
 }
 
-.store-card-more[open] > summary {
+.apps-card-more[open] > summary {
   margin-bottom: 0.5rem;
 }
 
 /* Space the stacked detail sections without relying on each element's own
    margins (block flow keeps the native disclosure marker intact). */
-.store-card-more > :not(summary) {
+.apps-card-more > :not(summary) {
   margin-top: 0.4rem;
 }
 
-.store-card-titles {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+.apps-card-titles {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  /* flex-direction: column; */
+  grid-gap: 0.5rem;
   min-width: 0;
-  flex: 1;
+  /* flex: 1; */
 }
 
-.store-title {
+.apps-title {
+  grid-column: 1 / -1;
   margin: 0;
-  font-size: 1rem;
+  font-size: 2rem;
+  line-height: 1;
   font-weight: 600;
   font-family: var(--font-serif);
-  overflow: hidden;
+  overflow: clip;            /* not hidden */
+  overflow-clip-margin: 0.15em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.store-meta {
+.apps-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1526,13 +1568,19 @@ body.napp-dragging .napp-body iframe {
   opacity: 0.65;
 }
 
-.store-author {
+.apps-author {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
 }
 
-.store-author-pic {
+/* Stand-in for the author on apps with no publisher (local/dev/temp). */
+.apps-author-label {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.apps-author-pic {
   display: inline-block;
   width: 14px;
   height: 14px;
@@ -1540,18 +1588,18 @@ body.napp-dragging .napp-body iframe {
   background: color-mix(in srgb, currentColor 15%, transparent);
 }
 
-.store-author-pic::part(img) {
+.apps-author-pic::part(img) {
   width: 14px;
   height: 14px;
   border-radius: 50%;
   object-fit: cover;
 }
 
-.store-author-name {
+.apps-author-name {
   font-family: var(--font-mono);
 }
 
-.store-kind {
+.apps-kind {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 0.05rem 0.4rem;
@@ -1559,23 +1607,7 @@ body.napp-dragging .napp-body iframe {
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
 
-.store-install {
-  flex-shrink: 0;
-  padding: 0.3rem 0.7rem;
-  font-size: 0.8rem;
-  background: var(--text);
-  color: var(--surface);
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.store-install:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.store-description {
+.apps-description {
   margin: 0;
   font-size: 0.85rem;
   line-height: 1.4;
@@ -1586,7 +1618,7 @@ body.napp-dragging .napp-body iframe {
   white-space: nowrap;
 }
 
-.store-source {
+.apps-source {
   font-size: 0.75rem;
   text-decoration: none;
   align-self: flex-start;
@@ -1594,81 +1626,69 @@ body.napp-dragging .napp-body iframe {
   color: inherit;
 }
 
-.store-source:hover {
+.apps-source:hover {
   opacity: 1;
   text-decoration: underline;
 }
 
 /* ─── store toolbar / search / relays config ────────────────── */
-.store-toolbar {
+.apps-toolbar {
   display: flex;
   gap: 0.4rem;
   align-items: center;
 }
 
-.store-search {
+.apps-search {
   flex: 1;
   min-width: 0;
   padding: 0.35rem 0.6rem;
-  font: inherit;
-  font-size: 0.85rem;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  background: transparent;
+  font-family: var(--font-mono);
+  /* font-size: 0.85rem; */
+  border: none;
+  /* border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
   color: inherit;
 }
 
-.store-search:focus {
+.apps-search:focus {
   outline: none;
   border-color: color-mix(in srgb, currentColor 50%, transparent);
 }
 
-.store-refresh,
-.store-relays-toggle {
-  flex-shrink: 0;
-  padding: 0.3rem 0.65rem;
-  font-size: 0.95rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.store-refresh:hover,
-.store-relays-toggle:hover {
-  background: color-mix(in srgb, currentColor 10%, transparent);
-}
-
-.store-refresh.spinning {
-  animation: store-spin 0.8s linear infinite;
-}
-
-@keyframes store-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.store-relays {
+/* Relay editor: a <details> below the search. Collapsed shows just the
+   "edit relays" summary; expanded becomes a bordered box with the textarea. */
+.apps-relays {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+.apps-relays[open] {
   padding: 0.5rem;
   border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
   border-radius: 6px;
 }
 
-.store-relays[hidden] {
-  display: none;
+.apps-relays > summary {
+  width: fit-content;
+  cursor: pointer;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  opacity: 0.7;
+  user-select: none;
 }
 
-.store-relays-label {
+.apps-relays > summary:hover {
+  opacity: 1;
+}
+
+.apps-relays-label {
   font-size: 0.72rem;
   opacity: 0.7;
 }
 
-.store-relays-input {
+.apps-relays-input {
   width: 100%;
   box-sizing: border-box;
   font-family: var(--font-mono);
@@ -1681,39 +1701,23 @@ body.napp-dragging .napp-body iframe {
   resize: vertical;
 }
 
-.store-relays-input:focus {
+.apps-relays-input:focus {
   outline: none;
   border-color: color-mix(in srgb, currentColor 50%, transparent);
 }
 
-.store-relays-actions {
+.apps-relays-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.3rem;
 }
 
-.store-relays-actions button {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.78rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.store-relays-save {
-  background: var(--text) !important;
-  color: var(--surface) !important;
-  border-color: var(--text) !important;
-}
-
-.store-status {
+.apps-status {
   font-size: 0.75rem;
   opacity: 0.65;
 }
 
-.store-empty {
+.apps-empty {
   padding: 1rem 0.5rem;
   text-align: center;
   opacity: 0.55;
@@ -1721,12 +1725,12 @@ body.napp-dragging .napp-body iframe {
 }
 
 /* ─── store filter chips & installed state ──────────────────── */
-.store-filters {
+.apps-filters {
   display: flex;
   gap: 0.3rem;
 }
 
-.store-filters button {
+.apps-filters button {
   flex: 1;
   padding: 0.3rem 0.5rem;
   font-size: 0.78rem;
@@ -1738,29 +1742,17 @@ body.napp-dragging .napp-body iframe {
   text-transform: lowercase;
 }
 
-.store-filters button:hover {
+.apps-filters button:hover {
   background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
-.store-filters button.active {
+.apps-filters button.active {
   background: var(--text);
   color: var(--surface);
   border-color: var(--text);
 }
 
-.store-install.installed {
-  background: transparent !important;
-  color: inherit !important;
-  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
-}
-
-.store-install.installed:hover {
-  background: #c0392b !important;
-  color: white !important;
-  border-color: #c0392b !important;
-}
-
-.store-section-heading {
+.apps-section-heading {
   margin: 1rem 0 0.25rem;
   font-size: 0.7rem;
   font-weight: 600;
@@ -1771,7 +1763,7 @@ body.napp-dragging .napp-body iframe {
   padding-top: 0.6rem;
 }
 
-.store-empty.store-empty-thin {
+.apps-empty.apps-empty-thin {
   padding: 0.4rem 0.5rem;
   font-style: normal;
   text-align: left;
@@ -1792,20 +1784,8 @@ body.napp-dragging .napp-body iframe {
   background: color-mix(in srgb, currentColor 15%, transparent);
 }
 
-.store-install.update-available {
-  background: #f59e0b;
-  color: #1a1a1a;
-  border: 0;
-  font-weight: 600;
-}
-
-.store-install.update-available:hover {
-  background: #d97706;
-  color: white;
-}
-
 /* When an update is available we show update + uninstall side by side. */
-.store-actions {
+.apps-actions {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -1813,7 +1793,7 @@ body.napp-dragging .napp-body iframe {
 }
 
 /* ─── store: NIP-5B listing extras ─────────────────────────────── */
-.store-card-icon {
+.apps-card-icon {
   width: 40px;
   height: 40px;
   flex-shrink: 0;
@@ -1822,21 +1802,21 @@ body.napp-dragging .napp-body iframe {
   background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
-.store-chips {
+.apps-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
   margin-top: 0.1rem;
 }
 
-.store-handlers {
+.apps-handlers {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
   margin-top: 0.1rem;
 }
 
-.store-chip {
+.apps-chip {
   font-size: 0.7rem;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
@@ -1846,22 +1826,22 @@ body.napp-dragging .napp-body iframe {
   word-break: break-all;
 }
 
-.store-chip-category {
+.apps-chip-category {
   text-transform: capitalize;
   background: color-mix(in srgb, currentColor 6%, transparent);
 }
 
-.store-chip-tag {
+.apps-chip-tag {
   opacity: 0.75;
   font-family: var(--font-mono);
 }
 
-.store-chip-handler {
+.apps-chip-handler {
   font-family: var(--font-mono);
   background: color-mix(in srgb, #3182ce 18%, transparent);
 }
 
-.store-card-menu-trigger {
+.apps-card-menu-trigger {
   background: none;
   border: none;
   color: color-mix(in srgb, currentColor 40%, transparent);
@@ -1872,11 +1852,11 @@ body.napp-dragging .napp-body iframe {
   line-height: 1;
 }
 
-.store-card-menu-trigger:hover {
+.apps-card-menu-trigger:hover {
   color: color-mix(in srgb, currentColor 70%, transparent);
 }
 
-.store-card-menu {
+.apps-card-menu {
   position: absolute;
   right: 0.5rem;
   top: 2.2rem;
@@ -1888,7 +1868,7 @@ body.napp-dragging .napp-body iframe {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.store-card-menu button {
+.apps-card-menu button {
   display: block;
   width: 100%;
   background: none;
@@ -1902,7 +1882,7 @@ body.napp-dragging .napp-body iframe {
   font-family: inherit;
 }
 
-.store-card-menu button:hover {
+.apps-card-menu button:hover {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
@@ -2003,15 +1983,6 @@ body.napp-dragging .napp-body iframe {
   justify-content: flex-end;
 }
 
-.handler-cancel {
-  padding: 0.4rem 0.8rem;
-  color: inherit;
-  background: transparent;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
 /* ─── settings: account section ────────────────────────────────── */
 .settings-account-connected {
   display: grid;
@@ -2046,36 +2017,6 @@ body.napp-dragging .napp-body iframe {
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-}
-
-.settings-disconnect-btn,
-.settings-connect-extension,
-.settings-connect-bunker-toggle,
-.settings-connect-google,
-.settings-bunker-submit,
-.settings-bunker-cancel {
-  padding: 0.3rem 0.7rem;
-  font-size: 0.85rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.settings-disconnect-btn:hover,
-.settings-connect-extension:hover,
-.settings-connect-bunker-toggle:hover,
-.settings-connect-google:hover,
-.settings-bunker-submit:hover,
-.settings-bunker-cancel:hover {
-  background: var(--text);
-  color: var(--surface);
-}
-
-.settings-connect-google:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 /* The google button + its error sit on their own row of the disconnected
@@ -2127,21 +2068,9 @@ body.napp-dragging .napp-body iframe {
 }
 
 /* ─── settings: reset ──────────────────────────────────────────── */
+/* Appearance comes from .btn .btn-danger; this keeps only its grid placement. */
 .settings-reset-btn {
-  padding: 0.3rem 0.7rem;
-  font-size: 0.85rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
   justify-self: start;
-}
-
-.settings-reset-btn:hover {
-  background: #c0392b;
-  color: white;
-  border-color: #c0392b;
 }
 
 /* ─── uploader ─────────────────────────────────────────────────── */
@@ -2229,22 +2158,6 @@ body.napp-dragging .napp-body iframe {
   gap: 0.3rem;
 }
 
-.upload-relays-actions button {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.78rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.upload-relays-save {
-  background: var(--text) !important;
-  color: var(--surface) !important;
-  border-color: var(--text) !important;
-}
-
 .upload-status {
   font-size: 0.75rem;
   opacity: 0.65;
@@ -2280,24 +2193,9 @@ body.napp-dragging .napp-body iframe {
   overflow-y: auto;
 }
 
+/* Appearance from .btn .btn-primary; this keeps only its placement. */
 .upload-publish {
-  padding: 0.35rem 0.7rem;
-  font-size: 0.85rem;
-  background: var(--text);
-  color: var(--surface);
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
   align-self: flex-start;
-}
-
-.upload-publish:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.upload-publish:hover:not(:disabled) {
-  background: color-mix(in srgb, currentColor 85%, transparent);
 }
 
 /* app info */

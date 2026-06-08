@@ -8,13 +8,15 @@ import { naddrEncode } from "@nostr/tools/nip19"
 import "nostr-web-components"
 
 import type { SystemCtx } from "../types.js"
-import { getDevHandle } from "../sandbox/host.js"
+import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
 import { readOpen } from "../persistence.js"
 import { getHandlers, dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NostrEvent } from "@nostr/tools"
+import { selectApp, type AppInfoParams } from "./appinfo.js"
+import { button, type ButtonVariant } from "./ui.js"
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
 
@@ -27,6 +29,14 @@ export function mount(
 ) {
   let currentTab = "installed"
   let discoverFetched = false
+
+  // ─── Installed tab state ───
+  let installedFilter = ""
+  let _installedListEl: HTMLElement | null = null
+  // Signature of the installed app set; used to skip needless rebuilds (which
+  // would collapse any open <details>) when the apps-changed signal fires for
+  // unrelated reasons (e.g. a window moved).
+  let _installedSig = ""
 
   // ─── Discover tab state ───
   let filter = ""
@@ -67,146 +77,170 @@ export function mount(
 
   // ─── Installed tab ─────────────────────────────────────────────
 
-  function renderInstalled() {
-    contentEl.innerHTML = `<div class="apps-list"></div>`
-    const listEl = contentEl.querySelector(".apps-list")!
-    const apps = ctx.apps.list()
+  // Best-effort icon for an installed app: absolute URLs pass through; a path
+  // (e.g. "/icon.svg") resolves against the napp's own origin (served by its
+  // SW). Falls back to a placeholder on error.
+  function installedIconUrl(app: any): string | null {
+    const icon = app.icon
+    if (!icon || typeof icon !== "string") return null
+    if (/^https?:\/\//.test(icon)) return icon
+    return `${nappOriginFor(app.nappId)}${icon.startsWith("/") ? "" : "/"}${icon}`
+  }
 
-    if (apps.length === 0) {
-      const empty = document.createElement("div")
-      empty.className = "apps-empty"
-      empty.textContent = "No apps installed yet."
-      listEl.appendChild(empty)
-      return
+  function installedButtons(app: any): HTMLElement[] {
+    if (app.nappId.startsWith("dev~")) {
+      return [
+        button({
+          label: "publish",
+          variant: "outline",
+          onClick: () => ctx.launchSystemNapp("uploader", { params: getDevHandle(app.nappId) })
+        })
+      ]
     }
+    if (app.nappId.startsWith("temp~")) {
+      const inst = button({ label: "install", variant: "primary" })
+      inst.addEventListener("click", async () => {
+        inst.disabled = true
+        inst.textContent = "installing…"
+        try {
+          const raw = app.nappId.slice(5)
+          ctx.setStatus?.(`Apps: installing ${raw}…`)
+          await ctx.install(raw)
+          ctx.setStatus?.(`Apps: installed ${raw}`)
+          renderInstalledList()
+        } catch (err: any) {
+          ctx.setStatus?.(`Apps: install failed for ${app.nappId}: ${err?.message || String(err)}`)
+          inst.disabled = false
+          inst.textContent = "error"
+          inst.title = err?.message || String(err)
+          setTimeout(() => {
+            inst.textContent = "install"
+            inst.removeAttribute("title")
+          }, 3000)
+        }
+      })
+      return [inst]
+    }
+    const del = button({ label: "delete", variant: "danger" })
+    del.addEventListener("click", async () => {
+      ctx.setStatus?.(`Apps: delete requested for ${app.nappId}`)
+      const ok = window.confirm(
+        `Delete ${app.petname || app.title || app.nappId}?\n\nThis closes every open window of this app and erases all of its data — files, settings, permissions, and any storage it created. This cannot be undone.`
+      )
+      if (!ok) {
+        ctx.setStatus?.(`Apps: delete cancelled for ${app.nappId}`)
+        return
+      }
+      del.disabled = true
+      del.textContent = "deleting…"
+      try {
+        ctx.setStatus?.(`Apps: deleting ${app.nappId}…`)
+        await ctx.uninstall(app.nappId)
+        ctx.setStatus?.(`Apps: delete finished for ${app.nappId}`)
+      } catch (err: any) {
+        ctx.setStatus?.(`Apps: delete failed for ${app.nappId}: ${err?.message || String(err)}`)
+        del.disabled = false
+        del.textContent = "error"
+        del.title = err?.message || String(err)
+        setTimeout(() => {
+          del.textContent = "delete"
+          del.removeAttribute("title")
+        }, 3000)
+      }
+    })
+    return [del]
+  }
 
+  // Rebuilds only the card list, preserving the search input. Called on
+  // keystroke and when the installed set changes.
+  function renderInstalledList() {
+    const listEl = _installedListEl
+    if (!listEl) return
+    listEl.innerHTML = ""
+    const apps = ctx.apps.list()
+    _installedSig = apps.map(a => a.nappId).join(",")
+    const needle = installedFilter.trim().toLowerCase()
+    const frag = document.createDocumentFragment()
+    let shown = 0
     for (const app of apps) {
-      const card = document.createElement("div")
-      card.className = "apps-card"
-
-      const head = document.createElement("div")
-      head.className = "apps-card-head"
-
-      const titles = document.createElement("div")
-      titles.className = "apps-card-titles"
-
-      const name = document.createElement("h3")
-      name.className = "apps-title"
-      name.textContent = app.petname || app.title || app.nappId
-      titles.appendChild(name)
-
-      const meta = document.createElement("div")
-      meta.className = "apps-meta"
-
-      const idEl = document.createElement("code")
-      idEl.className = "apps-napp-id"
-      idEl.textContent = app.nappId
-      meta.appendChild(idEl)
-
+      const actions = getHandlers(app.nappId)
+      const title = app.petname || app.title || app.nappId
+      const author = app.event?.pubkey || null
+      // Apps without a manifest (no publisher): show a type label + install date
+      // in place of author + publish date.
+      const authorLabel = author
+        ? null
+        : app.nappId.startsWith("dev~")
+          ? "dev"
+          : app.nappId.startsWith("temp~")
+            ? "temp"
+            : "local"
+      const createdAt = app.event?.created_at || app.installedAt || null
+      const search = haystackFrom([title, app.title, app.nappId, author, ...actions])
+      if (needle && !search.includes(needle)) continue
+      shown++
       const openCount = readOpen().filter(s => s.nappId === app.nappId).length
+      const metaExtras: HTMLElement[] = []
       if (openCount > 0) {
         const openEl = document.createElement("span")
         openEl.textContent = `${openCount} open`
-        meta.appendChild(openEl)
+        metaExtras.push(openEl)
       }
-
-      if (app.event?.created_at) {
-        const dateEl = document.createElement("span")
-        dateEl.textContent = new Date(app.event.created_at * 1000).toLocaleDateString()
-        meta.appendChild(dateEl)
-      }
-
-      titles.appendChild(meta)
-
-      const h = getHandlers(app.nappId)
-      if (h.length > 0) {
-        const handlers = document.createElement("div")
-        handlers.className = "apps-handlers"
-        for (const action of h) {
-          const chip = document.createElement("span")
-          chip.className = "apps-handler"
-          chip.textContent = action
-          handlers.appendChild(chip)
-        }
-        titles.appendChild(handlers)
-      }
-
-      const actions = document.createElement("div")
-      actions.className = "apps-actions"
-
-      if (app.nappId.startsWith("dev~")) {
-        const pub = document.createElement("button")
-        pub.type = "button"
-        pub.textContent = "publish"
-        pub.addEventListener("mouseup", () => {
-          ctx.launchSystemNapp("uploader", { params: getDevHandle(app.nappId) })
-        })
-        actions.appendChild(pub)
-      } else if (app.nappId.startsWith("temp~")) {
-        const inst = document.createElement("button")
-        inst.type = "button"
-        inst.textContent = "install"
-        inst.addEventListener("mouseup", async () => {
-          inst.disabled = true
-          inst.textContent = "installing…"
-          try {
-            const raw = app.nappId.slice(5)
-            ctx.setStatus?.(`Apps: installing ${raw}…`)
-            await ctx.install(raw)
-            ctx.setStatus?.(`Apps: installed ${raw}`)
-            renderInstalled()
-          } catch (err: any) {
-            ctx.setStatus?.(
-              `Apps: install failed for ${app.nappId}: ${err?.message || String(err)}`
-            )
-            inst.disabled = false
-            inst.textContent = "error"
-            inst.title = err?.message || String(err)
-            setTimeout(() => {
-              inst.textContent = "install"
-              inst.removeAttribute("title")
-            }, 3000)
+      frag.appendChild(
+        renderAppCard({
+          nappId: app.nappId,
+          title,
+          iconUrl: installedIconUrl(app),
+          authorPubkey: author,
+          authorLabel,
+          createdAt,
+          actions,
+          search,
+          buttons: installedButtons(app),
+          metaExtras,
+          onAuthorClick: author
+            ? () => dispatchAction("apps", "profile", author).catch(() => {})
+            : undefined,
+          onOpen: () => {
+            selectApp({
+              nappId: app.nappId,
+              title,
+              iconUrl: installedIconUrl(app),
+              authorPubkey: author,
+              authorLabel,
+              createdAt,
+              actions,
+              event: app.event || null
+            })
+            ctx.launchSystemNapp("appinfo")
           }
         })
-        actions.appendChild(inst)
-      } else {
-        const del = document.createElement("button")
-        del.type = "button"
-        del.textContent = "delete"
-        del.addEventListener("mouseup", async () => {
-          ctx.setStatus?.(`Apps: delete requested for ${app.nappId}`)
-          const ok = window.confirm(
-            `Delete ${app.petname || app.title || app.nappId}?\n\nThis closes every open window of this app and erases all of its data — files, settings, permissions, and any storage it created. This cannot be undone.`
-          )
-          if (!ok) {
-            ctx.setStatus?.(`Apps: delete cancelled for ${app.nappId}`)
-            return
-          }
-          del.disabled = true
-          del.textContent = "deleting…"
-          try {
-            ctx.setStatus?.(`Apps: deleting ${app.nappId}…`)
-            await ctx.uninstall(app.nappId)
-            ctx.setStatus?.(`Apps: delete finished for ${app.nappId}`)
-          } catch (err: any) {
-            ctx.setStatus?.(`Apps: delete failed for ${app.nappId}: ${err?.message || String(err)}`)
-            del.disabled = false
-            del.textContent = "error"
-            del.title = err?.message || String(err)
-            setTimeout(() => {
-              del.textContent = "delete"
-              del.removeAttribute("title")
-            }, 3000)
-          }
-        })
-        actions.appendChild(del)
-      }
-
-      head.append(titles, actions)
-      card.appendChild(head)
-
-      listEl!.appendChild(card)
+      )
     }
+    listEl.appendChild(frag)
+    if (apps.length === 0 || shown === 0) {
+      const empty = document.createElement("div")
+      empty.className = "apps-empty"
+      empty.textContent = apps.length === 0 ? "No apps installed yet." : "No matches."
+      listEl.appendChild(empty)
+    }
+  }
+
+  function renderInstalled() {
+    contentEl.innerHTML = `
+      <div class="apps-toolbar">
+        <input class="apps-search" type="search" placeholder="Search name, action, id…" />
+      </div>
+      <div class="apps-list"></div>
+    `
+    const searchEl = contentEl.querySelector(".apps-search") as HTMLInputElement
+    _installedListEl = contentEl.querySelector(".apps-list") as HTMLElement
+    searchEl.value = installedFilter
+    searchEl.addEventListener("input", () => {
+      installedFilter = searchEl.value
+      renderInstalledList()
+    })
+    renderInstalledList()
   }
 
   // ─── Discover tab ──────────────────────────────────────────────
@@ -241,7 +275,7 @@ export function mount(
           const servers = res?.items ?? []
           if (servers.length === 0) return
           const icons = _listEl!.querySelectorAll(
-            `[data-author="${evt.pubkey}"] .store-card-icon[data-icon-sha]`
+            `[data-author="${evt.pubkey}"] .apps-card-icon[data-icon-sha]`
           ) as unknown as HTMLImageElement[]
           for (const img of icons) {
             const sha = img.dataset.iconSha!
@@ -277,9 +311,9 @@ export function mount(
   // so it short-circuits instead of counting every card.
   function refreshEmptyState() {
     if (!_listEl) return
-    const hasAnyCard = !!_listEl.querySelector(".store-card")
-    const hasVisible = !!_listEl.querySelector(".store-card:not([hidden])")
-    const existing = _listEl.querySelector(".store-empty") as HTMLElement | null
+    const hasAnyCard = !!_listEl.querySelector(".apps-card")
+    const hasVisible = !!_listEl.querySelector(".apps-card:not([hidden])")
+    const existing = _listEl.querySelector(".apps-empty") as HTMLElement | null
     const msg = !hasAnyCard ? "No napps found." : !hasVisible ? "No matches." : null
     if (!msg) {
       existing?.remove()
@@ -289,7 +323,7 @@ export function mount(
       existing.textContent = msg
     } else {
       const empty = document.createElement("div")
-      empty.className = "store-empty"
+      empty.className = "apps-empty"
       empty.textContent = msg
       _listEl.appendChild(empty)
     }
@@ -300,7 +334,7 @@ export function mount(
   function applyFilter() {
     if (!_listEl) return
     const needle = filter.trim().toLowerCase()
-    const cards = _listEl.querySelectorAll(".store-card") as NodeListOf<HTMLElement>
+    const cards = _listEl.querySelectorAll(".apps-card") as NodeListOf<HTMLElement>
     for (const card of cards) {
       card.hidden = needle ? !(card.dataset.search || "").includes(needle) : false
     }
@@ -347,7 +381,7 @@ export function mount(
     const toRender = sortedManifests(batch)
     if (toRender.length === 0) return
     // Drop the placeholder before the merge so the ref walk only sees cards.
-    _listEl.querySelector(".store-empty")?.remove()
+    _listEl.querySelector(".apps-empty")?.remove()
 
     // Merge the sorted-desc batch into the sorted-desc list. Both are ordered
     // newest-first, so a single forward walk of the existing cards inserts each
@@ -427,32 +461,29 @@ export function mount(
 
   function renderDiscover() {
     contentEl.innerHTML = `
-      <div class="store-panel">
-        <div class="store-toolbar">
-          <input class="store-search" type="search" placeholder="Search title, description, npub…" />
-          <button type="button" class="store-relays-toggle" title="Configure relays">⚙</button>
-        </div>
-        <div class="store-relays" hidden>
-          <label class="store-relays-label">Relays (one per line — leave empty to use your kind 10002, or fall back to defaults)</label>
-          <textarea class="store-relays-input" rows="4" spellcheck="false"></textarea>
-          <div class="store-relays-actions">
-            <button type="button" class="store-relays-save">save &amp; refresh</button>
-            <button type="button" class="store-relays-clear">clear</button>
-          </div>
-        </div>
-        <div class="store-status" hidden></div>
-        <div class="store-list"></div>
+      <div class="apps-toolbar">
+        <input class="apps-search" type="search" placeholder="Search title, description, npub…" />
       </div>
+      <details class="apps-relays">
+        <summary>edit relays</summary>
+        <label class="apps-relays-label">Relays (one per line — leave empty to use your kind 10002, or fall back to defaults)</label>
+        <textarea class="apps-relays-input" rows="4" spellcheck="false"></textarea>
+        <div class="apps-relays-actions">
+          <button type="button" class="btn btn-primary apps-relays-save">save &amp; refresh</button>
+          <button type="button" class="btn btn-outline apps-relays-clear">clear</button>
+        </div>
+      </details>
+      <div class="apps-status" hidden></div>
+      <div class="apps-list"></div>
     `
 
-    _statusEl = contentEl.querySelector(".store-status") as HTMLElement
-    _listEl = contentEl.querySelector(".store-list") as HTMLElement
-    const searchEl = contentEl.querySelector(".store-search") as HTMLInputElement
-    const relaysToggleBtn = contentEl.querySelector(".store-relays-toggle") as HTMLElement
-    const relaysPanel = contentEl.querySelector(".store-relays") as HTMLElement
-    const relaysInput = contentEl.querySelector(".store-relays-input") as HTMLInputElement
-    const relaysSaveBtn = contentEl.querySelector(".store-relays-save") as HTMLElement
-    const relaysClearBtn = contentEl.querySelector(".store-relays-clear") as HTMLElement
+    _statusEl = contentEl.querySelector(".apps-status") as HTMLElement
+    _listEl = contentEl.querySelector(".apps-list") as HTMLElement
+    const searchEl = contentEl.querySelector(".apps-search") as HTMLInputElement
+    const relaysPanel = contentEl.querySelector(".apps-relays") as HTMLDetailsElement
+    const relaysInput = contentEl.querySelector(".apps-relays-input") as HTMLInputElement
+    const relaysSaveBtn = contentEl.querySelector(".apps-relays-save") as HTMLElement
+    const relaysClearBtn = contentEl.querySelector(".apps-relays-clear") as HTMLElement
 
     relaysInput.value = relays.join("\n")
     // Re-seed the search box from the persisted filter so switching away to the
@@ -467,16 +498,12 @@ export function mount(
       applyFilter()
     })
 
-    relaysToggleBtn.addEventListener("click", () => {
-      relaysPanel.hidden = !relaysPanel.hidden
-    })
-
     relaysSaveBtn.addEventListener("click", () => {
       relays = sanitizeRelays(relaysInput.value.split("\n"))
       if (relays.length === 0) relays = [...DEFAULT_RELAYS]
       relaysInput.value = relays.join("\n")
       emitDiscoverState()
-      relaysPanel.hidden = true
+      relaysPanel.open = false
       startDiscoverSubscription()
     })
 
@@ -484,7 +511,7 @@ export function mount(
       relays = [...DEFAULT_RELAYS]
       relaysInput.value = relays.join("\n")
       emitDiscoverState()
-      relaysPanel.hidden = true
+      relaysPanel.open = false
       startDiscoverSubscription()
     })
 
@@ -508,7 +535,12 @@ export function mount(
 
   render()
   const unsub = ctx.apps.subscribe(() => {
-    if (currentTab === "installed") renderInstalled()
+    if (currentTab !== "installed") return
+    // Only rebuild when the set of installed apps actually changed — otherwise
+    // an unrelated apps-changed signal (fired on window moves) would collapse
+    // any <details> the user just opened.
+    if (ctx.apps.list().map(a => a.nappId).join(",") === _installedSig) return
+    renderInstalledList()
   })
 
   return {
@@ -521,64 +553,133 @@ export function mount(
   }
 }
 
-// ─── Detail rendering for installed app cards ────────────────────
 
-async function renderDetail(evt: any): Promise<string> {
-  const pubkey = evt.pubkey
-  const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1] || ""
-  const description = evt.tags.find((t: any) => t[0] === "description")?.[1] || ""
-  const source = evt.tags.find((t: any) => t[0] === "source")?.[1] || ""
-  const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
-  const serverTagUrls = evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1])
-  const blossomServers =
-    pathTags.length > 0
-      ? (await loadBlossomServers(pubkey).catch(() => ({ items: [] as string[] }))).items
-      : []
-  const servers = [...new Set([...serverTagUrls, ...blossomServers])]
-  const createdAt = evt.created_at
-  const actionHandlers = evt.tags.filter((t: any) => t[0] === "action").map((t: any) => t[1])
+// ─── Unified app card (Installed + Discover render the same shape) ──
 
-  return `
-    <div class="apps-detail-section">
-      ${dTag ? `<div class="apps-detail-row"><span>d-tag:</span> <code>${esc(dTag)}</code></div>` : ""}
-      ${createdAt ? `<div class="apps-detail-row"><span>created at:</span> <span>${new Date(createdAt * 1000).toLocaleString()}</span></div>` : ""}
-      ${source ? `<div class="apps-detail-row"><span>source:</span> <a href="${esc(source)}" target="_blank" rel="noopener noreferrer">${esc(source)}</a></div>` : ""}
+interface AppCardOpts {
+  nappId: string
+  title: string
+  iconSha?: string | null
+  iconMime?: string | null
+  iconUrl?: string | null
+  authorPubkey?: string | null
+  authorLabel?: string | null // plain text shown in place of author (e.g. "local")
+  createdAt?: number | null
+  actions: string[]
+  search: string
+  buttons: HTMLElement[]
+  menuTrigger?: HTMLElement | null
+  metaExtras?: HTMLElement[]
+  onAuthorClick?: () => void
+  onOpen?: () => void // clicking the card (away from buttons/author) opens full info
+}
 
-    </div>
-    ${description ? `<div class="apps-detail-section"><p class="apps-detail-desc">${esc(description)}</p></div>` : ""}
-    ${
-      pathTags.length > 0
-        ? `
-      <div class="apps-detail-section">
-        <div class="apps-detail-row"><span>files (${pathTags.length}):</span></div>
-        <ul class="apps-detail-files">
-          ${pathTags
-            .map((t: string[]) => {
-              const path = t[1]
-              const sha = t[2]
-              return `<li><code>${esc(path)}</code> ${servers
-                .map((url: string) => {
-                  let hostname = new URL(url).host
-                  return `<a href="${url}/${sha}" target="_blank" rel="noopener noreferrer">${esc(hostname)}</a>`
-                })
-                .join(" ")}</li>`
-            })
-            .join("")}
-        </ul>
-      </div>
-      `
-        : ""
+// One card shape for both tabs: head (icon · title · meta · action chips ·
+// buttons) plus a collapsed <details> built lazily on first expand. data-*
+// attributes drive filtering (search), sorted insertion (createdAt) and icon
+// resolution (author).
+function renderAppCard(o: AppCardOpts): HTMLElement {
+  const card = document.createElement("div")
+  card.className = "apps-card"
+  card.dataset.nappId = o.nappId
+  if (o.authorPubkey) card.dataset.author = o.authorPubkey
+  if (o.createdAt) card.dataset.createdAt = String(o.createdAt)
+  card.dataset.search = o.search
+
+  const head = document.createElement("div")
+  head.className = "apps-card-head"
+
+  if (o.iconSha || o.iconUrl) {
+    const icon = document.createElement("img")
+    icon.className = "apps-card-icon"
+    icon.alt = ""
+    if (o.iconSha) {
+      icon.dataset.iconSha = o.iconSha
+      if (o.iconMime) icon.dataset.iconMime = o.iconMime
+      icon.src = PLACEHOLDER_SRC
+    } else {
+      icon.src = o.iconUrl!
+      icon.addEventListener("error", () => {
+        icon.src = PLACEHOLDER_SRC
+      })
     }
-    ${
-      actionHandlers.length > 0
-        ? `
-      <div class="apps-detail-section apps-detail-handlers">
-        ${actionHandlers.map((h: any) => `<span class="apps-handler">${esc(h)}</span>`).join("")}
-      </div>
-      `
-        : ""
+    head.appendChild(icon)
+  }
+
+  const titles = document.createElement("div")
+  titles.className = "apps-card-titles"
+
+  const h = document.createElement("h3")
+  h.className = "apps-title"
+  h.textContent = o.title
+  titles.appendChild(h)
+
+  const meta = document.createElement("div")
+  meta.className = "apps-meta"
+  if (o.authorPubkey) {
+    const author = document.createElement("span")
+    author.className = "apps-author"
+    if (o.onAuthorClick) {
+      author.style.cursor = "pointer"
+      author.addEventListener("click", e => {
+        e.stopPropagation()
+        o.onAuthorClick!()
+      })
     }
-  `
+    const pic = document.createElement("nostr-picture")
+    pic.className = "apps-author-pic"
+    pic.setAttribute("pubkey", o.authorPubkey)
+    const name = document.createElement("nostr-name")
+    name.className = "apps-author-name"
+    name.setAttribute("pubkey", o.authorPubkey)
+    author.append(pic, name)
+    meta.appendChild(author)
+  } else if (o.authorLabel) {
+    const label = document.createElement("span")
+    label.className = "apps-author apps-author-label"
+    label.textContent = o.authorLabel
+    meta.appendChild(label)
+  }
+  if (o.createdAt) {
+    const dateEl = document.createElement("span")
+    dateEl.className = "apps-date"
+    dateEl.textContent = new Date(o.createdAt * 1000).toLocaleDateString()
+    meta.appendChild(dateEl)
+  }
+  for (const el of o.metaExtras || []) meta.appendChild(el)
+  if (meta.childElementCount) titles.appendChild(meta)
+
+  if (o.actions.length) {
+    const chips = document.createElement("div")
+    chips.className = "apps-handlers"
+    for (const a of o.actions) {
+      const chip = document.createElement("span")
+      chip.className = "apps-handler"
+      chip.textContent = a
+      chips.appendChild(chip)
+    }
+    titles.appendChild(chips)
+  }
+
+  const actions = document.createElement("div")
+  actions.className = "apps-actions"
+  for (const b of o.buttons) actions.appendChild(b)
+  if (o.menuTrigger) actions.appendChild(o.menuTrigger)
+
+  head.append(titles, actions)
+  card.appendChild(head)
+
+  // Clicking the card (anywhere but a button or the author) opens the full-info
+  // window. The card itself stays minimal — no inline details.
+  if (o.onOpen) {
+    card.classList.add("apps-card-clickable")
+    card.addEventListener("click", e => {
+      if ((e.target as Element).closest("button, a, .apps-author")) return
+      o.onOpen!()
+    })
+  }
+
+  return card
 }
 
 // ─── Discover card rendering ─────────────────────────────────────
@@ -586,9 +687,6 @@ async function renderDetail(evt: any): Promise<string> {
 function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange: any = null) {
   const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || ""
   const dTag = tag("d")
-  const source = tag("source")
-  const date = new Date(evt.created_at * 1000).toLocaleDateString()
-  const pathCount = evt.tags.filter((t: any) => t[0] === "path").length
   const nappId = computeNappId(evt)
   const installed = ctx.isInstalled?.(nappId) ?? false
   const installedEvents = ctx.apps.events?.() ?? []
@@ -596,7 +694,6 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
   const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
 
   const title = tag("title")
-  const description = tag("description")
   const iconTag = evt.tags.find((t: any) => t[0] === "icon")
   const iconSha = iconTag?.[1]
   const iconMime = iconTag?.[2]
@@ -607,67 +704,9 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     identifier: dTag,
     relays: seenOnRelays
   })
-  const categoryTags = evt.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
-  const hashtags = evt.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1])
 
-  const card = document.createElement("div")
-  card.className = "store-card"
-  card.dataset.author = evt.pubkey
-  // Sort key for incremental insertion (newest first); see flushPending.
-  card.dataset.createdAt = String(evt.created_at)
-  // Search key for show/hide filtering without rebuilding; see applyFilter.
-  card.dataset.search = searchHaystack(evt)
-
-  const head = document.createElement("div")
-  head.className = "store-card-head"
-
-  if (iconSha) {
-    const icon = document.createElement("img")
-    icon.className = "store-card-icon"
-    icon.alt = ""
-    icon.dataset.iconSha = iconSha
-    if (iconMime) icon.dataset.iconMime = iconMime
-    icon.src = PLACEHOLDER_SRC
-    head.appendChild(icon)
-  }
-
-  const titles = document.createElement("div")
-  titles.className = "store-card-titles"
-
-  const h = document.createElement("h3")
-  h.className = "store-title"
-  h.textContent = title || `(${dTag})`
-  titles.appendChild(h)
-
-  const meta = document.createElement("div")
-  meta.className = "store-meta"
-
-  const author = document.createElement("span")
-  author.className = "store-author"
-  author.style.cursor = "pointer"
-  author.addEventListener("click", e => {
-    e.stopPropagation()
-    dispatchAction("apps", "profile", evt.pubkey).catch(() => {})
-  })
-  const pic = document.createElement("nostr-picture")
-  pic.className = "store-author-pic"
-  pic.setAttribute("pubkey", evt.pubkey)
-  const name = document.createElement("nostr-name")
-  name.className = "store-author-name"
-  name.setAttribute("pubkey", evt.pubkey)
-  author.append(pic, name)
-
-  const dateEl = document.createElement("span")
-  dateEl.className = "store-date"
-  dateEl.textContent = date
-
-  // Keep the head compact like the Installed tab: just author + date. File
-  // count, relays and everything else move into the <details> below.
-  meta.append(author, dateEl)
-  titles.appendChild(meta)
-
-  const actions = document.createElement("div")
-  actions.className = "store-actions"
+  // Assigned after renderAppCard() returns; menu/buttons close over it.
+  let card: HTMLElement
 
   const currentUser = ctx.account?.getPubkey()
   const isOwn = currentUser && evt.pubkey === currentUser
@@ -690,7 +729,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     }
     menuOpen = true
     menuEl = document.createElement("div")
-    menuEl.className = "store-card-menu"
+    menuEl.className = "apps-card-menu"
     const btn = document.createElement("button")
     btn.type = "button"
     btn.textContent = "request delete"
@@ -727,11 +766,15 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     card.appendChild(menuEl)
   }
 
-  const menuTrigger = document.createElement("button")
-  menuTrigger.type = "button"
-  menuTrigger.className = "store-card-menu-trigger"
-  menuTrigger.textContent = "···"
-  menuTrigger.addEventListener("click", toggleMenu)
+  let menuTrigger: HTMLButtonElement | null = null
+  if (isOwn) {
+    menuTrigger = button({
+      label: "···",
+      variant: "ghost",
+      class: "apps-card-menu-trigger",
+      onClick: toggleMenu
+    })
+  }
 
   const performAction = async (btn: HTMLButtonElement, action: string) => {
     btn.disabled = true
@@ -784,137 +827,57 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     }
   }
 
-  const makeActionBtn = (action: string, className: string) => {
-    const b = document.createElement("button")
-    b.type = "button"
-    b.className = className
-    b.textContent = action
+  const makeActionBtn = (action: string, variant: ButtonVariant) => {
+    const b = button({ label: action, variant })
     b.addEventListener("click", () => performAction(b, action))
     return b
   }
 
-  const makeDisabledBtn = (label: string, className: string) => {
-    const b = document.createElement("button")
-    b.type = "button"
-    b.className = className
-    b.textContent = label
-    b.disabled = true
+  const makeDisabledBtn = (label: string) => {
+    const b = button({ label, variant: "outline", disabled: true })
     b.setAttribute("aria-disabled", "true")
     return b
   }
 
+  const buttons: HTMLElement[] = []
   if (updateAvailable) {
-    actions.append(
-      makeActionBtn("update", "store-install update-available"),
-      makeDisabledBtn("installed", "store-install installed")
-    )
+    buttons.push(makeActionBtn("update", "warning"), makeDisabledBtn("installed"))
   } else if (installed) {
-    actions.append(makeDisabledBtn("installed", "store-install installed"))
+    buttons.push(makeDisabledBtn("installed"))
   } else {
-    actions.append(makeActionBtn("install", "store-install"))
+    buttons.push(makeActionBtn("install", "primary"))
   }
 
-  if (isOwn) actions.append(menuTrigger)
-
-  head.append(titles, actions)
-  card.appendChild(head)
-
-  // Everything beyond the head (which mirrors the Installed tab: title + meta +
-  // actions) is tucked into a collapsed <details> so each discover card stays
-  // compact until expanded.
-  const more = document.createElement("details")
-  more.className = "store-card-more"
-  const summary = document.createElement("summary")
-  summary.className = "store-card-more-summary"
-  summary.textContent = "details"
-  more.appendChild(summary)
-
-  // File count + the relays this manifest was seen on.
-  const moreMeta = document.createElement("div")
-  moreMeta.className = "store-meta store-more-meta"
-  const pathsEl = document.createElement("span")
-  pathsEl.className = "store-paths"
-  pathsEl.textContent = `${pathCount} file${pathCount === 1 ? "" : "s"}`
-  moreMeta.appendChild(pathsEl)
-  for (const relay of seenOnRelays) {
-    const chip = document.createElement("span")
-    chip.className = "store-chip store-chip-relay"
-    chip.textContent = relay.replace(/^wss?:\/\//, "")
-    chip.title = relay
-    moreMeta.appendChild(chip)
-  }
-  more.appendChild(moreMeta)
-
-  if (description) {
-    const desc = document.createElement("p")
-    desc.className = "store-description"
-    desc.textContent = description
-    more.appendChild(desc)
-  }
-
-  if (naddr) {
-    const naddrEl = document.createElement("div")
-    naddrEl.className = "store-naddr"
-    const codeEl = document.createElement("code")
-    codeEl.textContent = naddr
-    naddrEl.appendChild(codeEl)
-    more.appendChild(naddrEl)
-  }
-
-  if (categoryTags.length || hashtags.length) {
-    const chips = document.createElement("div")
-    chips.className = "store-chips"
-    for (const cat of categoryTags) {
-      const chip = document.createElement("span")
-      chip.className = "store-chip store-chip-category"
-      chip.textContent = formatCategory(cat)
-      chip.title = cat
-      chips.appendChild(chip)
+  card = renderAppCard({
+    nappId,
+    title: title || `(${dTag})`,
+    iconSha,
+    iconMime,
+    authorPubkey: evt.pubkey,
+    createdAt: evt.created_at,
+    actions: actionsOf(evt),
+    search: searchHaystack(evt),
+    buttons,
+    menuTrigger,
+    onAuthorClick: () => {
+      dispatchAction("apps", "profile", evt.pubkey).catch(() => {})
+    },
+    onOpen: () => {
+      selectApp({
+        nappId,
+        title: title || `(${dTag})`,
+        iconSha,
+        iconMime,
+        authorPubkey: evt.pubkey,
+        createdAt: evt.created_at,
+        actions: actionsOf(evt),
+        event: evt,
+        naddr,
+        seenOnRelays
+      })
+      ctx.launchSystemNapp("appinfo")
     }
-    for (const t of hashtags) {
-      const chip = document.createElement("span")
-      chip.className = "store-chip store-chip-tag"
-      chip.textContent = `#${t}`
-      chips.appendChild(chip)
-    }
-    more.appendChild(chips)
-  }
-
-  if (source) {
-    const src = document.createElement("a")
-    src.className = "store-source"
-    src.href = source
-    src.target = "_blank"
-    src.rel = "noopener noreferrer"
-    src.textContent = "source ↗"
-    more.appendChild(src)
-  }
-
-  const detailEl = document.createElement("div")
-  detailEl.className = "apps-detail"
-  more.appendChild(detailEl)
-
-  // Lazy: renderDetail awaits loadBlossomServers (a relay round-trip). Defer it
-  // until the user actually expands the <details>, so streaming the list doesn't
-  // fire one relay query per card. Load once, on first open.
-  let detailLoaded = false
-  more.addEventListener("toggle", () => {
-    if (!more.open || detailLoaded) return
-    detailLoaded = true
-    renderDetail(evt).then(html => {
-      detailEl.innerHTML = html
-      const authorEl = detailEl.querySelector(".apps-detail-author") as HTMLElement
-      if (authorEl) {
-        authorEl.style.cursor = "pointer"
-        authorEl.addEventListener("click", e => {
-          e.stopPropagation()
-          dispatchAction("apps", "profile", evt.pubkey).catch(() => {})
-        })
-      }
-    })
   })
-
-  card.appendChild(more)
 
   return card
 }
@@ -925,13 +888,6 @@ function computeNappId(evt: any) {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────
-
-function esc(s: string): string {
-  return String(s).replace(
-    /[&<>"']/g,
-    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string
-  )
-}
 
 function sanitizeRelays(relays: string[]): string[] {
   if (!Array.isArray(relays)) return []
@@ -954,7 +910,8 @@ function searchHaystack(evt: any): string {
         t[0] === "summary" ||
         t[0] === "description" ||
         t[0] === "l" ||
-        t[0] === "t") &&
+        t[0] === "t" ||
+        t[0] === "action") && // fold actions into search so they're filterable
       typeof t[1] === "string"
     ) {
       fields.push(t[1])
@@ -963,14 +920,19 @@ function searchHaystack(evt: any): string {
   return fields.join("\n").toLowerCase()
 }
 
+// Action/handler names a manifest declares.
+function actionsOf(evt: any): string[] {
+  return evt.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
+}
+
+// Build a lowercased search string from arbitrary parts (used by the Installed
+// tab, whose data is an InstalledApp rather than an event).
+function haystackFrom(parts: Array<string | null | undefined>): string {
+  return parts.filter(Boolean).join("\n").toLowerCase()
+}
+
 function matchesFilter(evt: any, filter: string) {
   const needle = filter.trim().toLowerCase()
   if (!needle) return true
   return searchHaystack(evt).includes(needle)
-}
-
-function formatCategory(label: string) {
-  const m = /^napp\.([^:]+):(.+)$/.exec(label)
-  if (!m) return label
-  return `${m[2]} · ${m[1]}`
 }
