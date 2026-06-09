@@ -1,10 +1,11 @@
 import { NostrEvent } from "@nostr/tools"
 import { InstalledApp, NappWindowState, SpaceData, SpacesState } from "./types"
 
-const OPEN_KEY = "nostrapps:open"
 const INSTALLED_KEY = "nostrapps:installed"
 const SPACES_KEY = "nostrapps:spaces"
-const PACK_MODE_KEY = "nostrapps:packMode"
+// Legacy keys — read once to migrate into the spaces document, then removed.
+const LEGACY_OPEN_KEY = "nostrapps:open"
+const LEGACY_PACK_MODE_KEY = "nostrapps:packMode"
 
 function readJson(key: string, fallback: any): any {
   try {
@@ -22,79 +23,104 @@ function sanitizeString(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
 
-// ─── Dev open entries (in-memory only) ──────────────────
-const devOpenEntries: NappWindowState[] = []
+// ─── Open windows: a view onto the current space ────────────────
+// Window state lives in the spaces document (nostrapps:spaces). The "current
+// space's open windows" is just spaces.list[current].open, and readOpen() is a
+// view onto it — so the whole app keeps calling readOpen()/updateOpen() while
+// the spaces document stays the single source of truth. Ephemeral dev~/temp~
+// windows can't be restored, so they're kept in memory only, per space.
+const devOpenBySpace = new Map<string, NappWindowState[]>()
 
 function isEphemeralNappId(nappId: string): boolean {
   return nappId.startsWith("dev~") || nappId.startsWith("temp~")
 }
 
-function readOpenFromStorage(): NappWindowState[] {
-  return readJson(OPEN_KEY, [])
+function ephemeralFor(spaceId: string): NappWindowState[] {
+  let arr = devOpenBySpace.get(spaceId)
+  if (!arr) {
+    arr = []
+    devOpenBySpace.set(spaceId, arr)
+  }
+  return arr
 }
 
-function writeOpenToStorage(napps: NappWindowState[]) {
-  writeJson(OPEN_KEY, napps)
+function currentSpace(state: SpacesState): SpaceData {
+  return state.list.find(s => s.id === state.current) ?? state.list[0]
 }
 
 export function readOpen(): NappWindowState[] {
-  return [...readOpenFromStorage(), ...devOpenEntries]
+  const state = ensureSpaces()
+  return [...currentSpace(state).open, ...ephemeralFor(state.current)]
 }
 
 export function writeOpen(napps: NappWindowState[]) {
+  const state = ensureSpaces()
+  const sp = currentSpace(state)
   const stored: NappWindowState[] = []
-  devOpenEntries.length = 0
-  for (const n of napps) {
-    if (isEphemeralNappId(n.nappId)) {
-      devOpenEntries.push(n)
-    } else {
-      stored.push(n)
+  const eph: NappWindowState[] = []
+  for (const n of napps) (isEphemeralNappId(n.nappId) ? eph : stored).push(n)
+  sp.open = stored
+  devOpenBySpace.set(state.current, eph)
+  writeJson(SPACES_KEY, state)
+}
+
+// Update a window's state wherever it lives — any space, or ephemeral. A
+// brand-new window with no home yet lands in the current space. Space-agnostic
+// so a hidden background-space window updates its own space, never the current.
+export function updateOpen(instanceId: string, state: NappWindowState) {
+  for (const arr of devOpenBySpace.values()) {
+    const i = arr.findIndex(n => n.instanceId === instanceId)
+    if (i >= 0) {
+      arr[i] = { ...arr[i], ...state }
+      return
     }
   }
-  writeOpenToStorage(stored)
-}
-
-export function updateOpen(instanceId: string, state: NappWindowState) {
-  // Check dev entries first
-  const devIdx = devOpenEntries.findIndex(n => n.instanceId === instanceId)
-  if (devIdx >= 0) {
-    devOpenEntries[devIdx] = { ...devOpenEntries[devIdx], ...state }
-    return
-  }
-  // Check if this is an ephemeral nappId — if so, add to in-memory
   if (isEphemeralNappId(state.nappId)) {
-    devOpenEntries.push(state)
+    ephemeralFor(ensureSpaces().current).push(state)
     return
   }
-  // Otherwise use localStorage
-  const stored = readOpenFromStorage()
-  const idx = stored.findIndex(n => n.instanceId === instanceId)
-  if (idx >= 0) {
-    stored[idx] = { ...stored[idx], ...state }
-  } else {
-    stored.push(state)
+  const spaces = ensureSpaces()
+  for (const sp of spaces.list) {
+    const i = sp.open.findIndex(n => n.instanceId === instanceId)
+    if (i >= 0) {
+      sp.open[i] = { ...sp.open[i], ...state }
+      writeJson(SPACES_KEY, spaces)
+      return
+    }
   }
-  writeOpenToStorage(stored)
+  currentSpace(spaces).open.push(state)
+  writeJson(SPACES_KEY, spaces)
 }
 
+// Remove a window wherever it lives — any space, or ephemeral.
 export function removeOpen(instanceId: string) {
-  const devIdx = devOpenEntries.findIndex(n => n.instanceId === instanceId)
-  if (devIdx >= 0) {
-    devOpenEntries.splice(devIdx, 1)
-    return
+  for (const arr of devOpenBySpace.values()) {
+    const i = arr.findIndex(n => n.instanceId === instanceId)
+    if (i >= 0) {
+      arr.splice(i, 1)
+      return
+    }
   }
-  writeOpenToStorage(readOpenFromStorage().filter(n => n.instanceId !== instanceId))
+  const spaces = ensureSpaces()
+  let changed = false
+  for (const sp of spaces.list) {
+    const next = sp.open.filter(n => n.instanceId !== instanceId)
+    if (next.length !== sp.open.length) {
+      sp.open = next
+      changed = true
+    }
+  }
+  if (changed) writeJson(SPACES_KEY, spaces)
 }
 
 export function getLoadedActions(instanceId: string): Array<{ name: string; payload: unknown }> {
   return readOpen().find(n => n.instanceId === instanceId)?.loadedActions || []
 }
 
-// ─── Spaces (saved window configurations) ──────────────────
-// The live/current space's window set stays in `nostrapps:open` (so all the
-// open/* helpers above are unchanged). `nostrapps:spaces` holds the full list of
-// spaces — each with its own `open` snapshot — plus which one is current. A
-// snapshot is written when switching away from a space.
+// ─── Spaces (the single source of truth for window state) ──────────
+// nostrapps:spaces = { current, list: SpaceData[] }. Each space holds its live
+// `open` set and a committed `saved` snapshot. The legacy single nostrapps:open
+// is folded into the document on first read and then removed.
 
 function readSpacesRaw(): SpacesState | null {
   const v = readJson(SPACES_KEY, null)
@@ -109,15 +135,48 @@ function readSpacesRaw(): SpacesState | null {
   return null
 }
 
-// Lazily migrate the legacy single `open` into a "default" space on first use.
+// One-time: fold leftover legacy keys (the old live current-space window set +
+// pack-mode, which may be fresher than the document) into the current space.
+function migrateLegacyOpen(state: SpacesState) {
+  const rawOpen = localStorage.getItem(LEGACY_OPEN_KEY)
+  const rawPack = localStorage.getItem(LEGACY_PACK_MODE_KEY)
+  if (rawOpen == null && rawPack == null) return
+  const cur = currentSpace(state)
+  if (rawOpen != null) {
+    try {
+      const legacy = JSON.parse(rawOpen)
+      if (Array.isArray(legacy)) cur.open = legacy
+    } catch {}
+    localStorage.removeItem(LEGACY_OPEN_KEY)
+  }
+  if (rawPack != null) {
+    cur.packMode = rawPack === "1"
+    localStorage.removeItem(LEGACY_PACK_MODE_KEY)
+  }
+  writeJson(SPACES_KEY, state)
+}
+
 function ensureSpaces(): SpacesState {
   const existing = readSpacesRaw()
-  if (existing) return existing
-  const open = readOpenFromStorage()
-  const packMode = localStorage.getItem(PACK_MODE_KEY) === "1"
-  const def: SpaceData = { id: "default", name: "default", open, saved: open, packMode, savedPackMode: packMode }
+  if (existing) {
+    migrateLegacyOpen(existing)
+    return existing
+  }
+  // Fresh install (or pre-spaces user): seed a default space from any legacy open.
+  const open = readJson(LEGACY_OPEN_KEY, [])
+  const packMode = localStorage.getItem(LEGACY_PACK_MODE_KEY) === "1"
+  const def: SpaceData = {
+    id: "default",
+    name: "default",
+    open,
+    saved: open,
+    packMode,
+    savedPackMode: packMode
+  }
   const state: SpacesState = { current: "default", list: [def] }
   writeJson(SPACES_KEY, state)
+  localStorage.removeItem(LEGACY_OPEN_KEY)
+  localStorage.removeItem(LEGACY_PACK_MODE_KEY)
   return state
 }
 
@@ -137,14 +196,30 @@ export function getSpacePackMode(id: string): boolean {
   return ensureSpaces().list.find(s => s.id === id)?.packMode ?? false
 }
 
-// Persist a space's live window set + pack-mode (called before switching away).
-export function saveSpaceState(id: string, open: NappWindowState[], packMode: boolean) {
+export function setSpacePackMode(id: string, on: boolean) {
   const state = ensureSpaces()
   const sp = state.list.find(s => s.id === id)
   if (!sp) return
-  sp.open = open
-  sp.packMode = packMode
+  sp.packMode = on
   writeJson(SPACES_KEY, state)
+}
+
+// Every open window across all spaces, tagged with its space — for the global
+// window switcher. The current space includes its in-memory ephemeral windows.
+export function allOpenWindows(): Array<{
+  spaceId: string
+  spaceName: string
+  window: NappWindowState
+}> {
+  const state = ensureSpaces()
+  const out: Array<{ spaceId: string; spaceName: string; window: NappWindowState }> = []
+  for (const sp of state.list) {
+    const eph = sp.id === state.current ? ephemeralFor(state.current) : []
+    for (const w of [...sp.open, ...eph]) {
+      out.push({ spaceId: sp.id, spaceName: sp.name, window: w })
+    }
+  }
+  return out
 }
 
 export function setCurrentSpaceId(id: string) {
@@ -169,15 +244,31 @@ export function createSpace(name?: string): string {
   return id
 }
 
-// Commit the given live state as the space's saved snapshot (the "Save" action).
-export function commitSpaceSaved(id: string, open: NappWindowState[], packMode: boolean) {
+// Commit this space's current live layout as its saved snapshot (Save action).
+export function commitSpaceSaved(id: string) {
   const state = ensureSpaces()
   const sp = state.list.find(s => s.id === id)
   if (!sp) return
-  sp.open = open
-  sp.saved = open
-  sp.packMode = packMode
-  sp.savedPackMode = packMode
+  sp.saved = [...sp.open]
+  sp.savedPackMode = sp.packMode
+  writeJson(SPACES_KEY, state)
+}
+
+// Reorder the spaces list to match the given id order (drag-to-reorder). Any
+// space missing from the list is kept, appended in its existing order.
+export function setSpacesOrder(orderedIds: string[]) {
+  const state = ensureSpaces()
+  const byId = new Map(state.list.map(s => [s.id, s]))
+  const next: SpaceData[] = []
+  for (const id of orderedIds) {
+    const sp = byId.get(id)
+    if (sp) {
+      next.push(sp)
+      byId.delete(id)
+    }
+  }
+  for (const sp of byId.values()) next.push(sp)
+  state.list = next
   writeJson(SPACES_KEY, state)
 }
 
@@ -203,41 +294,42 @@ export function deleteSpace(id: string) {
   writeJson(SPACES_KEY, state)
 }
 
-// Which OTHER space (not the current one) holds an open instance of a system
-// napp. Used to enforce the "one system napp instance, in one space" rule:
-// invoking it navigates there instead of duplicating.
-export function findOtherSpaceWithSystemNapp(systemId: string): string | null {
+// The space whose window set holds this system napp (single-placement),
+// preferring the current space. Null if no space has it. Used to navigate a
+// top-level invocation to the system napp's home space.
+export function findSpaceOfSystemNapp(systemId: string): string | null {
   const state = ensureSpaces()
+  let fallback: string | null = null
   for (const sp of state.list) {
-    if (sp.id === state.current) continue
-    if (sp.open.some(o => o.system && o.systemId === systemId)) return sp.id
+    if (sp.open.some(o => o.system && o.systemId === systemId)) {
+      if (sp.id === state.current) return sp.id
+      if (!fallback) fallback = sp.id
+    }
   }
-  return null
+  return fallback
 }
 
 export function appendLoadedAction(instanceId: string, name: string, payload: unknown) {
-  // Check dev entries
-  const devIdx = devOpenEntries.findIndex(n => n.instanceId === instanceId)
-  if (devIdx >= 0) {
-    const current = Array.isArray(devOpenEntries[devIdx].loadedActions)
-      ? devOpenEntries[devIdx].loadedActions
-      : []
-    devOpenEntries[devIdx] = {
-      ...devOpenEntries[devIdx],
-      loadedActions: [...current, { name, payload }]
+  const withAction = (entry: NappWindowState): NappWindowState => {
+    const current = Array.isArray(entry.loadedActions) ? entry.loadedActions : []
+    return { ...entry, loadedActions: [...current, { name, payload }] }
+  }
+  for (const arr of devOpenBySpace.values()) {
+    const i = arr.findIndex(n => n.instanceId === instanceId)
+    if (i >= 0) {
+      arr[i] = withAction(arr[i])
+      return
     }
-    return
   }
-  // Otherwise use localStorage
-  const stored = readOpenFromStorage()
-  const idx = stored.findIndex(n => n.instanceId === instanceId)
-  if (idx < 0) return
-  const current = Array.isArray(stored[idx].loadedActions) ? stored[idx].loadedActions : []
-  stored[idx] = {
-    ...stored[idx],
-    loadedActions: [...current, { name, payload }]
+  const spaces = ensureSpaces()
+  for (const sp of spaces.list) {
+    const i = sp.open.findIndex(n => n.instanceId === instanceId)
+    if (i >= 0) {
+      sp.open[i] = withAction(sp.open[i])
+      writeJson(SPACES_KEY, spaces)
+      return
+    }
   }
-  writeOpenToStorage(stored)
 }
 
 export function findSessionByPetname(petname: string): NappWindowState | null {

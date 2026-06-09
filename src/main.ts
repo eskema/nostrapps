@@ -21,8 +21,11 @@ import {
   setTempFiles,
   removeDevHandle,
   setInstanceIdSerial,
-  teardownAllWindows,
-  listOpenWindows
+  teardownSpaceWindows,
+  listOpenWindows,
+  setActiveSpace,
+  isWindowInactive,
+  allInstanceIds,
 } from "./sandbox/host.js"
 import { button, chip, icon } from "./system-napps/ui.js"
 import { resolveInput } from "./nsite/resolve.js"
@@ -77,13 +80,14 @@ tileBtn?.addEventListener("click", () => tileWindows(stage))
 // The live window set lives in persistence's `open`; each space owns its own
 // `open` snapshot. currentSpaceId tracks which we're showing.
 let currentSpaceId = persist.getCurrentSpaceId()
+// Spaces whose windows are mounted in this session. Switching to a space the
+// first time mounts its windows; after that we just toggle visibility, so the
+// windows (and their iframe state) survive switches.
+const materializedSpaces = new Set<string>()
 
 // ─── pack mode (Packery-style auto-layout on move/resize) ───────
-// PACK_MODE_KEY mirrors the *current* space's pack-mode (updated on toggle, so a
-// reload restores it). Each space's snapshot also stores packMode, applied when
-// switching into it.
-const PACK_MODE_KEY = "nostrapps:packMode"
-let packModeOn = localStorage.getItem(PACK_MODE_KEY) === "1"
+// Pack mode is per-space, stored in the spaces document (space.packMode).
+let packModeOn = persist.getSpacePackMode(currentSpaceId)
 
 // Re-entry guard: bestFitPack itself fires onStateChange (per persisted
 // position) which would loop right back here. We coalesce all state
@@ -124,7 +128,7 @@ function applyPackMode() {
   // The drag handler (in napp-window.js) reads this class to decide
   // whether to render a drop placeholder during the drag.
   stage?.classList.toggle("pack-mode", packModeOn)
-  localStorage.setItem(PACK_MODE_KEY, packModeOn ? "1" : "0")
+  persist.setSpacePackMode(currentSpaceId, packModeOn)
   if (packModeOn) maybeRepack()
 }
 
@@ -563,6 +567,7 @@ const systemCtx: SystemCtx = {
 function makeSystemLaunchOpts(sysId: string) {
   return {
     onStateChange: (state: NappWindowState) => {
+      if (isWindowInactive(state.instanceId)) return // background-space window
       persist.updateOpen(state.instanceId, {
         ...state,
         system: true,
@@ -908,6 +913,7 @@ function makeLaunchOpts() {
   return {
     onProgress: setStatus,
     onStateChange: (state: NappWindowState) => {
+      if (isWindowInactive(state.instanceId)) return // background-space window
       persist.updateOpen(state.instanceId, state)
       if (state.petname) persist.setInstalledPetname(state.nappId, state.petname)
       refreshSuggestions()
@@ -981,36 +987,38 @@ async function restoreAll() {
   }
 }
 
-// Bump the instance-id serial past any restored numeric ids so freshly created
-// windows don't collide with restored ones.
+// Bump the instance-id serial past every numeric id anywhere — live windows AND
+// every space's persisted windows (even unvisited ones) — so a new window can't
+// collide with one we'll restore when a not-yet-materialized space is opened.
 function bumpInstanceSerial() {
   let maxId = 0
-  for (const s of persist.readOpen()) {
-    const n = parseInt(s.instanceId, 10)
+  const ids = [...persist.allOpenWindows().map(w => w.window.instanceId), ...allInstanceIds()]
+  for (const iid of ids) {
+    const n = parseInt(iid, 10)
     if (!isNaN(n) && n > maxId) maxId = n
   }
   setInstanceIdSerial(maxId + 1)
 }
 
-// Save the current space's live window layout + pack-mode so we can return to it.
-function snapshotCurrentSpace() {
-  persist.saveSpaceState(currentSpaceId, persist.readOpen(), packModeOn)
-}
-
-// Switch to another space: snapshot the current windows, tear them all down,
-// then make the target space live and restore its windows + pack-mode.
+// Switch to another space. We do NOT tear windows down — each space's windows
+// stay mounted (so their iframe state survives) and we just toggle visibility.
+// A space's windows are mounted only the first time it's visited this session.
+// No snapshot is needed: each space's `open` is mutated live in the document, so
+// flipping the current pointer is enough to make readOpen() reflect the target.
 async function switchSpace(targetId: string) {
   if (targetId === currentSpaceId) return
-  snapshotCurrentSpace()
-  teardownAllWindows()
-  persist.writeOpen(persist.getSpaceOpen(targetId))
   persist.setCurrentSpaceId(targetId)
   currentSpaceId = targetId
-  bumpInstanceSerial()
   packModeOn = persist.getSpacePackMode(targetId)
+  // Reveal the target's windows, hide every other space's.
+  setActiveSpace(targetId)
+  if (!materializedSpaces.has(targetId)) {
+    // First visit this session: mount its windows from the saved layout.
+    materializedSpaces.add(targetId)
+    bumpInstanceSerial()
+    await restoreAll()
+  }
   applyPackMode()
-  await restoreAll()
-  if (packModeOn) maybeRepack()
   refreshSuggestions()
 }
 
@@ -1024,7 +1032,7 @@ async function createSpaceAndSwitch(name?: string): Promise<string> {
 
 // Commit the current windows as this space's saved layout.
 function saveCurrentSpace() {
-  persist.commitSpaceSaved(currentSpaceId, persist.readOpen(), packModeOn)
+  persist.commitSpaceSaved(currentSpaceId)
   setStatus("Space saved")
   renderSpacesBar()
 }
@@ -1036,15 +1044,16 @@ async function resetCurrentSpace() {
       "Windows you've opened, moved, resized, or closed since the last save will be lost."
   )
   if (!ok) return
+  // Reset genuinely discards the live windows, so close them and re-mount the
+  // saved snapshot from scratch.
   const saved = persist.getSpaceSaved(currentSpaceId)
-  teardownAllWindows()
-  persist.writeOpen(saved.open)
-  persist.saveSpaceState(currentSpaceId, saved.open, saved.packMode)
-  bumpInstanceSerial()
+  teardownSpaceWindows(currentSpaceId)
+  persist.writeOpen(saved.open) // becomes the current space's live open
   packModeOn = saved.packMode
-  applyPackMode()
+  persist.setSpacePackMode(currentSpaceId, packModeOn)
+  bumpInstanceSerial()
   await restoreAll()
-  if (packModeOn) maybeRepack()
+  applyPackMode()
   refreshSuggestions()
   renderSpacesBar()
 }
@@ -1062,15 +1071,20 @@ async function destroyCurrentSpace() {
       "Its windows and saved layout will be permanently removed."
   )
   if (!ok) return
-  teardownAllWindows()
+  // This space's windows are genuinely gone — close them.
+  teardownSpaceWindows(currentSpaceId)
+  materializedSpaces.delete(currentSpaceId)
   persist.deleteSpace(currentSpaceId)
   currentSpaceId = persist.getCurrentSpaceId() // deleteSpace re-points current
-  persist.writeOpen(persist.getSpaceOpen(currentSpaceId))
-  bumpInstanceSerial()
   packModeOn = persist.getSpacePackMode(currentSpaceId)
+  // Reveal the new current space — reusing its windows if already mounted.
+  setActiveSpace(currentSpaceId)
+  if (!materializedSpaces.has(currentSpaceId)) {
+    materializedSpaces.add(currentSpaceId)
+    bumpInstanceSerial()
+    await restoreAll()
+  }
   applyPackMode()
-  await restoreAll()
-  if (packModeOn) maybeRepack()
   refreshSuggestions()
   renderSpacesBar()
 }
@@ -1095,7 +1109,22 @@ function iconButton(name: string, title: string, onClick: () => void) {
 function renderSpacesBar() {
   spacesBar.innerHTML = ""
 
-  // Far left: controls for the CURRENT space (save / reset / destroy).
+  // Very start: the current space's name. Double-click to rename it.
+  const spaces = persist.listSpaces()
+  const currentName = document.createElement("div")
+  currentName.className = "spaces-current-name"
+  currentName.textContent = spaces.find(s => s.id === currentSpaceId)?.name || "space"
+  currentName.title = "Double-click to rename this space"
+  currentName.addEventListener("dblclick", () => {
+    const cur = persist.listSpaces().find(s => s.id === currentSpaceId)
+    const n = window.prompt("Rename space", cur?.name || "")
+    if (n != null) {
+      persist.renameSpace(currentSpaceId, n)
+      renderSpacesBar()
+    }
+  })
+
+  // Then: controls for the CURRENT space (save / reset / destroy).
   const controls = document.createElement("div")
   controls.className = "spaces-controls"
   controls.append(
@@ -1118,40 +1147,143 @@ function renderSpacesBar() {
     )
   }
 
-  // Right: the list of spaces + new-space.
+  // Right: the list of spaces (drag to reorder) + new-space.
   const spaceList = document.createElement("div")
   spaceList.className = "spaces-list"
-  for (const s of persist.listSpaces()) {
-    spaceList.appendChild(
-      chip({
-        label: s.name,
-        active: s.id === currentSpaceId,
-        title: "Switch — double-click to rename",
-        onClick: () => {
-          if (s.id !== currentSpaceId) switchSpace(s.id).then(renderSpacesBar)
-        },
-        onDblClick: () => {
-          const n = window.prompt("Rename space", s.name)
-          if (n != null) {
-            persist.renameSpace(s.id, n)
-            renderSpacesBar()
-          }
-        }
-      })
-    )
-  }
+  for (const s of spaces) spaceList.appendChild(buildSpaceChip(s))
 
   const right = document.createElement("div")
   right.className = "spaces-right"
   right.append(spaceList, iconButton("plus", "New space", () => createSpaceAndSwitch()))
 
-  spacesBar.append(controls, winList, right)
+  spacesBar.append(currentName, controls, winList, right)
+}
+
+// Space chips: click to switch, drag to reorder. Reordering is LIVE — the chip
+// slots into the gap under the cursor as you drag and the others slide aside
+// (FLIP-animated), so where you let go is where it lands. Rename is via the
+// current space's name at the start of the bar, not here.
+// Pointer-based (not native HTML5 DnD) so we control the cursor — `grabbing` the
+// whole time — and there's no floating ghost. A drag only begins past a small
+// threshold, so a plain click still switches spaces.
+let spaceDrag: {
+  el: HTMLElement
+  list: HTMLElement
+  startX: number
+  started: boolean
+} | null = null
+let suppressSpaceClick = false
+
+// The chip to insert before (the first one whose midpoint is right of the
+// cursor); null → past the end. Skips the chip being dragged.
+function dragAfterChip(list: HTMLElement, x: number): HTMLElement | null {
+  let closest: { offset: number; el: HTMLElement | null } = { offset: -Infinity, el: null }
+  for (const child of list.querySelectorAll<HTMLElement>(".btn-chip:not(.dragging)")) {
+    const box = child.getBoundingClientRect()
+    const offset = x - (box.left + box.width / 2)
+    if (offset < 0 && offset > closest.offset) closest = { offset, el: child }
+  }
+  return closest.el
+}
+
+// FLIP: animate every sibling sliding to its new spot with ease-in-out. Handles
+// being called mid-animation — measures current visual positions first, snaps
+// any in-flight transforms to rest, then animates from there to the new layout.
+function flipReorder(list: HTMLElement, exclude: HTMLElement, mutate: () => void) {
+  const others = [...list.children].filter(c => c !== exclude) as HTMLElement[]
+  // First: current visual left (includes any active transform).
+  const before = new Map(others.map(el => [el, el.getBoundingClientRect().left]))
+  // Snap to rest so the post-mutate measurement is the true layout position.
+  for (const el of others) {
+    el.style.transition = "none"
+    el.style.transform = ""
+  }
+  mutate()
+  for (const el of others) {
+    const dx = (before.get(el) ?? 0) - el.getBoundingClientRect().left
+    if (!dx) {
+      el.style.transition = ""
+      continue
+    }
+    el.style.transform = `translateX(${dx}px)`
+    void el.offsetWidth // force reflow so the next change animates from here
+    el.style.transition = "transform 150ms ease-in-out"
+    el.style.transform = ""
+    el.addEventListener("transitionend", () => (el.style.transition = ""), { once: true })
+  }
+}
+
+function onSpacePointerMove(e: PointerEvent) {
+  if (!spaceDrag) return
+  const { el, list, startX } = spaceDrag
+  if (!spaceDrag.started) {
+    if (Math.abs(e.clientX - startX) < 4) return // below threshold: still a click
+    spaceDrag.started = true
+    el.classList.add("dragging")
+    document.body.classList.add("space-dragging")
+  }
+  e.preventDefault()
+  const after = dragAfterChip(list, e.clientX)
+  if (after === el) return
+  const settled = after ? el.nextElementSibling === after : el === list.lastElementChild
+  if (settled) return
+  flipReorder(list, el, () =>
+    after == null ? list.appendChild(el) : list.insertBefore(el, after)
+  )
+}
+
+function endSpaceDrag() {
+  window.removeEventListener("pointermove", onSpacePointerMove)
+  window.removeEventListener("pointerup", endSpaceDrag)
+  window.removeEventListener("pointercancel", endSpaceDrag)
+  if (spaceDrag?.started) {
+    const { el, list } = spaceDrag
+    el.classList.remove("dragging")
+    document.body.classList.remove("space-dragging")
+    persist.setSpacesOrder(
+      [...list.querySelectorAll<HTMLElement>("[data-space-id]")].map(c => c.dataset.spaceId!)
+    )
+    suppressSpaceClick = true // swallow the click that follows this pointerup
+    setTimeout(() => (suppressSpaceClick = false), 0)
+  }
+  spaceDrag = null
+}
+
+function buildSpaceChip(s: { id: string; name: string }): HTMLButtonElement {
+  const el = chip({
+    label: s.name,
+    active: s.id === currentSpaceId,
+    title: "Switch space — drag to reorder",
+    onClick: () => {
+      if (suppressSpaceClick) return // just finished a drag, not a real click
+      if (s.id !== currentSpaceId) switchSpace(s.id).then(renderSpacesBar)
+    }
+  })
+  el.dataset.spaceId = s.id
+  el.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || !el.parentElement) return
+    spaceDrag = { el, list: el.parentElement, startX: e.clientX, started: false }
+    window.addEventListener("pointermove", onSpacePointerMove)
+    window.addEventListener("pointerup", endSpaceDrag)
+    window.addEventListener("pointercancel", endSpaceDrag)
+  })
+  return el
 }
 
 // Console hook (kept as a convenience alongside the bar).
 ;(window as any).__spaces = {
   list: () => persist.listSpaces(),
   current: () => currentSpaceId,
+  // Debug: every open window across all spaces, grouped by space.
+  windows: () =>
+    persist.allOpenWindows().map(w => ({
+      space: w.spaceName,
+      napp: w.window.nappId,
+      petname: w.window.petname,
+      system: !!w.window.system,
+      instanceId: w.window.instanceId
+    })),
+  doc: () => JSON.parse(localStorage.getItem("nostrapps:spaces") || "null"),
   switch: (id: string) => switchSpace(id).then(renderSpacesBar),
   create: (name?: string) => createSpaceAndSwitch(name),
   save: () => saveCurrentSpace(),
@@ -1185,6 +1317,10 @@ async function init() {
   // background. First sign request will wait if it's still connecting.
   reconnectIfNeeded().catch(err => setStatus(`Bunker reconnect failed: ${err.message}`))
   await handlers.init()
+  // The current space's windows are about to be mounted — make it the active
+  // (visible) space so they're tagged to it and shown.
+  setActiveSpace(currentSpaceId)
+  materializedSpaces.add(currentSpaceId)
   // Bump instanceIdSerial past any existing numeric instanceIds so new
   // windows don't collide with persisted entries.
   bumpInstanceSerial()
@@ -1465,4 +1601,8 @@ function syncDOM(win: NappWindow) {
   bringToTopOfStack(win.root)
   persistDomOrder()
   refreshSuggestions()
+  // Pack the new window into the grid (no-op when pack mode is off). Fresh-in-
+  // pack windows are flagged in the host, so bestFitPack sizes them 1×2 and
+  // appends them rather than disturbing the existing layout.
+  maybeRepack()
 }

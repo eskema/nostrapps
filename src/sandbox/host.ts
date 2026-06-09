@@ -40,6 +40,51 @@ const BOOT_TIMEOUT_MS = 10_000
 
 const openWindows = new Map<string, NappWindow>()
 
+// Which space's windows are currently visible. Windows from other spaces stay
+// mounted (so their iframes keep their state) but get `.space-inactive`
+// (display:none). A window is "born" into whatever space is active when it's
+// created, recorded on its root as data-space.
+let activeSpace = ""
+
+// Tag a freshly-created window with the active space and make sure it shows.
+function adoptWindow(win: NappWindow) {
+  win.root.dataset.space = activeSpace
+  win.root.classList.remove("space-inactive")
+}
+
+// A genuinely NEW window opened while pack mode is on (stage has the `pack-mode`
+// class) is flagged so bestFitPack sizes it 1×2 and appends it at the end,
+// instead of shoving it into the top-left and reflowing existing windows.
+// `hasPosition` is true for restored / reopened windows — those carry a saved
+// layout and must keep it, so they're never flagged. Singleton reuse returns
+// before creation, so reused windows are never flagged either.
+function flagFreshInPack(stageEl: HTMLElement, win: NappWindow, hasPosition: boolean) {
+  if (!hasPosition && stageEl.classList.contains("pack-mode")) win.root.dataset.packNew = "1"
+}
+
+// Switch which space is visible: show its windows, hide every other space's.
+// Pure visibility — nothing is mounted or unmounted, so iframe state survives.
+export function setActiveSpace(id: string) {
+  activeSpace = id
+  for (const win of openWindows.values()) {
+    const owns = (win.root.dataset.space || "") === id
+    win.root.classList.toggle("space-inactive", !owns)
+  }
+}
+
+// True only for a tracked window that belongs to a NON-active space. Used to
+// skip persisting background-space windows. A window mid-creation isn't in
+// openWindows yet, so this returns false and its initial state still persists.
+export function isWindowInactive(instanceId: string): boolean {
+  const win = openWindows.get(instanceId)
+  return !!win && (win.root.dataset.space || "") !== activeSpace
+}
+
+// Every live instance id across all materialized spaces (for serial bumping).
+export function allInstanceIds(): string[] {
+  return [...openWindows.keys()]
+}
+
 let iframeCallSerial = 1
 let instanceIdSerial = 1
 export function setInstanceIdSerial(val: number) {
@@ -251,13 +296,11 @@ export function focusInstance(instanceId: string): boolean {
   return true
 }
 
-// Close every open window (system napps unmount, iframes detach, singleton
-// registry clears) — used when switching spaces before restoring another set.
-// Each win.close() runs its onClose chain (which removes the session from
-// persistence); callers that are mid-switch overwrite `open` immediately after.
-export function teardownAllWindows() {
+// Close only the given space's windows (used when resetting or destroying a
+// space — its windows are genuinely gone, unlike a plain switch which hides).
+export function teardownSpaceWindows(spaceId: string) {
   for (const win of [...openWindows.values()]) {
-    win.close()
+    if ((win.root.dataset.space || "") === spaceId) win.close()
   }
 }
 
@@ -271,6 +314,8 @@ export function listOpenWindows(): Array<{
 }> {
   const out = []
   for (const [instanceId, win] of openWindows) {
+    // Only the active space's windows belong on the bar's taskbar.
+    if ((win.root.dataset.space || "") !== activeSpace) continue
     const st = win.getState()
     out.push({
       instanceId,
@@ -443,6 +488,8 @@ export function launchSystem(
     status: opts.status
   })
   win.systemId = sysId
+  adoptWindow(win)
+  flagFreshInPack(stageEl, win, !!opts.position)
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
   if (singleton) systemSingletons.set(sysId, instanceId)
@@ -515,6 +562,8 @@ function mount(
     onStateChange,
     onReorder
   })
+  adoptWindow(win)
+  flagFreshInPack(stageEl, win, !!position)
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
   resetInstanceRuntimeState(instanceId, "Window remounted before action registered")
@@ -583,6 +632,8 @@ export function mountWithLoading(
     onStateChange,
     onReorder
   })
+  adoptWindow(win)
+  flagFreshInPack(stageEl, win, !!position)
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
   resetInstanceRuntimeState(instanceId, "Loading window created")
@@ -618,6 +669,7 @@ export function capturePackSnapshot(stageEl: HTMLElement) {
   const map = new Map()
   for (const w of openWindows.values()) {
     if (!w.root || !w.root.isConnected) continue
+    if (w.root.classList.contains("space-inactive")) continue
     if (w.root.classList.contains("minimized")) continue
     if (w.root.classList.contains("maximized")) continue
     const px = parseFloat(w.root.style.left) || padL
@@ -715,6 +767,7 @@ export function bestFitPack(
 
   const all = Array.from(openWindows.values()).filter(w => {
     if (!w.root || !w.root.isConnected) return false
+    if (w.root.classList.contains("space-inactive")) return false
     if (w.root.classList.contains("minimized")) return false
     if (w.root.classList.contains("maximized")) return false
     if (getComputedStyle(w.root).position === "static") return false
@@ -751,6 +804,11 @@ export function bestFitPack(
     return NOW - t < JUST_MOVED_MS
   }
   items.sort((a, b) => {
+    // Freshly-launched (pack-new) windows pack LAST so existing windows claim
+    // their cells first and the new one first-fits into the leftover space.
+    const na = a.root.dataset.packNew === "1"
+    const nb = b.root.dataset.packNew === "1"
+    if (na !== nb) return na ? 1 : -1
     const ja = justMoved(a)
     const jb = justMoved(b)
     if (ja !== jb) return ja ? -1 : 1
@@ -847,35 +905,41 @@ export function bestFitPack(
   }
 
   for (const item of items) {
+    // Fresh-in-pack windows are 1 column × 2 rows and always append: they skip
+    // the "keep current/snapshot cell" preference and go straight to first-fit,
+    // landing in the first free slot after the existing windows.
+    const isNew = item.root.dataset.packNew === "1"
     // Prefer the snapshot cell (where this window was at drag start) so
     // an item only relocates when the dragged window is actually blocking
     // its original spot. Without snapshot we fall back to its current
     // style-derived cell — that's the regular non-drag pack path.
     const original = snapshot?.get(item.root)
-    const desired = original ?? cellFromPx(item)
+    const desired = isNew ? { col: 0, row: 0, cols: 1, rows: 2 } : original ?? cellFromPx(item)
     let placed = null
-    // 1. Try the exact desired cell.
-    if (fits(desired.col, desired.row, desired.cols, desired.rows)) {
-      placed = {
-        col: desired.col,
-        row: desired.row,
-        cols: desired.cols,
-        rows: desired.rows
+    if (!isNew) {
+      // 1. Try the exact desired cell.
+      if (fits(desired.col, desired.row, desired.cols, desired.rows)) {
+        placed = {
+          col: desired.col,
+          row: desired.row,
+          cols: desired.cols,
+          rows: desired.rows
+        }
+      }
+      // 2. Blocked → if this item is "much bigger" than the dragged stamp,
+      //    try shrinking it around the stamp instead of relocating. Skip
+      //    the most-recently-touched non-focused window — that one holds
+      //    its size.
+      if (
+        !placed &&
+        focusCell &&
+        item !== mostRecentItem &&
+        desired.cols * desired.rows >= 2 * (focusCell.cols * focusCell.rows)
+      ) {
+        placed = shrinkAroundFocus(desired, focusCell, fits)
       }
     }
-    // 2. Blocked → if this item is "much bigger" than the dragged stamp,
-    //    try shrinking it around the stamp instead of relocating. Skip
-    //    the most-recently-touched non-focused window — that one holds
-    //    its size.
-    if (
-      !placed &&
-      focusCell &&
-      item !== mostRecentItem &&
-      desired.cols * desired.rows >= 2 * (focusCell.cols * focusCell.rows)
-    ) {
-      placed = shrinkAroundFocus(desired, focusCell, fits)
-    }
-    // 3. Last resort: first-fit scan, original cols×rows.
+    // 3. Last resort (and the only path for new windows): first-fit scan.
     if (!placed) {
       for (let r = 0; r < 1000 && !placed; r++) {
         for (let c = 0; c <= COLS - desired.cols; c++) {
@@ -894,6 +958,7 @@ export function bestFitPack(
     if (!placed) continue
     mark(placed.col, placed.row, placed.cols, placed.rows)
     applyCellRect(item, placed.col, placed.row, placed.cols, placed.rows, padL, padT, cellW, cellH)
+    if (isNew) delete item.root.dataset.packNew // flag consumed
   }
 
   // Reset the clear timer on each pack so an ongoing drag (multiple
@@ -1019,6 +1084,7 @@ export function tileWindows(stageEl: HTMLElement) {
 
   const wins = Array.from(openWindows.values()).filter(w => {
     if (!w.root || !w.root.isConnected) return false
+    if (w.root.classList.contains("space-inactive")) return false
     if (w.root.classList.contains("minimized")) return false
     // Mobile static layout doesn't honor left/top — tiling makes no sense.
     if (getComputedStyle(w.root).position === "static") return false
@@ -1231,6 +1297,9 @@ function ensureStageObserver(stageEl: HTMLElement) {
   if (stageObserver) return
   stageObserver = new ResizeObserver(() => {
     for (const win of openWindows.values()) {
+      // Skip hidden (other-space) windows: they report zero size, so clamping
+      // would mis-reposition them before they're shown again.
+      if (win.root.classList.contains("space-inactive")) continue
       clampToStage(win.root, stageEl)
     }
   })

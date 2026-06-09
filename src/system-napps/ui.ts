@@ -68,7 +68,6 @@ export function button(opts: ButtonOpts = {}): HTMLButtonElement {
 export interface ChipOpts {
   label: string
   onClick?: (e: MouseEvent) => void
-  onDblClick?: () => void
   active?: boolean
   icon?: string
   title?: string
@@ -89,6 +88,5 @@ export function chip(o: ChipOpts): HTMLButtonElement {
   label.className = "btn-chip-label"
   label.textContent = o.label
   b.appendChild(label)
-  if (o.onDblClick) b.addEventListener("dblclick", o.onDblClick)
   return b
 }

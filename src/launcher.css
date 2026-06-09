@@ -91,9 +91,9 @@ h1 span {
   width: 1rem;
   height: 1rem;
   padding: 0;
-  /* font-size: 1.5rem; */
+  font-size: .9rem;
   line-height: 1rem;
-  color: color-mix(in srgb, currentColor 60%, transparent);
+  color: color-mix(in srgb, currentColor 30%, transparent);
   background: transparent;
 }
 
@@ -113,7 +113,7 @@ h1 span {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.2rem 0.5rem;
+  /* padding: 0.2rem 0.5rem; */
   min-height: 1.7rem;
   border-bottom: 1px dotted color-mix(in srgb, currentColor 40%, transparent);
 }
@@ -137,6 +137,11 @@ h1 span {
   scrollbar-width: thin;
 }
 
+#spaces-bar .btn
+{
+  font-size: .8rem;
+}
+
 /* List of spaces + new-space, right. */
 .spaces-right {
   display: flex;
@@ -151,9 +156,50 @@ h1 span {
   gap: 0.25rem;
 }
 
+/* Current space's name at the very start of the bar (double-click to rename). */
+.spaces-current-name {
+  flex-shrink: 0;
+  padding: 0 0.4rem;
+  font-family: var(--font-serif);
+  font-weight: 800;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Space chips drag to reorder: they slot into the gap under the cursor and the
+   others slide aside (FLIP-animated inline). The native drag ghost is suppressed,
+   so the dragged chip itself (in the list) is the only landing indicator. */
+.spaces-list .btn-chip {
+  cursor: grab;
+  touch-action: none;
+}
+.spaces-list .btn-chip.dragging {
+  /* Stay above the sliding siblings (their FLIP transforms create stacking
+     contexts that would otherwise cover the dragged chip). */
+  position: relative;
+  z-index: 1;
+}
+
+/* While a space chip is being dragged (pointer-based), force the grabbing
+   cursor everywhere and stop accidental text selection. */
+body.space-dragging,
+body.space-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+/* While dragging, wear an OPAQUE version of the hover look — so it's clear which
+   chip is moving, and sliding siblings never show through it. The tint is mixed
+   into the surface (not transparent) to stay solid. */
+.spaces-list .btn-ghost.dragging {
+  background: color-mix(in srgb, currentColor 12%, var(--surface));
+}
+.spaces-list .btn-primary.dragging {
+  background: color-mix(in srgb, var(--text) 88%, var(--surface));
+}
+
 .spaces-controls .btn,
 .spaces-right > .btn {
-  font-size: 1rem;
+  /* font-size: 1rem; */
   padding: 0.2rem;
 }
 
@@ -647,6 +693,12 @@ button {
 
 html[data-theme="dark"] .napp-window {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* Windows belonging to a non-active space: hidden, but kept mounted so their
+   iframe state survives. display:none does not reload the iframe. */
+.napp-window.space-inactive {
+  display: none;
 }
 
 .napp-window:focus {
