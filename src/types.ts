@@ -156,6 +156,11 @@ export interface SuggestionItem {
   slash?: string
   systemId?: string
   actionId?: string
+  // For "open" items: which space the window lives in (the input is a global
+  // view across all spaces). spaceCurrent marks windows in the active space.
+  spaceId?: string
+  spaceName?: string
+  spaceCurrent?: boolean
 }
 
 export interface SystemNappDef {

@@ -220,6 +220,9 @@ export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchO
   if (singleton) {
     const existing = findOpenWindowByNappId(nappId)
     if (existing) {
+      // Single instance: if it lives in another (hidden) space, adopt it into
+      // the active one so launching surfaces it where you are.
+      adoptWindow(existing)
       existing.focus?.()
       return existing
     }
@@ -435,6 +438,14 @@ export function reloadIframesByNappId(nappId: string): number {
 
 const systemSingletons = new Map<string, string>() // sysId -> instanceId
 
+// The space currently holding the live (singleton) system napp, or null if it
+// isn't mounted anywhere. Used to navigate to a system napp's home space.
+export function spaceOfLiveSystem(sysId: string): string | null {
+  const id = systemSingletons.get(sysId)
+  const win = id ? openWindows.get(id) : undefined
+  return win ? win.root.dataset.space || null : null
+}
+
 export function launchSystem(
   stageEl: HTMLElement,
   sysId: string,
@@ -451,8 +462,13 @@ export function launchSystem(
         sysId,
         instanceId: existing
       })
+      // A system napp is a single instance. If it currently lives in another
+      // (hidden) space, adopt it into the active one so invoking it always
+      // surfaces it where you are, rather than focusing a display:none window.
+      const win = openWindows.get(existing)!
+      adoptWindow(win)
       focusInstance(existing)
-      return openWindows.get(existing)
+      return win
     }
   }
 

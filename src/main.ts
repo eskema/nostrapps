@@ -26,6 +26,7 @@ import {
   setActiveSpace,
   isWindowInactive,
   allInstanceIds,
+  spaceOfLiveSystem
 } from "./sandbox/host.js"
 import { button, chip, icon } from "./system-napps/ui.js"
 import { resolveInput } from "./nsite/resolve.js"
@@ -622,11 +623,30 @@ function launchSystemNapp(
   return win
 }
 
+// Which space "owns" a system napp — where it's live, else its persisted
+// placement. A system napp is a single instance, so it lives in one space.
+function ownerSpaceOfSystem(sysId: string): string | null {
+  return spaceOfLiveSystem(sysId) ?? persist.findSpaceOfSystemNapp(sysId)
+}
+
+// Top-level invocation (slash command, suggestion): if the system napp already
+// lives in another space, switch there and focus it instead of duplicating or
+// moving it; otherwise open/focus it in the current space.
+async function invokeSystemNapp(sysId: string) {
+  const owner = ownerSpaceOfSystem(sysId)
+  if (owner && owner !== currentSpaceId) {
+    await switchSpace(owner)
+    renderSpacesBar()
+  }
+  const win = launchSystemNapp(sysId)
+  win?.focus?.()
+  return win
+}
+
 // ─── suggestions ────────────────────────────────────────────────
 function buildSuggestionItems(): SuggestionItem[] {
   const seen = new Set()
   const out: SuggestionItem[] = []
-  const sessionNappIds = new Set()
 
   // System napps + slash actions first — discoverability for slash commands
   for (const def of systemList) {
@@ -646,9 +666,16 @@ function buildSuggestionItems(): SuggestionItem[] {
     })
   }
 
-  const openSessions = persist.readOpen()
+  // Open windows across ALL spaces — a global switcher. Current space first so
+  // its windows lead the list; others follow, each tagged with their space.
+  const allWindows = persist.allOpenWindows()
+  allWindows.sort(
+    (a, b) =>
+      (a.spaceId === currentSpaceId ? 0 : 1) - (b.spaceId === currentSpaceId ? 0 : 1)
+  )
+  const allSessions = allWindows.map(a => a.window)
 
-  for (const s of openSessions) {
+  for (const { spaceId, spaceName, window: s } of allWindows) {
     if (s.system) continue // shown via systemList row instead
     const key = `sess:${s.instanceId}`
     if (seen.has(key)) continue
@@ -658,20 +685,24 @@ function buildSuggestionItems(): SuggestionItem[] {
       source: "open",
       nappId: s.nappId,
       instanceId: s.instanceId,
-      petname: customPet
+      petname: customPet,
+      spaceId,
+      spaceName,
+      spaceCurrent: spaceId === currentSpaceId
     })
-    if (s.nappId) sessionNappIds.add(s.nappId)
   }
 
+  // Every installed app stays launchable, even while open — opening one doesn't
+  // remove it from the list, so you can always open another instance. (An open
+  // window also appears as its own "open" row above, for jumping to it.)
   for (const app of persist.getInstalledApps()) {
-    if (sessionNappIds.has(app.nappId)) continue
     const key = `napp:${app.nappId}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push({
       source: "napp",
       nappId: app.nappId,
-      petname: petnameForNappId(app.nappId, openSessions)
+      petname: petnameForNappId(app.nappId, allSessions)
     })
   }
 
@@ -716,10 +747,10 @@ function renderSuggestions() {
 
   // Three sections:
   //   1. System items (slash commands and slash actions) — discoverability.
-  //   2. Last 5 sessions (open or closed), in recency order from persist.
+  //   2. Open windows across ALL spaces (current space first), a global switcher.
   //   3. Everything else (NAPP / NAME), alphabetical by friendly name.
   const systemItems = items.filter(i => i.source === "system" || i.source === "action")
-  const sessionItems = items.filter(i => i.source === "open").slice(0, 5)
+  const sessionItems = items.filter(i => i.source === "open")
   const sessionSet = new Set(sessionItems)
   const sysSet = new Set(systemItems)
   const restItems = items
@@ -779,6 +810,14 @@ function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
       id.textContent = item.instanceId.slice(0, 8)
       main.appendChild(id)
     }
+    // Global view: tag every open window with the space it lives in. The
+    // current space's windows are de-emphasized (you're already in it).
+    if (item.source === "open" && item.spaceName) {
+      const sp = document.createElement("span")
+      sp.className = item.spaceCurrent ? "sugg-space sugg-space-current" : "sugg-space"
+      sp.append(icon("window"), document.createTextNode(item.spaceName))
+      main.appendChild(sp)
+    }
   }
 
   const source = document.createElement("span")
@@ -792,11 +831,15 @@ function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
     hideSuggestions()
     try {
       if (item.systemId) {
-        const win = launchSystemNapp(item.systemId)
-        win?.focus?.()
+        await invokeSystemNapp(item.systemId)
       } else if (item.actionId) {
         actionRegistry[item.actionId]?.run(systemCtx)
       } else if (item.instanceId) {
+        // Window may live in another space — go there first, then focus it.
+        if (item.spaceId && item.spaceId !== currentSpaceId) {
+          await switchSpace(item.spaceId)
+          renderSpacesBar()
+        }
         await launchSession(item.instanceId)
       } else if (item.nappId) {
         const win = await launch(stage, item.nappId, {
@@ -1425,8 +1468,7 @@ async function launchFromInput(raw: string): Promise<void> {
     const sysId = slashCommands[raw]
     if (sysId) {
       console.debug("[launch] slash command → system napp", { sysId })
-      const win = launchSystemNapp(sysId)
-      win?.focus?.()
+      await invokeSystemNapp(sysId)
       return
     }
     const actionId = slashActions[raw]

@@ -491,7 +491,7 @@ button {
   border-top: none;
   border-radius: 0 0 4px 4px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
-  max-height: 320px;
+  max-height: min(70vh, 640px);
   overflow-y: auto;
 }
 
@@ -555,6 +555,25 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   flex-shrink: 0;
+}
+
+/* Space badge on every open-window row — the input is a global, cross-space
+   switcher. The current space's badge is de-emphasized (no border, dimmer). */
+.sugg-space {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: var(--btn-radius);
+  font-family: var(--font-serif);
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.sugg-space-current {
+  border-color: transparent;
+  opacity: 0.4;
 }
 
 #load-local {
