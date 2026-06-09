@@ -353,6 +353,9 @@ function bringToFront(el: HTMLElement) {
   zIndexCounter++
   const z = el.classList.contains("pinned") ? PIN_BASE + zIndexCounter : zIndexCounter
   el.style.zIndex = String(z)
+  // Mark the active window so CSS can distinguish it — z-index alone is invisible.
+  for (const w of document.querySelectorAll(".napp-window.focused")) w.classList.remove("focused")
+  el.classList.add("focused")
   // Let the window owner know so it can persist the new zIndex.
   el.dispatchEvent(new Event("napp-zindex-change"))
 }

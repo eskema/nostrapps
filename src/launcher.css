@@ -791,7 +791,12 @@ html[data-theme="dark"] .napp-window {
   text-transform: uppercase;
   white-space: nowrap;
   cursor: inherit;
-  transition: color 200ms ease-in-out;
+  /* Dim by default; the focused window's title goes full opacity — a subtle cue
+     of which window is active (see .napp-window.focused .napp-title). */
+  opacity: 0.5;
+  transition:
+    color 200ms ease-in-out,
+    opacity 200ms ease-in-out;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -803,6 +808,19 @@ html[data-theme="dark"] .napp-window {
   font-size: 0.68rem;
   opacity: 0.45;
   margin-left: 0.4rem;
+}
+
+/* The active/front window: a lifted shadow + full-opacity title (others' titles
+   are dimmed above) so it's clear which window is focused. Animates via the
+   box-shadow transition on .napp-window and the opacity transition on .napp-title. */
+.napp-window.focused {
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+}
+html[data-theme="dark"] .napp-window.focused {
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+}
+.napp-window.focused .napp-title {
+  opacity: 1;
 }
 
 .napp-title.editing {
