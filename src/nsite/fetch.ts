@@ -58,11 +58,12 @@ export async function fetchNsite(
   const manifestServers = manifest.tags
     .filter((t: string[]) => t[0] === "server" && t[1])
     .map((t: string[]) => t[1])
-  let servers = [...new Set(manifestServers)].filter(Boolean)
-  if (servers.length === 0) {
-    const userServers = (await loadBlossomServers(pubkey)).items ?? []
-    servers = [...new Set(userServers)].filter(Boolean)
-  }
+  const userServers = (await loadBlossomServers(pubkey)).items ?? []
+  const servers = [
+    "relay.nostrapps.com",
+    ...new Set(userServers),
+    ...new Set(manifestServers)
+  ].filter(Boolean)
 
   const files = []
   for (let i = 0; i < pathTags.length; i++) {
@@ -135,10 +136,11 @@ async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
   // Try each server at most once. A throwing server (timeout / network / CORS)
   // is skipped like any other failure — never retried in place, so an
   // unreachable server can't spin this loop forever and stall the install.
-  for (const server of servers) {
+  for (let server of servers) {
     try {
-      const base = server.endsWith("/") ? server.slice(0, -1) : server
-      const res = await fetch(`${base}/${sha}`, { signal: AbortSignal.timeout(10000) })
+      server = server.endsWith("/") ? server.slice(0, -1) : server
+      server = server.startsWith("http") ? server : `https://${server}`
+      const res = await fetch(`${server}/${sha}`, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) {
         console.debug("[fetchBlob] miss", { server, sha, status: res.status })
         continue

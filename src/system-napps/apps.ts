@@ -20,7 +20,11 @@ import { button, type ButtonVariant } from "./ui.js"
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
 
-const DEFAULT_RELAYS = ["wss://relay.nostrapps.com/personal", "wss://relay.nostrapps.com/internal"]
+const DEFAULT_RELAYS = [
+  "wss://relay.nostrapps.com/",
+  "wss://relay.nostrapps.com/personal",
+  "wss://relay.nostrapps.com/internal"
+]
 
 export function mount(
   container: HTMLElement,
