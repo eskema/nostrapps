@@ -37,6 +37,7 @@ import { pool } from "@nostr/gadgets/global"
 import type { SubCloser } from "@nostr/tools/abstract-pool"
 import type { NostrEvent } from "@nostr/tools/core"
 import { matchFilter, type Filter } from "@nostr/tools/filter"
+import { isNip05, queryProfile } from "@nostr/tools/nip05"
 import { getInstalledAppForNappId, updateOpen } from "../persistence.js"
 import { currentSigner } from "../signers/index.js"
 import { current as outboxCurrent, outbox } from "../outbox.js"
@@ -1838,6 +1839,25 @@ async function dispatch(
     case "napp.loadRelayInfo":
       return loadRelayInfo(params.url, params.refreshStyle)
     case "napp.loadNostrUser":
+      if (typeof params === "string") {
+        if (isNip05(params)) {
+          const resolved = await queryProfile(params)
+          if (resolved) {
+            return loadNostrUser({ pubkey: resolved.pubkey, relays: resolved.relays })
+          }
+        }
+        return loadNostrUser(params)
+      }
+      if (params?.pubkey && isNip05(params.pubkey)) {
+        const resolved = await queryProfile(params.pubkey)
+        if (resolved) {
+          return loadNostrUser({
+            ...params,
+            pubkey: resolved.pubkey,
+            relays: [...(params.relays || []), ...(resolved.relays || [])],
+          })
+        }
+      }
       return loadNostrUser(params)
     default:
       throw new Error(`unsupported method: ${method}`)
