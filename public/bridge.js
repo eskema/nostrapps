@@ -1,5 +1,6 @@
 ;(() => {
   const pending = new Map()
+  const feedCallbacks = new Map()
   // iframe.name (set by the launcher cross-origin)
   const INSTANCE_ID = window.name
 
@@ -76,6 +77,11 @@
       else p.reject(new Error(data.error))
       return
     }
+    if (data.__nostrapps === "napp-feed-callback") {
+      const callback = feedCallbacks.get(data.callbackId)
+      if (callback) callback(data.events)
+      return
+    }
     if (data.__nostrapps === "napp-dispatch-action") {
       handleDispatch(data)
       return
@@ -122,11 +128,37 @@
   //   window.napp.action(name, payload, options?) — call a registered action handler
   // Receiving apps register:
   //   window.napp.registerAction(pattern, handler) — handle incoming action dispatches
+  let feedSerial = 0
+  function feedRpc(method, params, callback) {
+    if (!callback) throw new Error("no callback specified")
+
+    const callbackId = feedSerial++
+    params.callbackId = callbackId
+    feedCallbacks.set(callbackId, callback)
+
+    rpc(method, params)
+
+    return {
+      close() {
+        feedCallbacks.delete(callbackId)
+        rpc("napp.feeds.cancel", { callbackId }).catch(() => {})
+      }
+    }
+  }
+
   const napp = {
     instance: INSTANCE_ID,
     action: (name, payload, options) => rpc("napp.action", { name, payload, options }),
     registerAction,
     actionHandlers,
+    feeds: {
+      profile: (pubkey, kinds, callback, { since, until, limit } = {}) =>
+        feedRpc("napp.feeds.profile", { pubkey, kinds, since, until, limit }, callback),
+      following: (source, kinds, callback, { since, until, limit } = {}) =>
+        feedRpc("napp.feeds.following", { source, kinds, since, until, limit }, callback),
+      inbox: (pubkey, kinds, callback, { since, until, limit } = {}) =>
+        feedRpc("napp.feeds.inbox", { pubkey, kinds, since, until, limit }, callback)
+    },
     // Data-loading helpers executed on the host via @nostr/gadgets.
     // Signatures match the original library functions.
     utils: {

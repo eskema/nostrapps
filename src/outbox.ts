@@ -18,7 +18,12 @@ setTimeout(() => {
         current.onsync[i](pubkey)
       }
     },
-    onbeforeupdate(_pubkey) {},
+    onbeforeupdate(pubkey) {
+      console.debug(":: before updating", pubkey)
+      for (let i = 0; i < current.onbefore.length; i++) {
+        current.onbefore[i](pubkey)
+      }
+    },
     onliveupdate(event) {
       console.debug(":: live", event)
       for (let i = 0; i < current.onnew.length; i++) {
@@ -58,8 +63,9 @@ export function stopOutbox() {
 
 export const current: {
   onsync: Array<(pubkey?: string) => void>
+  onbefore: Array<(pubkey?: string) => void>
   onnew: Array<(event: NostrEvent) => void>
-} = { onsync: [], onnew: [] }
+} = { onsync: [], onbefore: [], onnew: [] }
 
 let isReady: () => void
 let _ready: Promise<void>

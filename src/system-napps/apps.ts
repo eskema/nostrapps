@@ -15,7 +15,7 @@ import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NostrEvent } from "@nostr/tools"
-import { selectApp, type AppInfoParams } from "./appinfo.js"
+import { selectApp } from "./appinfo.js"
 import { button, type ButtonVariant } from "./ui.js"
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
@@ -301,9 +301,7 @@ export function mount(
   // (see applyFilter), not by excluding events here — so every manifest gets a
   // card and the filter can show/hide them without rebuilding.
   function sortedManifests(evts: any[]) {
-    return evts
-      .filter(e => e.kind === NSITE_NAMED_KIND)
-      .sort((a, b) => b.created_at - a.created_at)
+    return evts.filter(e => e.kind === NSITE_NAMED_KIND).sort((a, b) => b.created_at - a.created_at)
   }
 
   // Add / update / remove the placeholder based on whether there are any cards
@@ -539,7 +537,13 @@ export function mount(
     // Only rebuild when the set of installed apps actually changed — otherwise
     // an unrelated apps-changed signal (fired on window moves) would collapse
     // any <details> the user just opened.
-    if (ctx.apps.list().map(a => a.nappId).join(",") === _installedSig) return
+    if (
+      ctx.apps
+        .list()
+        .map(a => a.nappId)
+        .join(",") === _installedSig
+    )
+      return
     renderInstalledList()
   })
 
@@ -552,7 +556,6 @@ export function mount(
     }
   }
 }
-
 
 // ─── Unified app card (Installed + Discover render the same shape) ──
 

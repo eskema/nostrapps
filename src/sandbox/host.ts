@@ -33,8 +33,13 @@ import {
 import { loadEmojiSets, loadFollowPacks, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 import { loadRelayInfo } from "@nostr/gadgets/relays"
+import { pool } from "@nostr/gadgets/global"
+import type { SubCloser } from "@nostr/tools/abstract-pool"
+import type { NostrEvent } from "@nostr/tools/core"
+import { matchFilter, type Filter } from "@nostr/tools/filter"
 import { getInstalledAppForNappId, updateOpen } from "../persistence.js"
 import { currentSigner } from "../signers/index.js"
+import { current as outboxCurrent, outbox } from "../outbox.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -99,6 +104,10 @@ const readyResolve = new Map<string, () => void>()
 // "target origin does not match" error. broadcastTheme skips non-ready ones.
 const readyInstances = new Set<string>()
 const registeredActions = new Map<string, Array<{ idx: number; pattern: string }>>()
+const feedRequests = new Map<
+  string,
+  Map<string, { controller: AbortController; closer?: SubCloser; cleanup?: () => void }>
+>()
 const actionWaiters = new Map<
   string,
   Array<{
@@ -160,6 +169,55 @@ function clearInstanceRuntimeState(
 ) {
   clearReady(instanceId)
   clearInstanceActionState(instanceId, reason)
+  clearInstanceFeedRequests(instanceId)
+}
+
+function clearInstanceFeedRequests(instanceId: string) {
+  const requests = feedRequests.get(instanceId)
+  if (!requests) return
+  for (const request of requests.values()) {
+    request.controller.abort()
+    request.closer?.close("napp closed")
+    request.cleanup?.()
+  }
+  feedRequests.delete(instanceId)
+}
+
+function trackFeedRequest(
+  instanceId: string,
+  requestId: string,
+  request: { controller: AbortController; cleanup?: () => void }
+) {
+  let requests = feedRequests.get(instanceId)
+  if (!requests) {
+    requests = new Map()
+    feedRequests.set(instanceId, requests)
+  }
+  const existing = requests.get(requestId)
+  existing?.controller.abort()
+  existing?.closer?.close("feed replaced")
+  existing?.cleanup?.()
+  requests.set(requestId, request)
+}
+
+function finishFeedRequest(instanceId: string, requestId: string) {
+  const requests = feedRequests.get(instanceId)
+  if (!requests) return
+  const request = requests.get(requestId)
+  request?.cleanup?.()
+  requests.delete(requestId)
+  if (requests.size === 0) feedRequests.delete(instanceId)
+}
+
+function cancelFeedRequest(instanceId: string | undefined, requestId: string | undefined) {
+  if (!instanceId || !requestId) return false
+  const requests = feedRequests.get(instanceId)
+  const request = requests?.get(requestId)
+  if (!request) return false
+  request.controller.abort()
+  request.closer?.close("napp aborted feed")
+  finishFeedRequest(instanceId, requestId)
+  return true
 }
 
 function resetInstanceRuntimeState(
@@ -930,7 +988,7 @@ export function bestFitPack(
     // its original spot. Without snapshot we fall back to its current
     // style-derived cell — that's the regular non-drag pack path.
     const original = snapshot?.get(item.root)
-    const desired = isNew ? { col: 0, row: 0, cols: 1, rows: 2 } : original ?? cellFromPx(item)
+    const desired = isNew ? { col: 0, row: 0, cols: 1, rows: 2 } : (original ?? cellFromPx(item))
     let placed = null
     if (!isNew) {
       // 1. Try the exact desired cell.
@@ -1531,7 +1589,7 @@ async function handleRpc(
   signer: Signer | SignerGetter,
   nappId: string
 ) {
-  const { id, method, params } = data
+  const { id, method, params, instanceId } = data
   try {
     if (isGated(method!)) {
       const allowed = await requireApproval(nappId, method!)
@@ -1541,7 +1599,7 @@ async function handleRpc(
     // (`() => currentSigner()`). The getter form lets the user hot-swap
     // signer types (NIP-07 ↔ NIP-46) without forcing a napp reload.
     const resolvedSigner = typeof signer === "function" ? signer() : signer
-    const result = await dispatch(resolvedSigner, method!, params, nappId)
+    const result = await dispatch(resolvedSigner, method!, params, nappId, instanceId)
     iframe.contentWindow?.postMessage({ __nostrapps: "rpc-result", id, result }, "*")
   } catch (err: any) {
     iframe.contentWindow?.postMessage(
@@ -1551,7 +1609,112 @@ async function handleRpc(
   }
 }
 
-function dispatch(signer: Signer, method: string, params: any, callerNappId: string) {
+async function startOutboxFeed(
+  instanceId: string,
+  callbackId: string,
+  authors: string[],
+  kinds: number[],
+  until: number | undefined,
+  filter: Filter
+) {
+  const controller = new AbortController()
+
+  const win = openWindows.get(instanceId)?.iframe?.contentWindow
+  const notify = async () => {
+    if (!controller.signal.aborted)
+      win?.postMessage(
+        { __nostrapps: "napp-feed-callback", callbackId, events: await store.query(filter) },
+        "*"
+      )
+  }
+  notify()
+
+  const onSync = (pubkey?: string) => {
+    if (!pubkey || authors.includes(pubkey)) notify()
+  }
+  const onBefore = (pubkey?: string) => {
+    if (!pubkey || authors.includes(pubkey)) notify()
+  }
+  const onNew = (event: NostrEvent) => {
+    if (matchFilter(filter, event)) notify()
+  }
+  const cleanup = () => {
+    outboxCurrent.onsync = outboxCurrent.onsync.filter(listener => listener !== onSync)
+    outboxCurrent.onbefore = outboxCurrent.onbefore.filter(listener => listener !== onBefore)
+    outboxCurrent.onnew = outboxCurrent.onnew.filter(listener => listener !== onNew)
+  }
+
+  outboxCurrent.onsync.push(onSync)
+  outboxCurrent.onbefore.push(onBefore)
+  outboxCurrent.onnew.push(onNew)
+  trackFeedRequest(instanceId, callbackId, { controller, cleanup })
+  ;(async () => {
+    try {
+      if (!until || until >= Math.round(Date.now() / 1000) - 5)
+        await outbox.sync(authors, kinds, { signal: controller.signal })
+      else await outbox.before(authors, kinds, until, { signal: controller.signal })
+    } catch (err) {
+      if (!controller.signal.aborted) console.warn("failed to update feed", err)
+    }
+  })()
+}
+
+async function startInboxFeed(
+  instanceId: string,
+  callbackId: string,
+  pubkey: string,
+  filter: Filter
+) {
+  const controller = new AbortController()
+  trackFeedRequest(instanceId, callbackId, { controller })
+
+  const win = openWindows.get(instanceId)?.iframe?.contentWindow
+  const notify = async () => {
+    if (!controller.signal.aborted)
+      win?.postMessage(
+        { __nostrapps: "napp-feed-callback", callbackId, events: await store.query(filter) },
+        "*"
+      )
+  }
+  notify()
+
+  try {
+    const relayList = await loadRelayList(pubkey)
+    const relays = relayList.items.filter(relay => relay.read).map(relay => relay.url)
+    if (controller.signal.aborted || relays.length === 0) {
+      finishFeedRequest(instanceId, callbackId)
+      return
+    }
+    const closer = pool.subscribeMany(relays, filter, {
+      label: `inbox-${pubkey.substring(0, 6)}`,
+      abort: controller.signal,
+      async onevent(event) {
+        await store.add(event)
+        if (!controller.signal.aborted) notify()
+      },
+      async oneose() {
+        if (!controller.signal.aborted) notify()
+      },
+      onclose() {
+        notify()
+      }
+    })
+    const requests = feedRequests.get(instanceId)
+    const request = requests?.get(callbackId)
+    if (request) request.closer = closer
+  } catch (err) {
+    if (!controller.signal.aborted) console.warn("failed to update inbox feed", err)
+    finishFeedRequest(instanceId, callbackId)
+  }
+}
+
+async function dispatch(
+  signer: Signer,
+  method: string,
+  params: any,
+  callerNappId: string,
+  instanceId?: string
+) {
   switch (method) {
     case "getPublicKey":
       return signer.getPublicKey()
@@ -1577,6 +1740,56 @@ function dispatch(signer: Signer, method: string, params: any, callerNappId: str
       return store.replaceable(params.kind, params.author, params.identifier)
     case "napp.action":
       return dispatchAction(callerNappId, params?.name ?? "", params?.payload, params?.options)
+    case "napp.feeds.profile": {
+      const filter: Filter = {
+        authors: [params.pubkey],
+        kinds: params.kinds,
+        limit: params.limit || 100
+      }
+      if (params.since) filter.since = params.since
+      if (params.until) filter.until = params.until
+      startOutboxFeed(
+        instanceId!,
+        params.callbackId,
+        [params.pubkey],
+        params.kinds,
+        params.until,
+        filter
+      )
+      return
+    }
+    case "napp.feeds.following": {
+      const authors = await loadFollowsList(params.source)
+      const filter: Filter = {
+        authors: authors.items,
+        kinds: params.kinds,
+        limit: params.limit || 100
+      }
+      if (params.since) filter.since = params.since
+      if (params.until) filter.until = params.until
+      startOutboxFeed(
+        instanceId!,
+        params.callbackId,
+        authors.items,
+        params.kinds,
+        params.until,
+        filter
+      )
+      return
+    }
+    case "napp.feeds.inbox": {
+      const filter: Filter = {
+        "#p": [params.pubkey],
+        kinds: params.kinds,
+        limit: params.limit || 100
+      }
+      if (params.since) filter.since = params.since
+      if (params.until) filter.until = params.until
+      startInboxFeed(instanceId!, params.callbackId, params.pubkey, filter)
+      return
+    }
+    case "napp.feeds.cancel":
+      return cancelFeedRequest(instanceId, params?.callbackId)
     case "napp.loadBlossomServers":
       return loadBlossomServers(
         params.pubkey,

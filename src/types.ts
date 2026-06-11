@@ -116,6 +116,7 @@ export type MessageData =
       id: string
       method: string
       params: any
+      instanceId?: string
     }
   | {
       __nostrapps: "rpc-result"
@@ -132,6 +133,11 @@ export type MessageData =
       // Resolved color tokens from the launcher's active theme, forwarded so
       // napps can match the launcher's surface/text without hardcoding values.
       vars?: Record<string, string>
+    }
+  | {
+      __nostrapps: "napp-feed-callback"
+      callbackId: string
+      events: unknown[]
     }
 
 export type InstalledApp = {
