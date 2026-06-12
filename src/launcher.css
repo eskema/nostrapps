@@ -1017,9 +1017,11 @@ body.napp-dragging * {
   cursor: grabbing !important;
 }
 
-/* While dragging, take iframes out of the hit-test path so cross-origin
-   children don't burn time on hover/pointer work as the cursor flies over. */
-body.napp-dragging .napp-body iframe {
+/* While dragging or resizing, take iframes out of the hit-test path so
+   cross-origin children don't burn time on hover/pointer work as the
+   cursor flies over, and don't steal captured pointer events. */
+body.napp-dragging .napp-body iframe,
+body.napp-resizing .napp-body iframe {
   pointer-events: none;
 }
 
