@@ -1,4 +1,44 @@
 ;(() => {
+  // ── Neutralize service-worker registration ──────────────────────────
+  // A napp runs inside the launcher's sandbox, where the origin's single
+  // service-worker slot is already owned by the launcher (its sw.js serves the
+  // napp's files from IDB). A napp registering its own SW can't work: the script
+  // fetch bypasses the launcher SW and resolves from the network — 404 in prod,
+  // or the dev server's index.html (text/html) which the browser rejects — and
+  // if it did succeed it would evict the launcher's SW and break file serving.
+  // Stub registration so such napps degrade gracefully instead of throwing.
+  try {
+    const swc = navigator.serviceWorker
+    if (swc) {
+      const stub = {
+        scope: location.origin + "/",
+        active: null,
+        installing: null,
+        waiting: null,
+        update: () => Promise.resolve(stub),
+        unregister: () => Promise.resolve(true),
+        addEventListener() {},
+        removeEventListener() {}
+      }
+      const def = (name, value) => {
+        try {
+          Object.defineProperty(swc, name, { configurable: true, value })
+        } catch {}
+      }
+      def("register", () => {
+        console.warn(
+          "[nostrapps] service worker registration is unsupported in the sandbox; ignoring"
+        )
+        return Promise.resolve(stub)
+      })
+      def("getRegistration", () => Promise.resolve(undefined))
+      def("getRegistrations", () => Promise.resolve([]))
+      try {
+        Object.defineProperty(swc, "ready", { configurable: true, get: () => Promise.resolve(stub) })
+      } catch {}
+    }
+  } catch {}
+
   const pending = new Map()
   const feedCallbacks = new Map()
   // iframe.name (set by the launcher cross-origin)
