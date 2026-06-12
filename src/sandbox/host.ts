@@ -42,6 +42,7 @@ import { decode } from "@nostr/tools/nip19"
 import { getInstalledAppForNappId, updateOpen } from "../persistence.js"
 import { currentSigner } from "../signers/index.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS } from "../outbox.js"
+import { debounce } from "../utils.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -1624,13 +1625,13 @@ async function startOutboxFeed(
   const controller = new AbortController()
 
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
-  const notify = async () => {
+  const notify = debounce(async () => {
     if (!controller.signal.aborted)
       win?.postMessage(
         { __nostrapps: "napp-feed-callback", callbackId, events: await store.queryEvents(filter) },
         "*"
       )
-  }
+  }, 800)
   notify()
 
   const onSync = (pubkey?: string) => {
@@ -1673,13 +1674,13 @@ async function startInboxFeed(
   trackFeedRequest(instanceId, callbackId, { controller })
 
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
-  const notify = async () => {
+  const notify = debounce(async () => {
     if (!controller.signal.aborted)
       win?.postMessage(
         { __nostrapps: "napp-feed-callback", callbackId, events: await store.queryEvents(filter) },
         "*"
       )
-  }
+  }, 800)
   notify()
 
   try {
@@ -1693,14 +1694,8 @@ async function startInboxFeed(
       label: `inbox-${pubkey.substring(0, 6)}`,
       abort: controller.signal,
       async onevent(event) {
-        await store.saveEvent(event)
-        if (!controller.signal.aborted) notify()
-      },
-      async oneose() {
-        if (!controller.signal.aborted) notify()
-      },
-      onclose() {
-        notify()
+        const isNew = await store.saveEvent(event)
+        if (isNew) notify()
       }
     })
     const requests = feedRequests.get(instanceId)
