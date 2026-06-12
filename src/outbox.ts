@@ -4,7 +4,7 @@ import { loadFollowsList } from "@nostr/gadgets/lists"
 import { NostrEvent } from "@nostr/tools/core"
 import { getStore } from "./store"
 
-const FALLBACK_RELAYS = ["relay.damus.io", "relay.primal.net", "nos.lol"]
+export const FALLBACK_RELAYS = ["relay.damus.io", "relay.primal.net", "nos.lol"]
 const DEFAULT_KINDS = [1, 1111]
 
 export let outbox: OutboxManager

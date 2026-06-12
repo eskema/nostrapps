@@ -1862,12 +1862,92 @@ async function dispatch(
           return loadNostrUser({
             ...params,
             pubkey: resolved.pubkey,
-            relays: [...(params.relays || []), ...(resolved.relays || [])],
+            relays: [...(params.relays || []), ...(resolved.relays || [])]
           })
         }
       }
       return loadNostrUser(params)
+    case "napp.loadEvent":
+      return loadEvent(params)
     default:
       throw new Error(`unsupported method: ${method}`)
+  }
+}
+
+async function loadEvent(params: { code: string; relays?: string[]; author?: string }) {
+  let id: string | undefined
+  let kind: number | undefined
+  let author: string | undefined
+  let identifier: string | undefined
+  let relayHints: string[] = params.relays || []
+
+  let isReplaceable = false
+  if (params.code.startsWith("nevent1")) {
+    const { data } = decode(params.code)
+    const ptr = data as { id: string; relays?: string[]; author?: string; kind?: number }
+    id = ptr.id
+    if (ptr.relays) relayHints.push(...ptr.relays)
+    author = ptr.author || params.author
+    kind = ptr.kind
+  } else if (params.code.startsWith("naddr1")) {
+    isReplaceable = true
+    const { data } = decode(params.code)
+    const ptr = data as { identifier: string; pubkey: string; kind: number; relays?: string[] }
+    identifier = ptr.identifier
+    author = ptr.pubkey
+    kind = ptr.kind
+    if (ptr.relays) relayHints.push(...ptr.relays)
+  } else {
+    id = params.code
+    author = params.author
+  }
+
+  // try store
+  let event: NostrEvent | undefined
+  if (identifier && author && kind) {
+    const results = await store.loadReplaceables([[kind, author, identifier]])
+    event = results[0][1] as NostrEvent | undefined
+  } else if (id) {
+    const results = await store.queryEvents({ ids: [id] }, 1)
+    event = results[0]
+  }
+  if (event) return event
+
+  // prepare filter for relays
+  let filter: Record<string, any> = { limit: 1 }
+  if (identifier) {
+    filter.kinds = [kind]
+    filter.authors = [author]
+    if (identifier !== "") filter["#d"] = [identifier]
+  } else {
+    filter.ids = [id!]
+  }
+
+  // try relay hints first
+  let evt = await queryRelays(relayHints)
+  if (evt) return evt
+
+  // then try author's relay list
+  if (author) {
+    try {
+      const list = await loadRelayList(author)
+      evt = await queryRelays(list.items.filter(item => item.read).map(item => item.url))
+      if (evt) return evt
+    } catch {}
+  }
+
+  // finally try fallback relays
+  evt = await queryRelays(FALLBACK_RELAYS)
+  if (evt) return evt
+
+  return null
+
+  async function queryRelays(relays: string[]): Promise<NostrEvent | null> {
+    if (relays.length === 0) return null
+    const results = await pool.querySync(relays, filter, { maxWait: 4000 })
+    if (isReplaceable) results.sort((a, b) => b.created_at - a.created_at)
+    const evt = results[0]
+    if (evt) await store.saveEvent(evt)
+    return evt || null
   }
 }

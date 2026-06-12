@@ -197,7 +197,9 @@
       // ── relays ──────────────────────────────────────
       loadRelayInfo: (url, refreshStyle) => rpc("napp.loadRelayInfo", { url, refreshStyle }),
       // ── metadata ───────────────────────────────────
-      loadNostrUser: request => rpc("napp.loadNostrUser", request)
+      loadNostrUser: request => rpc("napp.loadNostrUser", request),
+      // ── event fetching ────────────────────────────
+      loadEvent: (code, relays, author) => rpc("napp.loadEvent", { code, relays, author })
     }
   }
 
