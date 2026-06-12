@@ -114,8 +114,8 @@ h1 span {
   justify-content: space-between;
   gap: 0.75rem;
   /* padding: 0.2rem 0.5rem; */
-  min-height: 1.7rem;
-  border-bottom: 1px dotted color-mix(in srgb, currentColor 40%, transparent);
+  /* min-height: 1.7rem; */
+  /* border-bottom: 1px dotted color-mix(in srgb, currentColor 40%, transparent); */
 }
 
 /* Current-space controls (save / reset / destroy), far left. */
@@ -139,6 +139,8 @@ h1 span {
 
 #spaces-bar .btn {
   font-size: 0.8rem;
+  padding: 0 0.4rem;
+  border-radius: 2px;
 }
 
 /* List of spaces + new-space, right. */
@@ -179,8 +181,9 @@ h1 span {
   z-index: 1;
 }
 
-/* While a space chip is being dragged (pointer-based), force the grabbing
-   cursor everywhere and stop accidental text selection. */
+/* While a space chip is pressed or dragged (pointer-based), force the grabbing
+   cursor everywhere and stop accidental text selection. Added on pointerdown so
+   the cursor responds to the press immediately, before the drag threshold. */
 body.space-dragging,
 body.space-dragging * {
   cursor: grabbing !important;

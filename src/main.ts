@@ -1269,8 +1269,7 @@ function onSpacePointerMove(e: PointerEvent) {
   if (!spaceDrag.started) {
     if (Math.abs(e.clientX - startX) < 4) return // below threshold: still a click
     spaceDrag.started = true
-    el.classList.add("dragging")
-    document.body.classList.add("space-dragging")
+    el.classList.add("dragging") // chip's "this one is moving" highlight
   }
   e.preventDefault()
   const after = dragAfterChip(list, e.clientX)
@@ -1284,10 +1283,10 @@ function endSpaceDrag() {
   window.removeEventListener("pointermove", onSpacePointerMove)
   window.removeEventListener("pointerup", endSpaceDrag)
   window.removeEventListener("pointercancel", endSpaceDrag)
+  document.body.classList.remove("space-dragging") // grabbing cursor off (press or drag)
   if (spaceDrag?.started) {
     const { el, list } = spaceDrag
     el.classList.remove("dragging")
-    document.body.classList.remove("space-dragging")
     persist.setSpacesOrder(
       [...list.querySelectorAll<HTMLElement>("[data-space-id]")].map(c => c.dataset.spaceId!)
     )
@@ -1311,6 +1310,8 @@ function buildSpaceChip(s: { id: string; name: string }): HTMLButtonElement {
   el.addEventListener("pointerdown", e => {
     if (e.button !== 0 || !el.parentElement) return
     spaceDrag = { el, list: el.parentElement, startX: e.clientX, started: false }
+    // Grabbing cursor on press — immediately, before the drag threshold.
+    document.body.classList.add("space-dragging")
     window.addEventListener("pointermove", onSpacePointerMove)
     window.addEventListener("pointerup", endSpaceDrag)
     window.addEventListener("pointercancel", endSpaceDrag)
