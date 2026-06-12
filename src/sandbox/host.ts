@@ -15,7 +15,7 @@ import type {
 
 import { isGated, requireApproval } from "../permissions.js"
 import { dispatchAction } from "../handlers.js"
-import * as store from "../store.js"
+import { getStore } from "../store.js"
 import { createNappWindow } from "./napp-window.js"
 import {
   loadBlossomServers,
@@ -38,11 +38,14 @@ import type { SubCloser } from "@nostr/tools/abstract-pool"
 import type { NostrEvent } from "@nostr/tools/core"
 import { matchFilter, type Filter } from "@nostr/tools/filter"
 import { isNip05, queryProfile } from "@nostr/tools/nip05"
+import { decode } from "@nostr/tools/nip19"
 import { getInstalledAppForNappId, updateOpen } from "../persistence.js"
 import { currentSigner } from "../signers/index.js"
-import { current as outboxCurrent, outbox } from "../outbox.js"
+import { current as outboxCurrent, outbox, FALLBACK_RELAYS } from "../outbox.js"
 
 const BOOT_TIMEOUT_MS = 10_000
+
+const store = getStore()
 
 const openWindows = new Map<string, NappWindow>()
 
@@ -1624,7 +1627,7 @@ async function startOutboxFeed(
   const notify = async () => {
     if (!controller.signal.aborted)
       win?.postMessage(
-        { __nostrapps: "napp-feed-callback", callbackId, events: await store.query(filter) },
+        { __nostrapps: "napp-feed-callback", callbackId, events: await store.queryEvents(filter) },
         "*"
       )
   }
@@ -1673,7 +1676,7 @@ async function startInboxFeed(
   const notify = async () => {
     if (!controller.signal.aborted)
       win?.postMessage(
-        { __nostrapps: "napp-feed-callback", callbackId, events: await store.query(filter) },
+        { __nostrapps: "napp-feed-callback", callbackId, events: await store.queryEvents(filter) },
         "*"
       )
   }
@@ -1690,7 +1693,7 @@ async function startInboxFeed(
       label: `inbox-${pubkey.substring(0, 6)}`,
       abort: controller.signal,
       async onevent(event) {
-        await store.add(event)
+        await store.saveEvent(event)
         if (!controller.signal.aborted) notify()
       },
       async oneose() {
@@ -1730,15 +1733,20 @@ async function dispatch(
     case "nip44.decrypt":
       return signer.nip44.decrypt(params.pubkey, params.ciphertext)
     case "nostrdb.add":
-      return store.add(params.event)
+      return store.saveEvent(params.event)
     case "nostrdb.query":
-      return store.query(params.filters)
+      return store.queryEvents(params.filters)
     case "nostrdb.count":
-      return store.count(params.filters)
+      const events = await store.queryEvents(params.filters, 10_000)
+      return events.length
     case "nostrdb.event":
-      return store.event(params.id)
+      const res = await store.queryEvents({ ids: [params.id] }, 1)
+      return res[0]
     case "nostrdb.replaceable":
-      return store.replaceable(params.kind, params.author, params.identifier)
+      const result = await getStore().loadReplaceables([
+        [params.kind, params.author, params.identifier]
+      ])
+      return result[0]
     case "napp.action":
       return dispatchAction(callerNappId, params?.name ?? "", params?.payload, params?.options)
     case "napp.feeds.profile": {

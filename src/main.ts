@@ -59,7 +59,6 @@ import { Filter } from "@nostr/tools/filter"
 import { pool } from "@nostr/gadgets/global"
 import { EventTemplate } from "@nostr/tools"
 
-
 pool.trackRelays = true
 pool.automaticallyAuth = (_url: string) =>
   currentSigner() ? (evt: EventTemplate) => currentSigner()?.signEvent(evt) as any : null
@@ -535,9 +534,6 @@ const systemCtx: SystemCtx = {
       return () => appSubs.delete(fn)
     }
   },
-  database: {
-    query: (filter: Filter) => nostrdb.query(filter)
-  },
   theme,
   logs,
   connect,
@@ -670,8 +666,7 @@ function buildSuggestionItems(): SuggestionItem[] {
   // its windows lead the list; others follow, each tagged with their space.
   const allWindows = persist.allOpenWindows()
   allWindows.sort(
-    (a, b) =>
-      (a.spaceId === currentSpaceId ? 0 : 1) - (b.spaceId === currentSpaceId ? 0 : 1)
+    (a, b) => (a.spaceId === currentSpaceId ? 0 : 1) - (b.spaceId === currentSpaceId ? 0 : 1)
   )
   const allSessions = allWindows.map(a => a.window)
 
@@ -1110,8 +1105,7 @@ async function destroyCurrentSpace() {
   }
   const name = spaces.find(s => s.id === currentSpaceId)?.name || "this space"
   const ok = window.confirm(
-    `Delete space "${name}"?\n\n` +
-      "Its windows and saved layout will be permanently removed."
+    `Delete space "${name}"?\n\n` + "Its windows and saved layout will be permanently removed."
   )
   if (!ok) return
   // This space's windows are genuinely gone — close them.
@@ -1197,7 +1191,10 @@ function renderSpacesBar() {
 
   const right = document.createElement("div")
   right.className = "spaces-right"
-  right.append(spaceList, iconButton("plus", "New space", () => createSpaceAndSwitch()))
+  right.append(
+    spaceList,
+    iconButton("plus", "New space", () => createSpaceAndSwitch())
+  )
 
   spacesBar.append(currentName, controls, winList, right)
 }
@@ -1270,9 +1267,7 @@ function onSpacePointerMove(e: PointerEvent) {
   if (after === el) return
   const settled = after ? el.nextElementSibling === after : el === list.lastElementChild
   if (settled) return
-  flipReorder(list, el, () =>
-    after == null ? list.appendChild(el) : list.insertBefore(el, after)
-  )
+  flipReorder(list, el, () => (after == null ? list.appendChild(el) : list.insertBefore(el, after)))
 }
 
 function endSpaceDrag() {
@@ -1540,7 +1535,11 @@ async function launchFromInput(raw: string): Promise<void> {
   }
 
   // ── temp install: show loading window immediately ──
-  const suffix = raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/[^a-z0-9._~-]/g, "-")
+  const suffix = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[^a-z0-9._~-]/g, "-")
   const nappId = `temp~${suffix}`
   const petname = friendlyNameFor(nappId)
 

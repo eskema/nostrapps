@@ -192,9 +192,6 @@ export interface SystemCtx {
     events(): NostrEvent[]
     subscribe(fn: () => void): () => void
   }
-  database: {
-    query(filter: Record<string, unknown>): Promise<NostrEvent[]>
-  }
   theme: {
     get(): string
     set(choice: string): void

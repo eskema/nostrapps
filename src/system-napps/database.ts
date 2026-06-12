@@ -9,9 +9,10 @@ const VARIADIC_FIELDS = [
   { key: "tags", label: "tags", placeholder: "e=value or #e=value", tagPairs: true }
 ]
 
-import type { SystemCtx } from "../types.js"
+import { Filter } from "@nostr/tools/filter"
+import { getStore } from "../store.js"
 
-export function mount(container: HTMLElement, ctx: SystemCtx) {
+export function mount(container: HTMLElement) {
   container.innerHTML = `
     <div class="db-panel">
       <form class="db-form">
@@ -127,8 +128,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     return value
   }
 
-  function buildFilter() {
-    const filter: Record<string, unknown> = {}
+  function buildFilter(): Filter {
+    const filter: Filter = {}
     const ids = readVariadic("ids")
     if (ids.length) filter.ids = ids
 
@@ -243,7 +244,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
     try {
       const filter = buildFilter()
-      const events = await ctx.database.query(filter)
+      const events = await getStore().queryEvents(filter)
       setStatus(`${events.length} result${events.length === 1 ? "" : "s"}`)
       renderResults(events)
     } catch (err: any) {
