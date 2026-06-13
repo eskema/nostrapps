@@ -118,6 +118,13 @@ window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrU
 
 // Event fetching
 window.napp.utils.loadEvent(code, relays?, author?)
+
+// Publishing
+window.napp.utils.publish(event, relays?)
+//   event: NostrEvent (must be signed)
+//   relays?: string[] — if omitted, publishes to the author's write relays
+//     (for kind 10002 also publishes to fallback + indexer relays)
+//   returns { relays: {[url]: { ok, error? }}, published, failed }
 ```
 
 Each function's signature matches `@nostr/gadgets` exactly. The call is forwarded to the host, which runs the real query against the shared relay pool and caches the result.

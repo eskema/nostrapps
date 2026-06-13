@@ -200,7 +200,9 @@
       // ── metadata ───────────────────────────────────
       loadNostrUser: request => rpc("napp.loadNostrUser", request),
       // ── event fetching ────────────────────────────
-      loadEvent: (code, relays, author) => rpc("napp.loadEvent", { code, relays, author })
+      loadEvent: (code, relays, author) => rpc("napp.loadEvent", { code, relays, author }),
+      // ── publishing ──────────────────────────────
+      publish: (event, relays) => rpc("napp.publish", { event, relays })
     }
   }
 

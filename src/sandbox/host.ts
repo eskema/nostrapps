@@ -1886,6 +1886,8 @@ async function dispatch(
         }
       }
       return loadNostrUser(params)
+    case "napp.publish":
+      return publishEvent(params.event, params.relays)
     case "napp.loadEvent":
       return loadEvent(params)
     default:
@@ -1969,4 +1971,65 @@ async function loadEvent(params: { code: string; relays?: string[]; author?: str
     if (evt) await store.saveEvent(evt)
     return evt || null
   }
+}
+
+type PublishResult = {
+  relays: Record<string, { ok: boolean; error?: string }>
+  published: number
+  failed: number
+}
+
+async function publishEvent(event: NostrEvent, relays?: string[]): Promise<PublishResult> {
+  let targetRelays: string[]
+
+  if (relays) {
+    targetRelays = relays
+  } else {
+    const pubkey = event.pubkey
+    try {
+      const list = await loadRelayList(pubkey)
+      targetRelays = list.items.filter(item => item.write).map(item => item.url)
+    } catch {
+      targetRelays = []
+    }
+
+    if (event.kind === 10002) {
+      targetRelays.push(
+        ...FALLBACK_RELAYS,
+        "wss://purplepag.es",
+        "wss://indexer.coracle.social",
+        "wss://user.kindpag.es",
+        "wss://relay.nos.social"
+      )
+    } else if (event.kind === 3) {
+      targetRelays.push(...FALLBACK_RELAYS, "wss://purplepag.es", "wss://user.kindpag.es", "wss://relay.nos.social")
+    }
+
+    targetRelays = [...new Set(targetRelays)]
+  }
+
+  if (targetRelays.length === 0) {
+    return { relays: {}, published: 0, failed: 0 }
+  }
+
+  const promises = pool.publish(targetRelays, event)
+  const settled = await Promise.allSettled(promises)
+
+  const relaysMap: Record<string, { ok: boolean; error?: string }> = {}
+  let published = 0
+  let failed = 0
+
+  for (let i = 0; i < targetRelays.length; i++) {
+    const result = settled[i]
+    const relayUrl = targetRelays[i]
+    if (result.status === "fulfilled") {
+      relaysMap[relayUrl] = { ok: true }
+      published++
+    } else {
+      relaysMap[relayUrl] = { ok: false, error: result.reason?.message ?? String(result.reason) }
+      failed++
+    }
+  }
+
+  return { relays: relaysMap, published, failed }
 }
