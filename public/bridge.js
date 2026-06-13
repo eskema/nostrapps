@@ -57,47 +57,48 @@
     )
   }
 
-  async function handleDispatch(data) {
-    const fn = actionHandlers[data.idx]?.[1]
-    if (!fn) {
-      throw new Error("No registered action handler matched this dispatch")
-    }
-    const result = await fn(data.name, data.payload)
-    reply(data.requestId, true, result ?? null)
-  }
-
   window.addEventListener("message", event => {
     const data = event.data
     if (!data) return
-    if (data.__nostrapps === "rpc-result" || data.__nostrapps === "rpc-error") {
-      const p = pending.get(data.id)
-      if (!p) return
-      pending.delete(data.id)
-      if (data.__nostrapps === "rpc-result") p.resolve(data.result)
-      else p.reject(new Error(data.error))
-      return
-    }
-    if (data.__nostrapps === "napp-feed-callback") {
-      const callback = feedCallbacks.get(data.callbackId)
-      if (callback) callback(data.events, data.synced)
-      return
-    }
-    if (data.__nostrapps === "napp-dispatch-action") {
-      handleDispatch(data)
-      return
-    }
-    if (data.__nostrapps === "napp-theme-change") {
-      document.documentElement.dataset.theme = data.theme
-      // Apply the launcher's resolved color tokens as inline custom properties.
-      // Inline styles on :root outrank any stylesheet `:root[data-theme=...]`
-      // rule, so a napp that uses var(--surface)/var(--text) tracks the launcher
-      // automatically — no need to hardcode matching colors in each napp.
-      if (data.vars) {
-        for (const key in data.vars) {
-          document.documentElement.style.setProperty("--" + key, data.vars[key])
-        }
+
+    switch (data.__nostrapps) {
+      case "rpc-result":
+      case "rpc-error": {
+        const p = pending.get(data.id)
+        if (!p) return
+        pending.delete(data.id)
+        if (data.__nostrapps === "rpc-result") p.resolve(data.result)
+        else p.reject(new Error(data.error))
+        return
       }
-      return
+      case "napp-feed-callback": {
+        const callback = feedCallbacks.get(data.callbackId)
+        if (callback) callback(data.events, data.synced)
+        return
+      }
+      case "napp-dispatch-action": {
+        const fn = actionHandlers[data.idx]?.[1]
+        if (!fn) {
+          throw new Error("No registered action handler matched this dispatch")
+        }
+        Promise.resolve()
+          .then(() => fn(data.name, data.payload))
+          .then(result => reply(data.requestId, true, result ?? null))
+        return
+      }
+      case "napp-theme-change": {
+        document.documentElement.dataset.theme = data.theme
+        // Apply the launcher's resolved color tokens as inline custom properties.
+        // Inline styles on :root outrank any stylesheet `:root[data-theme=...]`
+        // rule, so a napp that uses var(--surface)/var(--text) tracks the launcher
+        // automatically — no need to hardcode matching colors in each napp.
+        if (data.vars) {
+          for (const key in data.vars) {
+            document.documentElement.style.setProperty("--" + key, data.vars[key])
+          }
+        }
+        return
+      }
     }
   })
 

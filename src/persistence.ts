@@ -351,7 +351,7 @@ function writeInstalled(all: Record<string, Omit<InstalledApp, "nappId">>) {
   writeJson(INSTALLED_KEY, all)
 }
 
-function readInstalled(): Record<string, InstalledApp> {
+function readInstalled(): Record<string, Omit<InstalledApp, "nappId">> {
   return readJson(INSTALLED_KEY, {})
 }
 
@@ -363,7 +363,6 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string) {
 
   const title = event.tags.find(t => t[0] === "title")?.[1] || ""
   all[nappId] = {
-    nappId,
     icon: event.tags.find(t => t[0] === "icon")?.[1] || "",
     title,
     petname: petname || existing?.petname || title || nappId,
@@ -371,9 +370,7 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string) {
     actions: event.tags.filter(t => t[0] === "action" && t[1]).map(t => t[1]),
     event
   }
-  writeInstalled(
-    Object.fromEntries(Object.entries(all).map(([id, entry]) => [id, stripNappId(entry)]))
-  )
+  writeInstalled(all)
 }
 
 export function storeInstalledLocalApp(app: {
@@ -388,7 +385,6 @@ export function storeInstalledLocalApp(app: {
   const all = readInstalled()
 
   all[app.nappId] = {
-    nappId: app.nappId,
     title: sanitizeString(app.title),
     icon: sanitizeString(app.icon),
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
@@ -396,9 +392,7 @@ export function storeInstalledLocalApp(app: {
     singleton: !!app.singleton,
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
-  writeInstalled(
-    Object.fromEntries(Object.entries(all).map(([id, entry]) => [id, stripNappId(entry)]))
-  )
+  writeInstalled(all)
 }
 
 export function getInstalledNappIds(): string[] {
@@ -410,11 +404,11 @@ export function getInstalledNappIds(): string[] {
 }
 
 export function getInstalledApp(nappId: string): InstalledApp | undefined {
-    const app = readInstalled()[nappId]
-    if (app) return app
+  const app = readInstalled()[nappId]
+  if (app) return { nappId, ...app }
 
-    const dev = devApps.get(nappId)
-    if (dev) return { nappId, ...dev }
+  const dev = devApps.get(nappId)
+  if (dev) return { nappId, ...dev }
 }
 
 export function getInstalledApps(): InstalledApp[] {
@@ -423,14 +417,11 @@ export function getInstalledApps(): InstalledApp[] {
   const installed = readInstalled()
   for (const nappId in installed) {
     const app = installed[nappId]
-    apps.push(app)
+    apps.push({ nappId, ...app })
   }
 
   for (const [nappId, dev] of devApps) {
-    apps.push({
-      nappId: nappId,
-      ...dev
-    })
+    apps.push({ nappId, ...dev })
   }
 
   return apps
@@ -446,32 +437,13 @@ export function forgetInstalledNapp(nappId: string) {
   const all = readInstalled()
   if (nappId in all) {
     delete all[nappId]
-    writeInstalled(
-      Object.fromEntries(Object.entries(all).map(([id, entry]) => [id, stripNappId(entry)]))
-    )
+    writeInstalled(all)
   }
-  forgetDevApp(nappId)
+  devApps.delete(nappId)
 }
 
 export function getInstalledEventForNappId(nappId: string): NostrEvent | null {
   return readInstalled()[nappId]?.event || null
-}
-
-export function getInstalledAppForNappId(nappId: string): InstalledApp | null {
-  const fromStorage = readInstalled()[nappId]
-  if (fromStorage) return fromStorage
-  const dev = devApps.get(nappId)
-  if (dev) {
-    return {
-      nappId: nappId,
-      icon: dev.icon,
-      title: dev.title,
-      petname: dev.petname,
-      singleton: dev.singleton,
-      actions: dev.actions
-    }
-  }
-  return null
 }
 
 export function setInstalledPetname(nappId: string, petname: string) {
@@ -481,20 +453,13 @@ export function setInstalledPetname(nappId: string, petname: string) {
   if (!all[nappId]) return
 
   all[nappId].petname = petname
-  writeInstalled(
-    Object.fromEntries(Object.entries(all).map(([id, value]) => [id, stripNappId(value)]))
-  )
+  writeInstalled(all)
 }
 
 export function getNappIdForPetname(petname: string) {
   if (!petname) return null
   const app = getInstalledApps().find(app => app.petname === petname)
   return app?.nappId || null
-}
-
-function stripNappId(app: InstalledApp): Omit<InstalledApp, "nappId"> {
-  const { nappId: _nappId, ...entry } = app
-  return entry
 }
 
 // ─── Dev apps (in-memory only) ──────────────────────────
@@ -527,8 +492,4 @@ export function storeDevApp(app: {
     actions: app.actions || [],
     installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000)
   })
-}
-
-export function forgetDevApp(nappId: string) {
-  devApps.delete(nappId)
 }

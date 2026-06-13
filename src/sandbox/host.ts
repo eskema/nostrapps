@@ -39,7 +39,7 @@ import type { NostrEvent } from "@nostr/tools/core"
 import { matchFilter, type Filter } from "@nostr/tools/filter"
 import { isNip05, queryProfile } from "@nostr/tools/nip05"
 import { decode } from "@nostr/tools/nip19"
-import { getInstalledAppForNappId, updateOpen } from "../persistence.js"
+import { getInstalledApp, updateOpen } from "../persistence.js"
 import { currentSigner } from "../signers/index.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS } from "../outbox.js"
 import { debounce } from "../utils.js"
@@ -305,7 +305,7 @@ export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchO
 }
 
 function singletonForNappId(nappId: string): boolean | null {
-  const app = getInstalledAppForNappId(nappId)
+  const app = getInstalledApp(nappId)
   return app ? app.singleton : null
 }
 
@@ -418,7 +418,8 @@ const pendingDispatches = new Map<string, { resolve(v: unknown): void; reject(e:
 
 export async function callIframe(
   instanceId: string,
-  data: Record<string, unknown> = {}
+  actionName: string,
+  actionPayload: unknown
 ): Promise<unknown> {
   await waitReady(instanceId)
   const win = openWindows.get(instanceId)
@@ -442,20 +443,22 @@ export async function callIframe(
         reject(err)
       }
     })
-    const name = typeof data.name === "string" ? data.name : ""
     console.debug("[sandbox] dispatching action to iframe", {
       instanceId,
       nappId: win.root.dataset.nappId,
       requestId,
-      name
+      name: actionName
     })
     ;(async () => {
-      let extra = {}
-      const name = typeof data.name === "string" ? data.name : ""
-      const { idx } = await waitForRegisteredAction(instanceId, name)
-      extra = { idx }
+      const { idx } = await waitForRegisteredAction(instanceId, actionName)
       win.iframe!.contentWindow?.postMessage(
-        { __nostrapps: "napp-dispatch-action", requestId, ...data, ...extra },
+        {
+          __nostrapps: "napp-dispatch-action",
+          requestId,
+          idx,
+          name: actionName,
+          payload: actionPayload
+        },
         origin
       )
     })().catch(fail)

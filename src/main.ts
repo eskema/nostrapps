@@ -361,7 +361,7 @@ function loadFolder() {
 }
 
 async function uninstall(nappId: string) {
-  const wasInstalled = !!persist.getInstalledAppForNappId(nappId)
+  const wasInstalled = !!persist.getInstalledApp(nappId)
   uninstallingNapps.add(nappId)
 
   // Destroy any open windows; their onDestroy chain runs the per-instance
@@ -468,10 +468,7 @@ async function runNappAction(
 
   // actually call the instance
   persist.appendLoadedAction(instanceId, name, payload)
-  const result = await callIframe(instanceId, {
-    name,
-    payload
-  })
+  const result = await callIframe(instanceId, name, payload)
 
   if (result) {
     setStatus(`Action "${name}" result: ${JSON.stringify(result)}`)
@@ -482,7 +479,7 @@ async function runNappAction(
 
 async function replayLoadedActions(instanceId: string) {
   for (const action of persist.getLoadedActions(instanceId)) {
-    await callIframe(instanceId, action)
+    await callIframe(instanceId, action.name, action.payload)
   }
 }
 
@@ -567,8 +564,8 @@ const systemCtx: SystemCtx = {
     win.focus()
   },
   // Use a thunk so the reference resolves to the function declared later.
-  isInstalled: (nappId: string) => !!persist.getInstalledAppForNappId(nappId),
-  wasInstalled: (nappId: string) => !!persist.getInstalledAppForNappId(nappId),
+  isInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
+  wasInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
   install: (raw: string) => install(raw),
   uninstall: (nappId: string) => uninstall(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
@@ -725,7 +722,7 @@ function petnameForNappId(nappId: string, sessions: any[]): string | null {
       return s.petname
     }
   }
-  return persist.getInstalledAppForNappId(nappId)?.petname || null
+  return persist.getInstalledApp(nappId)?.petname || null
 }
 
 function itemSearchText(item: SuggestionItem): string {
@@ -1382,6 +1379,10 @@ async function init() {
   if (packModeOn) maybeRepack()
   broadcastTheme()
   renderSpacesBar()
+  processQueryStringNapps().catch(err => {
+    console.error("[url-napps] error:", err)
+    setStatus(`URL napps error: ${err.message}`)
+  })
 }
 init()
 
@@ -1659,4 +1660,68 @@ function syncDOM(win: NappWindow) {
   // pack windows are flagged in the host, so bestFitPack sizes them 1×2 and
   // appends them rather than disturbing the existing layout.
   maybeRepack()
+}
+
+async function processQueryStringNapps() {
+  const params = new URLSearchParams(location.search)
+  let instanceId: string | undefined
+  for (const [key, value] of params) {
+    if (key === "app") {
+      try {
+        instanceId = await loadTempNappFromNaddr(value)
+      } catch (err: any) {
+        console.error(`[url-napps] failed to load ${value.slice}:`, err)
+        setStatus(`Failed to load napp from URL: ${err.message}`)
+        continue
+      }
+    } else if (key === "action" && instanceId) {
+      try {
+        const spl = value.split("->")
+        const name = spl[0]
+        const payload = spl.slice(1).join("->")
+        await callIframe(instanceId, name, payload)
+      } catch (err: any) {
+        console.error(`[url-napps] action ${value} failed for ${instanceId}:`, err)
+        setStatus(`Action ${value} failed: ${err.message}`)
+      }
+    }
+  }
+}
+
+async function loadTempNappFromNaddr(naddr: string): Promise<string> {
+  const resolved = resolveInput(naddr)
+  const { files, title, manifest, singleton } = await fetchNsite(resolved, setStatus)
+
+  const suffix = naddr
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[^a-z0-9._~-]/g, "-")
+  const nappId = `temp~${suffix}`
+  const petname = title || resolved.dTag || nappId
+  const origin = nappOriginFor(nappId)
+  const label = title || nappId
+
+  setTempFiles(nappId, files)
+  setStatus(`Booting temp ${label}…`)
+  await bootDevApp(origin, nappId, setStatus, label)
+
+  persist.storeDevApp({
+    nappId,
+    title: title || null,
+    icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1] || null,
+    petname,
+    actions: capabilitiesFromEvent(manifest),
+    singleton
+  })
+  handlers.addApp(nappId, capabilitiesFromEvent(manifest))
+
+  const win = await launch(stage, nappId, {
+    ...makeLaunchOpts(),
+    petname
+  })
+  syncDOM(win)
+  win.focus()
+
+  return win.getState().instanceId
 }
