@@ -8,12 +8,7 @@ import * as appinfo from "./appinfo.js"
 
 import type { SystemNappDef } from "../types.js"
 
-const napps = [
-  settings,
-  logs,
-  apps,
-  database
-] satisfies SystemNappDef[]
+const napps = [settings, logs, apps, database] satisfies SystemNappDef[]
 
 // Slash actions are like system napps but they fire a one-shot side effect
 // (e.g. opening a file picker) instead of mounting a window.

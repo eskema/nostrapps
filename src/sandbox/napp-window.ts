@@ -282,7 +282,7 @@ export function createNappWindow({
   }
 
   function setIframe(src: string, sandboxVal?: string) {
-    body.innerHTML = ''
+    body.innerHTML = ""
     const newIframe = document.createElement("iframe")
     newIframe.sandbox = sandboxVal || sandbox
     newIframe.name = instanceId || ""
@@ -292,7 +292,18 @@ export function createNappWindow({
     newIframe.addEventListener("focus", () => bringToFront(root))
   }
 
-  return { root, iframe: iframeRef.current, body, titleEl, close, destroy, getState, focus, notifyState, setIframe }
+  return {
+    root,
+    iframe: iframeRef.current,
+    body,
+    titleEl,
+    close,
+    destroy,
+    getState,
+    focus,
+    notifyState,
+    setIframe
+  }
 }
 
 function startRename(el: HTMLElement, onDone: (name: string | null) => void) {

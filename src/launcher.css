@@ -83,7 +83,7 @@ h1 span {
   z-index: 200;
   width: fit-content;
   display: grid;
-  transform: translateX(-100%) translateY(-.8rem);
+  transform: translateX(-100%) translateY(-0.8rem);
 }
 
 #tile-windows,
@@ -91,7 +91,7 @@ h1 span {
   width: 1rem;
   height: 1rem;
   padding: 0;
-  font-size: .9rem;
+  font-size: 0.9rem;
   line-height: 1rem;
   color: color-mix(in srgb, currentColor 30%, transparent);
   background: transparent;
@@ -137,9 +137,8 @@ h1 span {
   scrollbar-width: thin;
 }
 
-#spaces-bar .btn
-{
-  font-size: .8rem;
+#spaces-bar .btn {
+  font-size: 0.8rem;
 }
 
 /* List of spaces + new-space, right. */
@@ -233,7 +232,7 @@ button {
   justify-content: center;
   gap: 0.35rem;
   font: inherit;
-  font-size: .8rem;
+  font-size: 0.8rem;
   font-family: var(--font-serif);
   font-weight: 700;
   /* text-transform: uppercase; */
@@ -542,7 +541,7 @@ button {
 .sugg-pet {
   font-family: var(--font-serif);
   font-weight: 900;
-  letter-spacing: .05em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   /* font-size: 0.85rem; */
   /* font-weight: 500; */
@@ -800,7 +799,7 @@ html[data-theme="dark"] .napp-window {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  letter-spacing: .05em;
+  letter-spacing: 0.05em;
 }
 
 .napp-title[data-instance]::after {
@@ -897,7 +896,9 @@ html[data-theme="dark"] .napp-window.focused {
 }
 
 @keyframes napp-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .napp-resize-handle {
@@ -1283,7 +1284,7 @@ body.napp-resizing .napp-body iframe {
 .apps-tab {
   flex: 1;
   text-transform: uppercase;
-  letter-spacing: .05rem;
+  letter-spacing: 0.05rem;
 
   /* padding: 0.5rem 1rem; */
   /* font: inherit; */
@@ -1296,7 +1297,10 @@ body.napp-resizing .napp-body iframe {
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .apps-tab:hover {
@@ -1587,7 +1591,7 @@ body.napp-resizing .napp-body iframe {
 
 .apps-card {
   display: grid;
-  grid-gap: .6rem;
+  grid-gap: 0.6rem;
   padding: 0.6rem 0.75rem;
   border: none;
   border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
@@ -1595,8 +1599,7 @@ body.napp-resizing .napp-body iframe {
   position: relative;
 }
 
-.apps-card:hover
-{
+.apps-card:hover {
   background-color: color-mix(in srgb, currentColor 5%, transparent);
   cursor: pointer;
 }
@@ -1696,7 +1699,7 @@ body.napp-resizing .napp-body iframe {
   line-height: 1;
   font-weight: 600;
   font-family: var(--font-serif);
-  overflow: clip;            /* not hidden */
+  overflow: clip; /* not hidden */
   overflow-clip-margin: 0.15em;
   text-overflow: ellipsis;
   white-space: nowrap;

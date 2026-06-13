@@ -97,7 +97,11 @@ export function mount(
         button({
           label: "publish",
           variant: "outline",
-          onClick: () => ctx.launchSystemNapp("uploader", { params: getDevHandle(app.nappId) })
+          onClick: () =>
+            ctx.launchSystemNapp("uploader", {
+              params: getDevHandle(app.nappId),
+              persistent: false
+            })
         })
       ]
     }
@@ -216,7 +220,7 @@ export function mount(
               actions,
               event: app.event || null
             })
-            ctx.launchSystemNapp("appinfo")
+            ctx.launchSystemNapp("appinfo", { persistent: false })
           }
         })
       )
@@ -882,7 +886,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
         naddr,
         seenOnRelays
       })
-      ctx.launchSystemNapp("appinfo")
+      ctx.launchSystemNapp("appinfo", { persistent: false })
     }
   })
 
