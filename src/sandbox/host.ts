@@ -1625,20 +1625,30 @@ async function startOutboxFeed(
   const controller = new AbortController()
 
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
+  let synced = authors.map(() => false)
   const notify = debounce(async () => {
     if (!controller.signal.aborted)
       win?.postMessage(
-        { __nostrapps: "napp-feed-callback", callbackId, events: await store.queryEvents(filter) },
+        {
+          __nostrapps: "napp-feed-callback",
+          callbackId,
+          events: await store.queryEvents(filter),
+          synced: synced.every(v => v)
+        },
         "*"
       )
   }, 800)
   notify()
 
-  const onSync = (pubkey?: string) => {
-    if (!pubkey || authors.includes(pubkey)) notify()
+  const onSync = (pubkey: string) => {
+    const idx = authors.indexOf(pubkey)
+    if (idx !== -1) {
+      synced[idx] = true
+      notify()
+    }
   }
-  const onBefore = (pubkey?: string) => {
-    if (!pubkey || authors.includes(pubkey)) notify()
+  const onBefore = (pubkey: string) => {
+    if (authors.includes(pubkey)) notify()
   }
   const onNew = (event: NostrEvent) => {
     if (matchFilter(filter, event)) notify()
@@ -1652,12 +1662,13 @@ async function startOutboxFeed(
   outboxCurrent.onsync.push(onSync)
   outboxCurrent.onbefore.push(onBefore)
   outboxCurrent.onnew.push(onNew)
+
   trackFeedRequest(instanceId, callbackId, { controller, cleanup })
   ;(async () => {
     try {
-      if (!until || until >= Math.round(Date.now() / 1000) - 5)
-        await outbox.sync(authors, kinds, { signal: controller.signal })
-      else await outbox.before(authors, kinds, until, { signal: controller.signal })
+      await outbox.sync(authors, kinds, { signal: controller.signal })
+      if (until && until < Math.round(Date.now() / 1000) - 5)
+        await outbox.before(authors, kinds, until, { signal: controller.signal })
     } catch (err) {
       if (!controller.signal.aborted) console.warn("failed to update feed", err)
     }
@@ -1674,10 +1685,17 @@ async function startInboxFeed(
   trackFeedRequest(instanceId, callbackId, { controller })
 
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
+
+  let synced = false
   const notify = debounce(async () => {
     if (!controller.signal.aborted)
       win?.postMessage(
-        { __nostrapps: "napp-feed-callback", callbackId, events: await store.queryEvents(filter) },
+        {
+          __nostrapps: "napp-feed-callback",
+          callbackId,
+          events: await store.queryEvents(filter),
+          synced
+        },
         "*"
       )
   }, 800)
@@ -1696,6 +1714,9 @@ async function startInboxFeed(
       async onevent(event) {
         const isNew = await store.saveEvent(event)
         if (isNew) notify()
+      },
+      oneose() {
+        synced = true
       }
     })
     const requests = feedRequests.get(instanceId)

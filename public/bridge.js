@@ -79,7 +79,7 @@
     }
     if (data.__nostrapps === "napp-feed-callback") {
       const callback = feedCallbacks.get(data.callbackId)
-      if (callback) callback(data.events)
+      if (callback) callback(data.events, data.synced)
       return
     }
     if (data.__nostrapps === "napp-dispatch-action") {

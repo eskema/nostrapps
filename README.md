@@ -85,6 +85,7 @@ window.nostrdb.query(filters)
 window.nostrdb.count(filters)
 window.nostrdb.event(id)
 window.nostrdb.replaceable(kind, author, identifier?)
+window.nostrdb.supports() // returns []
 ```
 
 You also get data-loading helpers executed on the host via `@nostr/gadgets`:
@@ -114,9 +115,35 @@ window.napp.utils.loadRelayInfo(url, refreshStyle?)
 
 // Profile metadata
 window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrUser
+
+// Event fetching
+window.napp.utils.loadEvent(code, relays?, author?)
 ```
 
 Each function's signature matches `@nostr/gadgets` exactly. The call is forwarded to the host, which runs the real query against the shared relay pool and caches the result.
+
+### Streaming feeds
+
+Napps can subscribe to live event streams. Each returns a handle with `.close()`:
+
+```js
+window.napp.feeds.profile(pubkey, kinds, callback, { since?, until?, limit? })
+window.napp.feeds.following(source, kinds, callback, { since?, until?, limit? })
+window.napp.feeds.inbox(pubkey, kinds, callback, { since?, until?, limit? })
+```
+
+`callback` will be called with `callback(events: NostrEvent[], synced: boolean)`.
+
+### Registering action handlers
+
+Napps can expose handlers for other windows to call:
+
+```js
+window.napp.registerAction(pattern, handler)
+// handler(name, payload) -> result
+```
+
+`pattern` is a string (exact match or prefix). When another napp calls `window.napp.action(name, payload, { instance })`, the host dispatches it to the matching handler registered under that instance.
 
 The host also exposes **basic actions** that any napp can call via `window.napp.action(name, payload, options?)`:
 
@@ -134,7 +161,7 @@ Each napp also gets its instance id at `window.napp.instance` (a string, unique 
 
 The host also pushes runtime signals to every napp via `postMessage`. Bridge.js relays them:
 
-- **`napp-theme-change`**: sets `document.documentElement.dataset.theme` to `"light"` or `"dark"`. Sent when the launcher's theme changes, so the napp can adjust its own styles.
+- **`napp-theme-change`**: sets `document.documentElement.dataset.theme` to `"light"` or `"dark"` and injects the launcher's resolved color tokens as `--surface`, `--text`, etc. on `:root`. Sent when the launcher's theme changes, so napps using `var(--surface)` / `var(--text)` track automatically.
 
 For data tied to the app rather than a specific window, use the napp's own `localStorage` or `indexedDB`. Each napp lives at its own origin so everything is naturally isolated.
 

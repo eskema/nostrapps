@@ -35,10 +35,6 @@ setTimeout(() => {
   })
 }, 0)
 
-export const status: { syncing: true; pubkey: string } | { syncing: undefined | false } = {
-  syncing: undefined
-}
-
 let liveTargets: string[] = []
 let controller: AbortController | undefined
 let refreshTimer: ReturnType<typeof setInterval> | undefined
@@ -57,13 +53,12 @@ export function stopOutbox() {
   clearInterval(refreshTimer)
   refreshTimer = undefined
   liveTargets = []
-  status.syncing = undefined
   resetPromises()
 }
 
 export const current: {
-  onsync: Array<(pubkey?: string) => void>
-  onbefore: Array<(pubkey?: string) => void>
+  onsync: Array<(pubkey: string) => void>
+  onbefore: Array<(pubkey: string) => void>
   onnew: Array<(event: NostrEvent) => void>
 } = { onsync: [], onbefore: [], onnew: [] }
 
@@ -93,9 +88,7 @@ export async function startOutbox(pubkey: string) {
   clearInterval(refreshTimer)
   refreshTimer = undefined
 
-  status.syncing = false
   resetPromises()
-  ;(status as Extract<typeof status, { syncing: true }>).pubkey = pubkey
 
   let followings: string[] = []
   try {
@@ -114,11 +107,7 @@ export async function startOutbox(pubkey: string) {
 
 async function startInternal() {
   const signal = controller!.signal
-  signal.onabort = () => {
-    status.syncing = undefined
-  }
 
-  status.syncing = true
   startedListeners.forEach(cb => cb(liveTargets.length))
 
   if (0 === (await getStore().queryEvents({}, 1)).length) {
@@ -128,17 +117,10 @@ async function startInternal() {
     await new Promise(resolve => setTimeout(resolve, 15000))
   }
 
-  const hasNew = await outbox.sync(liveTargets, DEFAULT_KINDS, {
+  await outbox.sync(liveTargets, DEFAULT_KINDS, {
     signal
   })
 
-  if (hasNew) {
-    for (let i = 0; i < current.onsync.length; i++) {
-      current.onsync[i]()
-    }
-  }
-
-  status.syncing = false
   isReady()
 
   outbox.live(liveTargets, DEFAULT_KINDS, { signal: undefined })
