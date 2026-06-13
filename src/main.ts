@@ -39,7 +39,6 @@ import * as account from "./account.js"
 import { mountDialog, clearDecisions } from "./permissions.js"
 import * as persist from "./persistence.js"
 import * as handlers from "./handlers.js"
-import * as nostrdb from "./store.js"
 import type {
   SuggestionItem,
   NsiteResult,
@@ -55,7 +54,6 @@ import {
   slashActions,
   actionList
 } from "./system-napps/index.js"
-import { Filter } from "@nostr/tools/filter"
 import { pool } from "@nostr/gadgets/global"
 import { EventTemplate } from "@nostr/tools"
 
@@ -437,38 +435,48 @@ async function runNappAction(
     throw new Error("napp.action: action name is required")
   }
 
-  if (options?.instance) {
-    persist.appendLoadedAction(options.instance, name, payload)
-    const result = await callIframe(options.instance, { name, payload })
-    return result
+  let instanceId = options?.instance
+  if (!instanceId) {
+    // no instance specified, will open a new window, often prompting the user first
+    const [candidates, openCandidates] = handlers.findHandlersForAction(name)
+    const [nappId, existingInstanceId] =
+      candidates.length + openCandidates.length === 1
+        ? [candidates[0], undefined]
+        : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
+
+    // the user may have picked an existing window.
+    // if not, open a new window here and get its id
+    if (existingInstanceId) {
+      instanceId = existingInstanceId
+    } else {
+      const win = await launch(stage, nappId, {
+        ...makeLaunchOpts(),
+        petname: friendlyNameFor(nappId)
+      })
+      // Match the other launch paths: register DOM order and (in pack mode) fold the
+      // new window into the grid. Without this an action-launched window stays at its
+      // free-floating launch coordinates instead of being packed.
+      syncDOM(win)
+      maybeRepack()
+      instanceId = win.getState().instanceId
+    }
+
+    setStatus(
+      `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}, ${JSON.stringify(payload)}`
+    )
   }
 
-  const candidates = handlers.findHandlersForAction(name).filter(id => id !== callerNappId)
-  const nappId =
-    candidates.length === 1
-      ? candidates[0]
-      : await pickHandler(callerNappId, name, payload, candidates)
-  const win = await launch(stage, nappId, {
-    ...makeLaunchOpts(),
-    petname: friendlyNameFor(nappId)
-  })
-  // Match the other launch paths: register DOM order and (in pack mode) fold the
-  // new window into the grid. Without this an action-launched window stays at its
-  // free-floating launch coordinates instead of being packed.
-  syncDOM(win)
-  maybeRepack()
-  const instanceId = win.getState().instanceId
+  // actually call the instance
   persist.appendLoadedAction(instanceId, name, payload)
-  setStatus(
-    `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}, ${JSON.stringify(payload)}`
-  )
   const result = await callIframe(instanceId, {
     name,
     payload
   })
+
   if (result) {
     setStatus(`Action "${name}" result: ${JSON.stringify(result)}`)
   }
+
   return result
 }
 
@@ -482,9 +490,10 @@ async function pickHandler(
   callerNappId: string,
   actionName: string,
   payload: unknown,
-  candidates: string[]
-): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
+  candidates: string[],
+  openCandidates: NappWindowState[]
+): Promise<[nappId: string, instanceId: string | undefined]> {
+  return new Promise<[string, string | undefined]>((resolve, reject) => {
     let win: NappWindow | null = null
     let settled = false
     const finish = (fn: () => void) => {
@@ -500,9 +509,10 @@ async function pickHandler(
         payload,
         callerNappId,
         candidates,
-        select(nappId: string) {
+        openCandidates,
+        select(nappId: string, instanceId?: string) {
           if (!candidates.includes(nappId)) return
-          finish(() => resolve(nappId))
+          finish(() => resolve([nappId, instanceId]))
         },
         cancel() {
           finish(() => reject(new Error("Action handler selection cancelled")))
@@ -525,6 +535,9 @@ const systemCtx: SystemCtx = {
   apps: {
     events() {
       return persist.getInstalledEvents()
+    },
+    get(nappId: string) {
+      return persist.getInstalledApp(nappId)
     },
     list() {
       return persist.getInstalledApps()

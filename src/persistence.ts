@@ -409,35 +409,27 @@ export function getInstalledNappIds(): string[] {
   return ids
 }
 
+export function getInstalledApp(nappId: string): InstalledApp | undefined {
+    const app = readInstalled()[nappId]
+    if (app) return app
+
+    const dev = devApps.get(nappId)
+    if (dev) return { nappId, ...dev }
+}
+
 export function getInstalledApps(): InstalledApp[] {
   const apps: InstalledApp[] = []
 
   const installed = readInstalled()
   for (const nappId in installed) {
     const app = installed[nappId]
-    apps.push({
-      nappId: nappId,
-      icon: app.icon,
-      title: app.title,
-      petname: app.petname,
-      singleton: app.singleton,
-      actions: app.actions,
-      // Surface the stored manifest so cards can show author + date (parity with
-      // the discover tab). Local apps have no event but carry an install date.
-      event: app.event,
-      installedAt: app.installedAt
-    })
+    apps.push(app)
   }
 
   for (const [nappId, dev] of devApps) {
     apps.push({
       nappId: nappId,
-      icon: dev.icon,
-      title: dev.title,
-      petname: dev.petname,
-      singleton: dev.singleton,
-      actions: dev.actions,
-      installedAt: dev.installedAt
+      ...dev
     })
   }
 

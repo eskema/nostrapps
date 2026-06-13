@@ -2121,6 +2121,11 @@ body.napp-resizing .napp-body iframe {
   opacity: 0.72;
 }
 
+.handler-open-instances h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
 .handler-actions {
   display: flex;
   justify-content: flex-end;

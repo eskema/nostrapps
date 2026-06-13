@@ -1,4 +1,5 @@
 import * as persist from "./persistence.js"
+import { NappWindowState } from "./types.js"
 
 // action name → nappIds that can handle it
 const actionMap = new Map<string, string[]>()
@@ -6,7 +7,12 @@ const actionMap = new Map<string, string[]>()
 const nappActions = new Map<string, string[]>()
 const subs = new Set<() => void>()
 let actionDispatcher:
-  | ((callerNappId: string, name: string, payload: unknown, options?: { instance?: string }) => Promise<unknown>)
+  | ((
+      callerNappId: string,
+      name: string,
+      payload: unknown,
+      options?: { instance?: string }
+    ) => Promise<unknown>)
   | null = null
 
 function emit() {
@@ -66,18 +72,31 @@ export function removeApp(nappId: string) {
   emit()
 }
 
-export function findHandlersForAction(action: string): string[] {
-  if (typeof action !== "string" || !action) return []
-  return [...(actionMap.get(action) || [])]
+export function findHandlersForAction(action: string): [string[], NappWindowState[]] {
+  const apps = actionMap.get(action) || []
+  const openCandidates = persist.readOpen().filter(w => apps.includes(w.nappId))
+  return [apps, openCandidates]
 }
 
 export function setActionDispatcher(
-  fn: ((callerNappId: string, name: string, payload: unknown, options?: { instance?: string }) => Promise<unknown>) | null
+  fn:
+    | ((
+        callerNappId: string,
+        name: string,
+        payload: unknown,
+        options?: { instance?: string }
+      ) => Promise<unknown>)
+    | null
 ) {
   actionDispatcher = fn
 }
 
-export function dispatchAction(callerNappId: string, name: string, payload: unknown, options?: { instance?: string }) {
+export function dispatchAction(
+  callerNappId: string,
+  name: string,
+  payload: unknown,
+  options?: { instance?: string }
+) {
   if (!actionDispatcher) {
     throw new Error("napp.action dispatch is not configured")
   }
