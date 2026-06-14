@@ -26,7 +26,8 @@ import {
   setActiveSpace,
   isWindowInactive,
   allInstanceIds,
-  spaceOfLiveSystem
+  spaceOfLiveSystem,
+  loadEvent
 } from "./sandbox/host.js"
 import { button, chip, icon } from "./system-napps/ui.js"
 import { resolveInput } from "./nsite/resolve.js"
@@ -439,31 +440,36 @@ async function runNappAction(
   if (!instanceId) {
     // no instance specified, will open a new window, often prompting the user first
     const [candidates, openCandidates] = handlers.findHandlersForAction(name)
-    const [nappId, existingInstanceId] =
-      candidates.length + openCandidates.length === 1
-        ? [candidates[0], undefined]
-        : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
+    try {
+      const [nappId, existingInstanceId] =
+        candidates.length + openCandidates.length === 1
+          ? [candidates[0], undefined]
+          : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
 
-    // the user may have picked an existing window.
-    // if not, open a new window here and get its id
-    if (existingInstanceId) {
-      instanceId = existingInstanceId
-    } else {
-      const win = await launch(stage, nappId, {
-        ...makeLaunchOpts(),
-        petname: friendlyNameFor(nappId)
-      })
-      // Match the other launch paths: register DOM order and (in pack mode) fold the
-      // new window into the grid. Without this an action-launched window stays at its
-      // free-floating launch coordinates instead of being packed.
-      syncDOM(win)
-      maybeRepack()
-      instanceId = win.getState().instanceId
+      // the user may have picked an existing window.
+      // if not, open a new window here and get its id
+      if (existingInstanceId) {
+        instanceId = existingInstanceId
+      } else {
+        const win = await launch(stage, nappId, {
+          ...makeLaunchOpts(),
+          petname: friendlyNameFor(nappId)
+        })
+        // Match the other launch paths: register DOM order and (in pack mode) fold the
+        // new window into the grid. Without this an action-launched window stays at its
+        // free-floating launch coordinates instead of being packed.
+        syncDOM(win)
+        maybeRepack()
+        instanceId = win.getState().instanceId
+      }
+      setStatus(
+        `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}, ${JSON.stringify(payload)}`
+      )
+    } catch (err) {
+      console.warn(err)
+      setStatus(String(err))
+      return
     }
-
-    setStatus(
-      `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}, ${JSON.stringify(payload)}`
-    )
   }
 
   // actually call the instance
@@ -490,6 +496,12 @@ async function pickHandler(
   candidates: string[],
   openCandidates: NappWindowState[]
 ): Promise<[nappId: string, instanceId: string | undefined]> {
+  if (actionName.startsWith("view:") && typeof payload === "string") {
+    const event = await loadEvent({ code: payload })
+    if (event) payload = event
+    else throw new Error(`Stopped routing of ${actionName}->${payload}: couldn't find event`)
+  }
+
   return new Promise<[string, string | undefined]>((resolve, reject) => {
     let win: NappWindow | null = null
     let settled = false

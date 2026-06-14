@@ -421,6 +421,18 @@ export async function callIframe(
   actionName: string,
   actionPayload: unknown
 ): Promise<unknown> {
+  // resolve nevent/naddr payload for view:* actions
+  if (actionName.startsWith("view:") && typeof actionPayload === "string") {
+    const event = await loadEvent({ code: actionPayload })
+    if (event) actionPayload = event
+    else {
+      console.warn(
+        `Stopped routing of ${actionName}->${actionPayload} to ${instanceId}: couldn't find event`
+      )
+      return
+    }
+  }
+
   await waitReady(instanceId)
   const win = openWindows.get(instanceId)
   if (!win || !win.iframe) {
@@ -1895,7 +1907,7 @@ async function dispatch(
   }
 }
 
-async function loadEvent(params: { code: string; relays?: string[]; author?: string }) {
+export async function loadEvent(params: { code: string; relays?: string[]; author?: string }) {
   let id: string | undefined
   let kind: number | undefined
   let author: string | undefined
@@ -2002,7 +2014,12 @@ async function publishEvent(event: NostrEvent, relays?: string[]): Promise<Publi
         "wss://relay.nos.social"
       )
     } else if (event.kind === 3) {
-      targetRelays.push(...FALLBACK_RELAYS, "wss://purplepag.es", "wss://user.kindpag.es", "wss://relay.nos.social")
+      targetRelays.push(
+        ...FALLBACK_RELAYS,
+        "wss://purplepag.es",
+        "wss://user.kindpag.es",
+        "wss://relay.nos.social"
+      )
     }
 
     targetRelays = [...new Set(targetRelays)]
