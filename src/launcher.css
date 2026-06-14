@@ -1327,18 +1327,6 @@ body.napp-resizing .napp-body iframe {
   font-weight: 700;
 }
 
-.apps-handler {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  padding: 0.12rem 0.4rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-  opacity: 0.8;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-all;
-}
-
 .apps-naddr {
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -1608,18 +1596,30 @@ body.napp-resizing .napp-body iframe {
 .apps-card {
   display: grid;
   grid-template-areas:
-    "icon author"
-    "icon actions"
     
-    "title title"
-    "about about"
-    "handlers handlers"
+    
+    "icon actions actions"
+    "title title title"
+    /* "icon title title" */
+    /* "author author actions" */
+    /* "title title title" */
+    "about about about"
+    "author author author"
+    "handlers handlers handlers"
+    
+    /* "actions actions actions" */
+    /* "handlers handlers handlers" */
     ;
   grid-template-columns: auto 1fr;
   grid-gap: 0 .5rem;
+  padding: 0.4rem;
   padding-bottom: 1rem;
   margin-bottom: 1rem;
   border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.apps-card:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
 /* Once .apps-card gets a display (grid/flex), it would outrank the UA [hidden]
@@ -1629,12 +1629,14 @@ body.napp-resizing .napp-body iframe {
 }
 
 .apps-card-icon {
+  box-sizing: border-box;
   width: 48px;
   height: 48px;
-  /* background: red; */
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   grid-area: icon;
   border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  padding: 4px;
+  /* border: 4px solid color-mix(in srgb, var(--text) 5%, transparent); */
 }
 
 .apps-title {
@@ -1643,6 +1645,12 @@ body.napp-resizing .napp-body iframe {
   font-size: 2rem;
   margin: 0;
   grid-area: title;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow: clip;            /* not hidden */
+  overflow-clip-margin: 0.15em;
+  white-space: nowrap;
+  /* width: 100%; */
 }
 
 .apps-author {
@@ -1651,6 +1659,8 @@ body.napp-resizing .napp-body iframe {
   grid-gap: .5rem;
   align-items: center;
   grid-area: author;
+  margin: .5rem 0;
+  /* align-self: end; */
 }
 
 .apps-author-label {
@@ -1686,6 +1696,22 @@ body.napp-resizing .napp-body iframe {
 
 .apps-handlers {
   grid-area: handlers;
+  display: flex;
+  gap: 0.4rem;
+  /* margin: .4rem 0; */
+  /* justify-self: end; */
+}
+
+.apps-handler {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  /* padding: 0.12rem 0.4rem; */
+  /* border-radius: 999px; */
+  /* border: 1px solid color-mix(in srgb, currentColor 18%, transparent); */
+  opacity: 0.6;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .apps-actions {
@@ -1693,14 +1719,28 @@ body.napp-resizing .napp-body iframe {
   gap: 0.4rem;
   grid-area: actions;
   justify-self: end;
+  align-self: center;
 }
 
 .apps-description {
   grid-area: about;
-  margin-top: 0;
+  margin: 0;
   font-family: var(--font-serif);
+  font-size: 1rem;
   hyphens: auto;
+  /* word-break: break-all; */
 }
+
+.apps-card .apps-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 3; /* Number of lines to display */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis; /* Ensures dots appear */
+  /* overflow-clip-margin: 0.15em; */
+  /* white-space: nowrap; */
+}
+
 
 /* App info window (singleton) — full detail for the card you clicked. */
 .appinfo {
