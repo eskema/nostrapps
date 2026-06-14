@@ -153,7 +153,7 @@ export function mount(
 
     if (protectedCb.checked) tags.push(["-"])
 
-    if (metadata?.name) tags.push(["title", metadata.name])
+    if (metadata?.title || metadata?.name) tags.push(["title", metadata.title || metadata.name])
     if (metadata?.description) tags.push(["description", metadata.description])
     if (metadata?.icon) tags.push(["icon", metadata.icon])
     if (Array.isArray(metadata?.actions)) {

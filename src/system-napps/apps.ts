@@ -32,7 +32,6 @@ export function mount(
   opts: { params?: any; onStateChange?: (state: any) => void } = {}
 ) {
   let currentTab = "installed"
-  let discoverFetched = false
 
   // ─── Installed tab state ───
   let installedFilter = ""
@@ -41,6 +40,9 @@ export function mount(
   // would collapse any open <details>) when the apps-changed signal fires for
   // unrelated reasons (e.g. a window moved).
   let _installedSig = ""
+  // Signature of which installed apps currently have an update available, so the
+  // streaming discovery subscription only re-renders the list when it changes.
+  let _installedUpdatesSig = ""
 
   // ─── Discover tab state ───
   let filter = ""
@@ -61,19 +63,40 @@ export function mount(
         <button type="button" class="apps-tab installed-tab active">installed</button>
         <button type="button" class="apps-tab discover-tab">discover</button>
       </div>
-      <div class="apps-content"></div>
+      <div class="apps-content">
+        <div class="apps-pane apps-pane-installed"></div>
+        <div class="apps-pane apps-pane-discover" hidden></div>
+      </div>
     </div>
   `
 
-  const contentEl = container.querySelector(".apps-content") as HTMLElement
+  const installedPane = container.querySelector(".apps-pane-installed") as HTMLElement
+  const discoverPane = container.querySelector(".apps-pane-discover") as HTMLElement
   const installedTab = container.querySelector(".installed-tab") as HTMLElement
   const discoverTab = container.querySelector(".discover-tab") as HTMLElement
+
+  // Both panes are built once and kept in the DOM; switching tabs just toggles
+  // visibility (no rebuild) so each list, its scroll, and inputs persist. The
+  // discover pane is built lazily on first view; discovery itself runs up front.
+  let installedBuilt = false
+  let discoverBuilt = false
 
   function switchTab(tab: string) {
     currentTab = tab
     installedTab.classList.toggle("active", tab === "installed")
     discoverTab.classList.toggle("active", tab === "discover")
-    render()
+    if (tab === "installed") {
+      if (!installedBuilt) {
+        renderInstalled()
+        installedBuilt = true
+      }
+      refreshInstalledUpdates() // catch up on updates discovery found while away
+    } else if (!discoverBuilt) {
+      renderDiscover()
+      discoverBuilt = true
+    }
+    installedPane.hidden = tab !== "installed"
+    discoverPane.hidden = tab !== "discover"
   }
 
   installedTab.addEventListener("click", () => switchTab("installed"))
@@ -159,6 +182,68 @@ export function mount(
     return [del]
   }
 
+  // The newest discovered manifest strictly newer than the one we installed, or
+  // null. Fed by the shared discovery subscription (started on mount), so the
+  // installed tab gets update detection for free — no per-app query.
+  function latestUpdateFor(app: any): any | null {
+    const base = app.event?.created_at
+    if (!base) return null // local/dev/temp apps have no manifest → no updates
+    let best: any = null
+    for (const e of events) {
+      if (e.kind !== NSITE_NAMED_KIND || e.created_at <= base) continue
+      if (computeNappId(e) !== app.nappId) continue
+      if (!best || e.created_at > best.created_at) best = e
+    }
+    return best
+  }
+
+  // An "update" button for an installed app, pointed at the newer manifest `evt`.
+  function makeInstalledUpdateBtn(app: any, evt: any): HTMLElement {
+    const b = button({ label: "update", variant: "warning" })
+    b.addEventListener("click", async () => {
+      b.disabled = true
+      b.textContent = "updating…"
+      try {
+        const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1] || ""
+        await ctx.update({
+          pubkey: evt.pubkey,
+          dTag,
+          relayHints: Array.from(pool.seenOn.get(evt.id) || []).map((r: any) => r.url)
+        })
+        ctx.setStatus?.(`Apps: updated ${app.petname || app.title || app.nappId}`)
+        renderInstalledList()
+      } catch (err: any) {
+        const m = err?.message || String(err)
+        ctx.setStatus?.(`Apps: update failed for ${app.nappId}: ${m}`)
+        b.disabled = false
+        b.textContent = "error"
+        b.title = m
+        setTimeout(() => {
+          b.textContent = "update"
+          b.removeAttribute("title")
+        }, 3000)
+      }
+    })
+    return b
+  }
+
+  // Signature of the apps-with-updates set (over ALL installed apps, regardless
+  // of the search filter) — used to know when the streaming discovery changed it.
+  function installedUpdateSig(): string {
+    return ctx.apps
+      .list()
+      .filter(a => latestUpdateFor(a))
+      .map(a => a.nappId)
+      .sort()
+      .join(",")
+  }
+
+  // Re-render the installed tab when discovery changes which apps have updates.
+  function refreshInstalledUpdates() {
+    if (currentTab !== "installed" || !_installedListEl) return
+    if (installedUpdateSig() !== _installedUpdatesSig) renderInstalledList()
+  }
+
   // Rebuilds only the card list, preserving the search input. Called on
   // keystroke and when the installed set changes.
   function renderInstalledList() {
@@ -194,17 +279,31 @@ export function mount(
         openEl.textContent = `${openCount} open`
         metaExtras.push(openEl)
       }
+      const upd = latestUpdateFor(app)
+      const buttons = upd
+        ? [makeInstalledUpdateBtn(app, upd), ...installedButtons(app)]
+        : installedButtons(app)
+      const description =
+        app.event?.tags.find((t: any) => t[0] === "description")?.[1] ||
+        app.event?.tags.find((t: any) => t[0] === "summary")?.[1] ||
+        null
+      // Published apps carry a manifest → resolve the icon from blossom (same as
+      // discover, doesn't depend on the napp's SW). Local/dev/temp apps have no
+      // manifest → fall back to their own origin path, served by their SW.
+      const iconSha = app.event ? resolveCardIcon(app.event).sha : null
       frag.appendChild(
         renderAppCard({
           nappId: app.nappId,
           title,
-          iconUrl: installedIconUrl(app),
+          description,
+          iconSha,
+          iconUrl: iconSha ? null : installedIconUrl(app),
           authorPubkey: author,
           authorLabel,
           createdAt,
           actions,
           search,
-          buttons: installedButtons(app),
+          buttons,
           metaExtras,
           onAuthorClick: author
             ? () => dispatchAction("apps", "profile", author).catch(() => {})
@@ -232,17 +331,23 @@ export function mount(
       empty.textContent = apps.length === 0 ? "No apps installed yet." : "No matches."
       listEl.appendChild(empty)
     }
+    // Load icons from blossom for the published apps (those with a manifest).
+    loadCardIcons(
+      listEl,
+      apps.filter(a => a.event).map(a => ({ nappId: a.nappId, evt: a.event }))
+    )
+    _installedUpdatesSig = installedUpdateSig()
   }
 
   function renderInstalled() {
-    contentEl.innerHTML = `
+    installedPane.innerHTML = `
       <div class="apps-toolbar">
         <input class="apps-search" type="search" placeholder="Search name, action, id…" />
       </div>
       <div class="apps-list"></div>
     `
-    const searchEl = contentEl.querySelector(".apps-search") as HTMLInputElement
-    _installedListEl = contentEl.querySelector(".apps-list") as HTMLElement
+    const searchEl = installedPane.querySelector(".apps-search") as HTMLInputElement
+    _installedListEl = installedPane.querySelector(".apps-list") as HTMLElement
     searchEl.value = installedFilter
     searchEl.addEventListener("input", () => {
       installedFilter = searchEl.value
@@ -270,39 +375,66 @@ export function mount(
 
   // Resolve and assign icon URLs for a set of events. Queries each unique
   // author's blossom servers once, then points every matching card icon at it.
-  function loadIcons(evts: any[]) {
-    if (!_listEl) return
-    const seenIconPks = new Set()
-    for (const evt of evts) {
-      if (seenIconPks.has(evt.pubkey)) continue
-      const hasIcon = evt.tags.some((t: any) => t[0] === "icon" && t[1])
-      if (!hasIcon) continue
-      seenIconPks.add(evt.pubkey)
-      loadBlossomServers(evt.pubkey)
-        .then(res => {
-          const servers = res?.items ?? []
-          if (servers.length === 0) return
-          const icons = _listEl!.querySelectorAll(
-            `[data-author="${evt.pubkey}"] .apps-card-icon[data-icon-sha]`
-          ) as unknown as HTMLImageElement[]
-          for (const img of icons) {
-            const sha = img.dataset.iconSha!
-            const base = servers[0].endsWith("/") ? servers[0].slice(0, -1) : servers[0]
-            img.src = `${base}/${sha}`
-            let next = 1
-            img.onerror = () => {
-              if (next >= servers.length) {
-                img.src = PLACEHOLDER_SRC
-                return
-              }
-              const b = servers[next].endsWith("/") ? servers[next].slice(0, -1) : servers[next]
-              next++
-              img.src = `${b}/${sha}`
-            }
-          }
-        })
-        .catch(() => {})
+  // Cache per-author blossom lists so each is fetched once per render.
+  const blossomCache = new Map<string, Promise<string[]>>()
+  function authorBlossom(pubkey: string): Promise<string[]> {
+    let p = blossomCache.get(pubkey)
+    if (!p) {
+      p = loadBlossomServers(pubkey)
+        .then((r: any) => (r?.items ?? []) as string[])
+        .catch(() => [])
+      blossomCache.set(pubkey, p)
     }
+    return p
+  }
+  const normalizeServer = (s: string) => {
+    const u = s.endsWith("/") ? s.slice(0, -1) : s
+    return u.startsWith("http") ? u : `https://${u}`
+  }
+
+  // Load card icons from blossom for any list (discover or installed). Each item
+  // pairs a card's nappId with its manifest event (for the icon sha + servers).
+  function loadCardIcons(listEl: HTMLElement | null, items: Array<{ nappId: string; evt: any }>) {
+    if (!listEl) return
+    for (const { nappId, evt } of items) {
+      if (!evt) continue
+      const { sha } = resolveCardIcon(evt)
+      if (!sha) continue
+      const img = listEl.querySelector(
+        `.apps-card[data-napp-id="${CSS.escape(nappId)}"] .apps-card-icon`
+      ) as HTMLImageElement | null
+      if (!img || img.dataset.iconLoaded === "1") continue
+      img.dataset.iconLoaded = "1"
+      // Candidate servers, mirroring fetchNsite: the manifest's own `server`
+      // tags + the author's blossom list + the default — the blob can be on any.
+      const manifestServers = evt.tags
+        .filter((t: any) => t[0] === "server" && t[1])
+        .map((t: any) => t[1])
+      authorBlossom(evt.pubkey).then((userServers: string[]) => {
+        const servers = [
+          ...new Set(
+            [...manifestServers, ...userServers, "relay.nostrapps.com"].map(normalizeServer)
+          )
+        ]
+        let i = 0
+        const tryNext = () => {
+          if (i >= servers.length) {
+            img.src = PLACEHOLDER_SRC
+            return
+          }
+          img.src = `${servers[i++]}/${sha}`
+        }
+        img.onerror = tryNext
+        tryNext()
+      })
+    }
+  }
+
+  function loadIcons(evts: any[]) {
+    loadCardIcons(
+      _listEl,
+      evts.map((e: any) => ({ nappId: computeNappId(e), evt: e }))
+    )
   }
 
   // All manifests, sorted newest-first. Filtering is applied as card visibility
@@ -376,12 +508,15 @@ export function mount(
     flushScheduled = true
     requestAnimationFrame(() => {
       flushScheduled = false
-      flushPending()
+      flushPending() // discover list DOM (no-op until the tab is opened)
+      refreshInstalledUpdates() // installed tab's update badges
     })
   }
 
   function flushPending() {
-    if (!_listEl || pending.length === 0) return
+    // _listEl may be detached when the discover tab isn't the active one — skip
+    // the DOM work; renderList() repaints from `events` when it's reopened.
+    if (!_listEl || !_listEl.isConnected || pending.length === 0) return
     const batch = pending
     pending = []
     const toRender = sortedManifests(batch)
@@ -416,11 +551,11 @@ export function mount(
 
   function startDiscoverSubscription() {
     closeSubscription()
-    events = []
-    eventIds.clear()
-    pending = []
     sawEose = false
-    renderList()
+    // Don't wipe events/eventIds here: re-subscribing on the shared pool won't
+    // re-deliver already-seen events, so clearing would empty the list until a
+    // page reload. We keep what we have and let the new relays' unseen events
+    // append (eventIds dedupes the rest). Adding a relay therefore grows the list.
 
     if (!relays.length) {
       setStatus("No relays configured.")
@@ -466,7 +601,7 @@ export function mount(
   }
 
   function renderDiscover() {
-    contentEl.innerHTML = `
+    discoverPane.innerHTML = `
       <div class="apps-toolbar">
         <input class="apps-search" type="search" placeholder="Search title, description, npub…" />
       </div>
@@ -483,13 +618,13 @@ export function mount(
       <div class="apps-list"></div>
     `
 
-    _statusEl = contentEl.querySelector(".apps-status") as HTMLElement
-    _listEl = contentEl.querySelector(".apps-list") as HTMLElement
-    const searchEl = contentEl.querySelector(".apps-search") as HTMLInputElement
-    const relaysPanel = contentEl.querySelector(".apps-relays") as HTMLDetailsElement
-    const relaysInput = contentEl.querySelector(".apps-relays-input") as HTMLInputElement
-    const relaysSaveBtn = contentEl.querySelector(".apps-relays-save") as HTMLElement
-    const relaysClearBtn = contentEl.querySelector(".apps-relays-clear") as HTMLElement
+    _statusEl = discoverPane.querySelector(".apps-status") as HTMLElement
+    _listEl = discoverPane.querySelector(".apps-list") as HTMLElement
+    const searchEl = discoverPane.querySelector(".apps-search") as HTMLInputElement
+    const relaysPanel = discoverPane.querySelector(".apps-relays") as HTMLDetailsElement
+    const relaysInput = discoverPane.querySelector(".apps-relays-input") as HTMLInputElement
+    const relaysSaveBtn = discoverPane.querySelector(".apps-relays-save") as HTMLElement
+    const relaysClearBtn = discoverPane.querySelector(".apps-relays-clear") as HTMLElement
 
     relaysInput.value = relays.join("\n")
     // Re-seed the search box from the persisted filter so switching away to the
@@ -521,30 +656,28 @@ export function mount(
       startDiscoverSubscription()
     })
 
+    // The subscription is already running (started on mount); just paint what it
+    // has collected so far. Streaming arrivals append via flushPending.
     renderList()
     emitDiscoverState()
-    if (!discoverFetched) {
-      discoverFetched = true
-      startDiscoverSubscription()
-    }
   }
 
   // ─── Render ────────────────────────────────────────────────────
 
-  function render() {
-    if (currentTab === "installed") {
-      renderInstalled()
-    } else {
-      renderDiscover()
-    }
-  }
-
-  render()
+  // Build the default (installed) pane now; the discover pane is built on first
+  // view. Both are kept thereafter — switchTab only toggles their visibility.
+  renderInstalled()
+  installedBuilt = true
+  // Start discovery once, up front (above the tabs), so it feeds BOTH: the
+  // discover list when that tab is opened, and the installed tab's update
+  // detection — a single relay query instead of one per installed app.
+  startDiscoverSubscription()
   const unsub = ctx.apps.subscribe(() => {
-    if (currentTab !== "installed") return
+    if (!installedBuilt) return
     // Only rebuild when the set of installed apps actually changed — otherwise
     // an unrelated apps-changed signal (fired on window moves) would collapse
-    // any <details> the user just opened.
+    // any <details> the user just opened. Keeps the (possibly hidden) installed
+    // pane fresh regardless of which tab is active.
     if (
       ctx.apps
         .list()
@@ -570,6 +703,7 @@ export function mount(
 interface AppCardOpts {
   nappId: string
   title: string
+  description?: string | null
   iconSha?: string | null
   iconMime?: string | null
   iconUrl?: string | null
@@ -597,36 +731,39 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
   if (o.createdAt) card.dataset.createdAt = String(o.createdAt)
   card.dataset.search = o.search
 
-  const head = document.createElement("div")
-  head.className = "apps-card-head"
+  // Flat structure: icon, title, author/label, date, meta extras, handlers and
+  // actions are all direct children of .apps-card.
 
-  if (o.iconSha || o.iconUrl) {
-    const icon = document.createElement("img")
-    icon.className = "apps-card-icon"
-    icon.alt = ""
-    if (o.iconSha) {
-      icon.dataset.iconSha = o.iconSha
-      if (o.iconMime) icon.dataset.iconMime = o.iconMime
+  // Icon — always present (even when empty) so the layout slot is stable.
+  const icon = document.createElement("img")
+  icon.className = "apps-card-icon"
+  icon.alt = ""
+  if (o.iconSha) {
+    icon.dataset.iconSha = o.iconSha
+    if (o.iconMime) icon.dataset.iconMime = o.iconMime
+    icon.src = PLACEHOLDER_SRC
+  } else if (o.iconUrl) {
+    icon.src = o.iconUrl
+    icon.addEventListener("error", () => {
       icon.src = PLACEHOLDER_SRC
-    } else {
-      icon.src = o.iconUrl!
-      icon.addEventListener("error", () => {
-        icon.src = PLACEHOLDER_SRC
-      })
-    }
-    head.appendChild(icon)
+    })
+  } else {
+    icon.src = PLACEHOLDER_SRC
   }
-
-  const titles = document.createElement("div")
-  titles.className = "apps-card-titles"
+  card.appendChild(icon)
 
   const h = document.createElement("h3")
   h.className = "apps-title"
   h.textContent = o.title
-  titles.appendChild(h)
+  card.appendChild(h)
 
-  const meta = document.createElement("div")
-  meta.className = "apps-meta"
+  if (o.description) {
+    const desc = document.createElement("p")
+    desc.className = "apps-description"
+    desc.textContent = o.description
+    card.appendChild(desc)
+  }
+
   if (o.authorPubkey) {
     const author = document.createElement("span")
     author.className = "apps-author"
@@ -644,21 +781,22 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
     name.className = "apps-author-name"
     name.setAttribute("pubkey", o.authorPubkey)
     author.append(pic, name)
-    meta.appendChild(author)
+    card.appendChild(author)
   } else if (o.authorLabel) {
     const label = document.createElement("span")
     label.className = "apps-author apps-author-label"
     label.textContent = o.authorLabel
-    meta.appendChild(label)
+    card.appendChild(label)
   }
+
   if (o.createdAt) {
     const dateEl = document.createElement("span")
     dateEl.className = "apps-date"
     dateEl.textContent = new Date(o.createdAt * 1000).toLocaleDateString()
-    meta.appendChild(dateEl)
+    card.appendChild(dateEl)
   }
-  for (const el of o.metaExtras || []) meta.appendChild(el)
-  if (meta.childElementCount) titles.appendChild(meta)
+
+  for (const el of o.metaExtras || []) card.appendChild(el)
 
   if (o.actions.length) {
     const chips = document.createElement("div")
@@ -669,16 +807,14 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
       chip.textContent = a
       chips.appendChild(chip)
     }
-    titles.appendChild(chips)
+    card.appendChild(chips)
   }
 
   const actions = document.createElement("div")
   actions.className = "apps-actions"
   for (const b of o.buttons) actions.appendChild(b)
   if (o.menuTrigger) actions.appendChild(o.menuTrigger)
-
-  head.append(titles, actions)
-  card.appendChild(head)
+  card.appendChild(actions)
 
   // Clicking the card (anywhere but a button or the author) opens the full-info
   // window. The card itself stays minimal — no inline details.
@@ -705,9 +841,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
   const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
 
   const title = tag("title")
-  const iconTag = evt.tags.find((t: any) => t[0] === "icon")
-  const iconSha = iconTag?.[1]
-  const iconMime = iconTag?.[2]
+  const { sha: iconSha, mime: iconMime } = resolveCardIcon(evt)
   const seenOnRelays = Array.from(pool.seenOn.get(evt.id) || []).map((r: any) => r.url)
   const naddr = naddrEncode({
     pubkey: evt.pubkey,
@@ -862,6 +996,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
   card = renderAppCard({
     nappId,
     title: title || `(${dTag})`,
+    description: tag("description") || tag("summary"),
     iconSha,
     iconMime,
     authorPubkey: evt.pubkey,
@@ -896,6 +1031,43 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
 function computeNappId(evt: any) {
   const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1]
   return `${evt.pubkey.slice(0, 16)}~${dTag || ""}`
+}
+
+// Conventional icon filenames to fall back to when no icon is declared.
+const ICON_FALLBACK_PATHS = [
+  "/icon.svg",
+  "/favicon.svg",
+  "/icon.png",
+  "/favicon.png",
+  "/apple-touch-icon.png",
+  "/icon-192.png",
+  "/favicon.ico"
+]
+
+// Resolve a discover card's icon to a blossom sha (loadIcons fetches it from the
+// author's blossom servers). The `icon` tag may hold a blossom sha OR a path
+// (e.g. "/icon.svg" from metadata.json) — for a path we map it to the file's sha
+// via the manifest's `path` tags. With no usable icon tag we fall back to a
+// conventional icon file among the manifest's paths.
+function resolveCardIcon(evt: any): { sha: string | null; mime: string | null } {
+  const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
+  // Match regardless of a leading slash on either side (manifests vary).
+  const findPath = (p: string) => {
+    const want = String(p).replace(/^\//, "")
+    return pathTags.find((t: any) => String(t[1]).replace(/^\//, "") === want)
+  }
+  const iconTag = evt.tags.find((t: any) => t[0] === "icon" && t[1])
+  if (iconTag) {
+    const val = iconTag[1] as string
+    if (/^[0-9a-f]{64}$/i.test(val)) return { sha: val, mime: iconTag[2] || null }
+    const pt = findPath(val)
+    if (pt) return { sha: pt[2], mime: pt[3] || null }
+  }
+  for (const candidate of ICON_FALLBACK_PATHS) {
+    const pt = findPath(candidate)
+    if (pt) return { sha: pt[2], mime: pt[3] || null }
+  }
+  return { sha: null, mime: null }
 }
 
 // ─── helpers ─────────────────────────────────────────────────────

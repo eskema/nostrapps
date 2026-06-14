@@ -1271,11 +1271,21 @@ body.napp-resizing .napp-body iframe {
   grid-gap: 1rem;
 }
 
-/* The per-tab content host (toolbar + list, etc.). Was a separate .apps-panel
-   wrapper; folded in here since both tabs render the same shape. */
+/* Holds both tab panes (one visible). The pane itself lays out its toolbar +
+   list — switching tabs just toggles [hidden] rather than rebuilding. */
 .apps-content {
   display: grid;
+}
+
+.apps-pane {
+  display: grid;
   grid-gap: 2rem;
+}
+
+/* Beat the UA [hidden]{display:none}, which our .apps-pane display:grid would
+   otherwise override (same specificity, later rule wins). */
+.apps-pane[hidden] {
+  display: none;
 }
 
 .apps-tabs {
@@ -1592,25 +1602,104 @@ body.napp-resizing .napp-body iframe {
   grid-gap: 0.5rem;
 }
 
+/* ─── Apps card ──────────────────────────────────────────────────
+   Flat structure: icon, title, author/label, date, handlers, and actions are
+   all direct children of .apps-card. Styling left as placeholders to fill in. */
 .apps-card {
   display: grid;
-  grid-gap: 0.6rem;
-  padding: 0.6rem 0.75rem;
-  border: none;
-  border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  /* border-radius: 4px; */
-  position: relative;
+  grid-template-areas:
+    "icon author"
+    "icon actions"
+    
+    "title title"
+    "about about"
+    "handlers handlers"
+    ;
+  grid-template-columns: auto 1fr;
+  grid-gap: 0 .5rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 }
 
-.apps-card:hover {
-  background-color: color-mix(in srgb, currentColor 5%, transparent);
-  cursor: pointer;
-}
-
-/* `display: grid` above outranks the [hidden] UA rule, so the hidden attribute
-   wouldn't hide a card on its own — make filtering (applyFilter) actually hide. */
+/* Once .apps-card gets a display (grid/flex), it would outrank the UA [hidden]
+   rule — keep this so applyFilter()'s hidden cards actually hide. */
 .apps-card[hidden] {
   display: none;
+}
+
+.apps-card-icon {
+  width: 48px;
+  height: 48px;
+  /* background: red; */
+  grid-area: icon;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.apps-title {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 2rem;
+  margin: 0;
+  grid-area: title;
+}
+
+.apps-author {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-gap: .5rem;
+  align-items: center;
+  grid-area: author;
+}
+
+.apps-author-label {
+  font-size: 1rem;
+  /* font-weight: 400; */
+}
+
+.apps-author-pic {
+  
+}
+
+.apps-author-pic::part(img) {
+  width: 1.4rem;
+  height: 1.4rem;
+  object-fit: cover;
+  display: block;
+  border-radius: 100%;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.apps-author-name {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.apps-card .apps-date {
+  display: none;
+  grid-area: date;
+  justify-self: end;
+  font-family: var(--font-mono);
+  font-size: .6rem;
+}
+
+.apps-handlers {
+  grid-area: handlers;
+}
+
+.apps-actions {
+  display: flex;
+  gap: 0.4rem;
+  grid-area: actions;
+  justify-self: end;
+}
+
+.apps-description {
+  grid-area: about;
+  margin-top: 0;
+  font-family: var(--font-serif);
+  hyphens: auto;
 }
 
 /* App info window (singleton) — full detail for the card you clicked. */
@@ -1655,13 +1744,6 @@ body.napp-resizing .napp-body iframe {
   word-break: break-word;
 }
 
-.apps-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
 /* Discover card: everything past the head collapses into this <details>, so
    each card stays as compact as an Installed-tab card until expanded. */
 .apps-card-more > summary {
@@ -1686,28 +1768,8 @@ body.napp-resizing .napp-body iframe {
   margin-top: 0.4rem;
 }
 
-.apps-card-titles {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  /* flex-direction: column; */
-  grid-gap: 0.5rem;
-  min-width: 0;
-  /* flex: 1; */
-}
-
-.apps-title {
-  grid-column: 1 / -1;
-  margin: 0;
-  font-size: 2rem;
-  line-height: 1;
-  font-weight: 600;
-  font-family: var(--font-serif);
-  overflow: clip; /* not hidden */
-  overflow-clip-margin: 0.15em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/* Shared with the App Info window (appinfo.ts); the card itself no longer uses
+   a meta wrapper, but appinfo still tags its meta row .apps-meta. */
 .apps-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1717,54 +1779,12 @@ body.napp-resizing .napp-body iframe {
   opacity: 0.65;
 }
 
-.apps-author {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-/* Stand-in for the author on apps with no publisher (local/dev/temp). */
-.apps-author-label {
-  opacity: 0.6;
-  font-style: italic;
-}
-
-.apps-author-pic {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: color-mix(in srgb, currentColor 15%, transparent);
-}
-
-.apps-author-pic::part(img) {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.apps-author-name {
-  font-family: var(--font-mono);
-}
-
 .apps-kind {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-}
-
-.apps-description {
-  margin: 0;
-  font-size: 0.85rem;
-  line-height: 1.4;
-  font-family: var(--font-serif);
-  opacity: 0.85;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .apps-source {
@@ -1933,32 +1953,7 @@ body.napp-resizing .napp-body iframe {
   background: color-mix(in srgb, currentColor 15%, transparent);
 }
 
-/* When an update is available we show update + uninstall side by side. */
-.apps-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  flex-shrink: 0;
-}
-
-/* ─── store: NIP-5B listing extras ─────────────────────────────── */
-.apps-card-icon {
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-  border-radius: 8px;
-  object-fit: cover;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-}
-
 .apps-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-top: 0.1rem;
-}
-
-.apps-handlers {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
