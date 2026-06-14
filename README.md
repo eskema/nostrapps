@@ -1,72 +1,10 @@
 # nostrapps
 
-> Heads up: still rough around the edges. APIs will move, things will break.
-
-Nostrapps is a small browser launcher for Nostr apps. Each app is a static site published as an [nsite](https://nips.nostr.com/5A), or just a folder you point at locally. The launcher fetches it once, caches it, and runs it in its own sandboxed window with a `window.nostr` bridge wired to your NIP-07 extension.
-
-## How to use it
-
-The whole UI is one input. Type something and press enter:
-
-- An npub, nprofile, hex pubkey, or naddr to fetch and run that nsite.
-- A NIP-5A hostname like `eskema.nsite-host.com`.
-- A slash command for one of the built-in tools.
-- Anything you've launched before, picked from the suggestions dropdown.
-
-Click the input and you'll see a dropdown grouped into three sections: slash commands first, your last 5 opened sessions next, then everything else alphabetically. `OPEN` and `CLOSED` rows reopen that exact session at its saved position. `NAPP` rows launch a fresh instance.
-
-### Slash commands
-
-Four built-in panels open the first time you load the launcher and remember whether you closed them after that.
-
-- `/store` — discover and install nsites your relays know about. Search, filter, update.
-- `/settings` — theme picker (light, dark, auto), connect or disconnect your account, load a local folder.
-- `/logs` — what the launcher is doing right now, with timestamps.
-- `/permissions` — every grant or denial you've made, per app. Forget any of them.
-
-There's also `/folder` as a shortcut to the folder picker.
-
-### Window controls
-
-| Button | Does                                                                                                 |
-| ------ | ---------------------------------------------------------------------------------------------------- |
-| `–`    | Minimize. Header only, body collapses.                                                               |
-| `▢`    | Maximize, or restore.                                                                                |
-| `•`    | Pin on top. Fills in (`●`) when active. Stays above everything, even after you click somewhere else. |
-| `×`    | Close. The session is remembered, type the name back to reopen at its saved position.                |
-| `⌫`    | Destroy. Wipes the app and all its data. There's a confirm prompt.                                   |
-
-Drag the header to move. Drag any edge or corner to resize. Double-click the title to rename it.
-
-### Snap zones
-
-Drag a window near an edge or corner of the stage and stop moving for about 300ms. A preview lights up showing the half or quadrant it'll fill. Drop on it to snap.
-
-### Mobile gestures
-
-On a narrow screen the layout switches to a vertical stack and the snap zones go away. To reorder, press and hold a window's header for about a quarter second, then drag up or down.
-
-### Installing and updating from the store
-
-`/store` queries your relays for nsite manifests the first time you open it, then caches the results so subsequent opens are instant. Hit `↻` to check for updates, `⚙` to override the relay list.
-
-Each card shows what the manifest provides: title, description, author, file count, date. The button on the right has three states:
-
-- **install**: not installed yet.
-- **uninstall**: currently installed and up to date.
-- **update**: currently installed, but the relay has a newer manifest. Click to fetch the new files and reload any open windows of the app in place. Per-instance state survives the update.
-
-The `installed` filter shows what you have right now at the top, then a "Previously installed" section below for apps you've uninstalled.
-
-### Working without an account
-
-The store works without connecting. It falls back to a small default set of relays for discovery, and you can override that anytime. Connecting just lets it use your kind 10002 list instead.
-
-You can also browse and run nsites that don't need a signer, like a static blog. The moment an app calls `signEvent` or anything else privileged, you'll get a permission prompt. Your answer is remembered per app, per method.
-
----
+Nostrapps is a small browser launcher for Nostr apps. Each app is a static site published as an [nsite](https://nips.nostr.com/5A), or just a folder you point at locally. The launcher fetches it once, caches it, and runs it in its own sandboxed window with a set of utilities for seamless Nostr integration.
 
 ## For developers
+
+The idea is that each napp is a very small, specialized app. It should do one (or few) things and do them well. It should call `window.napp.registerAction()` in order to receive the parameters it will use (for example, an app that displays any information related to a profile should call that to register the `"profile"` action) and it should call `window.napp.action()` for anything it doesn't handle internally (for example, an app that displays a list of notes but doesn't handle threads or an expanded view of such notes should call out to other apps with the `view:1` action).
 
 ### Building a napp
 
@@ -127,8 +65,6 @@ window.napp.utils.publish(event, relays?)
 //   returns { relays: {[url]: { ok, error? }}, published, failed }
 ```
 
-Each function's signature matches `@nostr/gadgets` exactly. The call is forwarded to the host, which runs the real query against the shared relay pool and caches the result.
-
 ### Streaming feeds
 
 Napps can subscribe to live event streams. Each returns a handle with `.close()`:
@@ -150,33 +86,28 @@ window.napp.registerAction(pattern, handler)
 // handler(name, payload) -> result
 ```
 
-`pattern` is a string (exact match or prefix). When another napp calls `window.napp.action(name, payload, { instance })`, the host dispatches it to the matching handler registered under that instance.
+`pattern` is a string (exact match). When another napp calls `window.napp.action(name, payload)`, the host dispatches it to the matching handler registered under that instance.
 
-The host also exposes **basic actions** that any napp can call via `window.napp.action(name, payload, options?)`:
+There is no policing of what actions are allowed, but these are some of the common ones that can be used:
 
-| Action               | Payload                   | Does                                                                         |
-| ---                  | ---                       | ---                                                                          |
-| `view:<kind-number>` | `{ event: object or id }` | Opens the given event in a viewer appropriate for its kind                   |
-| `profile`            | `{ pubkey: string }`      | Opens the profile view for the given pubkey                                  |
-| `feed`               | `{ pubkeys: string[] }`   | Opens the feed view for the given pubkey                                     |
-| `relay_feed`         | `{ relays: string[] }`    | Opens a feed view scoped to the given relay URLs                             |
-| `search_profile`     | `{ input?: string }`      | Returns a promise resolving to a pubkey (optionally from user-guided search) |
+| Action               | Payload                             |
+| ---                  | ---                                 |
+| `view:<kind-number>` | `event object or nevent/naddr code` |
+| `profile`            | `pubkey as hex`                     |
+| `feed`               | `list of pubkey strings`            |
+| `relay_feed`         | `list of relay URLs`                |
 
-Pass `{ instance: "<instanceId>" }` as the third argument to route the action directly to a specific running instance instead of launching a new one.
+Optionally `{ instance: "<instanceId>" }` as the third argument to route the action directly to a specific running instance instead of launching a new one.
 
 Each napp also gets its instance id at `window.napp.instance` (a string, unique per window).
 
-The host also pushes runtime signals to every napp via `postMessage`. Bridge.js relays them:
+The host also pushes runtime signals to every napp via `postMessage`. bridge.js relays them:
 
 - **`napp-theme-change`**: sets `document.documentElement.dataset.theme` to `"light"` or `"dark"` and injects the launcher's resolved color tokens as `--surface`, `--text`, etc. on `:root`. Sent when the launcher's theme changes, so napps using `var(--surface)` / `var(--text)` track automatically.
-
-For data tied to the app rather than a specific window, use the napp's own `localStorage` or `indexedDB`. Each napp lives at its own origin so everything is naturally isolated.
 
 ### Origin sandboxing
 
 Each napp runs at its own origin (a unique `<nappId>` subdomain). From the iframe, `window.parent` is cross-origin, so the napp can't reach into the launcher. The bridge is the only channel.
-
-The `nappId` is derived from the manifest: for a root manifest (kind 15128) it's the first 40 hex chars of the publisher's pubkey, and for a named manifest (kind 35128) it's that plus `-<dTag>`.
 
 ### Boot flow
 
@@ -186,15 +117,3 @@ The `nappId` is derived from the manifest: for a root manifest (kind 15128) it's
 4. The bridge picks up its `instanceId` from `window.name` (set by the parent before the iframe loads) and starts forwarding RPC.
 
 `window.name` survives same-origin navigations, so reloading an iframe (during an update, for example) keeps the same instance id and per-instance state.
-
-### How updates work
-
-When the launcher installs a napp it stores the full manifest event keyed by its event `id`. The store compares the stored event's `created_at` against the latest manifest from your relays. Newer `created_at` means an update is available.
-
-Clicking update re-fetches the manifest and blobs, reuses the boot iframe to swap the files store atomically (the install handler clears the store before writing), writes the new manifest event, and then reassigns `iframe.src` on every open window of that napp so the new files take effect right away.
-
-### How destroy works
-
-Close keeps the session and its per-instance state. Destroy is the full nuke. The launcher forgets the session, all its petnames, the install log entry, and any cached permission decisions. Then a hidden boot iframe at the napp's origin clears every IndexedDB on that origin, plus `localStorage`, `sessionStorage`, every CacheStorage entry, and every service worker registration. Reinstalling later starts from a clean slate.
-
-There's a confirm prompt before all that happens.
