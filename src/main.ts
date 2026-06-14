@@ -601,6 +601,9 @@ function launchSystemNapp(
   const launchOpts = persistent
     ? makeSystemLaunchOpts(sysId)
     : {
+        // Transient (e.g. the handler picker): don't persist it, but still
+        // re-pack on move/resize so pack mode keeps it constrained to the grid.
+        onStateChange: () => maybeRepack(),
         onReorder: persistDomOrder,
         onClose: () => refreshSuggestions()
       }
