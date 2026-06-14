@@ -745,7 +745,7 @@ html[data-theme="dark"] .napp-window {
   display: none;
 }
 
-.napp-window.minimized .napp-resize {
+.napp-window.minimized .napp-resize-handle {
   display: none;
 }
 

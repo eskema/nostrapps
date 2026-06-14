@@ -967,6 +967,11 @@ function setupResize(
     if (stage && stage.classList.contains("pack-mode")) {
       packSnapshot = capturePackSnapshot(stage)
     }
+    // Drop the 420px starter cap immediately so the user sees height
+    // change even on edge-only resize (S/E/W/N).  Without this the CSS
+    // max-height:420px clamps the first resize silently and only width
+    // changes (no max-width cap) give visible feedback.
+    root.classList.add("user-sized")
     // Mark a resize as in flight so main.js's maybeRepack short-circuits
     // — same reason as drag. The resize handler runs its own focused
     // live-pack; a generic bestFitPack in parallel would re-place the
@@ -974,7 +979,6 @@ function setupResize(
     document.body.classList.add("napp-resizing")
     handle.setPointerCapture(e.pointerId)
     e.preventDefault()
-    e.stopPropagation()
   })
 
   handle.addEventListener("pointermove", (e: PointerEvent) => {
