@@ -855,31 +855,19 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
 
   const currentUser = ctx.account?.getPubkey()
   const isOwn = currentUser && evt.pubkey === currentUser
-  let menuOpen = false
+  // Own-app menu (request delete). Built as a popover so it renders in the top
+  // layer (never clipped or mis-stacked under the card), light-dismisses on
+  // outside-click / Esc for free, and is anchored right under its trigger.
   let menuEl: HTMLDivElement | null = null
-
-  function closeMenu() {
-    if (menuEl) {
-      menuEl.remove()
-      menuEl = null
-    }
-    menuOpen = false
-  }
-
-  function toggleMenu(e: MouseEvent) {
-    e.stopPropagation()
-    if (menuOpen) {
-      closeMenu()
-      return
-    }
-    menuOpen = true
+  let menuTrigger: HTMLButtonElement | null = null
+  if (isOwn) {
     menuEl = document.createElement("div")
     menuEl.className = "apps-card-menu"
-    const btn = document.createElement("button")
-    btn.type = "button"
-    btn.textContent = "request delete"
-    btn.addEventListener("click", async () => {
-      closeMenu()
+    menuEl.popover = "auto"
+    menuEl.addEventListener("click", e => e.stopPropagation()) // don't open app-info
+    const delBtn = button({ label: "request delete", variant: "danger" })
+    delBtn.addEventListener("click", async () => {
+      menuEl?.hidePopover()
       ctx.setStatus?.("Requesting deletion of app event…")
       try {
         const signer = currentSigner()
@@ -900,24 +888,16 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
         ctx.setStatus?.(`Deletion failed — ${err.message}`)
       }
     })
-    menuEl.appendChild(btn)
-    const onDocClick = (ev: MouseEvent) => {
-      if (menuEl && !menuEl.contains(ev.target as Node)) {
-        closeMenu()
-        document.removeEventListener("click", onDocClick)
-      }
-    }
-    document.addEventListener("click", onDocClick)
-    card.appendChild(menuEl)
-  }
+    menuEl.appendChild(delBtn)
 
-  let menuTrigger: HTMLButtonElement | null = null
-  if (isOwn) {
-    menuTrigger = button({
-      label: "···",
-      variant: "ghost",
-      class: "apps-card-menu-trigger",
-      onClick: toggleMenu
+    menuTrigger = button({ label: "···", variant: "ghost", class: "apps-card-menu-trigger" })
+    menuTrigger.popoverTargetElement = menuEl
+    // Place it under the trigger (right-aligned) just before it opens.
+    menuEl.addEventListener("beforetoggle", (ev: Event) => {
+      if ((ev as ToggleEvent).newState !== "open" || !menuTrigger) return
+      const r = menuTrigger.getBoundingClientRect()
+      menuEl!.style.top = `${Math.round(r.bottom + 4)}px`
+      menuEl!.style.right = `${Math.round(Math.max(8, window.innerWidth - r.right))}px`
     })
   }
 
@@ -1024,6 +1004,10 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
       ctx.launchSystemNapp("appinfo", { persistent: false })
     }
   })
+
+  // The menu popover lives in the card so it's removed with it; top-layer
+  // rendering means its DOM position doesn't affect where it shows.
+  if (menuEl) card.appendChild(menuEl)
 
   return card
 }

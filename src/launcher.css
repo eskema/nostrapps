@@ -2040,34 +2040,34 @@ body.napp-resizing .napp-body iframe {
   color: color-mix(in srgb, currentColor 70%, transparent);
 }
 
+/* Popover (top layer). The UA gives it position:fixed + inset:0 + margin:auto
+   (centred); reset that so the JS-set top/right anchor it under the trigger.
+   The single action fills the popover as a solid (primary-look) danger button. */
 .apps-card-menu {
-  position: absolute;
-  right: 0.5rem;
-  top: 2.2rem;
-  z-index: 10;
-  background: var(--surface);
-  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  margin: 0;
+  inset: auto;
+  padding: 0;
+  border: none;
   border-radius: 6px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.apps-card-menu button {
-  display: block;
+.apps-card-menu .btn {
   width: 100%;
-  background: none;
-  border: none;
-  color: inherit;
-  font-size: 0.78rem;
-  padding: 0.4rem 0.7rem;
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-  font-family: inherit;
+  border-radius: 0;
 }
 
-.apps-card-menu button:hover {
-  background: color-mix(in srgb, currentColor 12%, transparent);
+.apps-card-menu .btn-danger {
+  background: #e33;
+  color: white;
+  border-color: #e33;
+}
+
+.apps-card-menu .btn-danger:hover:not(:disabled) {
+  background: #e33;
+  color: white;
+  opacity: 0.85;
 }
 
 /* ─── handler system napp ──────────────────────────────────────── */
