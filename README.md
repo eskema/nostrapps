@@ -6,8 +6,6 @@ Nostrapps is a small browser launcher for Nostr apps. Each app is a static site 
 
 The idea is that each napp is a very small, specialized app. It should do one (or few) things and do them well. It should call `window.napp.registerAction()` in order to receive the parameters it will use (for example, an app that displays any information related to a profile should call that to register the `"profile"` action) and it should call `window.napp.action()` for anything it doesn't handle internally (for example, an app that displays a list of notes but doesn't handle threads or an expanded view of such notes should call out to other apps with the `view:1` action).
 
-### Building a napp
-
 A napp is any folder with an `index.html`. Inside the iframe you get:
 
 ```js
@@ -24,13 +22,14 @@ window.nostrdb.count(filters)
 window.nostrdb.event(id)
 window.nostrdb.replaceable(kind, author, identifier?)
 window.nostrdb.supports() // returns []
-```
 
-You also get data-loading helpers executed on the host via `@nostr/gadgets`:
-
-```js
-// NIP-51 lists
-window.napp.utils.loadRelayList(pubkey, hints?, refreshStyle?, defaultItems?)
+// NIP-51 list loaders
+window.napp.utils.loadRelayList(
+  pubkey: string,
+  hints?: string[],
+  refreshStyle?: boolean | NostrEvent | null,
+  defaultItems?: RelayItem[]
+): Promise<ListResult<RelayItem>>
 window.napp.utils.loadFollowsList(pubkey, hints?, refreshStyle?, defaultItems?)
 window.napp.utils.loadMuteList(pubkey, hints?, refreshStyle?, defaultItems?)
 window.napp.utils.loadBookmarks(pubkey, hints?, refreshStyle?, defaultItems?)
@@ -54,7 +53,7 @@ window.napp.utils.loadRelayInfo(url, refreshStyle?)
 // Profile metadata
 window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrUser
 
-// Event fetching
+// Arbitrary event fetching
 window.napp.utils.loadEvent(code, relays?, author?)
 
 // Publishing
@@ -100,6 +99,8 @@ There is no policing of what actions are allowed, but these are some of the comm
 Optionally `{ instance: "<instanceId>" }` as the third argument to route the action directly to a specific running instance instead of launching a new one.
 
 Each napp also gets its instance id at `window.napp.instance` (a string, unique per window).
+
+TypeScript types for everything above live in [`env.d.ts`](./env.d.ts). Reference it in your napp's `tsconfig.json` or copy it as a starting point.
 
 The host also pushes runtime signals to every napp via `postMessage`. bridge.js relays them:
 
