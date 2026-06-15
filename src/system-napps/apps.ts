@@ -4,7 +4,8 @@ export const slash = "/apps"
 
 import { pool } from "@nostr/gadgets/global"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
-import { naddrEncode } from "@nostr/tools/nip19"
+import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
+import { loadNostrUser } from "@nostr/gadgets/metadata"
 import "nostr-web-components"
 
 import type { SystemCtx } from "../types.js"
@@ -15,7 +16,6 @@ import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NostrEvent } from "@nostr/tools"
-import { selectApp } from "./appinfo.js"
 import { button, type ButtonVariant } from "./ui.js"
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
@@ -67,13 +67,44 @@ export function mount(
         <div class="apps-pane apps-pane-installed"></div>
         <div class="apps-pane apps-pane-discover" hidden></div>
       </div>
+      <div class="apps-detail-overlay" hidden></div>
     </div>
   `
 
   const installedPane = container.querySelector(".apps-pane-installed") as HTMLElement
   const discoverPane = container.querySelector(".apps-pane-discover") as HTMLElement
+  const detailOverlay = container.querySelector(".apps-detail-overlay") as HTMLElement
   const installedTab = container.querySelector(".installed-tab") as HTMLElement
   const discoverTab = container.querySelector(".discover-tab") as HTMLElement
+
+  // Clicking a card lays the app-info detail over the whole panel (absolute,
+  // inset:0) instead of replacing the list — closing it just hides the overlay,
+  // so the list underneath keeps its scroll position and built state. Structure:
+  // images (if any) → the list-item card (rebuilt, non-clickable, actions live)
+  // → remaining info → files <details>.
+  function closeDetail() {
+    detailOverlay.hidden = true
+    detailOverlay.replaceChildren()
+  }
+  function showDetail(req: DetailReq) {
+    const back = button({
+      label: "← back",
+      variant: "ghost",
+      class: "apps-detail-back",
+      onClick: closeDetail
+    })
+    detailOverlay.replaceChildren(back)
+    const imgs = detailImages(req.event)
+    if (imgs) detailOverlay.appendChild(imgs)
+    detailOverlay.appendChild(req.buildCard())
+    detailOverlay.appendChild(detailInfo(req))
+    const files = detailFiles(req.event)
+    if (files) detailOverlay.appendChild(files)
+    // The card lives in the overlay (not the list), so load its icon here too.
+    loadCardIcons(detailOverlay, [{ nappId: req.nappId, evt: req.event }])
+    detailOverlay.hidden = false
+    detailOverlay.scrollTop = 0
+  }
 
   // Both panes are built once and kept in the DOM; switching tabs just toggles
   // visibility (no rebuild) so each list, its scroll, and inputs persist. The
@@ -83,6 +114,7 @@ export function mount(
 
   function switchTab(tab: string) {
     currentTab = tab
+    closeDetail() // leaving a tab dismisses any open detail overlay
     installedTab.classList.toggle("active", tab === "installed")
     discoverTab.classList.toggle("active", tab === "discover")
     if (tab === "installed") {
@@ -246,103 +278,135 @@ export function mount(
 
   // Rebuilds only the card list, preserving the search input. Called on
   // keystroke and when the installed set changes.
+  // Card options for one installed app — reused for both the list and the
+  // (rebuilt, non-clickable) card shown at the top of the detail overlay.
+  function installedOpts(app: any): AppCardOpts {
+    const actions = getHandlers(app.nappId)
+    const title = app.petname || app.title || app.nappId
+    const author = app.event?.pubkey || null
+    // Apps without a manifest (no publisher): show a type label + install date
+    // in place of author + publish date.
+    const authorLabel = author
+      ? null
+      : app.nappId.startsWith("dev~")
+        ? "dev"
+        : app.nappId.startsWith("temp~")
+          ? "temp"
+          : "local"
+    const createdAt = app.event?.created_at || app.installedAt || null
+    const search = buildHaystack({
+      title: app.title,
+      petname: app.petname,
+      description: app.event?.tags.find((t: any) => t[0] === "description")?.[1],
+      summary: app.event?.tags.find((t: any) => t[0] === "summary")?.[1],
+      id: app.nappId,
+      pubkey: author,
+      categories: app.event?.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1]),
+      hashtags: app.event?.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1]),
+      actions
+    })
+    const openCount = readOpen().filter(s => s.nappId === app.nappId).length
+    const metaExtras: HTMLElement[] = []
+    if (openCount > 0) {
+      const openEl = document.createElement("span")
+      openEl.textContent = `${openCount} open`
+      metaExtras.push(openEl)
+    }
+    const upd = latestUpdateFor(app)
+    const buttons = upd
+      ? [makeInstalledUpdateBtn(app, upd), ...installedButtons(app)]
+      : installedButtons(app)
+    const description =
+      app.event?.tags.find((t: any) => t[0] === "description")?.[1] ||
+      app.event?.tags.find((t: any) => t[0] === "summary")?.[1] ||
+      null
+    // Published apps carry a manifest → resolve the icon from blossom (same as
+    // discover, doesn't depend on the napp's SW). Local/dev/temp apps have no
+    // manifest → fall back to their own origin path, served by their SW.
+    const iconSha = app.event ? resolveCardIcon(app.event).sha : null
+    return {
+      nappId: app.nappId,
+      title,
+      description,
+      iconSha,
+      iconUrl: iconSha ? null : installedIconUrl(app),
+      authorPubkey: author,
+      authorLabel,
+      createdAt,
+      actions,
+      search,
+      buttons,
+      metaExtras,
+      onAuthorClick: author
+        ? () => dispatchAction("apps", "profile", author).catch(() => {})
+        : undefined
+    }
+  }
+
   function renderInstalledList() {
     const listEl = _installedListEl
     if (!listEl) return
     listEl.innerHTML = ""
     const apps = ctx.apps.list()
     _installedSig = apps.map(a => a.nappId).join(",")
-    const needle = installedFilter.trim().toLowerCase()
+    // Build every card once; filtering is a visibility toggle (applyInstalledFilter),
+    // mirroring the Discover tab — so the two tabs behave identically.
     const frag = document.createDocumentFragment()
-    let shown = 0
     for (const app of apps) {
-      const actions = getHandlers(app.nappId)
-      const title = app.petname || app.title || app.nappId
-      const author = app.event?.pubkey || null
-      // Apps without a manifest (no publisher): show a type label + install date
-      // in place of author + publish date.
-      const authorLabel = author
-        ? null
-        : app.nappId.startsWith("dev~")
-          ? "dev"
-          : app.nappId.startsWith("temp~")
-            ? "temp"
-            : "local"
-      const createdAt = app.event?.created_at || app.installedAt || null
-      const search = haystackFrom([title, app.title, app.nappId, author, ...actions])
-      if (needle && !search.includes(needle)) continue
-      shown++
-      const openCount = readOpen().filter(s => s.nappId === app.nappId).length
-      const metaExtras: HTMLElement[] = []
-      if (openCount > 0) {
-        const openEl = document.createElement("span")
-        openEl.textContent = `${openCount} open`
-        metaExtras.push(openEl)
-      }
-      const upd = latestUpdateFor(app)
-      const buttons = upd
-        ? [makeInstalledUpdateBtn(app, upd), ...installedButtons(app)]
-        : installedButtons(app)
-      const description =
-        app.event?.tags.find((t: any) => t[0] === "description")?.[1] ||
-        app.event?.tags.find((t: any) => t[0] === "summary")?.[1] ||
-        null
-      // Published apps carry a manifest → resolve the icon from blossom (same as
-      // discover, doesn't depend on the napp's SW). Local/dev/temp apps have no
-      // manifest → fall back to their own origin path, served by their SW.
-      const iconSha = app.event ? resolveCardIcon(app.event).sha : null
       frag.appendChild(
         renderAppCard({
-          nappId: app.nappId,
-          title,
-          description,
-          iconSha,
-          iconUrl: iconSha ? null : installedIconUrl(app),
-          authorPubkey: author,
-          authorLabel,
-          createdAt,
-          actions,
-          search,
-          buttons,
-          metaExtras,
-          onAuthorClick: author
-            ? () => dispatchAction("apps", "profile", author).catch(() => {})
-            : undefined,
-          onOpen: () => {
-            selectApp({
-              nappId: app.nappId,
-              title,
-              iconUrl: installedIconUrl(app),
-              authorPubkey: author,
-              authorLabel,
-              createdAt,
-              actions,
-              event: app.event || null
+          ...installedOpts(app),
+          onOpen: () =>
+            showDetail({
+              buildCard: () => renderAppCard(installedOpts(app)),
+              event: app.event || null,
+              nappId: app.nappId
             })
-            ctx.launchSystemNapp("appinfo", { persistent: false })
-          }
         })
       )
     }
     listEl.appendChild(frag)
-    if (apps.length === 0 || shown === 0) {
-      const empty = document.createElement("div")
-      empty.className = "apps-empty"
-      empty.textContent = apps.length === 0 ? "No apps installed yet." : "No matches."
-      listEl.appendChild(empty)
-    }
+    applyInstalledFilter()
     // Load icons from blossom for the published apps (those with a manifest).
     loadCardIcons(
       listEl,
       apps.filter(a => a.event).map(a => ({ nappId: a.nappId, evt: a.event }))
     )
+    loadAuthorNames(listEl, applyInstalledFilter)
     _installedUpdatesSig = installedUpdateSig()
+  }
+
+  // Show/hide installed cards against the current query (no rebuild), plus the
+  // empty-state message — the Installed-tab counterpart of applyFilter().
+  function applyInstalledFilter() {
+    const listEl = _installedListEl
+    if (!listEl) return
+    const needle = installedFilter.trim().toLowerCase()
+    const cards = listEl.querySelectorAll(".apps-card") as NodeListOf<HTMLElement>
+    let shown = 0
+    for (const card of cards) {
+      const match = !needle || (card.dataset.search || "").includes(needle)
+      card.hidden = !match
+      if (match) shown++
+    }
+    const existing = listEl.querySelector(".apps-empty") as HTMLElement | null
+    const msg = cards.length === 0 ? "No apps installed yet." : shown === 0 ? "No matches." : null
+    if (!msg) {
+      existing?.remove()
+    } else if (existing) {
+      existing.textContent = msg
+    } else {
+      const empty = document.createElement("div")
+      empty.className = "apps-empty"
+      empty.textContent = msg
+      listEl.appendChild(empty)
+    }
   }
 
   function renderInstalled() {
     installedPane.innerHTML = `
       <div class="apps-toolbar">
-        <input class="apps-search" type="search" placeholder="Search name, action, id…" />
+        <input class="apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
       </div>
       <div class="apps-list"></div>
     `
@@ -351,7 +415,7 @@ export function mount(
     searchEl.value = installedFilter
     searchEl.addEventListener("input", () => {
       installedFilter = searchEl.value
-      renderInstalledList()
+      applyInstalledFilter() // toggle visibility; no rebuild
     })
     renderInstalledList()
   }
@@ -490,12 +554,13 @@ export function mount(
     const all = sortedManifests(events)
     const frag = document.createDocumentFragment()
     for (const evt of all) {
-      const card = renderCard(evt, ctx, relays, renderList)
+      const card = renderCard(evt, ctx, relays, renderList, showDetail)
       card.hidden = !matchesFilter(evt, filter)
       frag.appendChild(card)
     }
     _listEl.appendChild(frag)
     loadIcons(all)
+    loadAuthorNames(_listEl, applyFilter)
     refreshEmptyState()
   }
 
@@ -531,7 +596,7 @@ export function mount(
     // that don't match the active filter are inserted hidden.
     let ref = _listEl.firstElementChild
     for (const evt of toRender) {
-      const card = renderCard(evt, ctx, relays, renderList)
+      const card = renderCard(evt, ctx, relays, renderList, showDetail)
       card.hidden = !matchesFilter(evt, filter)
       while (ref && Number((ref as HTMLElement).dataset.createdAt || 0) >= evt.created_at) {
         ref = ref.nextElementSibling
@@ -539,6 +604,7 @@ export function mount(
       _listEl.insertBefore(card, ref)
     }
     loadIcons(toRender)
+    loadAuthorNames(_listEl, applyFilter)
     refreshEmptyState()
   }
 
@@ -603,7 +669,7 @@ export function mount(
   function renderDiscover() {
     discoverPane.innerHTML = `
       <div class="apps-toolbar">
-        <input class="apps-search" type="search" placeholder="Search title, description, npub…" />
+        <input class="apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
       </div>
       <details class="apps-relays">
         <summary>edit relays</summary>
@@ -816,8 +882,8 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
   if (o.menuTrigger) actions.appendChild(o.menuTrigger)
   card.appendChild(actions)
 
-  // Clicking the card (anywhere but a button or the author) opens the full-info
-  // window. The card itself stays minimal — no inline details.
+  // Clicking the card (anywhere but a button or the author) opens the app-info
+  // detail overlay. The card itself stays minimal — no inline details.
   if (o.onOpen) {
     card.classList.add("apps-card-clickable")
     card.addEventListener("click", e => {
@@ -831,7 +897,13 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
 
 // ─── Discover card rendering ─────────────────────────────────────
 
-function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange: any = null) {
+function renderCard(
+  evt: NostrEvent,
+  ctx: SystemCtx,
+  relays: string[],
+  onChange: any = null,
+  onOpenDetail?: (req: DetailReq) => void
+) {
   const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || ""
   const dTag = tag("d")
   const nappId = computeNappId(evt)
@@ -933,7 +1005,7 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
       if (onChange) {
         onChange()
       } else {
-        const replacement = renderCard(evt, ctx, relays)
+        const replacement = renderCard(evt, ctx, relays, null, onOpenDetail)
         card.replaceWith(replacement)
       }
     } catch (err) {
@@ -988,21 +1060,18 @@ function renderCard(evt: NostrEvent, ctx: SystemCtx, relays: string[], onChange:
     onAuthorClick: () => {
       dispatchAction("apps", "profile", evt.pubkey).catch(() => {})
     },
-    onOpen: () => {
-      selectApp({
-        nappId,
-        title: title || `(${dTag})`,
-        iconSha,
-        iconMime,
-        authorPubkey: evt.pubkey,
-        createdAt: evt.created_at,
-        actions: actionsOf(evt),
-        event: evt,
-        naddr,
-        seenOnRelays
-      })
-      ctx.launchSystemNapp("appinfo", { persistent: false })
-    }
+    // Only clickable when a detail handler is supplied (the list). The card the
+    // detail rebuilds for its own header passes none, so it isn't re-clickable.
+    onOpen: onOpenDetail
+      ? () =>
+          onOpenDetail({
+            buildCard: () => renderCard(evt, ctx, relays),
+            event: evt,
+            nappId,
+            naddr,
+            seenOnRelays
+          })
+      : undefined
   })
 
   // The menu popover lives in the card so it's removed with it; top-layer
@@ -1064,27 +1133,62 @@ function sanitizeRelays(relays: string[]): string[] {
 // The lowercased text a card is searched against. Stored on each card as
 // data-search so filtering can be done by toggling visibility instead of
 // rebuilding, and used by matchesFilter so both stay in sync.
-function searchHaystack(evt: any): string {
-  const fields = [
-    evt.tags.find((t: any) => t[0] === "title")?.[1] || "",
-    evt.tags.find((t: any) => t[0] === "description")?.[1] || "",
-    evt.tags.find((t: any) => t[0] === "d")?.[1] || "",
-    evt.pubkey
-  ]
-  for (const t of evt.tags) {
-    if (
-      (t[0] === "title" ||
-        t[0] === "summary" ||
-        t[0] === "description" ||
-        t[0] === "l" ||
-        t[0] === "t" ||
-        t[0] === "action") && // fold actions into search so they're filterable
-      typeof t[1] === "string"
-    ) {
-      fields.push(t[1])
-    }
+// One placeholder + one field set for both tabs so search behaves identically.
+const SEARCH_PLACEHOLDER = "Search name, author, description, id…"
+
+// Lowercased search text shared by both tabs. `pubkey` is folded in as hex AND
+// npub; the author's display name is mixed in lazily (see loadAuthorNames) via
+// authorNameCache so apps are findable by author, not just key.
+const authorNameCache = new Map<string, string>()
+const authorNamesInFlight = new Set<string>()
+
+function buildHaystack(o: {
+  title?: string | null
+  petname?: string | null
+  description?: string | null
+  summary?: string | null
+  id?: string | null
+  pubkey?: string | null
+  categories?: string[]
+  hashtags?: string[]
+  actions?: string[]
+}): string {
+  let npub: string | null = null
+  if (o.pubkey) {
+    try {
+      npub = npubEncode(o.pubkey)
+    } catch {}
   }
-  return fields.join("\n").toLowerCase()
+  return [
+    o.title,
+    o.petname,
+    o.description,
+    o.summary,
+    o.id,
+    o.pubkey,
+    npub,
+    o.pubkey ? authorNameCache.get(o.pubkey) : null,
+    ...(o.categories || []),
+    ...(o.hashtags || []),
+    ...(o.actions || [])
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase()
+}
+
+function searchHaystack(evt: any): string {
+  const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || null
+  return buildHaystack({
+    title: tag("title"),
+    summary: tag("summary"),
+    description: tag("description"),
+    id: tag("d"),
+    pubkey: evt.pubkey,
+    categories: evt.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1]),
+    hashtags: evt.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1]),
+    actions: actionsOf(evt)
+  })
 }
 
 // Action/handler names a manifest declares.
@@ -1092,14 +1196,224 @@ function actionsOf(evt: any): string[] {
   return evt.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
 }
 
-// Build a lowercased search string from arbitrary parts (used by the Installed
-// tab, whose data is an InstalledApp rather than an event).
-function haystackFrom(parts: Array<string | null | undefined>): string {
-  return parts.filter(Boolean).join("\n").toLowerCase()
+function appendSearch(card: HTMLElement, text: string) {
+  const cur = card.dataset.search || ""
+  if (!text || cur.includes(text)) return
+  card.dataset.search = `${cur}\n${text}`
+}
+
+// Resolve author display names for the cards in `listEl` and fold them into each
+// card's data-search, then re-apply the active filter so a name typed before it
+// loaded still matches. Cached across renders; fresh cards already carry the name
+// via buildHaystack, so this only fills in cards built before the name arrived.
+function loadAuthorNames(listEl: HTMLElement | null, refilter: () => void) {
+  if (!listEl) return
+  const pubkeys = new Set<string>()
+  for (const card of listEl.querySelectorAll(".apps-card[data-author]") as NodeListOf<HTMLElement>) {
+    pubkeys.add(card.dataset.author!)
+  }
+  const cardsFor = (pk: string) =>
+    listEl.querySelectorAll(`.apps-card[data-author="${CSS.escape(pk)}"]`) as NodeListOf<HTMLElement>
+  for (const pk of pubkeys) {
+    const cached = authorNameCache.get(pk)
+    if (cached) {
+      for (const c of cardsFor(pk)) appendSearch(c, cached)
+      continue
+    }
+    if (cached === "" || authorNamesInFlight.has(pk)) continue // known-empty or loading
+    authorNamesInFlight.add(pk)
+    loadNostrUser(pk)
+      .then(u => {
+        authorNamesInFlight.delete(pk)
+        const name = [u.metadata?.name, u.metadata?.display_name, u.metadata?.nip05, u.shortName]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+        authorNameCache.set(pk, name)
+        if (!name) return
+        for (const c of cardsFor(pk)) appendSearch(c, name)
+        refilter()
+      })
+      .catch(() => authorNamesInFlight.delete(pk))
+  }
 }
 
 function matchesFilter(evt: any, filter: string) {
   const needle = filter.trim().toLowerCase()
   if (!needle) return true
   return searchHaystack(evt).includes(needle)
+}
+
+// ─── app-info detail (shown in the overlay over the list) ──────────
+// Built from the clicked app: a rebuilt list-item card (with live actions),
+// preceded by any images and followed by the remaining info + a files <details>.
+
+interface DetailReq {
+  buildCard: () => HTMLElement
+  event: any | null
+  nappId: string
+  naddr?: string | null
+  seenOnRelays?: string[]
+}
+
+// Images section (manifest `image` tags); null when there are none.
+function detailImages(event: any | null): HTMLElement | null {
+  const images = (event?.tags || [])
+    .filter((t: any) => t[0] === "image" && t[1])
+    .map((t: any) => t[1])
+  if (!images.length) return null
+  const gallery = document.createElement("div")
+  gallery.className = "apps-detail-images"
+  for (const src of images) {
+    const img = document.createElement("img")
+    img.className = "apps-detail-image"
+    img.alt = ""
+    img.loading = "lazy"
+    img.src = src
+    img.addEventListener("error", () => img.remove()) // drop dead links silently
+    gallery.appendChild(img)
+  }
+  return gallery
+}
+
+// Remaining info section: id, naddr, relays-seen-on, categories/hashtags, source.
+function detailInfo(req: DetailReq): HTMLElement {
+  const section = document.createElement("div")
+  section.className = "apps-detail-info"
+  section.appendChild(infoRow("id", code(req.nappId)))
+  if (req.naddr) section.appendChild(infoRow("naddr", code(req.naddr)))
+
+  if (req.seenOnRelays?.length) {
+    const chips = document.createElement("div")
+    chips.className = "apps-chips"
+    for (const r of req.seenOnRelays) {
+      const chip = document.createElement("span")
+      chip.className = "apps-chip apps-chip-relay"
+      chip.textContent = r.replace(/^wss?:\/\//, "")
+      chip.title = r
+      chips.appendChild(chip)
+    }
+    section.appendChild(chips)
+  }
+
+  const event = req.event
+  if (event) {
+    const cats = event.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
+    const hashtags = event.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1])
+    if (cats.length || hashtags.length) {
+      const chips = document.createElement("div")
+      chips.className = "apps-chips"
+      for (const cat of cats) {
+        const chip = document.createElement("span")
+        chip.className = "apps-chip apps-chip-category"
+        chip.textContent = formatCategory(cat)
+        chip.title = cat
+        chips.appendChild(chip)
+      }
+      for (const t of hashtags) {
+        const chip = document.createElement("span")
+        chip.className = "apps-chip apps-chip-tag"
+        chip.textContent = `#${t}`
+        chips.appendChild(chip)
+      }
+      section.appendChild(chips)
+    }
+
+    const source = event.tags.find((t: any) => t[0] === "source")?.[1]
+    if (source) {
+      const a = document.createElement("a")
+      a.href = source
+      a.target = "_blank"
+      a.rel = "noopener noreferrer"
+      a.textContent = source
+      section.appendChild(infoRow("source", a))
+    }
+  }
+  return section
+}
+
+// Files <details> whose list is fetched (blossom round-trip) only on first
+// expand; null when the manifest has no path tags.
+function detailFiles(event: any | null): HTMLElement | null {
+  const pathTags = (event?.tags || []).filter((t: any) => t[0] === "path" && t[1] && t[2])
+  if (!pathTags.length) return null
+  const details = document.createElement("details")
+  details.className = "apps-detail-files-block"
+  const summary = document.createElement("summary")
+  summary.textContent = `files (${pathTags.length})`
+  details.appendChild(summary)
+  const host = document.createElement("div")
+  host.className = "apps-detail"
+  details.appendChild(host)
+  let loaded = false
+  details.addEventListener("toggle", () => {
+    if (!details.open || loaded) return
+    loaded = true
+    renderFilesHtml(event).then(html => {
+      host.innerHTML = html
+    })
+  })
+  return details
+}
+
+async function renderFilesHtml(evt: any): Promise<string> {
+  const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
+  const serverTagUrls = evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1])
+  const blossomServers = (
+    await loadBlossomServers(evt.pubkey).catch(() => ({ items: [] as string[] }))
+  ).items
+  const servers = [...new Set([...serverTagUrls, ...blossomServers])].map(normalizeServer)
+
+  return `
+    <ul class="apps-detail-files">
+      ${pathTags
+        .map((t: string[]) => {
+          const path = t[1]
+          const sha = t[2]
+          return `<li><code>${esc(path)}</code> ${servers
+            .map(url => {
+              let host = url
+              try {
+                host = new URL(url).host
+              } catch {}
+              return `<a href="${url}/${sha}" target="_blank" rel="noopener noreferrer">${esc(host)}</a>`
+            })
+            .join(" ")}</li>`
+        })
+        .join("")}
+    </ul>
+  `
+}
+
+function normalizeServer(s: string): string {
+  const u = s.endsWith("/") ? s.slice(0, -1) : s
+  return u.startsWith("http") ? u : `https://${u}`
+}
+
+function code(text: string): HTMLElement {
+  const c = document.createElement("code")
+  c.textContent = text
+  return c
+}
+
+function infoRow(label: string, value: Node): HTMLElement {
+  const row = document.createElement("div")
+  row.className = "apps-detail-row"
+  const l = document.createElement("span")
+  l.textContent = `${label}:`
+  row.append(l, document.createTextNode(" "), value)
+  return row
+}
+
+function esc(s: string): string {
+  return String(s).replace(
+    /[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string
+  )
+}
+
+function formatCategory(label: string) {
+  const m = /^napp\.([^:]+):(.+)$/.exec(label)
+  if (!m) return label
+  return `${m[2]} · ${m[1]}`
 }

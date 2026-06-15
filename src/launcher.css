@@ -293,7 +293,7 @@ button {
 
 .btn-warning {
   background: #f59e0b;
-  color: #1a1a1a;
+  color: var(--surface); /* #1a1a1a; */
   border-color: #f59e0b;
   font-weight: 600;
 }
@@ -1266,20 +1266,70 @@ body.napp-resizing .napp-body iframe {
 }
 
 /* apps */
+/* Apps napp fills the window body and scrolls inside its pane (not the body),
+   so the detail overlay can cover a bounded content area and stay put while the
+   list keeps its scroll position behind it. */
+.system-napp-apps {
+  height: 100%;
+  min-height: 0;
+}
+
 .apps-panel {
   display: grid;
   grid-gap: 1rem;
+  grid-template-rows: auto 1fr;
+  flex: 1;
+  min-height: 0;
+  position: relative; /* positioning context for the detail overlay */
 }
 
 /* Holds both tab panes (one visible). The pane itself lays out its toolbar +
    list — switching tabs just toggles [hidden] rather than rebuilding. */
 .apps-content {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* App-info detail laid over the whole panel (tabs included); closing it just
+   hides the layer, so the list underneath is untouched (scroll + built state
+   preserved). Stacks: back · images · card · info · files. */
+.apps-detail-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--surface);
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  align-content: start; /* pack rows at the top, don't stretch to fill height */
+  gap: 0.75rem;
+}
+
+/* `display` on the class would override the [hidden] attribute's display:none,
+   so only set it when actually shown. */
+.apps-detail-overlay:not([hidden]) {
+  display: grid;
+}
+
+/* Hide the scrollbar on the store's scroll areas (scroll still works). */
+.apps-pane::-webkit-scrollbar,
+.apps-detail-overlay::-webkit-scrollbar {
+  display: none;
+}
+
+.apps-detail-back {
+  justify-self: start;
 }
 
 .apps-pane {
   display: grid;
-  grid-gap: 2rem;
+  /* grid-gap: 2rem; */
+  overflow-y: auto;
+  min-height: 0;
+  align-content: start;
+  scrollbar-width: none; /* Firefox */
 }
 
 /* Beat the UA [hidden]{display:none}, which our .apps-pane display:grid would
@@ -1290,41 +1340,42 @@ body.napp-resizing .napp-body iframe {
 
 .apps-tabs {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  gap: .5rem;
+  /* border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); */
 }
 
 .apps-tab {
   flex: 1;
-  text-transform: uppercase;
-  letter-spacing: 0.05rem;
+  /* text-transform: uppercase; */
+  /* letter-spacing: 0.05rem; */
 
-  /* padding: 0.5rem 1rem; */
+  padding: 0.5rem;
   /* font: inherit; */
   /* font-style: italic; */
   font-family: var(--font-serif);
   font-size: 1rem;
-  font-weight: 500;
+  /* font-weight: 500; */
   background: transparent;
   color: color-mix(in srgb, currentColor 50%, transparent);
   border: none;
-  border-bottom: 2px solid transparent;
+  /* border-bottom: 2px solid transparent; */
   cursor: pointer;
-  transition:
-    color 0.15s,
-    border-color 0.15s,
-    background 0.15s;
+  border-radius: 12px;
+  transition: all 0.15s ease-in-out;
 }
 
 .apps-tab:hover {
   color: color-mix(in srgb, currentColor 75%, transparent);
-  /* background: color-mix(in srgb, currentColor 5%, transparent); */
+  background: color-mix(in srgb, currentColor 15%, transparent);
 }
 
 .apps-tab.active {
-  color: inherit;
+  color: var(--surface);
   border-bottom-color: var(--text);
   font-weight: 700;
+  background: var(--text);
+  flex: 1.2;
+  /* background: color-mix(in srgb, currentColor 50%, transparent); */
 }
 
 .apps-naddr {
@@ -1598,13 +1649,13 @@ body.napp-resizing .napp-body iframe {
   grid-template-areas:
     
     
-    "icon actions actions"
+    "icon author actions"
     "title title title"
     /* "icon title title" */
     /* "author author actions" */
     /* "title title title" */
     "about about about"
-    "author author author"
+    /* "author author author" */
     "handlers handlers handlers"
     
     /* "actions actions actions" */
@@ -1669,7 +1720,7 @@ body.napp-resizing .napp-body iframe {
 }
 
 .apps-author-pic {
-  
+  display: none;
 }
 
 .apps-author-pic::part(img) {
@@ -1742,46 +1793,36 @@ body.napp-resizing .napp-body iframe {
 }
 
 
-/* App info window (singleton) — full detail for the card you clicked. */
-.appinfo {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.75rem;
-  overflow-y: auto;
+/* App-info detail sections (rendered in the overlay over the list). The card
+   supplies the header; these style what sits around it. Placeholder styling —
+   the information structure is expected to change. */
+.apps-detail-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
 }
 
-.appinfo-empty {
+.apps-detail-image {
+  width: 100%;
+  border-radius: 8px;
+}
+
+.apps-detail-info {
+  display: grid;
+  align-content: start;
+  gap: 0.4rem;
+}
+
+.apps-detail-files-block > summary {
+  cursor: pointer;
+  width: fit-content;
   opacity: 0.6;
+  font-weight: 600;
+  user-select: none;
 }
 
-.appinfo-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-}
-
-.appinfo-icon {
-  width: 48px;
-  height: 48px;
-  flex-shrink: 0;
-  border-radius: 10px;
-  object-fit: cover;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-}
-
-.appinfo-titlewrap {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-}
-
-.appinfo-title {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-weight: 700;
-  word-break: break-word;
+.apps-detail-files-block > summary:hover {
+  opacity: 1;
 }
 
 /* Discover card: everything past the head collapses into this <details>, so
@@ -1845,6 +1886,12 @@ body.napp-resizing .napp-body iframe {
   display: flex;
   gap: 0.4rem;
   align-items: center;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+  padding-bottom: .2rem;
+  margin-bottom: 1.5rem;
 }
 
 .apps-search {

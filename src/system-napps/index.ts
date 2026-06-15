@@ -4,7 +4,6 @@ import * as apps from "./apps.js"
 import * as database from "./database.js"
 import * as uploader from "./uploader.js"
 import * as handler from "./handler.js"
-import * as appinfo from "./appinfo.js"
 
 import type { SystemNappDef } from "../types.js"
 
@@ -36,7 +35,6 @@ export type { SystemNappDef as SystemNapp }
 export const registry: Record<string, SystemNappDef> = Object.fromEntries(napps.map(s => [s.id, s]))
 registry[uploader.id] = uploader
 registry[handler.id] = handler
-registry[appinfo.id] = appinfo
 export const list = napps
 
 export const actionRegistry = Object.fromEntries(actions.map(a => [a.id, a]))
