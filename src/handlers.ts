@@ -3,8 +3,8 @@ import { NappWindowState } from "./types.js"
 
 // action name → nappIds that can handle it
 const actionMap = new Map<string, string[]>()
+
 // nappId → actions for reverse lookup
-const nappActions = new Map<string, string[]>()
 const subs = new Set<() => void>()
 let actionDispatcher:
   | ((
@@ -20,21 +20,6 @@ function emit() {
 }
 
 function setAppActions(nappId: string, actions: string[]) {
-  const old = nappActions.get(nappId)
-  if (old) {
-    for (const a of old) {
-      const apps = actionMap.get(a)
-      if (!apps) continue
-      const next = apps.filter(id => id !== nappId)
-      if (next.length === 0) actionMap.delete(a)
-      else actionMap.set(a, next)
-    }
-  }
-  if (actions.length === 0) {
-    nappActions.delete(nappId)
-    return
-  }
-  nappActions.set(nappId, actions)
   for (const action of actions) {
     const current = actionMap.get(action) || []
     if (!current.includes(nappId)) actionMap.set(action, [...current, nappId])
@@ -43,7 +28,6 @@ function setAppActions(nappId: string, actions: string[]) {
 
 export async function init() {
   actionMap.clear()
-  nappActions.clear()
   for (const app of persist.getInstalledApps()) {
     setAppActions(app.nappId, app.actions)
   }
@@ -58,22 +42,22 @@ export function addApp(nappId: string, actions: string[]) {
 }
 
 export function removeApp(nappId: string) {
-  const old = nappActions.get(nappId)
-  if (old) {
-    for (const a of old) {
-      const apps = actionMap.get(a)
-      if (!apps) continue
-      const next = apps.filter(id => id !== nappId)
-      if (next.length === 0) actionMap.delete(a)
-      else actionMap.set(a, next)
+  for (const [_, nappIds] of actionMap.entries()) {
+    const idx = nappIds.indexOf(nappId)
+    if (idx !== -1) {
+      nappIds[idx] = nappIds[nappIds.length - 1]
+      nappIds.length--
     }
   }
-  nappActions.delete(nappId)
   emit()
 }
 
 export function findHandlersForAction(action: string): [string[], NappWindowState[]] {
   const apps = actionMap.get(action) || []
+
+  // special case
+  if (action.startsWith("view:")) apps.push(...(actionMap.get("view") || []))
+
   const openCandidates = persist.readOpen().filter(w => apps.includes(w.nappId))
   return [apps, openCandidates]
 }
@@ -101,11 +85,6 @@ export function dispatchAction(
     throw new Error("napp.action dispatch is not configured")
   }
   return actionDispatcher(callerNappId, name, payload, options)
-}
-
-export function getHandlers(nappId: string): string[] {
-  if (typeof nappId !== "string" || !nappId) return []
-  return nappActions.get(nappId) || []
 }
 
 export function snapshotActionMap(): Array<[string, string[]]> {

@@ -8,10 +8,10 @@ import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 import "nostr-web-components"
 
-import type { SystemCtx } from "../types.js"
+import type { InstalledApp, SystemCtx } from "../types.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
 import { readOpen } from "../persistence.js"
-import { getHandlers, dispatchAction } from "../handlers.js"
+import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
@@ -280,8 +280,7 @@ export function mount(
   // keystroke and when the installed set changes.
   // Card options for one installed app — reused for both the list and the
   // (rebuilt, non-clickable) card shown at the top of the detail overlay.
-  function installedOpts(app: any): AppCardOpts {
-    const actions = getHandlers(app.nappId)
+  function installedOpts(app: InstalledApp): AppCardOpts {
     const title = app.petname || app.title || app.nappId
     const author = app.event?.pubkey || null
     // Apps without a manifest (no publisher): show a type label + install date
@@ -303,7 +302,7 @@ export function mount(
       pubkey: author,
       categories: app.event?.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1]),
       hashtags: app.event?.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1]),
-      actions
+      actions: app.actions
     })
     const openCount = readOpen().filter(s => s.nappId === app.nappId).length
     const metaExtras: HTMLElement[] = []
@@ -333,7 +332,7 @@ export function mount(
       authorPubkey: author,
       authorLabel,
       createdAt,
-      actions,
+      actions: app.actions,
       search,
       buttons,
       metaExtras,
@@ -353,12 +352,14 @@ export function mount(
     // mirroring the Discover tab — so the two tabs behave identically.
     const frag = document.createDocumentFragment()
     for (const app of apps) {
+      const opts = installedOpts(app)
+
       frag.appendChild(
         renderAppCard({
-          ...installedOpts(app),
+          ...opts,
           onOpen: () =>
             showDetail({
-              buildCard: () => renderAppCard(installedOpts(app)),
+              buildCard: () => renderAppCard(opts),
               event: app.event || null,
               nappId: app.nappId
             })
@@ -1150,15 +1151,15 @@ const authorNameCache = new Map<string, string>()
 const authorNamesInFlight = new Set<string>()
 
 function buildHaystack(o: {
+  id: string | null
+  pubkey: string | null
+  actions: string[]
   title?: string | null
   petname?: string | null
   description?: string | null
   summary?: string | null
-  id?: string | null
-  pubkey?: string | null
   categories?: string[]
   hashtags?: string[]
-  actions?: string[]
 }): string {
   let npub: string | null = null
   if (o.pubkey) {
@@ -1184,13 +1185,13 @@ function buildHaystack(o: {
     .toLowerCase()
 }
 
-function searchHaystack(evt: any): string {
+function searchHaystack(evt: NostrEvent): string {
   const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || null
   return buildHaystack({
     title: tag("title"),
     summary: tag("summary"),
     description: tag("description"),
-    id: tag("d"),
+    id: tag("d") || "",
     pubkey: evt.pubkey,
     categories: evt.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1]),
     hashtags: evt.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1]),
@@ -1199,7 +1200,7 @@ function searchHaystack(evt: any): string {
 }
 
 // Action/handler names a manifest declares.
-function actionsOf(evt: any): string[] {
+function actionsOf(evt: NostrEvent): string[] {
   return evt.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
 }
 
@@ -1216,11 +1217,15 @@ function appendSearch(card: HTMLElement, text: string) {
 function loadAuthorNames(listEl: HTMLElement | null, refilter: () => void) {
   if (!listEl) return
   const pubkeys = new Set<string>()
-  for (const card of listEl.querySelectorAll(".apps-card[data-author]") as NodeListOf<HTMLElement>) {
+  for (const card of listEl.querySelectorAll(
+    ".apps-card[data-author]"
+  ) as NodeListOf<HTMLElement>) {
     pubkeys.add(card.dataset.author!)
   }
   const cardsFor = (pk: string) =>
-    listEl.querySelectorAll(`.apps-card[data-author="${CSS.escape(pk)}"]`) as NodeListOf<HTMLElement>
+    listEl.querySelectorAll(
+      `.apps-card[data-author="${CSS.escape(pk)}"]`
+    ) as NodeListOf<HTMLElement>
   for (const pk of pubkeys) {
     const cached = authorNameCache.get(pk)
     if (cached) {

@@ -124,7 +124,9 @@ const actionWaiters = new Map<
 >()
 
 function matchesActionPattern(pattern: string, name: string): boolean {
-  return pattern === "*" || pattern === name
+  if (pattern === name) return true
+  if (pattern === "view" && name.startsWith("view:")) return true
+  return false
 }
 
 function findRegisteredAction(instanceId: string, name: string) {

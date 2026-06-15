@@ -85,18 +85,21 @@ window.napp.registerAction(pattern, handler?)
 // handler(name, payload) -> result
 ```
 
-`pattern` is a string (exact match). When another napp calls `window.napp.action(name, payload)`, the host dispatches it to the matching handler registered under that instance.
+`pattern` is an exact match, with one special case: `"view"` matches all `"view:<any-number>"` actions.
 
-If `handler` is omitted (or `null`/`undefined`), the napp opts into handling actions via the `popstate` event instead. The host pushes history entries with `state: { action: { name, payload } }` — listen for `popstate` and read `event.state.action`. This lets actions participate in browser back/forward navigation.
+The napp can omit the `handler` and opt into only handling actions via the `popstate` event. The host pushes history entries with `state: { action: { name, payload } }` — listen for `popstate` and read `event.state.action`. This lets actions participate in browser back/forward navigation.
 
 There is no policing of what actions are allowed, but these are some of the common ones that can be used:
 
-| Action               | Payload                             |
-| ---                  | ---                                 |
-| `view:<kind-number>` | `event object or nevent/naddr code` |
-| `profile`            | `pubkey as hex`                     |
-| `feed`               | `list of pubkey strings`            |
-| `relay_feed`         | `list of relay URLs`                |
+| Action               | Payload                                    |
+| ---                  | ---                                        |
+| `view`               | `nevent/naddr code` **or** full event      |
+| `view:<kind-number>` | `full event object` (always resolved)      |
+| `profile`            | `pubkey as hex`                            |
+| `feed`               | `list of pubkey strings`                   |
+| `relay_feed`         | `list of relay URLs`                       |
+
+Apps registering `"view"` (generic, no number) may receive either a nip19 code string or a resolved event object and must handle both. Apps registering a specific `"view:<kind-number>"` always receive a resolved event object.
 
 Optionally `{ instance: "<instanceId>" }` as the third argument to route the action directly to a specific running instance instead of launching a new one.
 
