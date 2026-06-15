@@ -618,10 +618,17 @@ export function mount(
   function startDiscoverSubscription() {
     closeSubscription()
     sawEose = false
-    // Don't wipe events/eventIds here: re-subscribing on the shared pool won't
-    // re-deliver already-seen events, so clearing would empty the list until a
-    // page reload. We keep what we have and let the new relays' unseen events
-    // append (eventIds dedupes the rest). Adding a relay therefore grows the list.
+    // A relay change is a real refresh: drop the current set and re-query so the
+    // list reflects EXACTLY the new relays (removed relays' apps disappear, added
+    // relays' apps appear). The pool dedupes per-subscription — each subscribeMany
+    // gets a fresh _knownIds — so the relays re-send every matching event to the
+    // new REQ; clearing our own eventIds lets them all back in. renderList() then
+    // clears the discover DOM (a no-op before the tab is first built, where it's
+    // repainted from `events` on open).
+    events = []
+    eventIds.clear()
+    pending = []
+    renderList()
 
     if (!relays.length) {
       setStatus("No relays configured.")
