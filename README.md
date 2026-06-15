@@ -81,11 +81,13 @@ window.napp.feeds.inbox(pubkey, kinds, callback, { since?, until?, limit? })
 Napps can expose handlers for other windows to call:
 
 ```js
-window.napp.registerAction(pattern, handler)
+window.napp.registerAction(pattern, handler?)
 // handler(name, payload) -> result
 ```
 
 `pattern` is a string (exact match). When another napp calls `window.napp.action(name, payload)`, the host dispatches it to the matching handler registered under that instance.
+
+If `handler` is omitted (or `null`/`undefined`), the napp opts into handling actions via the `popstate` event instead. The host pushes history entries with `state: { action: { name, payload } }` — listen for `popstate` and read `event.state.action`. This lets actions participate in browser back/forward navigation.
 
 There is no policing of what actions are allowed, but these are some of the common ones that can be used:
 

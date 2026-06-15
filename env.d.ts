@@ -238,7 +238,7 @@ interface NappUtils {
 // ── Main napp object ─────────────────────────────────────────────────────
 interface Napp {
   instance: string
-  registerAction(pattern: string, fn: (name: string, payload: unknown) => Promise<unknown>): void
+  registerAction(pattern: string, fn?: ((name: string, payload: unknown) => Promise<unknown>) | null): void
   action(name: string, payload?: unknown, opts?: { instance?: string }): Promise<unknown>
   feeds: NappFeeds
   utils: NappUtils

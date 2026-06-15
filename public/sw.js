@@ -127,7 +127,7 @@ async function requestFileFromHost(path) {
 function injectBridge(html) {
   const bridgeTag = '<script src="/bridge.js"></script>'
   const readyTag =
-    '<script>window.parent.postMessage({ __nostrapps: "napp-ready", instanceId: (window.name||"") }, "*")</script>'
+    '<script>window.parent.postMessage({ __nostrapps: "napp-ready", instanceId: window.name }, "*")</script>'
 
   let result = html
   const headMatch = result.match(/<head[^>]*>/i)

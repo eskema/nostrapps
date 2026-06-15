@@ -41,11 +41,10 @@
 
   const pending = new Map()
   const feedCallbacks = new Map()
-  // iframe.name (set by the launcher cross-origin)
-  const INSTANCE_ID = window.name
 
+  let rpcSerial = 0
   function rpc(method, params) {
-    const id = crypto.randomUUID()
+    const id = "rpc" + rpcSerial++
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject })
       window.parent.postMessage(
@@ -54,7 +53,7 @@
           id,
           method,
           params,
-          instanceId: INSTANCE_ID
+          instanceId: window.name
         },
         "*"
       )
@@ -66,7 +65,7 @@
       {
         __nostrapps: "napp-dispatch-result",
         requestId,
-        instanceId: INSTANCE_ID,
+        instanceId: window.name,
         ...(ok ? { result: payload } : { error: payload })
       },
       "*"
@@ -74,28 +73,6 @@
   }
 
   const actionHandlers = []
-
-  function registerAction(pattern, fn) {
-    if (typeof pattern !== "string" || !pattern) {
-      throw new Error("window.napp.registerAction: pattern is required")
-    }
-    if (typeof fn !== "function") {
-      throw new Error("window.napp.registerAction: handler must be function")
-    }
-
-    const idx = actionHandlers.length
-    actionHandlers.push([pattern, fn])
-
-    window.parent.postMessage(
-      {
-        __nostrapps: "napp-action-registered",
-        instanceId: INSTANCE_ID,
-        idx,
-        pattern
-      },
-      "*"
-    )
-  }
 
   window.addEventListener("message", event => {
     const data = event.data
@@ -117,13 +94,25 @@
         return
       }
       case "napp-dispatch-action": {
-        const fn = actionHandlers[data.idx]?.[1]
-        if (!fn) {
-          throw new Error("No registered action handler matched this dispatch")
+        // if a callback was previously registered with registerAction() we'll have an idx here
+        if (typeof data.idx === "number") {
+          const fn = actionHandlers[data.idx]?.[1]
+          if (!fn) {
+            throw new Error("No registered action handler matched this dispatch")
+          }
+
+          // this is necessary to pass a result back to the caller, which is only possible when
+          // a callback is registered with registerAction()
+          Promise.resolve()
+            .then(() => fn(data.name, data.payload))
+            .then(result => reply(data.requestId, true, result ?? null))
         }
-        Promise.resolve()
-          .then(() => fn(data.name, data.payload))
-          .then(result => reply(data.requestId, true, result ?? null))
+
+        // regardless of whether we have a callback registered or not, always call popstate
+        const state = { action: { name: data.name, payload: data.payload } }
+        history.pushState(state, "", location.href)
+        window.dispatchEvent(new PopStateEvent("popstate", { state }))
+
         return
       }
       case "napp-theme-change": {
@@ -166,9 +155,11 @@
   }
 
   // Inter-app calling. Everything is an action.
-  //   window.napp.action(name, payload, options?) — call a registered action handler
+  //   window.napp.action(name, payload, options?) - call a registered action handler
   // Receiving apps register:
-  //   window.napp.registerAction(pattern, handler) — handle incoming action dispatches
+  //   window.napp.registerAction(pattern, handler) - handle incoming action dispatches
+  //   window.napp.registerAction(pattern)
+  //   window.addEventListener('popstate', handler) - each action is translated to a history event
   let feedSerial = 0
   function feedRpc(method, params, callback) {
     if (!callback) throw new Error("no callback specified")
@@ -188,10 +179,33 @@
   }
 
   const napp = {
-    instance: INSTANCE_ID,
+    instance: window.name,
     action: (name, payload, options) => rpc("napp.action", { name, payload, options }),
-    registerAction,
-    actionHandlers,
+    registerAction(pattern, fn) {
+      if (typeof pattern !== "string" || !pattern) {
+        throw new Error("window.napp.registerAction: pattern is required")
+      }
+
+      // if a callback is given we'll register its index(idx) in the array so actions fired later
+      // with "napp=dispatch-action" can find and execute it easily
+      let idx
+      if (typeof fn === "function") {
+        idx = actionHandlers.length
+        actionHandlers.push([pattern, fn])
+      }
+
+      // but it can also be the case that it won't be registered because the app only wants to
+      // receive new actions via the history 'popstate' event, which is fine too
+      window.parent.postMessage(
+        {
+          __nostrapps: "napp-action-registered",
+          instanceId: window.name,
+          idx,
+          pattern
+        },
+        "*"
+      )
+    },
     feeds: {
       profile: (pubkey, kinds, callback, { since, until, limit } = {}) =>
         feedRpc("napp.feeds.profile", { pubkey, kinds, since, until, limit }, callback),

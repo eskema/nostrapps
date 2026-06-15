@@ -108,7 +108,7 @@ const readyResolve = new Map<string, () => void>()
 // is the launcher's — posting there with the napp origin logs an uncatchable
 // "target origin does not match" error. broadcastTheme skips non-ready ones.
 const readyInstances = new Set<string>()
-const registeredActions = new Map<string, Array<{ idx: number; pattern: string }>>()
+const registeredActions = new Map<string, Array<{ idx: number | undefined; pattern: string }>>()
 const feedRequests = new Map<
   string,
   Map<string, { controller: AbortController; closer?: SubCloser; cleanup?: () => void }>
@@ -117,7 +117,7 @@ const actionWaiters = new Map<
   string,
   Array<{
     name: string
-    resolve(entry: { idx: number; pattern: string }): void
+    resolve(entry: { idx: number | undefined; pattern: string }): void
     reject(err: Error): void
   }>
 >()
@@ -134,7 +134,10 @@ function findRegisteredAction(instanceId: string, name: string) {
   )
 }
 
-function addRegisteredAction(instanceId: string, entry: { idx: number; pattern: string }) {
+function addRegisteredAction(
+  instanceId: string,
+  entry: { idx: number | undefined; pattern: string }
+) {
   const list = registeredActions.get(instanceId) || []
   list.push(entry)
   registeredActions.set(instanceId, list)
@@ -263,7 +266,7 @@ export async function waitForRegisteredAction(instanceId: string, name: string) 
   await waitReady(instanceId)
   const afterReady = findRegisteredAction(instanceId, name)
   if (afterReady) return afterReady
-  return await new Promise<{ idx: number; pattern: string }>((resolve, reject) => {
+  return await new Promise<{ idx: number | undefined; pattern: string }>((resolve, reject) => {
     const waiters = actionWaiters.get(instanceId) || []
     waiters.push({ name, resolve, reject })
     actionWaiters.set(instanceId, waiters)
@@ -622,25 +625,24 @@ function mount(
     position,
     status,
     onMessage: (data, iframe) => {
-      if (!data) return
-      if (data.__nostrapps === "napp-ready") {
-        resolveReady(data.instanceId!)
-        iframe.contentWindow?.postMessage(themePayload(), origin)
-        return
-      }
-      if (data.__nostrapps === "napp-action-registered") {
-        if (typeof data.idx === "number" && typeof data.pattern === "string") {
-          addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
+      switch (data.__nostrapps) {
+        case "napp-ready": {
+          resolveReady(data.instanceId!)
+          iframe.contentWindow?.postMessage(themePayload(), origin)
+          return
         }
-        return
-      }
-      if (data.__nostrapps === "rpc") {
-        handleRpc(data, iframe, signer, nappId)
-        return
-      }
-      if (data.__nostrapps === "napp-dispatch-result") {
-        settleDispatch(data)
-        return
+        case "napp-action-registered": {
+          addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
+          return
+        }
+        case "rpc": {
+          handleRpc(data, iframe, signer, nappId)
+          return
+        }
+        case "napp-dispatch-result": {
+          settleDispatch(data)
+          return
+        }
       }
     },
     onClose: () => {
@@ -692,25 +694,24 @@ export function mountWithLoading(
     position,
     status,
     onMessage: (data, iframe) => {
-      if (!data) return
-      if (data.__nostrapps === "napp-ready") {
-        resolveReady(data.instanceId!)
-        iframe.contentWindow?.postMessage(themePayload(), origin)
-        return
-      }
-      if (data.__nostrapps === "napp-action-registered") {
-        if (typeof data.idx === "number" && typeof data.pattern === "string") {
-          addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
+      switch (data.__nostrapps) {
+        case "napp-ready": {
+          resolveReady(data.instanceId!)
+          iframe.contentWindow?.postMessage(themePayload(), origin)
+          return
         }
-        return
-      }
-      if (data.__nostrapps === "rpc") {
-        handleRpc(data, iframe, currentSigner, nappId)
-        return
-      }
-      if (data.__nostrapps === "napp-dispatch-result") {
-        settleDispatch(data)
-        return
+        case "napp-action-registered": {
+          addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
+          return
+        }
+        case "rpc": {
+          handleRpc(data, iframe, currentSigner, nappId)
+          return
+        }
+        case "napp-dispatch-result": {
+          settleDispatch(data)
+          return
+        }
       }
     },
     onClose: () => {

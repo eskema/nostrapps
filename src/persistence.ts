@@ -229,9 +229,10 @@ export function setCurrentSpaceId(id: string) {
   writeJson(SPACES_KEY, state)
 }
 
+let spaceSerial = 0
 export function createSpace(name?: string): string {
   const state = ensureSpaces()
-  const id = crypto.randomUUID()
+  const id = "space" + spaceSerial++
   state.list.push({
     id,
     name: name?.trim() || `space ${state.list.length + 1}`,

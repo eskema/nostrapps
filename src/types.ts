@@ -95,13 +95,13 @@ export type MessageData =
   | {
       __nostrapps: "napp-action-registered"
       instanceId: string
-      idx: number
+      idx: number | undefined
       pattern: string
     }
   | {
       __nostrapps: "napp-dispatch-action"
       requestId: string
-      idx: number
+      idx: number | undefined
       name: string
       payload: unknown
     }

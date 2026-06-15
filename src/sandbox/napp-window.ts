@@ -122,8 +122,8 @@ export function createNappWindow({
     iframe.sandbox = sandbox
     // window.name is cross-origin readable from inside the iframe, so the bridge
     // can pick up the instance id without us polluting the URL.
-    iframe.name = instanceId || ""
-    iframe.src = src || ""
+    iframe.name = instanceId || "<missing-window-name>"
+    iframe.src = src || "<missing-iframe-src>"
     body.appendChild(iframe)
     iframeRef.current = iframe
   }
