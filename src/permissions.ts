@@ -1,3 +1,5 @@
+import { openDialog } from "./dialog.js"
+
 const STORAGE_KEY = "nostrapps:permissions"
 
 const GATED_METHODS = new Set([
@@ -75,42 +77,33 @@ export function subscribe(fn: () => void) {
   return () => subscribers.delete(fn)
 }
 
-let dialogEl: HTMLDialogElement | null
-let promptChain: Promise<void> = Promise.resolve()
-
-export function mountDialog(dialog: HTMLDialogElement | null) {
-  dialogEl = dialog
-}
-
 export async function requireApproval(nappId: string, method: string) {
   const cached = getDecision(nappId, method)
   if (cached === "allow") return true
   if (cached === "deny") return false
 
-  const decision = await prompt(nappId, method)
+  const decision = await openDialog<string>({
+    title: "Permission request",
+    body: permissionBody(nappId, method),
+    actions: [
+      { label: "Deny always", value: "deny-always", variant: "outline" },
+      { label: "Deny", value: "deny-once", variant: "outline" },
+      { label: "Allow once", value: "allow-once", variant: "primary" },
+      { label: "Allow always", value: "allow-always", variant: "primary", autofocus: true }
+    ],
+    dismissValue: "deny-once" // Esc / backdrop → deny
+  })
   if (decision === "allow-always") setDecision(nappId, method, "allow")
   if (decision === "deny-always") setDecision(nappId, method, "deny")
   return decision === "allow-once" || decision === "allow-always"
 }
 
-function prompt(nappId: string, method: string): Promise<string> {
-  const next: Promise<string> = promptChain.then(() => showOne(nappId, method))
-  promptChain = next.catch(() => {}) as Promise<void>
-  return next
-}
-
-function showOne(nappId: string, method: string): Promise<string> {
-  const el = dialogEl
-  if (!el) return Promise.resolve("deny-once")
-  return new Promise(resolve => {
-    el.querySelector("[data-perm-nappid]")!.textContent = nappId
-    el.querySelector("[data-perm-method]")!.textContent = method
-    el.returnValue = ""
-    el.showModal()
-    const onClose = () => {
-      el.removeEventListener("close", onClose)
-      resolve(el.returnValue || "deny-once")
-    }
-    el.addEventListener("close", onClose)
-  })
+function permissionBody(nappId: string, method: string): Node {
+  const p = document.createElement("p")
+  const napp = document.createElement("code")
+  napp.textContent = nappId
+  const meth = document.createElement("code")
+  meth.textContent = method
+  p.append("Napp ", napp, " wants to use ", meth)
+  return p
 }

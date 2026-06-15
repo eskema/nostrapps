@@ -1,158 +1,100 @@
-export const id = "handler"
-export const title = "Handler"
-export const singleton = false
+import type { InstalledApp, NappWindowState } from "../types.js"
 
-import type { InstalledApp, NappWindowState, SystemCtx } from "../types.js"
-
-type HandlerParams = {
-  name: string
+export interface HandlerBodyOpts {
+  actionName: string
   payload: unknown
-  callerNappId: string
   candidates: string[]
   openCandidates: NappWindowState[]
-  select: (nappId: string, instanceId?: string) => void
-  cancel: () => void
+  apps: { list(): InstalledApp[]; get(nappId: string): InstalledApp | undefined }
+  onSelect: (nappId: string, instanceId?: string) => void
 }
 
-export function mount(container: HTMLElement, ctx: SystemCtx, opts: { params: HandlerParams }) {
-  const params = opts.params || {}
-  const name = typeof params.name === "string" ? params.name : ""
-  const payload = params.payload
-  const candidates = Array.isArray(params.candidates) ? params.candidates : []
-  let settled = false
+// Builds the action-handler picker body shown inside a launcher shell (the
+// cursor popover via openPopover, or openDialog). Selecting a candidate or an
+// already-open instance calls onSelect; cancel / dismiss is handled by the shell.
+export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
+  const root = document.createElement("div")
+  root.className = "handler-panel"
 
-  container.innerHTML = `
-    <div class="handler-panel">
-      <div class="handler-request">
-        <div class="handler-request-label">action</div>
-        <code class="handler-action-name"></code>
-        <div class="handler-request-label">value</div>
-        <pre class="handler-payload"></pre>
-      </div>
-      <div class="handler-candidates"></div>
-      <div class="handler-open-instances"></div>
-      <div class="handler-actions">
-        <button type="button" class="btn btn-outline handler-cancel">cancel</button>
-      </div>
-    </div>
-  `
+  // ── request summary ──
+  const request = document.createElement("div")
+  request.className = "handler-request"
+  request.append(
+    label("action"),
+    el("code", "handler-action-name", o.actionName || "(none)"),
+    label("value"),
+    el("pre", "handler-payload", formatPayload(o.payload))
+  )
+  root.appendChild(request)
 
-  const nameEl = container.querySelector(".handler-action-name") as HTMLElement
-  const payloadEl = container.querySelector(".handler-payload") as HTMLElement
-  const candidatesEl = container.querySelector(".handler-candidates") as HTMLElement
-  const openInstancesEl = container.querySelector(".handler-open-instances") as HTMLElement
-  const cancelBtn = container.querySelector(".handler-cancel") as HTMLElement
+  const appLabel = (app: InstalledApp | undefined, nappId: string) =>
+    app?.petname || app?.title || nappId
 
-  nameEl.textContent = name || "(none)"
-  payloadEl.textContent = formatPayload(payload)
-
-  function finish(fn?: () => void) {
-    if (settled) return
-    settled = true
-    fn?.()
-  }
-
-  function appLabel(app: InstalledApp | undefined, nappId: string) {
-    return app?.petname || app?.title || nappId
-  }
-
-  function renderCandidates() {
-    candidatesEl.innerHTML = ""
-    const apps = ctx.apps.list()
-    const byId = new Map(apps.map(app => [app.nappId, app]))
-
-    const heading = document.createElement("h3")
-    heading.textContent = "Open new app"
-    candidatesEl.appendChild(heading)
-
-    if (candidates.length === 0) {
-      const empty = document.createElement("div")
-      empty.className = "handler-empty"
-      empty.textContent = "No installed app declares this action."
-      candidatesEl.appendChild(empty)
-      return
-    }
-
+  // ── candidates (open a new app) ──
+  const candidatesEl = document.createElement("div")
+  candidatesEl.className = "handler-candidates"
+  candidatesEl.appendChild(el("h3", "", "Open new app"))
+  if (o.candidates.length === 0) {
+    candidatesEl.appendChild(el("div", "handler-empty", "No installed app declares this action."))
+  } else {
+    const byId = new Map(o.apps.list().map(app => [app.nappId, app]))
     const list = document.createElement("ul")
     list.className = "handler-list"
-    for (const nappId of candidates) {
+    for (const nappId of o.candidates) {
       const app = byId.get(nappId)
-      const item = document.createElement("li")
-      const button = document.createElement("button")
-      button.type = "button"
-
-      const title = document.createElement("span")
-      title.className = "handler-pet"
-      title.textContent = appLabel(app, nappId)
-
-      const idEl = document.createElement("code")
-      idEl.className = "handler-id"
-      idEl.textContent = nappId
-
-      button.append(title, idEl)
-      button.addEventListener("click", () => finish(() => params.select(nappId)))
-      item.appendChild(button)
-      list.appendChild(item)
+      list.appendChild(handlerItem(appLabel(app, nappId), nappId, () => o.onSelect(nappId)))
     }
     candidatesEl.appendChild(list)
   }
+  root.appendChild(candidatesEl)
 
-  function renderOpenInstances() {
-    openInstancesEl.innerHTML = ""
-
-    if (params.openCandidates.length === 0) {
-      openInstancesEl.style.display = "none"
-      return
-    }
-
-    openInstancesEl.style.display = ""
-
-    const heading = document.createElement("h3")
-    heading.textContent = "Already open"
-    openInstancesEl.appendChild(heading)
-
+  // ── already-open instances ──
+  if (o.openCandidates.length) {
+    const openEl = document.createElement("div")
+    openEl.className = "handler-open-instances"
+    openEl.appendChild(el("h3", "", "Already open"))
     const list = document.createElement("ul")
     list.className = "handler-list"
-    for (const win of params.openCandidates) {
-      const app = ctx.apps.get(win.nappId)
-
-      const item = document.createElement("li")
-      const button = document.createElement("button")
-      button.type = "button"
-
-      const title = document.createElement("span")
-      title.className = "handler-pet napp-title"
-      title.textContent = appLabel(app, win.nappId)
-      title.dataset.instance = win.instanceId
-
-      const idEl = document.createElement("code")
-      idEl.className = "handler-id"
-      idEl.textContent = app?.title || win.nappId
-
-      button.append(title, idEl)
-      button.addEventListener("mouseup", () =>
-        finish(() => params.select(win.nappId, win.instanceId))
+    for (const win of o.openCandidates) {
+      const app = o.apps.get(win.nappId)
+      list.appendChild(
+        handlerItem(appLabel(app, win.nappId), app?.title || win.nappId, () =>
+          o.onSelect(win.nappId, win.instanceId)
+        )
       )
-      item.appendChild(button)
-      list.appendChild(item)
     }
-    openInstancesEl.appendChild(list)
+    openEl.appendChild(list)
+    root.appendChild(openEl)
   }
 
-  cancelBtn.addEventListener("click", () => finish(() => params.cancel?.()))
-  renderCandidates()
-  renderOpenInstances()
-  const unsubscribe = ctx.apps.subscribe(() => {
-    renderCandidates()
-    renderOpenInstances()
-  })
+  return root
+}
 
-  return {
-    unmount() {
-      unsubscribe()
-      finish(() => params.cancel?.())
-    }
-  }
+function label(text: string): HTMLElement {
+  return el("div", "handler-request-label", text)
+}
+
+function el(tag: string, className: string, text: string): HTMLElement {
+  const node = document.createElement(tag)
+  if (className) node.className = className
+  node.textContent = text
+  return node
+}
+
+function handlerItem(text: string, idText: string, onClick: () => void): HTMLLIElement {
+  const item = document.createElement("li")
+  const btn = document.createElement("button")
+  btn.type = "button"
+  const title = document.createElement("span")
+  title.className = "handler-pet"
+  title.textContent = text
+  const idEl = document.createElement("code")
+  idEl.className = "handler-id"
+  idEl.textContent = idText
+  btn.append(title, idEl)
+  btn.addEventListener("click", onClick)
+  item.appendChild(btn)
+  return item
 }
 
 function formatPayload(payload: unknown) {

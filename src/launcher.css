@@ -1088,55 +1088,149 @@ body.napp-resizing .napp-body iframe {
   }
 }
 
-#permission-prompt {
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 12px;
-  padding: 1.5rem;
+/* ─── Reusable modal dialog (openDialog in dialog.ts) ──────────────
+   The shared shell for launcher prompts/pickers (permissions, action handler,
+   …). The <dialog> itself is a transparent container; its two children — the
+   prompt card (.app-dialog-body) and the queue card (.app-dialog-queue) — carry
+   the surface background + radius so they read as separated, stacked cards. */
+.app-dialog {
   max-width: 28rem;
+  max-height: 85vh;
+  overflow: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: inherit;
-  background: var(--surface);
   font-family: inherit;
 }
 
-#permission-prompt::backdrop {
+/* `display` on the class would override the closed <dialog>'s UA display:none,
+   so only set the grid layout while open. */
+.app-dialog[open] {
+  display: grid;
+  gap: 0.6rem;
+  align-content: start;
+}
+
+.app-dialog::backdrop {
   background: rgba(0, 0, 0, 0.45);
 }
 
-#permission-prompt h3 {
-  margin: 0 0 0.75rem;
+/* Both children are surface cards — the gap between them shows the backdrop. */
+.app-dialog-body,
+.app-dialog-queue {
+  background: var(--surface);
+  border-radius: 12px;
+}
+
+.app-dialog-body {
+  display: grid;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.app-dialog-title {
+  margin: 0;
+  font-family: var(--font-serif);
   font-size: 1.05rem;
 }
 
-#permission-prompt p {
-  margin: 0 0 1rem;
+.app-dialog-content {
   line-height: 1.4;
 }
 
-#permission-prompt code {
+.app-dialog-content p {
+  margin: 0;
+}
+
+.app-dialog-content code {
   font-family: var(--font-mono);
   padding: 0.1rem 0.35rem;
   background: color-mix(in srgb, currentColor 10%, transparent);
   border-radius: 4px;
 }
 
-#permission-prompt .perm-actions {
+/* A horizontal row of action buttons, right-aligned (wraps when narrow). */
+.app-dialog-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
-  padding: 0;
   margin: 0;
+  padding: 0;
 }
 
-#permission-prompt button {
-  padding: 0.4rem 0.8rem;
-  font-size: 0.875rem;
+/* Queue card: collapsible. Collapsed shows only the count; expanded reveals the
+   list of waiting requests and the "Dismiss all" button. */
+.app-dialog-queue {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.5rem 0.7rem;
 }
 
-#permission-prompt button[value^="deny"] {
-  background: transparent;
+.app-dialog-queue-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.app-dialog-queue-count {
+  opacity: 0.7;
+}
+
+.app-dialog-queue-count::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 0.4rem;
+  opacity: 0.7;
+}
+
+.app-dialog-queue:not(.collapsed) .app-dialog-queue-count::before {
+  content: "▾";
+}
+
+.app-dialog-queue.collapsed .app-dialog-queue-list,
+.app-dialog-queue.collapsed .app-dialog-queue-dismiss {
+  display: none;
+}
+
+.app-dialog-queue-list {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 8rem;
+  overflow: auto;
+}
+
+.app-dialog-queue-list li {
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Floating popover (openPopover in popover.ts) ─────────────────
+   A non-modal card anchored at a point (e.g. the cursor); light-dismisses on
+   click-outside / Esc. Position is set inline; reset the UA popover centering. */
+.app-popover {
+  position: fixed;
+  margin: 0;
+  inset: auto;
+  border: none;
+  padding: 0.5rem;
+  max-width: 24rem;
+  max-height: 80vh;
+  overflow: auto;
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
   color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  font-family: inherit;
 }
 
 /* All windows snug to content (system) or sit at their default inline
@@ -1662,14 +1756,39 @@ body.napp-resizing .napp-body iframe {
     /* "handlers handlers handlers" */
     ;
   grid-template-columns: auto 1fr;
-  grid-gap: 0 .5rem;
+  grid-gap: 0 1rem;
   padding: 0.4rem;
   padding-bottom: 1rem;
   margin-bottom: 1rem;
   border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 }
 
-.apps-card:hover {
+.apps-detail-overlay .apps-card {
+  display: grid;
+  grid-template-areas:
+    
+    "img img img"
+    "icon actions actions"
+    "title title title"
+    /* "icon title title" */
+    /* "author author actions" */
+    /* "title title title" */
+    "about about about"
+    "author author author"
+    "handlers handlers handlers"
+    
+    /* "actions actions actions" */
+    /* "handlers handlers handlers" */
+    ;
+  grid-template-columns: auto 1fr;
+  grid-gap: 0 1rem;
+  padding: 0.4rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.apps-content .apps-card:hover {
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
@@ -1749,6 +1868,7 @@ body.napp-resizing .napp-body iframe {
   grid-area: handlers;
   display: flex;
   gap: 0.4rem;
+  margin-top: .4rem;
   /* margin: .4rem 0; */
   /* justify-self: end; */
 }
@@ -2117,7 +2237,7 @@ body.napp-resizing .napp-body iframe {
   opacity: 0.85;
 }
 
-/* ─── handler system napp ──────────────────────────────────────── */
+/* ─── action-handler picker (body content inside .app-dialog) ─────── */
 .handler-panel {
   display: grid;
   gap: 1rem;

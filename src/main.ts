@@ -37,7 +37,9 @@ import { currentSigner, reconnectIfNeeded } from "./signers/index.js"
 import { connectBunkerInput, disconnectBunkerSigner } from "./signers/nip46.js"
 import { googleLoginAndCreateBunker } from "./signers/google.js"
 import * as account from "./account.js"
-import { mountDialog, clearDecisions } from "./permissions.js"
+import { clearDecisions } from "./permissions.js"
+import { openPopover } from "./popover.js"
+import { buildHandlerBody } from "./system-napps/handler.js"
 import * as persist from "./persistence.js"
 import * as handlers from "./handlers.js"
 import type {
@@ -138,7 +140,17 @@ packToggleBtn?.addEventListener("click", () => {
 
 applyPackMode()
 
-mountDialog(document.getElementById("permission-prompt") as HTMLDialogElement | null)
+// Track the pointer so cursor-anchored UI (the action-handler popover) can open
+// where the user is. Pointer events over napp iframes don't reach the launcher,
+// so this is the parent-window cursor — approximate for napp-triggered actions.
+let lastPointer = { x: Math.round(window.innerWidth / 2), y: Math.round(window.innerHeight / 2) }
+window.addEventListener(
+  "pointermove",
+  e => {
+    lastPointer = { x: e.clientX, y: e.clientY }
+  },
+  { passive: true }
+)
 
 // ─── theme store ────────────────────────────────────────────────
 const THEME_KEY = "nostrapps:theme"
@@ -502,36 +514,33 @@ async function pickHandler(
     else throw new Error(`Stopped routing of ${actionName}->${payload}: couldn't find event`)
   }
 
-  return new Promise<[string, string | undefined]>((resolve, reject) => {
-    let win: NappWindow | null = null
-    let settled = false
-    const finish = (fn: () => void) => {
-      if (settled) return
-      settled = true
-      fn()
-      win?.close()
-    }
-    win = launchSystemNapp("handler", {
-      persistent: false,
-      params: {
-        name: actionName,
+  if (candidates.length === 0) {
+    setStatus(`No handler for action "${actionName}" from ${friendlyNameFor(callerNappId)}`)
+  }
+
+  const choice = await openPopover<[string, string | undefined] | null>({
+    x: lastPointer.x,
+    y: lastPointer.y,
+    class: "handler-popover",
+    build: resolve =>
+      buildHandlerBody({
+        actionName,
         payload,
-        callerNappId,
         candidates,
         openCandidates,
-        select(nappId: string, instanceId?: string) {
-          if (!candidates.includes(nappId)) return
-          finish(() => resolve([nappId, instanceId]))
+        apps: {
+          list: () => persist.getInstalledApps(),
+          get: (nappId: string) => persist.getInstalledApp(nappId)
         },
-        cancel() {
-          finish(() => reject(new Error("Action handler selection cancelled")))
+        onSelect: (nappId, instanceId) => {
+          if (candidates.includes(nappId)) resolve([nappId, instanceId])
         }
-      }
-    })
-    if (candidates.length === 0) {
-      setStatus(`No handler for action "${actionName}" from ${friendlyNameFor(callerNappId)}`)
-    }
+      }),
+    dismissValue: null // click outside / Esc cancels
   })
+
+  if (!choice) throw new Error("Action handler selection cancelled")
+  return choice
 }
 
 function friendlyNameFor(nappId: string): string {
