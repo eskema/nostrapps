@@ -178,9 +178,21 @@
     }
   }
 
+  // Track the cursor inside this iframe so dispatched actions can carry it; the
+  // launcher converts it to screen coords (it never sees pointer events here).
+  let __pointer = { x: 0, y: 0 }
+  window.addEventListener(
+    "pointermove",
+    e => {
+      __pointer = { x: e.clientX, y: e.clientY }
+    },
+    { passive: true }
+  )
+
   const napp = {
     instance: window.name,
-    action: (name, payload, options) => rpc("napp.action", { name, payload, options }),
+    action: (name, payload, options) =>
+      rpc("napp.action", { name, payload, options, pointer: __pointer }),
     registerAction(pattern, fn) {
       if (typeof pattern !== "string" || !pattern) {
         throw new Error("window.napp.registerAction: pattern is required")

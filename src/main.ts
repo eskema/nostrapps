@@ -39,6 +39,7 @@ import { googleLoginAndCreateBunker } from "./signers/google.js"
 import * as account from "./account.js"
 import { clearDecisions } from "./permissions.js"
 import { openPopover } from "./popover.js"
+import { setPointer, getPointer } from "./pointer.js"
 import { buildHandlerBody } from "./system-napps/handler.js"
 import * as persist from "./persistence.js"
 import * as handlers from "./handlers.js"
@@ -140,17 +141,10 @@ packToggleBtn?.addEventListener("click", () => {
 
 applyPackMode()
 
-// Track the pointer so cursor-anchored UI (the action-handler popover) can open
-// where the user is. Pointer events over napp iframes don't reach the launcher,
-// so this is the parent-window cursor — approximate for napp-triggered actions.
-let lastPointer = { x: Math.round(window.innerWidth / 2), y: Math.round(window.innerHeight / 2) }
-window.addEventListener(
-  "pointermove",
-  e => {
-    lastPointer = { x: e.clientX, y: e.clientY }
-  },
-  { passive: true }
-)
+// Feed the launcher's own cursor into the shared pointer store (cursor-anchored
+// UI like the action-handler popover reads it). Napp-dispatched actions instead
+// carry the in-iframe pointer, converted to screen coords in host.ts.
+window.addEventListener("pointermove", e => setPointer(e.clientX, e.clientY), { passive: true })
 
 // ─── theme store ────────────────────────────────────────────────
 const THEME_KEY = "nostrapps:theme"
@@ -518,9 +512,10 @@ async function pickHandler(
     setStatus(`No handler for action "${actionName}" from ${friendlyNameFor(callerNappId)}`)
   }
 
+  const pointer = getPointer()
   const choice = await openPopover<[string, string | undefined] | null>({
-    x: lastPointer.x,
-    y: lastPointer.y,
+    x: pointer.x,
+    y: pointer.y,
     class: "handler-popover",
     build: resolve =>
       buildHandlerBody({

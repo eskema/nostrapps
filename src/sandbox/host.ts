@@ -15,6 +15,7 @@ import type {
 
 import { isGated, requireApproval } from "../permissions.js"
 import { dispatchAction } from "../handlers.js"
+import { setPointer } from "../pointer.js"
 import { getStore } from "../store.js"
 import { createNappWindow } from "./napp-window.js"
 import {
@@ -1779,8 +1780,18 @@ async function dispatch(
         [params.kind, params.author, params.identifier]
       ])
       return result[0]
-    case "napp.action":
+    case "napp.action": {
+      // The bridge forwards the in-iframe pointer; convert it to screen coords via
+      // this napp's iframe rect so cursor-anchored UI (the handler popover) opens
+      // under the cursor instead of wherever the launcher cursor last was.
+      const pt = params?.pointer
+      const iframe = instanceId ? openWindows.get(instanceId)?.iframe : null
+      if (pt && iframe) {
+        const r = iframe.getBoundingClientRect()
+        setPointer(r.left + pt.x, r.top + pt.y)
+      }
       return dispatchAction(callerNappId, params?.name ?? "", params?.payload, params?.options)
+    }
     case "napp.feeds.profile": {
       const filter: Filter = {
         authors: [params.pubkey],
