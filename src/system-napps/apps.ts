@@ -359,7 +359,10 @@ export function mount(
           ...opts,
           onOpen: () =>
             showDetail({
-              buildCard: () => renderAppCard(opts),
+              // Fresh opts so the detail card gets its OWN buttons — reusing
+              // `opts` would move the list card's button elements into the
+              // overlay (and lose them when it closes).
+              buildCard: () => renderAppCard(installedOpts(app)),
               event: app.event || null,
               nappId: app.nappId
             })
