@@ -10,7 +10,6 @@ import "nostr-web-components"
 
 import type { InstalledApp, SystemCtx } from "../types.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
-import { readOpen } from "../persistence.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
@@ -304,13 +303,6 @@ export function mount(
       hashtags: app.event?.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1]),
       actions: app.actions
     })
-    const openCount = readOpen().filter(s => s.nappId === app.nappId).length
-    const metaExtras: HTMLElement[] = []
-    if (openCount > 0) {
-      const openEl = document.createElement("span")
-      openEl.textContent = `${openCount} open`
-      metaExtras.push(openEl)
-    }
     const upd = latestUpdateFor(app)
     const buttons = upd
       ? [makeInstalledUpdateBtn(app, upd), ...installedButtons(app)]
@@ -335,7 +327,6 @@ export function mount(
       actions: app.actions,
       search,
       buttons,
-      metaExtras,
       onAuthorClick: author
         ? () => dispatchAction("apps", "profile", author).catch(() => {})
         : undefined
@@ -791,7 +782,6 @@ interface AppCardOpts {
   search: string
   buttons: HTMLElement[]
   menuTrigger?: HTMLElement | null
-  metaExtras?: HTMLElement[]
   onAuthorClick?: () => void
   onOpen?: () => void // clicking the card (away from buttons/author) opens full info
 }
@@ -872,8 +862,6 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
     dateEl.textContent = new Date(o.createdAt * 1000).toLocaleDateString()
     card.appendChild(dateEl)
   }
-
-  for (const el of o.metaExtras || []) card.appendChild(el)
 
   if (o.actions.length) {
     const chips = document.createElement("div")
