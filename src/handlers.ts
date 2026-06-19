@@ -53,7 +53,10 @@ export function removeApp(nappId: string) {
 }
 
 export function findHandlersForAction(action: string): [string[], NappWindowState[]] {
-  const apps = actionMap.get(action) || []
+  // Copy — actionMap.get returns the stored array by reference, and the view:
+  // push below would otherwise mutate it (appending "view" handlers on every
+  // call, so the candidate list grows by duplicates each dispatch).
+  const apps = [...(actionMap.get(action) || [])]
 
   // special case
   if (action.startsWith("view:")) apps.push(...(actionMap.get("view") || []))
