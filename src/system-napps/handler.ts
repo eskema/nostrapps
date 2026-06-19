@@ -1,4 +1,5 @@
 import type { InstalledApp, NappWindowState } from "../types.js"
+import { button } from "./ui.js"
 
 export interface HandlerBodyOpts {
   actionName: string
@@ -10,25 +11,46 @@ export interface HandlerBodyOpts {
 }
 
 // Builds the action-handler picker body shown inside a launcher shell (the
-// cursor popover via openPopover, or openDialog). Selecting a candidate or an
-// already-open instance calls onSelect; cancel / dismiss is handled by the shell.
+// cursor popover via openPopover, or openDialog). Selecting an already-open
+// instance or a candidate calls onSelect; cancel / dismiss is up to the shell.
 export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
   const root = document.createElement("div")
   root.className = "handler-panel"
 
-  // ── request summary ──
+  // ── request: "action: <name>" on one line, then the payload ──
   const request = document.createElement("div")
   request.className = "handler-request"
-  request.append(
-    label("action"),
-    el("code", "handler-action-name", o.actionName || "(none)"),
-    label("value"),
-    el("pre", "handler-payload", formatPayload(o.payload))
-  )
+  const actionLine = document.createElement("div")
+  actionLine.className = "handler-action"
+  const lbl = document.createElement("span")
+  lbl.className = "handler-request-label"
+  lbl.textContent = "action:"
+  actionLine.append(lbl, el("code", "handler-action-name", o.actionName || "(none)"))
+  request.append(actionLine, el("pre", "handler-payload", formatPayload(o.payload)))
   root.appendChild(request)
 
   const appLabel = (app: InstalledApp | undefined, nappId: string) =>
     app?.petname || app?.title || nappId
+
+  // ── already-open instances first (route to an existing window) ──
+  if (o.openCandidates.length) {
+    const openEl = document.createElement("div")
+    openEl.className = "handler-open-instances"
+    openEl.appendChild(el("h3", "", "Already open"))
+    const list = document.createElement("ul")
+    list.className = "handler-list"
+    const counts = new Map<string, number>()
+    for (const win of o.openCandidates) {
+      const app = o.apps.get(win.nappId)
+      const n = (counts.get(win.nappId) || 0) + 1
+      counts.set(win.nappId, n)
+      list.appendChild(
+        handlerItem(appLabel(app, win.nappId), n, () => o.onSelect(win.nappId, win.instanceId))
+      )
+    }
+    openEl.appendChild(list)
+    root.appendChild(openEl)
+  }
 
   // ── candidates (open a new app) ──
   const candidatesEl = document.createElement("div")
@@ -42,36 +64,13 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
     list.className = "handler-list"
     for (const nappId of o.candidates) {
       const app = byId.get(nappId)
-      list.appendChild(handlerItem(appLabel(app, nappId), nappId, () => o.onSelect(nappId)))
+      list.appendChild(handlerItem(appLabel(app, nappId), null, () => o.onSelect(nappId)))
     }
     candidatesEl.appendChild(list)
   }
   root.appendChild(candidatesEl)
 
-  // ── already-open instances ──
-  if (o.openCandidates.length) {
-    const openEl = document.createElement("div")
-    openEl.className = "handler-open-instances"
-    openEl.appendChild(el("h3", "", "Already open"))
-    const list = document.createElement("ul")
-    list.className = "handler-list"
-    for (const win of o.openCandidates) {
-      const app = o.apps.get(win.nappId)
-      list.appendChild(
-        handlerItem(appLabel(app, win.nappId), app?.title || win.nappId, () =>
-          o.onSelect(win.nappId, win.instanceId)
-        )
-      )
-    }
-    openEl.appendChild(list)
-    root.appendChild(openEl)
-  }
-
   return root
-}
-
-function label(text: string): HTMLElement {
-  return el("div", "handler-request-label", text)
 }
 
 function el(tag: string, className: string, text: string): HTMLElement {
@@ -81,18 +80,21 @@ function el(tag: string, className: string, text: string): HTMLElement {
   return node
 }
 
-function handlerItem(text: string, idText: string, onClick: () => void): HTMLLIElement {
+// A picker row, built on the design-system button. `num` (the per-app window
+// number) is shown only for already-open instances.
+function handlerItem(text: string, num: number | null, onClick: () => void): HTMLLIElement {
   const item = document.createElement("li")
-  const btn = document.createElement("button")
-  btn.type = "button"
+  const btn = button({ variant: "outline", class: "handler-item", onClick })
   const title = document.createElement("span")
   title.className = "handler-pet"
   title.textContent = text
-  const idEl = document.createElement("code")
-  idEl.className = "handler-id"
-  idEl.textContent = idText
-  btn.append(title, idEl)
-  btn.addEventListener("click", onClick)
+  btn.appendChild(title)
+  if (num != null) {
+    const badge = document.createElement("span")
+    badge.className = "handler-num"
+    badge.textContent = `#${num}`
+    btn.appendChild(badge)
+  }
   item.appendChild(btn)
   return item
 }

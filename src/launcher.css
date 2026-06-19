@@ -2248,11 +2248,16 @@ body.napp-resizing .napp-body iframe {
   gap: 0.35rem;
 }
 
+.handler-action {
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: start;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
 .handler-request-label {
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  opacity: 0.62;
-  text-transform: uppercase;
+  opacity: 0.6;
 }
 
 .handler-action-name {
@@ -2286,40 +2291,26 @@ body.napp-resizing .napp-body iframe {
   list-style: none;
 }
 
-.handler-list button {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.65rem;
-  align-items: baseline;
+/* Picker rows are design-system buttons; just make them full-width with the
+   name on the left and the window number (open instances) on the right. */
+.handler-item {
   width: 100%;
-  padding: 0.55rem 0.65rem;
-  color: inherit;
-  background: transparent;
-  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-  border-radius: 8px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.handler-list button:hover {
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  justify-content: space-between;
+  gap: 0.65rem;
 }
 
 .handler-pet {
+  min-width: 0;
   overflow: hidden;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.handler-id {
-  overflow: hidden;
-  max-width: 12rem;
+.handler-num {
+  flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
-  opacity: 0.58;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  opacity: 0.55;
 }
 
 .handler-empty {
@@ -2332,11 +2323,6 @@ body.napp-resizing .napp-body iframe {
 .handler-open-instances h3 {
   margin: 0 0 0.5rem;
   font-size: 1rem;
-}
-
-.handler-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 /* ─── settings: account section ────────────────────────────────── */
