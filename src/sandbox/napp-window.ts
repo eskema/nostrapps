@@ -559,6 +559,13 @@ function setupDrag(
     pending = true
     startX = e.clientX
     startY = e.clientY
+    // Window-level fallback so the drag ALWAYS ends, even if the handle's
+    // pointerup is lost — e.g. Chromium dropping pointer capture when the cursor
+    // crosses a cross-origin iframe, which would otherwise strand the drag (stuck
+    // until reload). Removed in end(); end() is idempotent so the handle and
+    // window paths can't double-commit.
+    window.addEventListener("pointerup", end)
+    window.addEventListener("pointercancel", end)
     if (isCompact()) {
       mode = "reorder"
       // capture finger offset from window top so we can keep it pinned later
@@ -744,8 +751,11 @@ function setupDrag(
           packPlaceholder.className = "pack-placeholder"
           stage.appendChild(packPlaceholder)
         }
-        packPlaceholder.style.left = `${snap.left + stage.scrollLeft}px`
-        packPlaceholder.style.top = `${snap.top + stage.scrollTop}px`
+        // snap.left/top are content-box coords (scroll-independent); the
+        // placeholder is position:absolute in the stage, so use them directly —
+        // adding scroll would double-count and push the ghost down a row.
+        packPlaceholder.style.left = `${snap.left}px`
+        packPlaceholder.style.top = `${snap.top}px`
         packPlaceholder.style.width = `${snap.width}px`
         packPlaceholder.style.height = `${snap.height}px`
 
@@ -812,6 +822,9 @@ function setupDrag(
   }
 
   const end = (e: PointerEvent) => {
+    if (!pending && !dragging && !reordering) return // already settled — no double-commit
+    window.removeEventListener("pointerup", end)
+    window.removeEventListener("pointercancel", end)
     const wasDragging = dragging
     const wasReordering = reordering
     const finalZone = snapZone
@@ -1039,8 +1052,11 @@ function setupResize(
           packPlaceholder.className = "pack-placeholder"
           stage.appendChild(packPlaceholder)
         }
-        packPlaceholder.style.left = `${snap.left + stage.scrollLeft}px`
-        packPlaceholder.style.top = `${snap.top + stage.scrollTop}px`
+        // snap.left/top are content-box coords (scroll-independent); the
+        // placeholder is position:absolute in the stage, so use them directly —
+        // adding scroll would double-count and push the ghost down a row.
+        packPlaceholder.style.left = `${snap.left}px`
+        packPlaceholder.style.top = `${snap.top}px`
         packPlaceholder.style.width = `${snap.width}px`
         packPlaceholder.style.height = `${snap.height}px`
 

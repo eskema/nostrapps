@@ -1066,6 +1066,8 @@ export function bestFitPack(
     document.querySelectorAll(".napp-window.packing").forEach(el => el.classList.remove("packing"))
     packingClearTimer = null
   }, 260)
+
+  updateStageBottomSpacer(stageEl)
 }
 
 // Try to fit `desired` around `focus` by trimming one of the four sides
@@ -1359,6 +1361,33 @@ export function getStageBounds(stage: HTMLElement) {
   }
 }
 
+// Browsers don't include a scroll container's padding-bottom in the scrollable
+// area for absolutely-positioned children, so a window scrolled to the bottom
+// sits flush against the edge. Keep a tiny spacer a gutter below the lowest
+// window so the bottom gets the same breathing room as the sides.
+function updateStageBottomSpacer(stage: HTMLElement) {
+  if (!stage) return
+  let maxBottom = 0
+  for (const win of openWindows.values()) {
+    const r = win.root
+    if (!r.isConnected || r.classList.contains("space-inactive")) continue
+    if (getComputedStyle(r).position === "static") continue // mobile flow layout
+    const bottom = r.offsetTop + r.offsetHeight
+    if (bottom > maxBottom) maxBottom = bottom
+  }
+  let spacer = stage.querySelector(":scope > .stage-bottom-spacer") as HTMLElement | null
+  if (maxBottom <= 0) {
+    spacer?.remove()
+    return
+  }
+  if (!spacer) {
+    spacer = document.createElement("div")
+    spacer.className = "stage-bottom-spacer"
+    stage.appendChild(spacer)
+  }
+  spacer.style.top = `${Math.round(maxBottom + getStageBounds(stage).padB)}px`
+}
+
 // Make sure the window's header is reachable inside the stage's visible
 // area, AND that the window respects the stage's padding gutter.
 //
@@ -1383,9 +1412,15 @@ function clampToStage(root: HTMLElement, stage: HTMLElement) {
   const minLeft = padL
   const minTop = padT
   const maxLeft = Math.max(minLeft, W - padR - minVisibleX)
-  const maxTop = Math.max(minTop, H - padB - 28)
   const newLeft = Math.max(minLeft, Math.min(maxLeft, left))
-  const newTop = Math.max(minTop, Math.min(maxTop, top))
+  // The stage scrolls vertically (overflow-y: auto), so a window below the fold
+  // is still reachable by scrolling — clamping its top into the viewport would
+  // yank packed below-the-fold windows up onto the one above. Only clamp the top
+  // DOWN-ward when the stage can't scroll vertically. (Horizontal always clamps:
+  // overflow-x is hidden.)
+  const scrollsY = /(auto|scroll)/.test(getComputedStyle(stage).overflowY)
+  const maxTop = Math.max(minTop, H - padB - 28)
+  const newTop = scrollsY ? Math.max(minTop, top) : Math.max(minTop, Math.min(maxTop, top))
   if (newLeft !== left) root.style.left = `${newLeft}px`
   if (newTop !== top) root.style.top = `${newTop}px`
 }
@@ -1400,6 +1435,7 @@ function ensureStageObserver(stageEl: HTMLElement) {
       if (win.root.classList.contains("space-inactive")) continue
       clampToStage(win.root, stageEl)
     }
+    updateStageBottomSpacer(stageEl)
   })
   stageObserver.observe(stageEl)
 }
