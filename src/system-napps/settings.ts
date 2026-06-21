@@ -13,28 +13,13 @@ import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
+import { details } from "./ui.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
     <div class="settings-panel">
-      <div class="settings-row">
-        <span class="settings-label">Theme</span>
-        <div class="settings-theme">
-          <button type="button" data-choice="light" title="Light">☀</button>
-          <button type="button" data-choice="dark" title="Dark">☾</button>
-          <button type="button" data-choice="auto" title="Auto">◐</button>
-        </div>
-      </div>
-
-      <div class="settings-row settings-reset-row">
-        <span class="settings-label">Reset</span>
-        <button type="button" class="btn btn-danger settings-reset-btn">
-          erase all data
-        </button>
-      </div>
-
       <div class="settings-row settings-account-row">
-        <span class="settings-label">Account</span>
+        <span class="settings-label">User</span>
         <div class="settings-account">
           <div class="settings-account-connected" hidden>
             <nostr-name class="settings-pubkey" style="cursor:pointer"></nostr-name>
@@ -72,14 +57,17 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
       <hr class="settings-separator" />
 
-      <div class="perm-list" data-section="decisions"></div>
-      <div class="perm-list" data-section="handlers"></div>
+      <div class="settings-sections"></div>
 
-      <div class="settings-build">build ${APP_VERSION}</div>
+      <div class="settings-build-row">
+        <span class="settings-build">build ${APP_VERSION}</span>
+        <button type="button" class="btn btn-danger settings-reset-btn">
+          erase all data
+        </button>
+      </div>
     </div>
   `
 
-  const themeBtns = container.querySelectorAll(".settings-theme button") as unknown as HTMLElement[]
   const connectedEl = container.querySelector(".settings-account-connected") as HTMLElement
   const disconnectedEl = container.querySelector(".settings-account-disconnected") as HTMLElement
   const pubkeyEl = container.querySelector(".settings-pubkey") as HTMLElement
@@ -95,12 +83,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   const bunkerCancel = container.querySelector(".settings-bunker-cancel") as HTMLElement
   const bunkerError = container.querySelector(".settings-bunker-error") as HTMLElement
   const resetBtn = container.querySelector(".settings-reset-btn") as HTMLElement
-
-  function renderTheme(choice: string) {
-    for (const btn of themeBtns) {
-      btn.classList.toggle("active", btn.dataset.choice === choice)
-    }
-  }
 
   function renderAccount(pk: string | null) {
     if (pk) {
@@ -129,10 +111,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   function showBunkerError(msg: string) {
     bunkerError.textContent = msg
     bunkerError.hidden = false
-  }
-
-  for (const btn of themeBtns) {
-    btn.addEventListener("click", () => ctx.theme.set(btn.dataset.choice!))
   }
 
   disconnectBtn.addEventListener("click", () => ctx.disconnect())
@@ -203,21 +181,33 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     }
   })
 
-  renderTheme(ctx.theme.get())
   renderAccount(ctx.account.getPubkey())
 
-  const unsubTheme = ctx.theme.subscribe(renderTheme)
   const unsubAccount = ctx.account.subscribe(renderAccount)
 
-  // ─── Permissions ────────────────────────────────────────
+  // ─── Permissions + actions (collapsible disclosures) ────────────
 
-  const decisionsEl = container.querySelector('[data-section="decisions"]')!
-  const handlersEl = container.querySelector('[data-section="handlers"]')!
+  const sectionsEl = container.querySelector(".settings-sections") as HTMLElement
+
+  const permDetails = details({ summary: "permissions" })
+  const permSummary = permDetails.querySelector("summary") as HTMLElement
+  const decisionsEl = document.createElement("div")
+  decisionsEl.className = "perm-list"
+  permDetails.appendChild(decisionsEl)
+
+  const actionsDetails = details({ summary: "actions" })
+  const actionsSummary = actionsDetails.querySelector("summary") as HTMLElement
+  const handlersEl = document.createElement("div")
+  handlersEl.className = "perm-list"
+  actionsDetails.appendChild(handlersEl)
+
+  sectionsEl.append(permDetails, actionsDetails)
 
   function renderDecisions() {
     decisionsEl.innerHTML = ""
     const all = perms.listDecisions()
     const entries = Object.entries(all)
+    permSummary.textContent = `permissions (${entries.length})`
     if (entries.length === 0) {
       const empty = document.createElement("div")
       empty.className = "perm-empty"
@@ -265,40 +255,27 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
   function renderHandlerPrefs() {
     handlersEl.innerHTML = ""
-
-    const heading = document.createElement("h4")
-    heading.className = "apps-section-heading"
-    heading.textContent = "Action handlers"
-    handlersEl.appendChild(heading)
-
-    const debug = document.createElement("details")
-    debug.className = "perm-group"
-    const summary = document.createElement("summary")
-    summary.textContent = "Action map"
-    debug.appendChild(summary)
-
     const snapshot = handlers.snapshotActionMap()
+    actionsSummary.textContent = `actions (${snapshot.length})`
     if (snapshot.length === 0) {
       const empty = document.createElement("div")
       empty.className = "perm-empty"
       empty.textContent = "No actions registered in memory yet."
-      debug.appendChild(empty)
-    } else {
-      for (const [action, nappIds] of snapshot) {
-        const row = document.createElement("div")
-        row.className = "perm-row"
-        const name = document.createElement("code")
-        name.className = "perm-method"
-        name.textContent = action
-        const targets = document.createElement("code")
-        targets.className = "perm-napp-id"
-        targets.textContent = nappIds.join(", ")
-        row.append(name, targets)
-        debug.appendChild(row)
-      }
+      handlersEl.appendChild(empty)
+      return
     }
-
-    handlersEl.appendChild(debug)
+    for (const [action, nappIds] of snapshot) {
+      const row = document.createElement("div")
+      row.className = "perm-row"
+      const name = document.createElement("code")
+      name.className = "perm-method"
+      name.textContent = action
+      const targets = document.createElement("code")
+      targets.className = "perm-napp-id"
+      targets.textContent = nappIds.join(", ")
+      row.append(name, targets)
+      handlersEl.appendChild(row)
+    }
   }
 
   function renderPerms() {
@@ -312,7 +289,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
   return {
     unmount() {
-      unsubTheme()
       unsubAccount()
       unsubPerms()
       unsubHandlers()

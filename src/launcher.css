@@ -340,7 +340,10 @@ button {
   opacity: 0.5;
 }
 
-.headerbar button {
+/* Plain (non-design-system) headerbar buttons. Scoped :not(.btn) so a `.btn`
+   variant (e.g. the theme toggle) keeps its own styling — a contextual
+   `.headerbar button` (0,1,1) would otherwise beat `.btn-*` (0,1,0). */
+.headerbar button:not(.btn) {
   background: transparent;
   /* background-color: var(--surface); */
   color: var(--text);
@@ -348,12 +351,42 @@ button {
   padding: 0 0.8rem;
 }
 
-.headerbar button:hover,
-.headerbar button[aria-expanded="true"] {
+.headerbar button:not(.btn):hover,
+.headerbar button:not(.btn)[aria-expanded="true"] {
   /* background: transparent; */
   background-color: var(--text);
   color: var(--surface);
 }
+
+/* Theme toggle — single glyph button at the right edge of the input row.
+   Fixed width + centering so the differing advance widths of ☀/☾/◐ (☀ often
+   renders as a wider emoji glyph) don't resize the button as it cycles. */
+#theme-toggle {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 2rem;
+  height: 2rem;
+  /* width: 2.5rem; */
+  /* margin: .2rem; */
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  line-height: 1;
+  /* .btn forces serif/700, which reshapes the ☾/◐ glyph fallback — revert to the
+     inherited sans at normal weight so the moon matches its old rendering. */
+  font-weight: 400;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 50%;
+  align-self: center;
+  justify-self: center;
+}
+
+#theme-toggle:hover {
+  /* transform: scale(.8); */
+}
+
 
 /* .headerbar button[type="submit"]
 {
@@ -1289,11 +1322,20 @@ body.napp-resizing .napp-body iframe {
 }
 
 /* Build stamp — de-emphasized via opacity, not a smaller font. */
-.settings-build {
+/* Footer row: build stamp on the left, reset button pushed to the right. */
+.settings-build-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   margin-top: 0.4rem;
+}
+
+.settings-build {
   font-family: var(--font-mono);
+  font-size: .75rem;
   opacity: 0.5;
   user-select: text;
+  margin-right: auto;
 }
 
 .settings-row {
@@ -1309,31 +1351,6 @@ body.napp-resizing .napp-body iframe {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.settings-theme {
-  display: inline-flex;
-  gap: 0.25rem;
-}
-
-.settings-theme button,
-.settings-account-btn,
-.settings-load-folder {
-  padding: 0.3rem 0.7rem;
-  font-size: 0.85rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.settings-theme button.active,
-.settings-theme button:hover,
-.settings-account-btn:hover,
-.settings-load-folder:hover {
-  background: var(--text);
-  color: var(--surface);
 }
 
 .settings-account {
@@ -2257,17 +2274,6 @@ body.napp-resizing .napp-body iframe {
   background: var(--text);
   color: var(--surface);
   border-color: var(--text);
-}
-
-.apps-section-heading {
-  margin: 1rem 0 0.25rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.55;
-  border-top: 1px dotted color-mix(in srgb, currentColor 25%, transparent);
-  padding-top: 0.6rem;
 }
 
 .apps-empty.apps-empty-thin {

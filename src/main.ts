@@ -174,6 +174,29 @@ const theme = {
 applyTheme(theme.get())
 theme.subscribe(() => broadcastTheme())
 
+// Header theme toggle — a single button that cycles light → dark → auto, showing
+// the current state with the same glyphs as the Settings theme row. (Experiment;
+// Settings still has the full switcher.)
+const THEME_CYCLE = ["light", "dark", "auto"]
+// Only ☀ defaults to a wide color emoji, so it gets the text-presentation
+// selector (\uFE0E) to stay monochrome; ☾/◐ are already plain glyphs.
+const THEME_GLYPH: Record<string, string> = {
+  light: "☀︎",
+  dark: "☾",
+  auto: "◐"
+}
+const themeToggleBtn = document.getElementById("theme-toggle")!
+function renderThemeToggle(choice: string) {
+  themeToggleBtn.textContent = THEME_GLYPH[choice] || THEME_GLYPH.auto
+  themeToggleBtn.title = `Theme: ${choice}`
+}
+themeToggleBtn.addEventListener("click", () => {
+  const next = THEME_CYCLE[(THEME_CYCLE.indexOf(theme.get()) + 1) % THEME_CYCLE.length]
+  theme.set(next)
+})
+renderThemeToggle(theme.get())
+theme.subscribe(renderThemeToggle)
+
 // ─── log bus ────────────────────────────────────────────────────
 // Each entry is `{ at: msTimestamp, msg: string }`. Consumers (currently
 // /logs) format the timestamp how they want.
