@@ -37,8 +37,14 @@
 
 body {
   margin: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-areas: 
+    "header"
+    "spaces"
+    "stage";
+  grid-template-rows: auto auto 1fr;
+  /* align-items: start;
+  align-content: start; */
   min-height: 100vh;
   background: var(--surface);
   color: var(--text);
@@ -728,7 +734,7 @@ button {
 }
 
 #stage {
-  flex: 1;
+  grid-area: stage;
   position: relative;
   overflow-x: hidden;
   overflow-y: auto;
@@ -762,16 +768,30 @@ button {
   background: var(--surface);
   /* border: 1px solid color-mix(in srgb, currentColor 20%, transparent); */
   border-radius: 4px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 .6rem rgba(0, 0, 0, 0.2);
   min-width: 240px;
   overflow: hidden;
   transition:
-    max-height 220ms ease-in-out,
-    box-shadow 220ms ease-in-out;
+    max-height 220ms ease-in-out
+    /* transform 220ms ease-in-out, */
+    /* box-shadow 220ms ease-in-out; */
+}
+
+/* The active/front window: a lifted shadow + full-opacity title (others' titles
+   are dimmed above) so it's clear which window is focused. Animates via the
+   box-shadow transition on .napp-window and the opacity transition on .napp-title. */
+.napp-window.focused {
+  box-shadow: 0 .4rem .8rem rgba(0, 0, 0, 0.6);
+  transform: translateY(-1px);
+  /* box-shadow: none; */
 }
 
 html[data-theme="dark"] .napp-window {
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 .6rem rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme="dark"] .napp-window.focused {
+  box-shadow: 0 .2rem .8rem rgba(0, 0, 0, 0.6);
 }
 
 /* Windows belonging to a non-active space: hidden, but kept mounted so their
@@ -870,15 +890,6 @@ html[data-theme="dark"] .napp-window {
   margin-left: 0.4rem;
 }
 
-/* The active/front window: a lifted shadow + full-opacity title (others' titles
-   are dimmed above) so it's clear which window is focused. Animates via the
-   box-shadow transition on .napp-window and the opacity transition on .napp-title. */
-.napp-window.focused {
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
-}
-html[data-theme="dark"] .napp-window.focused {
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
-}
 .napp-window.focused .napp-title {
   opacity: 1;
 }
@@ -1305,7 +1316,7 @@ body.napp-resizing .napp-body iframe {
   padding: 0.6rem 0.8rem;
   overflow: auto;
   color: var(--text);
-  font-size: 0.85rem;
+  /* font-size: 0.85rem; */
 }
 
 .system-napp-content {

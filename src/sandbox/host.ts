@@ -941,6 +941,11 @@ export function bestFitPack(
       }
     }
   }
+  const overlaps = (a: PackCell, b: PackCell) =>
+    a.col < b.col + b.cols &&
+    a.col + a.cols > b.col &&
+    a.row < b.row + b.rows &&
+    a.row + a.rows > b.row
 
   const cellFromPx = (w: NappWindow) => {
     const px = parseFloat(w.root.style.left) || padL
@@ -1024,6 +1029,18 @@ export function bestFitPack(
           rows: desired.rows
         }
       }
+      // 1b. The window the focus DIRECTLY displaced (its snapshot cell is where
+      //     the dragged window is going) swaps into the dragged window's vacated
+      //     origin — instead of falling through to the global first-fit scan
+      //     below, which can grab a third window's still-unplaced cell and
+      //     cascade (a 3-cycle of windows rather than a clean A<->B swap). Only
+      //     during a live drag (focusCell + snapshot both set).
+      if (!placed && focusCell && focused && snapshot && overlaps(desired, focusCell)) {
+        const origin = snapshot.get(focused.root)
+        if (origin && fits(origin.col, origin.row, desired.cols, desired.rows)) {
+          placed = { col: origin.col, row: origin.row, cols: desired.cols, rows: desired.rows }
+        }
+      }
       // 2. Blocked → if this item is "much bigger" than the dragged stamp,
       //    try shrinking it around the stamp instead of relocating. Skip
       //    the most-recently-touched non-focused window — that one holds
@@ -1037,18 +1054,33 @@ export function bestFitPack(
         placed = shrinkAroundFocus(desired, focusCell, fits)
       }
     }
-    // 3. Last resort (and the only path for new windows): first-fit scan.
-    if (!placed) {
+    // 3. Last resort. New windows append via top-left first-fit (earliest gap).
+    //    A displaced EXISTING window instead takes the free cell NEAREST its
+    //    desired spot, so it shifts locally into a nearby gap (e.g. its own
+    //    just-vacated cell) rather than teleporting to the top-left — which can
+    //    grab a not-yet-placed window's cell and cascade a third window.
+    if (!placed && isNew) {
       for (let r = 0; r < 1000 && !placed; r++) {
         for (let c = 0; c <= COLS - desired.cols; c++) {
           if (fits(c, r, desired.cols, desired.rows)) {
-            placed = {
-              col: c,
-              row: r,
-              cols: desired.cols,
-              rows: desired.rows
-            }
+            placed = { col: c, row: r, cols: desired.cols, rows: desired.rows }
             break
+          }
+        }
+      }
+    } else if (!placed) {
+      const maxRow = grid.length + desired.rows
+      let bestDist = Infinity
+      for (let r = 0; r <= maxRow; r++) {
+        for (let c = 0; c <= COLS - desired.cols; c++) {
+          if (!fits(c, r, desired.cols, desired.rows)) continue
+          const colDist = Math.abs(c - desired.col)
+          const rowDist = Math.abs(r - desired.row)
+          // Nearest by Manhattan; tie → same/nearer column, then top, then left.
+          const dist = (colDist + rowDist) * 1000 + colDist
+          if (dist < bestDist) {
+            bestDist = dist
+            placed = { col: c, row: r, cols: desired.cols, rows: desired.rows }
           }
         }
       }
@@ -1067,7 +1099,16 @@ export function bestFitPack(
     packingClearTimer = null
   }, 260)
 
-  updateStageBottomSpacer(stageEl)
+  // Bottom of the lowest occupied row, from the target grid (not measured —
+  // offsetTop lags the .packing transition that just started above).
+  let lastRow = 0
+  for (let r = grid.length - 1; r >= 0; r--) {
+    if (grid[r]?.some(Boolean)) {
+      lastRow = r + 1
+      break
+    }
+  }
+  setStageBottomSpacer(stageEl, lastRow ? padT + lastRow * cellH - TILE_GAP / 2 : 0)
 }
 
 // Try to fit `desired` around `focus` by trimming one of the four sides
@@ -1365,16 +1406,8 @@ export function getStageBounds(stage: HTMLElement) {
 // area for absolutely-positioned children, so a window scrolled to the bottom
 // sits flush against the edge. Keep a tiny spacer a gutter below the lowest
 // window so the bottom gets the same breathing room as the sides.
-function updateStageBottomSpacer(stage: HTMLElement) {
+function setStageBottomSpacer(stage: HTMLElement, maxBottom: number) {
   if (!stage) return
-  let maxBottom = 0
-  for (const win of openWindows.values()) {
-    const r = win.root
-    if (!r.isConnected || r.classList.contains("space-inactive")) continue
-    if (getComputedStyle(r).position === "static") continue // mobile flow layout
-    const bottom = r.offsetTop + r.offsetHeight
-    if (bottom > maxBottom) maxBottom = bottom
-  }
   let spacer = stage.querySelector(":scope > .stage-bottom-spacer") as HTMLElement | null
   if (maxBottom <= 0) {
     spacer?.remove()
@@ -1386,6 +1419,21 @@ function updateStageBottomSpacer(stage: HTMLElement) {
     stage.appendChild(spacer)
   }
   spacer.style.top = `${Math.round(maxBottom + getStageBounds(stage).padB)}px`
+}
+
+// Lowest window bottom from laid-out positions — valid only when windows are
+// SETTLED. bestFitPack instead derives it from its target grid, since offsetTop
+// lags behind the in-flight `.packing` transition right after a repack (which is
+// why the spacer used to wait for a focus/re-pack to catch up).
+function measureMaxWindowBottom(stage: HTMLElement): number {
+  let maxBottom = 0
+  for (const win of openWindows.values()) {
+    const r = win.root
+    if (!r.isConnected || r.classList.contains("space-inactive")) continue
+    if (getComputedStyle(r).position === "static") continue // mobile flow layout
+    maxBottom = Math.max(maxBottom, r.offsetTop + r.offsetHeight)
+  }
+  return maxBottom
 }
 
 // Make sure the window's header is reachable inside the stage's visible
@@ -1435,7 +1483,8 @@ function ensureStageObserver(stageEl: HTMLElement) {
       if (win.root.classList.contains("space-inactive")) continue
       clampToStage(win.root, stageEl)
     }
-    updateStageBottomSpacer(stageEl)
+    // Windows are settled here (a resize isn't a repack), so measuring is fine.
+    setStageBottomSpacer(stageEl, measureMaxWindowBottom(stageEl))
   })
   stageObserver.observe(stageEl)
 }
