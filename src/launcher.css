@@ -227,7 +227,7 @@ button {
 /* ─── Design system: buttons ──────────────────────────────────────
    Shared button styles for system-napp (and other content) buttons.
    Base `.btn` + a variant: btn-primary | btn-outline | btn-danger |
-   btn-warning | btn-ghost. Layout (align-self, margins) stays on the
+   btn-warning | btn-ghost | btn-link. Layout (align-self, margins) stays on the
    parent/context, not the variant. See button() in system-napps/ui.ts. */
 .btn {
   display: inline-flex;
@@ -304,6 +304,20 @@ button {
 
 .btn-ghost:hover:not(:disabled) {
   background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* Link: looks like inline text, not a button — no padding/border/background,
+   dimmed until hover. */
+.btn-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  opacity: 0.6;
+}
+
+.btn-link:hover:not(:disabled) {
+  opacity: 1;
+  background: transparent;
 }
 
 /* Chip: a selectable .btn (window/space switcher). chip() in ui.ts sets the

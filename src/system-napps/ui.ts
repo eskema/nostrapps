@@ -5,11 +5,12 @@
 //   • button({ variant, label, onClick, … })  → a `.btn .btn-<variant>`
 //   • chip({ label, active, icon, onClick, … }) → a `.btn .btn-chip` (selectable)
 //   • icon(name)                                → an inline `<svg>` (currentColor)
+//   • details({ summary, open, … })             → a `.ui-details` disclosure
 // Variants: primary | outline | danger | warning | ghost. Layout (align-self,
 // margins, placement) belongs on the parent/context, not the variant. CSS lives
 // in launcher.css under "Design system".
 
-export type ButtonVariant = "primary" | "outline" | "danger" | "warning" | "ghost"
+export type ButtonVariant = "primary" | "outline" | "danger" | "warning" | "ghost" | "link"
 
 export interface ButtonOpts {
   label?: string
@@ -89,4 +90,27 @@ export function chip(o: ChipOpts): HTMLButtonElement {
   label.textContent = o.label
   b.appendChild(label)
   return b
+}
+
+export interface DetailsOpts {
+  /** Summary label — the always-visible disclosure header. */
+  summary: string
+  /** Start expanded (default collapsed). */
+  open?: boolean
+  /** Extra classes for context. */
+  class?: string
+}
+
+// A collapsible disclosure (<details>/<summary>) styled like the apps-store
+// file/info sections. Returns the <details> with its <summary> already in place
+// — append your content to it. For a live count, update the summary later:
+// `d.querySelector("summary")!.textContent = …`.
+export function details(opts: DetailsOpts): HTMLDetailsElement {
+  const d = document.createElement("details")
+  d.className = `ui-details${opts.class ? ` ${opts.class}` : ""}`
+  if (opts.open) d.open = true
+  const s = document.createElement("summary")
+  s.textContent = opts.summary
+  d.appendChild(s)
+  return d
 }
