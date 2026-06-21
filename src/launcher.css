@@ -1412,6 +1412,13 @@ body.napp-resizing .napp-body iframe {
   overflow: hidden;
 }
 
+/* While the detail overlay is up (.has-overlay on .apps-panel), hide the panel
+   underneath so it can't peek through when the overlay scrolls past its end. */
+.has-overlay .apps-content,
+.has-overlay .apps-tabs {
+  opacity: 0;
+}
+
 /* App-info detail laid over the whole panel (tabs included); closing it just
    hides the layer, so the list underneath is untouched (scroll + built state
    preserved). Stacks: back · images · card · info · files. */
@@ -1511,17 +1518,45 @@ body.napp-resizing .napp-body iframe {
 }
 
 .apps-detail-files {
-  font-size: 0.75rem;
+  /* font-size: 0.75rem; */
   margin: 0.15rem 0;
   padding-left: 1.2rem;
 }
 
 .apps-detail-files li {
-  margin: 0.1rem 0;
+  margin-top: 1rem;
+  /* margin: 0.1rem 0; */
+  /* line-height: 2; */
 }
 
 .apps-detail-files code {
-  font-size: 0.7rem;
+  margin-right: .5rem;
+  pointer-events: none;
+  font-size: 1rem;
+}
+
+.apps-detail-files-links-btn {
+  line-height: 1;
+  padding: 0;
+  /* display: none; */
+  /* font-size: 0.7rem; */
+}
+
+/* .apps-detail-files li:focus .apps-detail-files-links-btn {
+  display: inline;
+} */
+
+.apps-detail-files-links {
+  line-height: 1;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.apps-detail-files-links a {
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  /* display: inline-block; */
 }
 
 .apps-detail-author {
@@ -1537,6 +1572,7 @@ body.napp-resizing .napp-body iframe {
   height: 14px;
   border-radius: 50%;
   background: color-mix(in srgb, currentColor 15%, transparent);
+  margin-right: .2rem;
 }
 
 .apps-detail-author-pic::part(img) {
@@ -1782,10 +1818,11 @@ body.napp-resizing .napp-body iframe {
     ;
   grid-template-columns: auto 1fr;
   grid-gap: 0 1rem;
-  padding: 0.4rem;
-  padding-bottom: 1rem;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  padding: 1rem 0.4rem;
+  /* padding-top: 1rem; */
+  margin-bottom: .5rem;
+  
+  border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 }
 
 .apps-detail-overlay .apps-card {
@@ -1799,18 +1836,24 @@ body.napp-resizing .napp-body iframe {
     /* "author author actions" */
     /* "title title title" */
     "about about about"
-    "author author author"
     "handlers handlers handlers"
+    "author author author"
+    
     
     /* "actions actions actions" */
     /* "handlers handlers handlers" */
     ;
-  grid-template-columns: auto 1fr;
-  grid-gap: 0 1rem;
-  padding: 0.4rem;
-  padding-bottom: 1rem;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  /* grid-template-columns: auto 1fr; */
+  /* grid-gap: 0 1rem; */
+  /* padding: .5rem 0; */
+  padding-bottom: 0;
+  margin-bottom: 0;
+  /* border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent); */
+}
+
+
+.apps-content .apps-card {
+  cursor: pointer;
 }
 
 .apps-content .apps-card:hover {
@@ -1834,6 +1877,11 @@ body.napp-resizing .napp-body iframe {
   /* border: 4px solid color-mix(in srgb, var(--text) 5%, transparent); */
 }
 
+.apps-detail-overlay .apps-card-icon {
+  width: 96px;
+  height: 96px;
+}
+
 .apps-title {
   font-family: var(--font-serif);
   font-weight: 700;
@@ -1848,6 +1896,10 @@ body.napp-resizing .napp-body iframe {
   /* width: 100%; */
 }
 
+.apps-detail-overlay .apps-title {
+  font-size: 3rem;
+}
+
 .apps-author {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1855,7 +1907,16 @@ body.napp-resizing .napp-body iframe {
   align-items: center;
   grid-area: author;
   margin: .5rem 0;
+  justify-self: start;
+  
   /* align-self: end; */
+}
+
+.apps-detail-overlay .apps-author {
+  margin-top: 2rem;
+  padding: .5rem 0;
+  border-top: 1px dotted color-mix(in srgb, var(--text) 100%, transparent);
+  /* border-bottom: 1px dotted color-mix(in srgb, var(--text) 100%, transparent); */
 }
 
 .apps-author-label {
@@ -1863,7 +1924,7 @@ body.napp-resizing .napp-body iframe {
   /* font-weight: 400; */
 }
 
-.apps-author-pic {
+.apps-content .apps-author-pic {
   display: none;
 }
 
@@ -1952,21 +2013,62 @@ body.napp-resizing .napp-body iframe {
   border-radius: 8px;
 }
 
+.apps-detail-id .apps-detail-value
+{
+  font-size: .6rem;
+  opacity: .6;
+}
+
+.apps-detail-btns {
+  display: flex;
+  gap: .5rem;
+  margin-bottom: 1rem;
+}
+
+.apps-detail-label {
+  margin-right: .5rem;
+  font-family: var(--font-serif);
+  font-weight: 700;
+}
+
+.apps-detail-relays .apps-detail-label {
+  
+}
+
+.apps-detail-relays ul {
+  display: inline;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.apps-detail-relays ul li {
+  display: inline;
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
 .apps-detail-info {
   display: grid;
   align-content: start;
   gap: 0.4rem;
 }
 
-.apps-detail-files-block > summary {
+/* Design system: disclosure — a collapsible <details> with a serif-bold
+   summary. Used by the apps-store file list and the settings permission/action
+   sections. details() in system-napps/ui.ts. */
+.ui-details {
+  padding: 0.5rem 0;
+}
+
+.ui-details > summary {
   cursor: pointer;
-  width: fit-content;
-  opacity: 0.6;
-  font-weight: 600;
+  font-family: var(--font-serif);
+  font-weight: 700;
   user-select: none;
 }
 
-.apps-detail-files-block > summary:hover {
+.ui-details > summary:hover {
   opacity: 1;
 }
 
@@ -2063,20 +2165,23 @@ body.napp-resizing .napp-body iframe {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  /* border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
+  /* border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
+  margin-bottom: 1rem;
 }
 
 .apps-relays[open] {
-  padding: 0.5rem;
-  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  border-radius: 6px;
+  /* padding: 0.5rem; */
+  /* border: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
+  /* border-radius: 6px; */
 }
 
 .apps-relays > summary {
-  width: fit-content;
+  /* width: fit-content; */
   cursor: pointer;
   font-family: var(--font-serif);
   font-weight: 700;
-  opacity: 0.7;
+  /* opacity: 0.7; */
   user-select: none;
 }
 
@@ -2085,19 +2190,20 @@ body.napp-resizing .napp-body iframe {
 }
 
 .apps-relays-label {
-  font-size: 0.72rem;
-  opacity: 0.7;
+  font-size: 0.75rem;
+  /* opacity: 0.7; */
 }
 
 .apps-relays-input {
   width: 100%;
   box-sizing: border-box;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  background: transparent;
+  /* font-size: 0.78rem; */
+  padding: .5rem;
+  border: none;
+  /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
   color: inherit;
   resize: vertical;
 }
@@ -2565,132 +2671,4 @@ body.napp-resizing .napp-body iframe {
   align-self: flex-start;
 }
 
-/* app info */
-.app-info-empty {
-  opacity: 0.6;
-  font-style: italic;
-}
 
-.app-info-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.app-info-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  font-family: var(--font-serif);
-}
-
-.app-info-id {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  opacity: 0.65;
-}
-
-.app-info-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.8rem;
-}
-
-.app-info-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.app-info-row span:first-child {
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-
-.app-info-row code {
-  font-family: var(--font-mono);
-  word-break: break-all;
-}
-
-.app-info-row a {
-  word-break: break-all;
-}
-
-.app-info-desc {
-  font-size: 0.85rem;
-  opacity: 0.85;
-  line-height: 1.4;
-}
-
-.app-info-handlers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-
-.app-info-handler {
-  padding: 0.1rem 0.45rem;
-  font-size: 0.72rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  font-family: var(--font-mono);
-}
-
-.app-info-author {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-}
-
-.app-info-author-pic {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  overflow: hidden;
-  flex-shrink: 0;
-  background: color-mix(in srgb, currentColor 15%, transparent);
-}
-
-.app-info-author-pic::part(img) {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.app-info-author-name {
-  font-family: var(--font-mono);
-}
-
-.app-info-files {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.app-info-file-list {
-  margin: 0;
-  padding: 0 0 0 1.2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.78rem;
-}
-
-.app-info-file-list li {
-  margin: 0;
-}
-
-.app-info-file-list a {
-  color: color-mix(in srgb, currentColor 55%, transparent);
-  text-decoration: none;
-  font-size: 0.72rem;
-  margin-left: 0.3rem;
-}
-
-.app-info-file-list a:hover {
-  color: color-mix(in srgb, currentColor 75%, transparent);
-  text-decoration: underline;
-}

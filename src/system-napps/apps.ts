@@ -15,7 +15,7 @@ import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NostrEvent } from "@nostr/tools"
-import { button, type ButtonVariant } from "./ui.js"
+import { button, details, type ButtonVariant } from "./ui.js"
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
 
@@ -70,6 +70,7 @@ export function mount(
     </div>
   `
 
+  const appsPanel = container.querySelector(".apps-panel") as HTMLElement
   const installedPane = container.querySelector(".apps-pane-installed") as HTMLElement
   const discoverPane = container.querySelector(".apps-pane-discover") as HTMLElement
   const detailOverlay = container.querySelector(".apps-detail-overlay") as HTMLElement
@@ -84,6 +85,7 @@ export function mount(
   function closeDetail() {
     detailOverlay.hidden = true
     detailOverlay.replaceChildren()
+    appsPanel.classList.remove("has-overlay")
   }
   function showDetail(req: DetailReq) {
     const back = button({
@@ -103,6 +105,7 @@ export function mount(
     loadCardIcons(detailOverlay, [{ nappId: req.nappId, evt: req.event }])
     detailOverlay.hidden = false
     detailOverlay.scrollTop = 0
+    appsPanel.classList.add("has-overlay")
   }
 
   // Both panes are built once and kept in the DOM; switching tabs just toggles
@@ -805,6 +808,7 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
   const icon = document.createElement("img")
   icon.className = "apps-card-icon"
   icon.alt = ""
+  icon.loading = "lazy" // defer off-screen blob fetches; loadCardIcons sets src later
   if (o.iconSha) {
     icon.dataset.iconSha = o.iconSha
     if (o.iconMime) icon.dataset.iconMime = o.iconMime
@@ -913,13 +917,6 @@ function renderCard(
 
   const title = tag("title")
   const { sha: iconSha, mime: iconMime } = resolveCardIcon(evt)
-  const seenOnRelays = Array.from(pool.seenOn.get(evt.id) || []).map((r: any) => r.url)
-  const naddr = naddrEncode({
-    pubkey: evt.pubkey,
-    kind: NSITE_NAMED_KIND,
-    identifier: dTag,
-    relays: seenOnRelays
-  })
 
   // Assigned after renderAppCard() returns; menu/buttons close over it.
   let card: HTMLElement
@@ -1066,9 +1063,7 @@ function renderCard(
           onOpenDetail({
             buildCard: () => renderCard(evt, ctx, relays),
             event: evt,
-            nappId,
-            naddr,
-            seenOnRelays
+            nappId
           })
       : undefined
   })
@@ -1086,37 +1081,50 @@ function computeNappId(evt: any) {
 }
 
 // Conventional icon filenames to fall back to when no icon is declared.
-const ICON_FALLBACK_PATHS = [
-  "/icon.svg",
-  "/favicon.svg",
-  "/icon.png",
-  "/favicon.png",
-  "/apple-touch-icon.png",
-  "/icon-192.png",
-  "/favicon.ico"
+// Conventional icon filenames to look for when a manifest declares no usable
+// `icon` tag. Matched by BASENAME (so an icon in a subfolder still counts);
+// apple-touch-icon is handled separately (preferred, any size/path).
+const ICON_FALLBACK_NAMES = [
+  "icon.svg",
+  "favicon.svg",
+  "icon.png",
+  "favicon.png",
+  "icon-192.png",
+  "favicon.ico"
 ]
 
 // Resolve a discover card's icon to a blossom sha (loadIcons fetches it from the
 // author's blossom servers). The `icon` tag may hold a blossom sha OR a path
 // (e.g. "/icon.svg" from metadata.json) — for a path we map it to the file's sha
-// via the manifest's `path` tags. With no usable icon tag we fall back to a
-// conventional icon file among the manifest's paths.
+// via the manifest's `path` tags. With no usable icon tag we look through the
+// manifest's files BY FILENAME (so icons in subfolders are found, not just at
+// the root), preferring an apple-touch-icon, then a conventional favicon name.
 function resolveCardIcon(evt: any): { sha: string | null; mime: string | null } {
   const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
-  // Match regardless of a leading slash on either side (manifests vary).
-  const findPath = (p: string) => {
+  const basename = (p: any) => String(p).replace(/^.*\//, "").toLowerCase()
+  // Match the full declared path (manifests vary on the leading slash).
+  const byFullPath = (p: string) => {
     const want = String(p).replace(/^\//, "")
     return pathTags.find((t: any) => String(t[1]).replace(/^\//, "") === want)
   }
+  const byName = (name: string) => pathTags.find((t: any) => basename(t[1]) === name)
+
   const iconTag = evt.tags.find((t: any) => t[0] === "icon" && t[1])
   if (iconTag) {
     const val = iconTag[1] as string
     if (/^[0-9a-f]{64}$/i.test(val)) return { sha: val, mime: iconTag[2] || null }
-    const pt = findPath(val)
+    // The declared path may not match exactly (root vs subfolder); fall back to
+    // its filename anywhere in the manifest.
+    const pt = byFullPath(val) || byName(basename(val))
     if (pt) return { sha: pt[2], mime: pt[3] || null }
   }
-  for (const candidate of ICON_FALLBACK_PATHS) {
-    const pt = findPath(candidate)
+
+  // Prefer an apple-touch-icon (a real app icon), wherever it lives.
+  const apple = pathTags.find((t: any) => basename(t[1]).startsWith("apple-touch-icon"))
+  if (apple) return { sha: apple[2], mime: apple[3] || null }
+
+  for (const name of ICON_FALLBACK_NAMES) {
+    const pt = byName(name)
     if (pt) return { sha: pt[2], mime: pt[3] || null }
   }
   return { sha: null, mime: null }
@@ -1255,8 +1263,6 @@ interface DetailReq {
   buildCard: () => HTMLElement
   event: any | null
   nappId: string
-  naddr?: string | null
-  seenOnRelays?: string[]
 }
 
 // Images section (manifest `image` tags); null when there are none.
@@ -1280,56 +1286,105 @@ function detailImages(event: any | null): HTMLElement | null {
 }
 
 // Remaining info section: id, naddr, relays-seen-on, categories/hashtags, source.
+// Everything here is derived from the manifest event (the same event whether the
+// app was opened from Discover or Installed), so both tabs show identical info.
+// `id` is the only field without an event; the rest only render when present.
 function detailInfo(req: DetailReq): HTMLElement {
   const section = document.createElement("div")
   section.className = "apps-detail-info"
-  section.appendChild(infoRow("id", code(req.nappId)))
-  if (req.naddr) section.appendChild(infoRow("naddr", code(req.naddr)))
 
-  if (req.seenOnRelays?.length) {
-    const chips = document.createElement("div")
-    chips.className = "apps-chips"
-    for (const r of req.seenOnRelays) {
-      const chip = document.createElement("span")
-      chip.className = "apps-chip apps-chip-relay"
-      chip.textContent = r.replace(/^wss?:\/\//, "")
-      chip.title = r
-      chips.appendChild(chip)
-    }
-    section.appendChild(chips)
-  }
+  // id — value only, no label.
+  section.appendChild(detailField("id", code(req.nappId)))
 
   const event = req.event
   if (event) {
-    const cats = event.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
-    const hashtags = event.tags.filter((t: any) => t[0] === "t" && t[1]).map((t: any) => t[1])
-    if (cats.length || hashtags.length) {
-      const chips = document.createElement("div")
-      chips.className = "apps-chips"
-      for (const cat of cats) {
-        const chip = document.createElement("span")
-        chip.className = "apps-chip apps-chip-category"
-        chip.textContent = formatCategory(cat)
-        chip.title = cat
-        chips.appendChild(chip)
-      }
-      for (const t of hashtags) {
-        const chip = document.createElement("span")
-        chip.className = "apps-chip apps-chip-tag"
-        chip.textContent = `#${t}`
-        chips.appendChild(chip)
-      }
-      section.appendChild(chips)
+    // Relays the event was seen on (from the shared pool) — empty for a purely
+    // local install that was never discovered. Also feeds the naddr relay hints.
+    const seenOn = Array.from(pool.seenOn.get(event.id) || []).map((r: any) => r.url)
+
+    // Action buttons (not raw values): copy the naddr, route the raw event to a
+    // viewer through the action handler, and open the source.
+    const btns = document.createElement("div")
+    btns.className = "apps-detail-btns"
+
+    const dTag = event.tags.find((t: any) => t[0] === "d")?.[1]
+    if (dTag) {
+      const naddr = naddrEncode({
+        pubkey: event.pubkey,
+        kind: event.kind,
+        identifier: dTag,
+        relays: seenOn
+      })
+      const copyBtn = button({ label: "copy naddr", variant: "outline", class: "apps-detail-naddr" })
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(naddr)
+          copyBtn.textContent = "copied!"
+          setTimeout(() => (copyBtn.textContent = "copy naddr"), 1500)
+        } catch {}
+      })
+      btns.appendChild(copyBtn)
+      btns.appendChild(
+        button({
+          label: "view event",
+          variant: "outline",
+          class: "apps-detail-view-event",
+          onClick: () => dispatchAction("apps", `view:${event.kind}`, event).catch(() => {})
+        })
+      )
     }
 
     const source = event.tags.find((t: any) => t[0] === "source")?.[1]
     if (source) {
-      const a = document.createElement("a")
-      a.href = source
-      a.target = "_blank"
-      a.rel = "noopener noreferrer"
-      a.textContent = source
-      section.appendChild(infoRow("source", a))
+      btns.appendChild(
+        button({
+          label: "view source",
+          variant: "outline",
+          class: "apps-detail-view-source",
+          onClick: () => window.open(source, "_blank", "noopener,noreferrer")
+        })
+      )
+    }
+
+    if (btns.childElementCount) section.appendChild(btns)
+
+    // seen-on relays — a labelled <ul>, not chips.
+    if (seenOn.length) {
+      const row = document.createElement("div")
+      row.className = "apps-detail-relays"
+      const label = document.createElement("span")
+      label.className = "apps-detail-label"
+      label.textContent = "seen on:"
+      const list = document.createElement("ul")
+      for (const r of seenOn) {
+        const li = document.createElement("li")
+        li.textContent = r.replace(/^wss?:\/\//, "")
+        li.title = r
+        list.appendChild(li)
+      }
+      row.append(label, list)
+      section.appendChild(row)
+    }
+
+    const cats: string[] = event.tags
+      .filter((t: any) => t[0] === "l" && t[1])
+      .map((t: any) => t[1])
+    if (cats.length) {
+      section.appendChild(
+        chipGroup(
+          "categories",
+          cats.map(c => detailChip("apps-chip-category", formatCategory(c), c))
+        )
+      )
+    }
+
+    const hashtags: string[] = event.tags
+      .filter((t: any) => t[0] === "t" && t[1])
+      .map((t: any) => t[1])
+    if (hashtags.length) {
+      section.appendChild(
+        chipGroup("tags", hashtags.map(t => detailChip("apps-chip-tag", `#${t}`)))
+      )
     }
   }
   return section
@@ -1340,26 +1395,20 @@ function detailInfo(req: DetailReq): HTMLElement {
 function detailFiles(event: any | null): HTMLElement | null {
   const pathTags = (event?.tags || []).filter((t: any) => t[0] === "path" && t[1] && t[2])
   if (!pathTags.length) return null
-  const details = document.createElement("details")
-  details.className = "apps-detail-files-block"
-  const summary = document.createElement("summary")
-  summary.textContent = `files (${pathTags.length})`
-  details.appendChild(summary)
-  const host = document.createElement("div")
-  host.className = "apps-detail"
-  details.appendChild(host)
+  const block = details({ summary: `files (${pathTags.length})` })
+  const list = document.createElement("ul")
+  list.className = "apps-detail-files"
+  block.appendChild(list)
   let loaded = false
-  details.addEventListener("toggle", () => {
-    if (!details.open || loaded) return
+  block.addEventListener("toggle", () => {
+    if (!block.open || loaded) return
     loaded = true
-    renderFilesHtml(event).then(html => {
-      host.innerHTML = html
-    })
+    renderFiles(event, list)
   })
-  return details
+  return block
 }
 
-async function renderFilesHtml(evt: any): Promise<string> {
+async function renderFiles(evt: any, list: HTMLElement) {
   const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
   const serverTagUrls = evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1])
   const blossomServers = (
@@ -1367,25 +1416,36 @@ async function renderFilesHtml(evt: any): Promise<string> {
   ).items
   const servers = [...new Set([...serverTagUrls, ...blossomServers])].map(normalizeServer)
 
-  return `
-    <ul class="apps-detail-files">
-      ${pathTags
-        .map((t: string[]) => {
-          const path = t[1]
-          const sha = t[2]
-          return `<li><code>${esc(path)}</code> ${servers
-            .map(url => {
-              let host = url
-              try {
-                host = new URL(url).host
-              } catch {}
-              return `<a href="${url}/${sha}" target="_blank" rel="noopener noreferrer">${esc(host)}</a>`
-            })
-            .join(" ")}</li>`
-        })
-        .join("")}
-    </ul>
-  `
+  for (const t of pathTags as string[][]) {
+    const sha = t[2]
+    const li = document.createElement("li")
+    const pathCode = document.createElement("code")
+    pathCode.textContent = t[1]
+    li.appendChild(pathCode)
+
+    // The per-file links are folded behind a "links" button: clicking it builds
+    // the blossom links for this file and swaps itself out for them.
+    const linksBtn = button({ label: "links", variant: "link", class: "apps-detail-files-links-btn" })
+    linksBtn.addEventListener("click", () => {
+      const span = document.createElement("span")
+      span.className = "apps-detail-files-links"
+      for (const url of servers) {
+        const a = document.createElement("a")
+        a.href = `${url}/${sha}`
+        a.target = "_blank"
+        a.rel = "noopener noreferrer"
+        try {
+          a.textContent = new URL(url).host
+        } catch {
+          a.textContent = url
+        }
+        span.appendChild(a)
+      }
+      linksBtn.replaceWith(span)
+    })
+    li.appendChild(linksBtn)
+    list.appendChild(li)
+  }
 }
 
 function normalizeServer(s: string): string {
@@ -1399,20 +1459,38 @@ function code(text: string): HTMLElement {
   return c
 }
 
-function infoRow(label: string, value: Node): HTMLElement {
+// A field, addressable via .apps-detail-<key> (e.g. .apps-detail-id). The
+// .apps-detail-label is added only when a label is given; the value always gets
+// .apps-detail-value.
+function detailField(key: string, value: HTMLElement, label?: string): HTMLElement {
   const row = document.createElement("div")
-  row.className = "apps-detail-row"
-  const l = document.createElement("span")
-  l.textContent = `${label}:`
-  row.append(l, document.createTextNode(" "), value)
+  row.className = `apps-detail-${key}`
+  if (label) {
+    const l = document.createElement("span")
+    l.className = "apps-detail-label"
+    l.textContent = label
+    row.appendChild(l)
+  }
+  value.classList.add("apps-detail-value")
+  row.appendChild(value)
   return row
 }
 
-function esc(s: string): string {
-  return String(s).replace(
-    /[&<>"']/g,
-    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string
-  )
+// A row of chips, addressable via .apps-detail-<key> (keeps .apps-chips for the
+// shared chip layout).
+function chipGroup(key: string, chips: HTMLElement[]): HTMLElement {
+  const group = document.createElement("div")
+  group.className = `apps-detail-${key} apps-chips`
+  for (const c of chips) group.appendChild(c)
+  return group
+}
+
+function detailChip(variant: string, text: string, title?: string): HTMLElement {
+  const el = document.createElement("span")
+  el.className = `apps-chip ${variant}`
+  el.textContent = text
+  if (title) el.title = title
+  return el
 }
 
 function formatCategory(label: string) {
