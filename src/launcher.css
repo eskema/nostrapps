@@ -1532,7 +1532,7 @@ body.napp-resizing .napp-body iframe {
   /* display: inline-block; */
 }
 
-.apps-detail-author {
+/* .apps-detail-author {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -1546,19 +1546,14 @@ body.napp-resizing .napp-body iframe {
   border-radius: 50%;
   background: color-mix(in srgb, currentColor 15%, transparent);
   margin-right: .2rem;
-}
+} */
 
-.apps-detail-author-pic::part(img) {
+/* .apps-detail-author-pic::part(img) {
   width: 14px;
   height: 14px;
   border-radius: 50%;
   object-fit: cover;
-}
-
-.apps-detail-author-name {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-}
+} */
 
 /* database */
 .db-panel {
@@ -1760,14 +1755,14 @@ body.napp-resizing .napp-body iframe {
   grid-template-areas:
     
     
-    "icon author actions"
+    "icon handlers actions"
     "title title title"
     /* "icon title title" */
     /* "author author actions" */
     /* "title title title" */
     "about about about"
-    /* "author author author" */
-    "handlers handlers handlers"
+    "author author author"
+    /* "handlers handlers handlers" */
     
     /* "actions actions actions" */
     /* "handlers handlers handlers" */
@@ -1875,9 +1870,15 @@ body.napp-resizing .napp-body iframe {
   /* border-bottom: 1px dotted color-mix(in srgb, var(--text) 100%, transparent); */
 }
 
+.apps-author:not(.apps-author-label)::before {
+  content: "from ";
+}
+
+.apps-author:not(.apps-author-label)::before,
 .apps-author-label {
-  font-size: 1rem;
-  /* font-weight: 400; */
+  font-family: var(--font-serif);
+  font-size: .75rem;
+  font-weight: 600;
 }
 
 .apps-content .apps-author-pic {
@@ -1894,8 +1895,10 @@ body.napp-resizing .napp-body iframe {
 }
 
 .apps-author-name {
-  font-size: 1rem;
-  line-height: 1;
+  /* font-size: 1rem;
+  line-height: 1; */
+  font-weight: 600;
+  font-family: var(--font-mono);
 }
 
 .apps-card .apps-date {
@@ -1916,8 +1919,10 @@ body.napp-resizing .napp-body iframe {
 }
 
 .apps-handler {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
+  /* font-family: var(--font-mono); */
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05rem;
   /* padding: 0.12rem 0.4rem; */
   /* border-radius: 999px; */
   /* border: 1px solid color-mix(in srgb, currentColor 18%, transparent); */
