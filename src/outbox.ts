@@ -7,6 +7,9 @@ import { getStore } from "./store"
 export const FALLBACK_RELAYS = ["relay.damus.io", "relay.primal.net", "nos.lol"]
 const DEFAULT_KINDS = [1, 1111]
 
+// Initialized on the next macrotask, so it's `undefined` during the synchronous
+// boot/restore pass. Callers must guard (`outbox?.…`) — e.g. stopOutbox() runs
+// while a settings window is being restored before this timer fires.
 export let outbox: OutboxManager
 setTimeout(() => {
   outbox = new OutboxManager(getStore(), {
@@ -42,14 +45,14 @@ let refreshTimer: ReturnType<typeof setInterval> | undefined
 function restart() {
   if (!liveTargets.length) return
   resetPromises()
-  outbox.close()
+  outbox?.close()
   startInternal()
 }
 
 export function stopOutbox() {
   controller?.abort()
   controller = undefined
-  outbox.close()
+  outbox?.close()
   clearInterval(refreshTimer)
   refreshTimer = undefined
   liveTargets = []
@@ -84,7 +87,7 @@ export function onStarted(cb: (len: number) => void) {
 
 export async function startOutbox(pubkey: string) {
   controller?.abort()
-  outbox.close()
+  outbox?.close()
   clearInterval(refreshTimer)
   refreshTimer = undefined
 
