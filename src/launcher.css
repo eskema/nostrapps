@@ -1325,61 +1325,6 @@ body.napp-resizing .napp-body iframe {
   gap: 0.6rem;
 }
 
-/* settings */
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-/* Build stamp — de-emphasized via opacity, not a smaller font. */
-/* Footer row: build stamp on the left, reset button pushed to the right. */
-.settings-build-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-top: 0.4rem;
-}
-
-.settings-build {
-  font-family: var(--font-mono);
-  font-size: .75rem;
-  opacity: 0.5;
-  user-select: text;
-  margin-right: auto;
-}
-
-.settings-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.settings-label {
-  flex-shrink: 0;
-  width: 5rem;
-  opacity: 0.6;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.settings-account {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.settings-pubkey {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  opacity: 0.8;
-}
-
-.settings-pubkey:empty {
-  display: none;
-}
-
 /* logs */
 .logs-view {
   list-style: none;
@@ -1777,37 +1722,20 @@ body.napp-resizing .napp-body iframe {
 
 .perm-decision {
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 0.7rem;
-  padding: 0.1rem 0.45rem;
-  border-radius: 999px;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+  /* border-radius: 999px; */
 }
 
 .perm-allow {
-  background: color-mix(in srgb, #38a169 25%, transparent);
-  color: color-mix(in srgb, currentColor 85%, #38a169);
+  /* background: color-mix(in srgb, #38a169 25%, transparent); */
+  color: color-mix(in srgb, #38a169 85%, transparent);
 }
 
 .perm-deny {
-  background: color-mix(in srgb, #e53e3e 25%, transparent);
-  color: color-mix(in srgb, currentColor 85%, #e53e3e);
-}
-
-.perm-group-head button,
-.perm-row button {
-  padding: 0.2rem 0.55rem;
-  font-size: 0.75rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.perm-group-head button:hover,
-.perm-row button:hover {
-  background: var(--text);
-  color: var(--surface);
+  /* background: color-mix(in srgb, #e53e3e 25%, transparent); */
+  color: color-mix(in srgb, #e53e3e 65%, transparent);
 }
 
 /* suggestions: slash commands */
@@ -2086,18 +2014,62 @@ body.napp-resizing .napp-body iframe {
    summary. Used by the apps-store file list and the settings permission/action
    sections. details() in system-napps/ui.ts. */
 .ui-details {
-  padding: 0.5rem 0;
+  margin: 0.5rem 0;
+  /* overflow: hidden; */
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  /* border-radius: 6px 6px 0 0; */
+  transition: all .2s ease-in-out;
+  /* border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); */
+}
+
+.ui-details[open] {
+  /* border-radius: 6px 6px 0 0; */
+  /* background: color-mix(in srgb, var(--text) 10%, transparent); */
+  /* border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border: none; */
+  /* border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent); */
+  /* padding: .2rem; */
+  /* padding-top: 0; */
+  /* border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent); */
+  padding-bottom: 1rem;
+  /* border-bottom: 1px solid color-mix(in srgb, var(--text) 20%, transparent); */
 }
 
 .ui-details > summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
   cursor: pointer;
+  /* text-transform: uppercase; */
   font-family: var(--font-serif);
+  font-size: 1.2rem;
   font-weight: 700;
   user-select: none;
+  padding: .4rem .6rem;
+  padding-left: 0;
+  opacity: .4;
+  /* border-radius: 2px; */
+}
+
+.ui-details[open] > summary {
+  /* background: color-mix(in srgb, var(--text) 5%, transparent); */
+  margin-bottom: .5rem;
+  /* padding-left: .4rem; */
+  /* padding: 0 .2rem; */
+  /* opacity: .6; */
+}
+
+.ui-details > summary::after {
+  content: "+";
+}
+
+.ui-details[open] > summary::after {
+  content: "–";
 }
 
 .ui-details > summary:hover {
   opacity: 1;
+  /* background: color-mix(in srgb, var(--text) 10%, transparent); */
+  /* padding-left: .4rem; */
 }
 
 /* Discover card: everything past the head collapses into this <details>, so
@@ -2474,9 +2446,54 @@ body.napp-resizing .napp-body iframe {
 }
 
 /* ─── settings: account section ────────────────────────────────── */
+
+.settings-panel {
+  /* display: flex;
+  flex-direction: column;
+  gap: 0.5rem; */
+}
+
+/* Build stamp — de-emphasized via opacity, not a smaller font. */
+/* Footer row: build stamp on the left, reset button pushed to the right. */
+.settings-build-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.settings-build {
+  font-family: var(--font-mono);
+  font-size: .75rem;
+  opacity: 0.5;
+  user-select: text;
+  margin-right: auto;
+}
+
+.settings-account {
+  /* display: inline-flex;
+  align-items: center;
+  gap: 0.5rem; */
+}
+
+.settings-pubkey {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  /* font-size: 0.8rem; */
+  opacity: 0.6;
+}
+
+.settings-pubkey:hover {
+  opacity: 1;
+}
+
+.settings-pubkey:empty {
+  display: none;
+}
+
 .settings-account-connected {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 0.4rem;
 }
@@ -2485,7 +2502,11 @@ body.napp-resizing .napp-body iframe {
   display: grid;
   grid-template-columns: auto auto;
   align-items: center;
-  gap: 0.4rem;
+  grid-gap: 0.4rem;
+}
+
+.settings-account-disconnected .btn {
+  white-space: pre;
 }
 
 /* The bunker form expands across both columns of the disconnected row. */
@@ -2500,13 +2521,13 @@ body.napp-resizing .napp-body iframe {
 }
 
 .settings-account-type {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   opacity: 0.6;
   padding: 0.05rem 0.4rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  /* border-radius: 999px; */
+  /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
 }
 
 /* The google button + its error sit on their own row of the disconnected

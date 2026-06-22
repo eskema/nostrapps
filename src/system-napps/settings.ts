@@ -13,13 +13,13 @@ import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
-import { details } from "./ui.js"
+import { button, details } from "./ui.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
     <div class="settings-panel">
-      <div class="settings-row settings-account-row">
-        <span class="settings-label">User</span>
+      <details class="ui-details settings-user" open>
+        <summary>user</summary>
         <div class="settings-account">
           <div class="settings-account-connected" hidden>
             <nostr-name class="settings-pubkey" style="cursor:pointer"></nostr-name>
@@ -53,11 +53,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
             </form>
           </div>
         </div>
-      </div>
-
-      <hr class="settings-separator" />
-
-      <div class="settings-sections"></div>
+      </details>
 
       <div class="settings-build-row">
         <span class="settings-build">build ${APP_VERSION}</span>
@@ -187,21 +183,25 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
 
   // ─── Permissions + actions (collapsible disclosures) ────────────
 
-  const sectionsEl = container.querySelector(".settings-sections") as HTMLElement
+  const panel = container.querySelector(".settings-panel") as HTMLElement
+  const buildRow = container.querySelector(".settings-build-row") as HTMLElement
 
-  const permDetails = details({ summary: "permissions" })
+  const permDetails = details({ summary: "permissions", class: "settings-permissions" })
   const permSummary = permDetails.querySelector("summary") as HTMLElement
   const decisionsEl = document.createElement("div")
   decisionsEl.className = "perm-list"
   permDetails.appendChild(decisionsEl)
 
-  const actionsDetails = details({ summary: "actions" })
+  const actionsDetails = details({ summary: "actions", class: "settings-actions" })
   const actionsSummary = actionsDetails.querySelector("summary") as HTMLElement
   const handlersEl = document.createElement("div")
   handlersEl.className = "perm-list"
   actionsDetails.appendChild(handlersEl)
 
-  sectionsEl.append(permDetails, actionsDetails)
+  // Sections live directly on the root panel (user · permissions · actions),
+  // inserted before the build/reset footer.
+  panel.insertBefore(permDetails, buildRow)
+  panel.insertBefore(actionsDetails, buildRow)
 
   function renderDecisions() {
     decisionsEl.innerHTML = ""
@@ -225,10 +225,12 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       name.className = "perm-napp-id"
       name.textContent = nappId
       head.appendChild(name)
-      const clearAll = document.createElement("button")
-      clearAll.type = "button"
-      clearAll.textContent = "forget all"
-      clearAll.addEventListener("click", () => perms.forgetDecision(nappId))
+      const clearAll = button({
+        label: "forget all",
+        variant: "outline",
+        class: "perm-forget-all",
+        onClick: () => perms.forgetDecision(nappId)
+      })
       head.appendChild(clearAll)
       group.appendChild(head)
 
@@ -241,10 +243,12 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
         const d = document.createElement("span")
         d.className = `perm-decision perm-${decision}`
         d.textContent = decision
-        const f = document.createElement("button")
-        f.type = "button"
-        f.textContent = "forget"
-        f.addEventListener("click", () => perms.forgetDecision(nappId, method))
+        const f = button({
+          label: "forget",
+          variant: "outline",
+          class: "perm-forget",
+          onClick: () => perms.forgetDecision(nappId, method)
+        })
         row.append(m, d, f)
         group.appendChild(row)
       }
