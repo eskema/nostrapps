@@ -601,6 +601,7 @@ export function launchSystem(
   if (singleton) systemSingletons.set(sysId, instanceId)
   ensureStageObserver(stageEl)
   clampToStage(win.root, stageEl)
+  captureWindowGeom(win.root)
   return win
 }
 
@@ -674,6 +675,7 @@ function mount(
   resetInstanceRuntimeState(instanceId, "Window remounted before action registered")
   ensureStageObserver(stageEl)
   clampToStage(win.root, stageEl)
+  captureWindowGeom(win.root)
   return win
 }
 
@@ -743,6 +745,7 @@ export function mountWithLoading(
   resetInstanceRuntimeState(instanceId, "Loading window created")
   ensureStageObserver(stageEl)
   clampToStage(win.root, stageEl)
+  captureWindowGeom(win.root)
   return win
 }
 
@@ -756,8 +759,86 @@ export function mountWithLoading(
 // are covered (no empty space). For N > 12 we grow the grid in rows so the
 // column width stays consistent.
 const TILE_GAP = 8
-const TILE_BASE_COLS = 4
-const TILE_BASE_ROWS = 3
+
+// The pack/tile grid steps down with the stage width so cells never get too
+// narrow. We skip ODD column counts on purpose: a 2-of-4-column window (half
+// width) maps cleanly to 1-of-2, whereas 1.5-of-3 would round and leave a gap.
+// So columns only halve: 4 → 2. Below ~760px inner the windows switch to the
+// mobile flow layout (CSS @media), which is what a 1-column grid would be — no
+// point maintaining both.
+function gridForWidth(innerW: number): { cols: number; rows: number } {
+  if (innerW >= 1080) return { cols: 4, rows: 3 }
+  return { cols: 2, rows: 2 }
+}
+// Grid the windows were last packed at — the resize observer re-packs only when
+// a width change steps to a DIFFERENT grid; within a band it rescales smoothly.
+let lastPackGrid: { cols: number; rows: number } = { cols: 0, rows: 0 }
+
+// Remembered pack layout per grid config, so narrowing then widening returns to
+// the SAME layout instead of re-deriving from pixels (at 1×1 every window is
+// full-width, which would otherwise read as full-width at every wider grid).
+// Keyed "<cols>x<rows>" → instanceId → cell. A snapshot is reused when its grid
+// is revisited only if it still covers the current window set; otherwise we
+// re-pack and overwrite it (which also handles windows opening/closing).
+const packLayouts = new Map<string, Map<string, PackCell>>()
+
+function gridKey(g: { cols: number; rows: number }) {
+  return `${g.cols}x${g.rows}`
+}
+
+function isPackable(root: HTMLElement): boolean {
+  return (
+    root.isConnected &&
+    !root.classList.contains("space-inactive") &&
+    !root.classList.contains("minimized") &&
+    !root.classList.contains("maximized") &&
+    getComputedStyle(root).position !== "static"
+  )
+}
+
+// Snapshot each packable window's current cell, keyed by instanceId.
+function snapshotCells(stageEl: HTMLElement): Map<string, PackCell> {
+  const out = new Map<string, PackCell>()
+  for (const [root, cell] of capturePackSnapshot(stageEl) as Map<HTMLElement, PackCell>) {
+    const id = root.dataset.instanceId
+    if (id) out.set(id, cell)
+  }
+  return out
+}
+
+// Does a stored layout include every packable window currently on the stage?
+function packLayoutCovers(snap: Map<string, PackCell>): boolean {
+  let n = 0
+  for (const w of openWindows.values()) {
+    if (!isPackable(w.root)) continue
+    n++
+    const id = w.root.dataset.instanceId
+    if (!id || !snap.has(id)) return false
+  }
+  return n > 0
+}
+
+// Re-apply a stored layout. Cells are grid-relative; pixels follow the current
+// cell size, so the layout scales to whatever width we're at within this grid.
+function applyPackLayout(stageEl: HTMLElement, snap: Map<string, PackCell>) {
+  const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
+  if (innerW <= 0 || innerH <= 0) return
+  const { cols: COLS, rows: ROWS } = gridForWidth(innerW)
+  const cellW = innerW / COLS
+  const cellH = innerH / ROWS
+  for (const w of openWindows.values()) {
+    if (!isPackable(w.root)) continue
+    const cell = w.root.dataset.instanceId ? snap.get(w.root.dataset.instanceId) : undefined
+    if (cell) applyCellRect(w, cell.col, cell.row, cell.cols, cell.rows, padL, padT, cellW, cellH)
+  }
+}
+
+// Drop all remembered layouts. Called when the user makes a real geometry edit
+// (drag/resize) — that invalidates the OTHER grids' snapshots; the grid being
+// edited is re-recorded by the re-pack that follows the edit.
+export function invalidatePackLayouts() {
+  packLayouts.clear()
+}
 
 // Snapshot every visible window's current cell. Used at drag start so the
 // live-pack can default to the pre-drag layout: as long as the dragged
@@ -767,9 +848,9 @@ export function capturePackSnapshot(stageEl: HTMLElement) {
   if (!stageEl) return new Map()
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return new Map()
-  const COLS = TILE_BASE_COLS
+  const { cols: COLS, rows: ROWS } = gridForWidth(innerW)
   const cellW = innerW / COLS
-  const cellH = innerH / TILE_BASE_ROWS
+  const cellH = innerH / ROWS
   const map = new Map()
   for (const w of openWindows.values()) {
     if (!w.root || !w.root.isConnected) continue
@@ -802,9 +883,9 @@ export function packCellSnap(
 ) {
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return null
-  const COLS = TILE_BASE_COLS
+  const { cols: COLS, rows: ROWS } = gridForWidth(innerW)
   const cellW = innerW / COLS
-  const cellH = innerH / TILE_BASE_ROWS
+  const cellH = innerH / ROWS
   const cols = Math.max(1, Math.min(COLS, Math.round(widthPx / cellW)))
   const rows = Math.max(1, Math.round(heightPx / cellH))
   const col = Math.max(0, Math.min(COLS - cols, Math.round((leftPx - padL) / cellW)))
@@ -865,9 +946,15 @@ export function bestFitPack(
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
   if (innerW <= 0 || innerH <= 0) return
 
-  const COLS = TILE_BASE_COLS
+  const { cols: COLS, rows: ROWS } = gridForWidth(innerW)
+  // Grid stepped since the last pack (e.g. 4×3 → 2×2)? Then each window's
+  // pixel-derived cell is stale and doesn't translate to the new grid, so we
+  // pack compactly in reading order instead of honoring those cells (which
+  // would leave gaps and open needless new rows).
+  const gridChanged = COLS !== lastPackGrid.cols || ROWS !== lastPackGrid.rows
+  lastPackGrid = { cols: COLS, rows: ROWS }
   const cellW = innerW / COLS
-  const cellH = innerH / TILE_BASE_ROWS
+  const cellH = innerH / ROWS
 
   const all = Array.from(openWindows.values()).filter(w => {
     if (!w.root || !w.root.isConnected) return false
@@ -965,6 +1052,16 @@ export function bestFitPack(
     return { col, row, cols, rows }
   }
 
+  // On a grid step, order items top-left → bottom-right so compaction fills the
+  // grid in reading order (a window that was top-left stays top-left, etc.).
+  if (gridChanged) {
+    items.sort((a, b) => {
+      const ca = cellFromPx(a)
+      const cb = cellFromPx(b)
+      return ca.row - cb.row || ca.col - cb.col
+    })
+  }
+
   // Add the transition class to items so neighbors slide smoothly. The
   // focused window is excluded — during a live drag it's controlled by
   // transform, and we don't want its left/top change on drop to animate
@@ -1025,7 +1122,7 @@ export function bestFitPack(
     const original = snapshot?.get(item.root)
     const desired = isNew ? { col: 0, row: 0, cols: 1, rows: 2 } : (original ?? cellFromPx(item))
     let placed = null
-    if (!isNew) {
+    if (!isNew && !gridChanged) {
       // 1. Try the exact desired cell.
       if (fits(desired.col, desired.row, desired.cols, desired.rows)) {
         placed = {
@@ -1060,12 +1157,13 @@ export function bestFitPack(
         placed = shrinkAroundFocus(desired, focusCell, fits)
       }
     }
-    // 3. Last resort. New windows append via top-left first-fit (earliest gap).
-    //    A displaced EXISTING window instead takes the free cell NEAREST its
-    //    desired spot, so it shifts locally into a nearby gap (e.g. its own
-    //    just-vacated cell) rather than teleporting to the top-left — which can
-    //    grab a not-yet-placed window's cell and cascade a third window.
-    if (!placed && isNew) {
+    // 3. Last resort. New windows AND grid-step repacks use top-left first-fit
+    //    (earliest gap) so the grid fills compactly with no stray rows. A
+    //    displaced EXISTING window (same grid) instead takes the free cell
+    //    NEAREST its desired spot, so it shifts locally into a nearby gap rather
+    //    than teleporting to the top-left — which can grab a not-yet-placed
+    //    window's cell and cascade a third window.
+    if (!placed && (isNew || gridChanged)) {
       for (let r = 0; r < 1000 && !placed; r++) {
         for (let c = 0; c <= COLS - desired.cols; c++) {
           if (fits(c, r, desired.cols, desired.rows)) {
@@ -1115,6 +1213,10 @@ export function bestFitPack(
     }
   }
   setStageBottomSpacer(stageEl, lastRow ? padT + lastRow * cellH - TILE_GAP / 2 : 0)
+
+  // Remember this layout so revisiting the grid restores it (instead of guessing
+  // from pixels). Read-back via the same px the layout just wrote.
+  packLayouts.set(gridKey({ cols: COLS, rows: ROWS }), snapshotCells(stageEl))
 }
 
 // Try to fit `desired` around `focus` by trimming one of the four sides
@@ -1242,11 +1344,10 @@ export function tileWindows(stageEl: HTMLElement) {
   const shuffled = shuffle(wins.slice())
   const n = shuffled.length
 
-  // Pick grid dimensions: 4×3 base, growing rows so we always have enough
-  // cells (one per window minimum). Columns stay at 4 so cell width is
-  // predictable.
-  const cols = TILE_BASE_COLS
-  const rows = Math.max(TILE_BASE_ROWS, Math.ceil(n / cols))
+  // Grid dimensions step down with the stage width (4×3 → 3×3 → 2×2 → 1×1),
+  // then grow rows so we always have enough cells (one per window minimum).
+  const { cols, rows: baseRows } = gridForWidth(innerW)
+  const rows = Math.max(baseRows, Math.ceil(n / cols))
   const gridRects = partitionGrid({ col: 0, row: 0, cols, rows }, Math.min(n, cols * rows))
 
   const cellW = innerW / cols
@@ -1408,6 +1509,65 @@ export function getStageBounds(stage: HTMLElement) {
   }
 }
 
+// ─── viewport-relative geometry (recompose on resize) ──────────────────
+// A window's geometry is kept as a REFERENCE pixel rect plus the stage inner
+// size it was set against. On stage resize we re-derive pixels proportionally
+// from that reference, so windows reposition AND resize with the viewport
+// instead of keeping fixed pixels (which clip on a smaller stage).
+//
+// The reference is the source of truth: captured at every geometry COMMIT (via
+// the window's notifyState) and never re-read from a render, so it survives any
+// number of resizes without drift. Windows scale fully (no size floor) so they
+// keep their relative layout and never overlap a neighbour on a smaller stage.
+type GeomRef = {
+  left: number
+  top: number
+  width: number
+  height?: number
+  innerW: number
+  innerH: number
+}
+const windowGeomRef = new WeakMap<HTMLElement, GeomRef>()
+
+export function captureWindowGeom(root: HTMLElement) {
+  const stage = root.parentElement
+  // Mobile (static flow) and detached windows have no meaningful pixel geometry.
+  if (!stage || getComputedStyle(root).position === "static") return
+  const { width: iw, height: ih } = getStageBounds(stage)
+  if (iw <= 0 || ih <= 0) return
+  const h = parseFloat(root.style.height)
+  windowGeomRef.set(root, {
+    left: parseFloat(root.style.left) || 0,
+    top: parseFloat(root.style.top) || 0,
+    // Prefer the inline width (the intended size) over offsetWidth, which a
+    // maximized window reports as the CSS-inset full size.
+    width: parseFloat(root.style.width) || root.offsetWidth || 0,
+    height: Number.isFinite(h) && h > 0 ? h : undefined,
+    innerW: iw,
+    innerH: ih
+  })
+}
+
+export function rescaleWindowGeom(root: HTMLElement) {
+  const stage = root.parentElement
+  if (!stage || getComputedStyle(root).position === "static") return
+  const ref = windowGeomRef.get(root)
+  if (!ref) {
+    captureWindowGeom(root) // first sight: nothing to scale from yet
+    return
+  }
+  const { width: iw, height: ih, padL, padT } = getStageBounds(stage)
+  if (iw <= 0 || ih <= 0 || ref.innerW <= 0 || ref.innerH <= 0) return
+  const sx = iw / ref.innerW
+  const sy = ih / ref.innerH
+  root.style.left = `${Math.round(padL + (ref.left - padL) * sx)}px`
+  root.style.top = `${Math.round(padT + (ref.top - padT) * sy)}px`
+  root.style.width = `${Math.round(ref.width * sx)}px`
+  if (ref.height != null) {
+    root.style.height = `${Math.round(ref.height * sy)}px`
+  }
+}
+
 // Browsers don't include a scroll container's padding-bottom in the scrollable
 // area for absolutely-positioned children, so a window scrolled to the bottom
 // sits flush against the edge. Keep a tiny spacer a gutter below the lowest
@@ -1489,13 +1649,27 @@ let stageObserver: ResizeObserver | null = null
 function ensureStageObserver(stageEl: HTMLElement) {
   if (stageObserver) return
   stageObserver = new ResizeObserver(() => {
-    for (const win of openWindows.values()) {
-      // Skip hidden (other-space) windows: they report zero size, so clamping
-      // would mis-reposition them before they're shown again.
-      if (win.root.classList.contains("space-inactive")) continue
-      clampToStage(win.root, stageEl, { pullIn: false })
+    const grid = gridForWidth(getStageBounds(stageEl).width)
+    const stepped = grid.cols !== lastPackGrid.cols || grid.rows !== lastPackGrid.rows
+    if (stageEl.classList.contains("pack-mode") && stepped) {
+      // The grid changed band (e.g. 4×3 → 3×3). If we've laid windows out at
+      // this grid before, restore that exact layout; otherwise pack fresh.
+      const snap = packLayouts.get(gridKey(grid))
+      if (snap && packLayoutCovers(snap)) {
+        applyPackLayout(stageEl, snap)
+        lastPackGrid = grid
+      } else {
+        bestFitPack(stageEl)
+      }
+    } else {
+      for (const win of openWindows.values()) {
+        // Skip hidden (other-space) windows: they report zero size, so rescaling
+        // would mis-place them before they're shown again.
+        if (win.root.classList.contains("space-inactive")) continue
+        // Recompose proportionally with the new stage size (reposition + resize).
+        rescaleWindowGeom(win.root)
+      }
     }
-    // Windows are settled here (a resize isn't a repack), so measuring is fine.
     setStageBottomSpacer(stageEl, measureMaxWindowBottom(stageEl))
   })
   stageObserver.observe(stageEl)

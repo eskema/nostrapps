@@ -1,5 +1,12 @@
 import type { NappWindow, NappWindowState, MessageData, Position, Status } from "../types.js"
-import { getStageBounds, packCellSnap, bestFitPack, capturePackSnapshot } from "./host.js"
+import {
+  getStageBounds,
+  packCellSnap,
+  bestFitPack,
+  capturePackSnapshot,
+  captureWindowGeom,
+  invalidatePackLayouts
+} from "./host.js"
 import { moveBefore } from "../dom.js"
 
 let zIndexCounter = 1
@@ -236,7 +243,13 @@ export function createNappWindow({
     root.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" })
   }
 
-  const notifyState = () => onStateChange?.(getState())
+  // Capture the window's geometry reference on every commit (drag/resize/pack/
+  // tile/snap/zindex all route through here) so a later stage resize can
+  // recompose it proportionally. Reads the live, un-floored pixels.
+  const notifyState = () => {
+    captureWindowGeom(root)
+    onStateChange?.(getState())
+  }
 
   btnClose.addEventListener("click", e => {
     e.stopPropagation()
@@ -373,7 +386,7 @@ function bringToFront(el: HTMLElement) {
 }
 
 function isCompact() {
-  return window.matchMedia("(max-width: 723px)").matches
+  return window.matchMedia("(max-width: 791px)").matches
 }
 
 function snapLayout(zone: string, w: number, h: number) {
@@ -913,6 +926,9 @@ function setupDrag(
     // Bump the move timestamp — pack mode uses this to prioritize
     // recently-touched windows over older ones during reflow.
     root.dataset.lastMovedAt = String(Date.now())
+    // A real drag invalidates the per-grid layout memory: other grids' snapshots
+    // are now stale. The current grid is re-recorded by the re-pack below.
+    invalidatePackLayouts()
     onDone?.()
   }
   handle.addEventListener("pointerup", end)
@@ -1100,6 +1116,8 @@ function setupResize(
     packSnapshot = null
     // Bump the move timestamp — pack mode uses this for weight ordering.
     root.dataset.lastMovedAt = String(Date.now())
+    // A real resize invalidates the per-grid layout memory (see drag end).
+    invalidatePackLayouts()
     onDone?.()
   }
   handle.addEventListener("pointerup", end)

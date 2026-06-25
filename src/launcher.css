@@ -38,11 +38,15 @@
 body {
   margin: 0;
   display: grid;
-  grid-template-areas: 
+  grid-template-areas:
     "header"
     "spaces"
     "stage";
   grid-template-rows: auto auto 1fr;
+  /* Pin the single column to the viewport with a 0 minimum so a wide child
+     (spaces taskbar, etc.) can't blow the grid track out past 100vw — which
+     would make the stage, and any width:100% window, wider than the screen. */
+  grid-template-columns: minmax(0, 1fr);
   /* align-items: start;
   align-content: start; */
   min-height: 100vh;
@@ -1148,7 +1152,7 @@ body.napp-resizing .napp-body iframe {
   pointer-events: none;
 }
 
-@media (max-width: 723px) {
+@media (max-width: 791px) {
   /* Desktop-only chrome. #stage-controls is a sticky, full-HEIGHT element; as
      the first flow child it would push every window down by a whole stage-
      height. The bottom spacer (absolute, tall) is for desktop scroll padding.
@@ -1169,13 +1173,21 @@ body.napp-resizing .napp-body iframe {
     left: 0 !important;
     top: 0 !important;
     width: 100% !important;
+    /* Never exceed the viewport: drop the 240px floor and cap at the stage
+       width (some windows carry a wider inline/desktop width). */
+    min-width: 0 !important;
+    max-width: 100% !important;
     margin: 0 0 0.5rem 0;
     border-radius: 0;
     border-left: 0;
     border-right: 0;
     box-shadow: none;
   }
+  /* Beat the global .napp-window.maximized (width:auto + inset) which would
+     otherwise win on specificity and let a maximized window overflow. */
   .napp-window.maximized {
+    width: 100% !important;
+    inset: auto !important;
     height: 100vh !important;
   }
   .napp-resize-handle {
