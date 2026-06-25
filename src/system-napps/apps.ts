@@ -404,7 +404,7 @@ export function mount(
   function renderInstalled() {
     installedPane.innerHTML = `
       <div class="apps-toolbar">
-        <input class="apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
+        <input class="ui-input apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
       </div>
       <div class="apps-list"></div>
     `
@@ -674,7 +674,7 @@ export function mount(
   function renderDiscover() {
     discoverPane.innerHTML = `
       <div class="apps-toolbar">
-        <input class="apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
+        <input class="ui-input apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
       </div>
       <details class="apps-relays">
         <summary>edit relays</summary>

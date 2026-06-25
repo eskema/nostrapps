@@ -6,6 +6,7 @@
 //   • chip({ label, active, icon, onClick, … }) → a `.btn .btn-chip` (selectable)
 //   • icon(name)                                → an inline `<svg>` (currentColor)
 //   • details({ summary, open, … })             → a `.ui-details` disclosure
+//   • input({ type, placeholder, … })           → a `.ui-input` text field
 // Variants: primary | outline | danger | warning | ghost. Layout (align-self,
 // margins, placement) belongs on the parent/context, not the variant. CSS lives
 // in launcher.css under "Design system".
@@ -113,4 +114,27 @@ export function details(opts: DetailsOpts): HTMLDetailsElement {
   s.textContent = opts.summary
   d.appendChild(s)
   return d
+}
+
+export interface InputOpts {
+  type?: string
+  placeholder?: string
+  value?: string
+  autocomplete?: string
+  spellcheck?: boolean
+  /** Extra classes for layout/context. */
+  class?: string
+}
+
+// A styled text input (`.ui-input`). Appearance comes from the class; layout
+// (flex/width) belongs on the parent/context.
+export function input(opts: InputOpts = {}): HTMLInputElement {
+  const el = document.createElement("input")
+  el.type = opts.type || "text"
+  el.className = `ui-input${opts.class ? ` ${opts.class}` : ""}`
+  if (opts.placeholder != null) el.placeholder = opts.placeholder
+  if (opts.value != null) el.value = opts.value
+  if (opts.autocomplete) el.setAttribute("autocomplete", opts.autocomplete)
+  if (opts.spellcheck === false) el.spellcheck = false
+  return el
 }

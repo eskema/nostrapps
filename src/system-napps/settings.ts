@@ -27,30 +27,30 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
             <button type="button" class="btn btn-outline settings-disconnect-btn">disconnect</button>
           </div>
           <div class="settings-account-disconnected">
-            <button type="button" class="btn btn-outline settings-connect-extension">
-              connect with extension
-            </button>
-            <button type="button" class="btn btn-outline settings-connect-bunker-toggle">
-              connect with bunker
-            </button>
-            <button type="button" class="btn btn-outline settings-connect-google">
-              ${GOOGLE_LABEL}
-            </button>
-            <div class="settings-google-error" hidden></div>
-            <form class="settings-bunker-form" hidden>
-              <input
-                type="text"
-                class="settings-bunker-input"
-                placeholder="bunker://…"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <div class="settings-bunker-actions">
-                <button type="submit" class="btn btn-outline settings-bunker-submit">connect</button>
-                <button type="button" class="btn btn-outline settings-bunker-cancel">cancel</button>
-              </div>
-              <div class="settings-bunker-error" hidden></div>
-            </form>
+            <button type="button" class="btn btn-outline settings-connect-extension">connect with extension</button>
+
+            <div class="settings-bunker-section">
+              <button type="button" class="btn btn-outline settings-connect-bunker-toggle">connect with bunker</button>
+              <form class="settings-bunker-form" hidden>
+                <input
+                  type="text"
+                  class="ui-input settings-bunker-input"
+                  placeholder="bunker://…"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <div class="settings-bunker-actions">
+                  <button type="submit" class="btn btn-outline settings-bunker-submit">connect</button>
+                  <button type="button" class="btn btn-outline settings-bunker-cancel">cancel</button>
+                </div>
+                <div class="settings-bunker-error" hidden></div>
+              </form>
+            </div>
+
+            <div class="settings-google-section">
+              <button type="button" class="btn btn-outline settings-connect-google">${GOOGLE_LABEL}</button>
+              <div class="settings-google-error" hidden></div>
+            </div>
           </div>
         </div>
       </details>

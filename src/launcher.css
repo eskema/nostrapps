@@ -326,6 +326,22 @@ button {
   background: transparent;
 }
 
+/* Design system: input — a borderless text field on a tinted fill (the apps
+   search bar look). input() in system-napps/ui.ts. Layout (flex/width) belongs
+   on the parent/context. */
+.ui-input {
+  padding: 0.35rem 0.6rem;
+  font-family: var(--font-mono);
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: inherit;
+}
+
+.ui-input:focus {
+  outline: none;
+}
+
 /* Chip: a selectable .btn (window/space switcher). chip() in ui.ts sets the
    variant — primary when active, ghost otherwise — and wraps the text in
    .btn-chip-label so long names truncate instead of widening the bar. */
@@ -1899,6 +1915,11 @@ body.napp-resizing .napp-body iframe {
   line-height: 1; */
   font-weight: 600;
   font-family: var(--font-mono);
+  opacity: .6;
+}
+
+.apps-author-name:hover {
+  opacity: 1;
 }
 
 .apps-card .apps-date {
@@ -2146,22 +2167,10 @@ body.napp-resizing .napp-body iframe {
   margin-bottom: 1.5rem;
 }
 
+/* Appearance from .ui-input; only the toolbar layout lives here. */
 .apps-search {
   flex: 1;
   min-width: 0;
-  padding: 0.35rem 0.6rem;
-  font-family: var(--font-mono);
-  /* font-size: 0.85rem; */
-  border: none;
-  /* border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
-  border-radius: 4px;
-  background: color-mix(in srgb, currentColor 5%, transparent);
-  color: inherit;
-}
-
-.apps-search:focus {
-  outline: none;
-  border-color: color-mix(in srgb, currentColor 50%, transparent);
 }
 
 /* Relay editor: a <details> below the search. Collapsed shows just the
@@ -2503,20 +2512,26 @@ body.napp-resizing .napp-body iframe {
   gap: 0.4rem;
 }
 
+/* Three stacked groups: extension button, bunker section (button + form),
+   google section (button + error). */
 .settings-account-disconnected {
   display: grid;
-  grid-template-columns: auto auto;
-  align-items: center;
-  grid-gap: 0.4rem;
+  gap: 0.5rem;
 }
 
-.settings-account-disconnected .btn {
-  white-space: pre;
+.settings-bunker-section,
+.settings-google-section {
+  display: grid;
+  gap: 0.4rem;
 }
 
-/* The bunker form expands across both columns of the disconnected row. */
-.settings-bunker-form {
-  grid-column: 1 / -1;
+/* Connect buttons stay content-width and left-aligned; the sections, bunker
+   form and errors span the full row. */
+.settings-account-disconnected > .btn,
+.settings-bunker-section > .btn,
+.settings-google-section > .btn {
+  justify-self: start;
+  white-space: nowrap;
 }
 
 .settings-account-connected[hidden],
@@ -2535,40 +2550,9 @@ body.napp-resizing .napp-body iframe {
   /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
 }
 
-/* The google button + its error sit on their own row of the disconnected
-   grid — central fixes the operator list, so it's effectively a one-click
-   alternative to the two manual paths above. */
-.settings-connect-google,
-.settings-google-error {
-  grid-column: 1 / -1;
-  justify-self: start;
-}
-
-.settings-google-error {
-  font-size: 0.78rem;
-  color: #c0392b;
-}
-
 .settings-bunker-form {
   display: grid;
   gap: 0.4rem;
-  width: 100%;
-  margin-top: 0.4rem;
-}
-
-.settings-bunker-input {
-  padding: 0.35rem 0.5rem;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-}
-
-.settings-bunker-input:focus {
-  outline: none;
-  border-color: color-mix(in srgb, currentColor 50%, transparent);
 }
 
 .settings-bunker-actions {
@@ -2578,7 +2562,8 @@ body.napp-resizing .napp-body iframe {
   justify-content: end;
 }
 
-.settings-bunker-error {
+.settings-bunker-error,
+.settings-google-error {
   font-size: 0.78rem;
   color: #c0392b;
 }
