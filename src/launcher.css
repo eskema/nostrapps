@@ -1226,6 +1226,12 @@ body.napp-resizing .napp-body iframe {
   .napp-resize-handle {
     display: none;
   }
+  /* Pack mode is a desktop-only layout, so keep minimize available on mobile
+     even when the space has pack mode on — it collapses the window to its
+     header in the flow stack. */
+  #stage.pack-mode .napp-btn-min {
+    display: inline-block;
+  }
   .napp-header {
     min-height: 40px;
     padding: 0 0.5rem 0 1rem;
