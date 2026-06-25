@@ -171,10 +171,10 @@ h1 span {
 
 /* List of spaces + new-space, right. */
 .spaces-right {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 0.4rem;
-  flex-shrink: 0;
+  grid-gap: 0.4rem;
   margin-right: .3rem;
 }
 
@@ -859,11 +859,13 @@ html[data-theme="dark"] .napp-window.focused {
 }
 
 .napp-window.maximized {
-  /* Respect the stage's gutter on all sides. `inset` is the absolute-position
-     equivalent of these four edges; using it lets the browser auto-size the
-     box to fill what's left, instead of us hardcoding 100% which would
-     bleed into the padding region. */
-  inset: 1rem !important;
+  /* Truly maximized: fixed to the VIEWPORT (not the stage) so it covers the
+     header, spaces bar, and every other window — on desktop and mobile alike.
+     z-index above the pin tier (100000) and the suggestions dropdown (200000);
+     modal dialogs use the top layer so they still sit above. */
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 300000 !important;
   width: auto !important;
   height: auto !important;
   border-radius: 0;
@@ -1166,6 +1168,31 @@ body.napp-resizing .napp-body iframe {
   #stage {
     padding-left: 0;
     padding-right: 0;
+    /* Clear the fixed bottom space-switcher bar so the last window in the flow
+       isn't hidden behind it. */
+    padding-bottom: 3.5rem;
+  }
+
+  /* The top spaces bar is too crowded on a narrow screen — move the space
+     switcher (tabs + new-space) to a fixed bar pinned to the bottom edge. */
+  .spaces-right {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 200;
+    justify-content: center;
+    margin-right: 0;
+    padding: .2rem .5rem;
+    background: var(--surface);
+    /* border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
+  }
+
+  .spaces-tab.active {
+    opacity: 1;
+    padding: 0 0.5rem;
+    border-top: 1px solid currentColor;
+    border-bottom: none;
   }
 
   .napp-window {
@@ -1181,14 +1208,7 @@ body.napp-resizing .napp-body iframe {
     border-radius: 0;
     border-left: 0;
     border-right: 0;
-    box-shadow: none;
-  }
-  /* Beat the global .napp-window.maximized (width:auto + inset) which would
-     otherwise win on specificity and let a maximized window overflow. */
-  .napp-window.maximized {
-    width: 100% !important;
-    inset: auto !important;
-    height: 100vh !important;
+    /* box-shadow: none; */
   }
   .napp-resize-handle {
     display: none;
