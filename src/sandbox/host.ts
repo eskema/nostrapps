@@ -394,10 +394,16 @@ export function listOpenWindows(): Array<{
       nappId: st.nappId,
       petname: st.petname || st.nappId,
       systemId: win.systemId,
-      minimized: !!st.status.minimized
+      minimized: !!st.status.minimized,
+      root: win.root
     })
   }
-  return out
+  // Order by stage DOM position so the taskbar matches the stage / open / mobile
+  // order — reordering either the taskbar or the stage keeps them in sync.
+  out.sort((a, b) =>
+    a.root.compareDocumentPosition(b.root) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+  )
+  return out.map(({ root, ...rest }) => rest)
 }
 
 export function destroyByNappId(nappId: string): number {

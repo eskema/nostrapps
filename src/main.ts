@@ -40,6 +40,7 @@ import * as account from "./account.js"
 import { clearDecisions } from "./permissions.js"
 import { openPopover } from "./popover.js"
 import { setPointer, getPointer } from "./pointer.js"
+import { moveBefore } from "./dom.js"
 import { buildHandlerBody } from "./system-napps/handler.js"
 import * as persist from "./persistence.js"
 import * as handlers from "./handlers.js"
@@ -1195,16 +1196,21 @@ function iconButton(name: string, title: string, onClick: () => void) {
   return b
 }
 
-function renderSpacesBar() {
-  spacesBar.innerHTML = ""
+// Persistent spaces-bar structure: built once, then renderSpacesBar() updates
+// its contents in place. The space TABS in particular are reused across renders
+// (keyed by data-space-id) so toggling .active animates — a freshly-created
+// element has no prior state to transition from.
+let spacesBarBuilt = false
+let spacesNameEl: HTMLDivElement
+let spacesWinListEl: HTMLDivElement
+let spacesTabListEl: HTMLDivElement
 
-  // Very start: the current space's name. Double-click to rename it.
-  const spaces = persist.listSpaces()
-  const currentName = document.createElement("div")
-  currentName.className = "spaces-current-name"
-  currentName.textContent = spaces.find(s => s.id === currentSpaceId)?.name || "space"
-  currentName.title = "Double-click to rename this space"
-  currentName.addEventListener("dblclick", () => {
+function buildSpacesBarSkeleton() {
+  // Start: the current space's name. Double-click to rename it.
+  spacesNameEl = document.createElement("div")
+  spacesNameEl.className = "spaces-current-name"
+  spacesNameEl.title = "Double-click to rename this space"
+  spacesNameEl.addEventListener("dblclick", () => {
     const cur = persist.listSpaces().find(s => s.id === currentSpaceId)
     const n = window.prompt("Rename space", cur?.name || "")
     if (n != null) {
@@ -1213,7 +1219,8 @@ function renderSpacesBar() {
     }
   })
 
-  // Then: controls for the CURRENT space (save / reset / destroy).
+  // Controls for the CURRENT space (save / reset / destroy) — handlers read
+  // currentSpaceId at call time, so building them once is fine.
   const controls = document.createElement("div")
   controls.className = "spaces-controls"
   controls.append(
@@ -1222,60 +1229,68 @@ function renderSpacesBar() {
     iconButton("trash", "Delete this space", destroyCurrentSpace)
   )
 
-  // Then the current space's live windows (taskbar). Click → focus/restore.
-  const winList = document.createElement("div")
-  winList.className = "spaces-windows"
-  for (const w of listOpenWindows()) {
-    winList.appendChild(
-      chip({
-        label: w.petname,
-        title: w.petname,
-        class: w.minimized ? "minimized" : "",
-        onClick: () => focusInstance(w.instanceId)
-      })
-    )
-  }
+  // The current space's live windows (taskbar).
+  spacesWinListEl = document.createElement("div")
+  spacesWinListEl.className = "spaces-windows"
 
-  // Right: the list of spaces (drag to reorder) + new-space.
-  const spaceList = document.createElement("div")
-  spaceList.className = "spaces-list"
-  for (const s of spaces) spaceList.appendChild(buildSpaceChip(s))
+  // The list of spaces (drag to reorder) + new-space.
+  spacesTabListEl = document.createElement("div")
+  spacesTabListEl.className = "spaces-list"
 
   const right = document.createElement("div")
   right.className = "spaces-right"
-  right.append(
-    spaceList,
-    iconButton("plus", "New space", () => createSpaceAndSwitch())
-  )
+  right.append(spacesTabListEl, iconButton("plus", "New space", () => createSpaceAndSwitch()))
 
-  spacesBar.append(currentName, controls, winList, right)
+  spacesBar.append(spacesNameEl, controls, spacesWinListEl, right)
+  spacesBarBuilt = true
 }
 
-// Space chips: click to switch, drag to reorder. Reordering is LIVE — the chip
-// slots into the gap under the cursor as you drag and the others slide aside
-// (FLIP-animated), so where you let go is where it lands. Rename is via the
-// current space's name at the start of the bar, not here.
-// Pointer-based (not native HTML5 DnD) so we control the cursor — `grabbing` the
-// whole time — and there's no floating ghost. A drag only begins past a small
-// threshold, so a plain click still switches spaces.
-let spaceDrag: {
-  el: HTMLElement
-  list: HTMLElement
-  startX: number
-  started: boolean
-} | null = null
-let suppressSpaceClick = false
+function renderSpacesBar() {
+  if (!spacesBarBuilt) buildSpacesBarSkeleton()
+  const spaces = persist.listSpaces()
 
-// The chip to insert before (the first one whose midpoint is right of the
-// cursor); null → past the end. Skips the chip being dragged.
-function dragAfterChip(list: HTMLElement, x: number): HTMLElement | null {
-  let closest: { offset: number; el: HTMLElement | null } = { offset: -Infinity, el: null }
-  for (const child of list.querySelectorAll<HTMLElement>(".btn-chip:not(.dragging)")) {
-    const box = child.getBoundingClientRect()
-    const offset = x - (box.left + box.width / 2)
-    if (offset < 0 && offset > closest.offset) closest = { offset, el: child }
+  spacesNameEl.textContent = spaces.find(s => s.id === currentSpaceId)?.name || "space"
+
+  // Window taskbar — rebuilt each render. Click → focus; drag → reorder (which
+  // reorders the stage / mobile stack, see reorderWindows).
+  spacesWinListEl.innerHTML = ""
+  for (const w of listOpenWindows()) {
+    const c = chip({
+      label: w.petname,
+      title: `${w.petname} — drag to reorder`,
+      class: "spaces-window" + (w.minimized ? " minimized" : ""),
+      onClick: () => {
+        if (windowReorder.wasDragging()) return
+        focusInstance(w.instanceId)
+      }
+    })
+    c.dataset.instanceId = w.instanceId
+    windowReorder.attach(c)
+    spacesWinListEl.appendChild(c)
   }
-  return closest.el
+
+  // Space tabs — REUSE existing elements so .active toggles (and its padding
+  // transition) animate on a live node instead of being born already-active.
+  const existing = new Map(
+    [...spacesTabListEl.children].map(c => [(c as HTMLElement).dataset.spaceId!, c as HTMLButtonElement])
+  )
+  spaces.forEach((s, i) => {
+    let tab = existing.get(s.id)
+    if (tab) {
+      tab.textContent = s.name // keep name in sync (rename)
+      existing.delete(s.id)
+    } else {
+      tab = buildSpaceChip(s)
+    }
+    tab.classList.toggle("active", s.id === currentSpaceId)
+    // Only move the node when its position is actually wrong — re-inserting a
+    // node cancels its in-flight transition, which would defeat the .active
+    // padding animation on a plain switch (where the order doesn't change).
+    if (spacesTabListEl.children[i] !== tab) {
+      spacesTabListEl.insertBefore(tab, spacesTabListEl.children[i] ?? null)
+    }
+  })
+  for (const [, tab] of existing) tab.remove() // spaces that no longer exist
 }
 
 // FLIP: animate every sibling sliding to its new spot with ease-in-out. Handles
@@ -1305,59 +1320,118 @@ function flipReorder(list: HTMLElement, exclude: HTMLElement, mutate: () => void
   }
 }
 
-function onSpacePointerMove(e: PointerEvent) {
-  if (!spaceDrag) return
-  const { el, list, startX } = spaceDrag
-  if (!spaceDrag.started) {
-    if (Math.abs(e.clientX - startX) < 4) return // below threshold: still a click
-    spaceDrag.started = true
-    el.classList.add("dragging") // chip's "this one is moving" highlight
+// Generic drag-to-reorder for a horizontal chip row. Pointer-based (not native
+// HTML5 DnD) so we own the cursor — `grabbing` throughout — with no floating
+// ghost; a drag only starts past a small threshold, so a plain click still
+// fires. While dragging, the chip slots into the gap under the cursor and the
+// others slide aside (FLIP). On drop, commit() runs with the row's items in
+// their new DOM order. Shared by the space tabs and the window taskbar.
+function makeReorder(opts: { itemSelector: string; commit: (orderedEls: HTMLElement[]) => void }) {
+  let drag: { el: HTMLElement; list: HTMLElement; startX: number; started: boolean } | null = null
+  let suppressClick = false
+
+  // Item to insert before (first whose midpoint is right of the cursor); null →
+  // past the end. Skips the dragged item.
+  function dragAfter(list: HTMLElement, x: number): HTMLElement | null {
+    let closest: { offset: number; el: HTMLElement | null } = { offset: -Infinity, el: null }
+    for (const child of list.querySelectorAll<HTMLElement>(`${opts.itemSelector}:not(.dragging)`)) {
+      const box = child.getBoundingClientRect()
+      const offset = x - (box.left + box.width / 2)
+      if (offset < 0 && offset > closest.offset) closest = { offset, el: child }
+    }
+    return closest.el
   }
-  e.preventDefault()
-  const after = dragAfterChip(list, e.clientX)
-  if (after === el) return
-  const settled = after ? el.nextElementSibling === after : el === list.lastElementChild
-  if (settled) return
-  flipReorder(list, el, () => (after == null ? list.appendChild(el) : list.insertBefore(el, after)))
+
+  function onMove(e: PointerEvent) {
+    if (!drag) return
+    const { el, list, startX } = drag
+    if (!drag.started) {
+      if (Math.abs(e.clientX - startX) < 4) return // below threshold: still a click
+      drag.started = true
+      el.classList.add("dragging") // "this one is moving" highlight
+    }
+    e.preventDefault()
+    const after = dragAfter(list, e.clientX)
+    if (after === el) return
+    const settled = after ? el.nextElementSibling === after : el === list.lastElementChild
+    if (settled) return
+    flipReorder(list, el, () => (after == null ? list.appendChild(el) : list.insertBefore(el, after)))
+  }
+
+  function onUp() {
+    window.removeEventListener("pointermove", onMove)
+    window.removeEventListener("pointerup", onUp)
+    window.removeEventListener("pointercancel", onUp)
+    document.body.classList.remove("space-dragging") // grabbing cursor off
+    if (drag?.started) {
+      const { el, list } = drag
+      el.classList.remove("dragging")
+      opts.commit([...list.querySelectorAll<HTMLElement>(opts.itemSelector)])
+      suppressClick = true // swallow the click that follows this pointerup
+      setTimeout(() => (suppressClick = false), 0)
+    }
+    drag = null
+  }
+
+  return {
+    // Wire an item's pointerdown to begin a potential drag.
+    attach(el: HTMLElement) {
+      el.addEventListener("pointerdown", e => {
+        if (e.button !== 0 || !el.parentElement) return
+        drag = { el, list: el.parentElement, startX: e.clientX, started: false }
+        document.body.classList.add("space-dragging") // grabbing cursor on press
+        window.addEventListener("pointermove", onMove)
+        window.addEventListener("pointerup", onUp)
+        window.addEventListener("pointercancel", onUp)
+      })
+    },
+    // True briefly after a drag so the trailing click can be ignored.
+    wasDragging: () => suppressClick
+  }
 }
 
-function endSpaceDrag() {
-  window.removeEventListener("pointermove", onSpacePointerMove)
-  window.removeEventListener("pointerup", endSpaceDrag)
-  window.removeEventListener("pointercancel", endSpaceDrag)
-  document.body.classList.remove("space-dragging") // grabbing cursor off (press or drag)
-  if (spaceDrag?.started) {
-    const { el, list } = spaceDrag
-    el.classList.remove("dragging")
-    persist.setSpacesOrder(
-      [...list.querySelectorAll<HTMLElement>("[data-space-id]")].map(c => c.dataset.spaceId!)
-    )
-    suppressSpaceClick = true // swallow the click that follows this pointerup
-    setTimeout(() => (suppressSpaceClick = false), 0)
+// Two reorderable rows in the spaces bar: the space tabs (→ space order) and the
+// window taskbar (→ the per-space window/stage order, which is the mobile stack).
+const spaceReorder = makeReorder({
+  itemSelector: ".spaces-tab",
+  commit: els => persist.setSpacesOrder(els.map(e => e.dataset.spaceId!).filter(Boolean))
+})
+const windowReorder = makeReorder({
+  itemSelector: ".spaces-window",
+  commit: els => reorderWindows(els.map(e => e.dataset.instanceId!).filter(Boolean))
+})
+
+// Reorder the live windows in the stage to match the taskbar order, then sync
+// the per-space `open` array from the new DOM order (persistDomOrder). In mobile
+// (static flow) this reorders the visible vertical stack; on desktop the windows
+// are absolutely positioned, so only the persisted order changes — which still
+// drives the mobile layout and the restore order. Keeping the stage DOM in sync
+// matters: persistDomOrder reads it, so a taskbar-only reorder would be reverted.
+function reorderWindows(instanceIds: string[]) {
+  const spacer = stage.querySelector(".stage-bottom-spacer")
+  for (const id of instanceIds) {
+    const win = stage.querySelector<HTMLElement>(`.napp-window[data-instance-id="${id}"]`)
+    // moveBefore (not insertBefore) so the window's iframe keeps running.
+    if (win) moveBefore(stage, win, spacer)
   }
-  spaceDrag = null
+  persistDomOrder()
 }
 
 function buildSpaceChip(s: { id: string; name: string }): HTMLButtonElement {
-  const el = chip({
-    label: s.name,
-    active: s.id === currentSpaceId,
-    title: "Switch space — drag to reorder",
-    onClick: () => {
-      if (suppressSpaceClick) return // just finished a drag, not a real click
-      if (s.id !== currentSpaceId) switchSpace(s.id).then(renderSpacesBar)
-    }
-  })
+  // Custom (not the .btn system): a text tab, dimmed, with an underline on the
+  // active one. Kept out of the design system so the tab look doesn't fight the
+  // button variants' background/border.
+  const el = document.createElement("button")
+  el.type = "button"
+  el.className = "spaces-tab" + (s.id === currentSpaceId ? " active" : "")
+  el.textContent = s.name
+  el.title = "Switch space — drag to reorder"
   el.dataset.spaceId = s.id
-  el.addEventListener("pointerdown", e => {
-    if (e.button !== 0 || !el.parentElement) return
-    spaceDrag = { el, list: el.parentElement, startX: e.clientX, started: false }
-    // Grabbing cursor on press — immediately, before the drag threshold.
-    document.body.classList.add("space-dragging")
-    window.addEventListener("pointermove", onSpacePointerMove)
-    window.addEventListener("pointerup", endSpaceDrag)
-    window.addEventListener("pointercancel", endSpaceDrag)
+  el.addEventListener("click", () => {
+    if (spaceReorder.wasDragging()) return // just finished a drag, not a real click
+    if (s.id !== currentSpaceId) switchSpace(s.id).then(renderSpacesBar)
   })
+  spaceReorder.attach(el)
   return el
 }
 

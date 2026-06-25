@@ -1,5 +1,6 @@
 import type { NappWindow, NappWindowState, MessageData, Position, Status } from "../types.js"
 import { getStageBounds, packCellSnap, bestFitPack, capturePackSnapshot } from "./host.js"
+import { moveBefore } from "../dom.js"
 
 let zIndexCounter = 1
 let positionOffset = 0
@@ -656,11 +657,9 @@ function setupDrag(
         for (const item of siblings) {
           beforeTops.set(item, item.getBoundingClientRect().top)
         }
-        if (insertBefore) {
-          stage.insertBefore(root, insertBefore)
-        } else {
-          stage.appendChild(root)
-        }
+        // moveBefore (not insertBefore/appendChild) so the window's iframe keeps
+        // running instead of reloading on every reorder step. null → end.
+        moveBefore(stage, root, insertBefore)
         // Re-establish pointer capture: re-parenting the captured element
         // can drop the implicit capture in Chromium, after which pointermove
         // would route to whichever (cross-origin) iframe sits under the
