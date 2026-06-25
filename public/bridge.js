@@ -115,6 +115,15 @@
 
         return
       }
+      case "napp-nav": {
+        // The launcher can't drive a cross-origin frame's history, so it asks
+        // us (running inside the napp) to do it. reload() reloads the CURRENT
+        // location (client-side route included), not the original src.
+        if (data.dir === "back") history.back()
+        else if (data.dir === "forward") history.forward()
+        else if (data.dir === "reload") location.reload()
+        return
+      }
       case "napp-theme-change": {
         document.documentElement.dataset.theme = data.theme
         // Apply the launcher's resolved color tokens as inline custom properties.

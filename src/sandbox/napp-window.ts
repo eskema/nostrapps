@@ -8,6 +8,7 @@ import {
   invalidatePackLayouts
 } from "./host.js"
 import { moveBefore } from "../dom.js"
+import { icon } from "../system-napps/ui.js"
 
 let zIndexCounter = 1
 let positionOffset = 0
@@ -113,8 +114,6 @@ export function createNappWindow({
   // it's a napp-wide, origin-clearing operation, not a per-window control.
   controls.append(btnMin, btnMax, btnPin, btnClose)
 
-  header.append(titleEl, controls)
-
   const body = document.createElement("div")
   body.className = "napp-body"
   if (system) body.classList.add("napp-body-system")
@@ -136,6 +135,32 @@ export function createNappWindow({
     iframe.src = src || "<missing-iframe-src>"
     body.appendChild(iframe)
     iframeRef.current = iframe
+  }
+
+  // Nav controls (back/forward/reload) for iframe napps. The parent can't drive
+  // a cross-origin frame's history, so these post to bridge.js — which runs
+  // inside the napp and calls history.back()/forward()/location.reload().
+  if (!system && !bodyElement) {
+    const nav = document.createElement("div")
+    nav.className = "napp-nav"
+    const navCmd = (dir: "back" | "forward" | "reload") =>
+      iframeRef.current?.contentWindow?.postMessage({ __nostrapps: "napp-nav", dir }, origin || "*")
+    const navBtn = (iconName: string, title: string) => {
+      const b = makeBtn("", title)
+      b.append(icon(iconName))
+      return b
+    }
+    const btnBack = navBtn("back", "Back")
+    const btnFwd = navBtn("forward", "Forward")
+    const btnReload = navBtn("reload", "Reload")
+    btnBack.addEventListener("click", e => (e.stopPropagation(), navCmd("back")))
+    btnFwd.addEventListener("click", e => (e.stopPropagation(), navCmd("forward")))
+    btnReload.addEventListener("click", e => (e.stopPropagation(), navCmd("reload")))
+    nav.append(btnBack, btnFwd, btnReload)
+    header.classList.add("has-nav")
+    header.append(nav, titleEl, controls)
+  } else {
+    header.append(titleEl, controls)
   }
 
   const resizeHandles: Record<string, HTMLElement> = {}
@@ -273,7 +298,7 @@ export function createNappWindow({
   // Double-click / double-tap the empty header area (not the title or the
   // controls) to toggle maximize.
   header.addEventListener("dblclick", e => {
-    if ((e.target as HTMLElement).closest(".napp-title, .napp-controls")) return
+    if ((e.target as HTMLElement).closest(".napp-title, .napp-controls, .napp-nav")) return
     toggleMaximize()
   })
   btnPin.addEventListener("click", e => {

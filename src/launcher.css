@@ -243,10 +243,14 @@ body.space-dragging * {
   cursor: grabbing !important;
   user-select: none;
 }
+
 .spaces-controls .btn,
 .spaces-right > .btn {
-  /* font-size: 1rem; */
   padding: 0.2rem;
+}
+
+#spaces-bar .spaces-controls .btn {
+  font-size: 1rem;
 }
 
 .ui-icon {
@@ -929,6 +933,17 @@ html[data-theme="dark"] .napp-window.focused {
   cursor: grabbing;
 }
 
+/* Iframe napps add a left nav group (back/forward/reload) before the title. */
+.napp-header.has-nav {
+  grid-template-columns: auto 1fr auto;
+}
+
+.napp-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
 .napp-title {
   flex: 1 1 auto;
   min-width: 0;
@@ -986,6 +1001,9 @@ html[data-theme="dark"] .napp-window.focused {
 }
 
 .napp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   height: 20px;
   padding: 0;
@@ -996,6 +1014,12 @@ html[data-theme="dark"] .napp-window.focused {
   border: 0;
   border-radius: 3px;
   cursor: pointer;
+}
+
+/* Nav icons read better a touch larger than the text-glyph controls. */
+.napp-nav .napp-btn .ui-icon {
+  width: 1.15em;
+  height: 1.15em;
 }
 
 .napp-btn:hover {
