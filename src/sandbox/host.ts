@@ -1449,7 +1449,7 @@ function measureMaxWindowBottom(stage: HTMLElement): number {
 // `left: 0` is at the padding box's outer edge, which is the same as the
 // stage's outer edge here. So the visual 1rem gutter only exists if we
 // actively clamp the window's left/top to ≥ padding.
-function clampToStage(root: HTMLElement, stage: HTMLElement) {
+function clampToStage(root: HTMLElement, stage: HTMLElement, opts: { pullIn?: boolean } = {}) {
   if (!stage) return
   // Mobile static layout: nothing to clamp (the layout handles position).
   if (getComputedStyle(root).position === "static") return
@@ -1460,13 +1460,19 @@ function clampToStage(root: HTMLElement, stage: HTMLElement) {
   const left = parseFloat(root.style.left) || 0
   const top = parseFloat(root.style.top) || 0
   const width = root.offsetWidth || parseFloat(root.style.width) || 240
+  // pullIn (default) drags an out-of-bounds window back inside — wanted when a
+  // window is first placed. On RESIZE we don't pull in: that would nudge
+  // right/bottom-edge windows inward on every shrink and they'd never return
+  // ("windows lose their place"). There we only keep them from going above/left
+  // of the padding; an off-screen-right window reappears as the stage grows.
+  const pullIn = opts.pullIn !== false
   // Always leave at least this much of the window inside the stage so the
   // user can grab the header. Header height ≈ 28px on desktop, 40px on mobile.
   const minVisibleX = Math.min(80, width)
   const minLeft = padL
   const minTop = padT
   const maxLeft = Math.max(minLeft, W - padR - minVisibleX)
-  const newLeft = Math.max(minLeft, Math.min(maxLeft, left))
+  const newLeft = pullIn ? Math.max(minLeft, Math.min(maxLeft, left)) : Math.max(minLeft, left)
   // The stage scrolls vertically (overflow-y: auto), so a window below the fold
   // is still reachable by scrolling — clamping its top into the viewport would
   // yank packed below-the-fold windows up onto the one above. Only clamp the top
@@ -1474,7 +1480,7 @@ function clampToStage(root: HTMLElement, stage: HTMLElement) {
   // overflow-x is hidden.)
   const scrollsY = /(auto|scroll)/.test(getComputedStyle(stage).overflowY)
   const maxTop = Math.max(minTop, H - padB - 28)
-  const newTop = scrollsY ? Math.max(minTop, top) : Math.max(minTop, Math.min(maxTop, top))
+  const newTop = scrollsY || !pullIn ? Math.max(minTop, top) : Math.max(minTop, Math.min(maxTop, top))
   if (newLeft !== left) root.style.left = `${newLeft}px`
   if (newTop !== top) root.style.top = `${newTop}px`
 }
@@ -1487,7 +1493,7 @@ function ensureStageObserver(stageEl: HTMLElement) {
       // Skip hidden (other-space) windows: they report zero size, so clamping
       // would mis-reposition them before they're shown again.
       if (win.root.classList.contains("space-inactive")) continue
-      clampToStage(win.root, stageEl)
+      clampToStage(win.root, stageEl, { pullIn: false })
     }
     // Windows are settled here (a resize isn't a repack), so measuring is fine.
     setStageBottomSpacer(stageEl, measureMaxWindowBottom(stageEl))

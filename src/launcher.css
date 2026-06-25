@@ -88,8 +88,11 @@ h1 span {
   left: 0;
   z-index: 200;
   width: fit-content;
+  height: 100%;
   display: grid;
-  transform: translateX(-100%) translateY(-0.8rem);
+  align-items: center;
+  align-content: center;
+  transform: translateX(-1.2rem);
 }
 
 #tile-windows,
@@ -788,7 +791,7 @@ button {
   /* Inner gutter so windows never touch the edge. clampToStage in host.js
      reads this padding from computed style and uses it as the bound for
      window left/top. */
-  padding: 1rem;
+  padding: 0.5rem 0.5rem 1rem 1.5rem;
   box-sizing: border-box;
 }
 
@@ -1146,6 +1149,21 @@ body.napp-resizing .napp-body iframe {
 }
 
 @media (max-width: 723px) {
+  /* Desktop-only chrome. #stage-controls is a sticky, full-HEIGHT element; as
+     the first flow child it would push every window down by a whole stage-
+     height. The bottom spacer (absolute, tall) is for desktop scroll padding.
+     Neither applies to the mobile flow stack. */
+  #stage-controls,
+  .stage-bottom-spacer {
+    display: none;
+  }
+
+  /* Full-bleed windows: no side gutter in the flow stack. */
+  #stage {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
   .napp-window {
     position: static !important;
     left: 0 !important;
