@@ -891,10 +891,23 @@ html[data-theme="dark"] .napp-window.focused {
   background: color-mix(in srgb, currentColor 22%, transparent);
 }
 
+/* Maximized: only the maximize/restore button stays. */
+.napp-window.maximized .napp-btn:not(.napp-btn-max) {
+  display: none;
+}
+
+/* Pack mode: minimize and pin don't apply (the grid owns layout + stacking),
+   and dropping them is also a visual cue you're in pack mode. */
+#stage.pack-mode .napp-btn-min,
+#stage.pack-mode .napp-btn-pin {
+  display: none;
+}
+
 .napp-header {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  justify-items: start;
+  /* flex-wrap: nowrap; */
   align-items: center;
   gap: 0.5rem;
   min-height: 28px;

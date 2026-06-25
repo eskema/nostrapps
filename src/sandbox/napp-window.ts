@@ -103,7 +103,9 @@ export function createNappWindow({
   const controls = document.createElement("div")
   controls.className = "napp-controls"
   const btnMin = makeBtn("–", "Minimize")
+  btnMin.classList.add("napp-btn-min")
   const btnMax = makeBtn("▢", "Maximize")
+  btnMax.classList.add("napp-btn-max")
   const btnPin = makeBtn("•", "Pin on top")
   btnPin.classList.add("napp-btn-pin")
   const btnClose = makeBtn("×", system ? "Close" : "Close (keep state)")
@@ -260,10 +262,19 @@ export function createNappWindow({
     root.classList.toggle("minimized")
     notifyState()
   })
-  btnMax.addEventListener("click", e => {
-    e.stopPropagation()
+  const toggleMaximize = () => {
     root.classList.toggle("maximized")
     notifyState()
+  }
+  btnMax.addEventListener("click", e => {
+    e.stopPropagation()
+    toggleMaximize()
+  })
+  // Double-click / double-tap the empty header area (not the title or the
+  // controls) to toggle maximize.
+  header.addEventListener("dblclick", e => {
+    if ((e.target as HTMLElement).closest(".napp-title, .napp-controls")) return
+    toggleMaximize()
   })
   btnPin.addEventListener("click", e => {
     e.stopPropagation()
