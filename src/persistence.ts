@@ -233,9 +233,16 @@ let spaceSerial = 0
 export function createSpace(name?: string): string {
   const state = ensureSpaces()
   const id = "space" + spaceSerial++
+  // Default name is one past the highest existing "space N". Counting the list
+  // length instead repeats a number after any delete (delete shrinks the list),
+  // which is how two "space 4" can end up side by side.
+  const maxN = state.list.reduce((m, s) => {
+    const match = /^space (\d+)$/.exec(s.name)
+    return match ? Math.max(m, Number(match[1])) : m
+  }, 0)
   state.list.push({
     id,
-    name: name?.trim() || `space ${state.list.length + 1}`,
+    name: name?.trim() || `space ${maxN + 1}`,
     open: [],
     saved: [],
     packMode: false,
