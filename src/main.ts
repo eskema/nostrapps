@@ -1475,7 +1475,7 @@ function maybeBootstrap() {
 
 async function init() {
   setStatus(
-    "Ready — try /apps, /database, /upload, /settings, /logs, /folder, or enter a pubkey/npub/nsite host"
+    "Ready — try /apps, /upload, /settings, /logs, /folder, or enter a pubkey/npub/nsite host"
   )
   handlers.setActionDispatcher(runNappAction)
   // If the user is paired with a bunker, get the connection warm in the

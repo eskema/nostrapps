@@ -1,12 +1,11 @@
 import * as settings from "./settings.js"
 import * as logs from "./logs.js"
 import * as apps from "./apps.js"
-import * as database from "./database.js"
 import * as uploader from "./uploader.js"
 
 import type { SystemNappDef } from "../types.js"
 
-const napps = [settings, logs, apps, database] satisfies SystemNappDef[]
+const napps = [settings, logs, apps] satisfies SystemNappDef[]
 
 // Slash actions are like system napps but they fire a one-shot side effect
 // (e.g. opening a file picker) instead of mounting a window.
