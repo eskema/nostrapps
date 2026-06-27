@@ -1123,7 +1123,15 @@ function setupResize(
               cols: snap.cols,
               rows: snap.rows
             },
-            packSnapshot
+            packSnapshot,
+            // resize: neighbors shrink (subtract) instead of being displaced.
+            // Pass the resize axis so a neighbor subtracts along it (a sideways
+            // resize narrows it, not flattens it).
+            dir.includes("e") || dir.includes("w")
+              ? dir.includes("n") || dir.includes("s")
+                ? true
+                : "h"
+              : "v"
           )
         }
       }

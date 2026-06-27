@@ -939,7 +939,8 @@ export function bestFitPack(
   stageEl: HTMLElement,
   focusRoot: HTMLElement | null = null,
   focusCell: PackCell | null = null,
-  snapshot: Map<HTMLElement, PackCell> | null = null
+  snapshot: Map<HTMLElement, PackCell> | null = null,
+  resize: boolean | "h" | "v" = false
 ) {
   if (!stageEl) return
   const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
@@ -1131,29 +1132,45 @@ export function bestFitPack(
           rows: desired.rows
         }
       }
-      // 1b. The window the focus DIRECTLY displaced (its snapshot cell is where
-      //     the dragged window is going) swaps into the dragged window's vacated
-      //     origin — instead of falling through to the global first-fit scan
-      //     below, which can grab a third window's still-unplaced cell and
-      //     cascade (a 3-cycle of windows rather than a clean A<->B swap). Only
-      //     during a live drag (focusCell + snapshot both set).
-      if (!placed && focusCell && focused && snapshot && overlaps(desired, focusCell)) {
-        const origin = snapshot.get(focused.root)
-        if (origin && fits(origin.col, origin.row, desired.cols, desired.rows)) {
-          placed = { col: origin.col, row: origin.row, cols: desired.cols, rows: desired.rows }
+      if (resize) {
+        // Resize: a neighbor the resized window overlaps always yields by
+        // SHRINKING — carve the focus footprint out of it (largest sub-rect
+        // that clears the focus) rather than displacing it. No size rules. Only
+        // when nothing is left (the resize swallowed its whole cell — e.g. its
+        // width would drop below one column) does it fall through to relocation.
+        if (!placed && focusCell && overlaps(desired, focusCell)) {
+          placed = shrinkAroundFocus(
+            desired,
+            focusCell,
+            fits,
+            typeof resize === "string" ? resize : undefined
+          )
         }
-      }
-      // 2. Blocked → if this item is "much bigger" than the dragged stamp,
-      //    try shrinking it around the stamp instead of relocating. Skip
-      //    the most-recently-touched non-focused window — that one holds
-      //    its size.
-      if (
-        !placed &&
-        focusCell &&
-        item !== mostRecentItem &&
-        desired.cols * desired.rows >= 2 * (focusCell.cols * focusCell.rows)
-      ) {
-        placed = shrinkAroundFocus(desired, focusCell, fits)
+      } else {
+        // 1b. The window the focus DIRECTLY displaced (its snapshot cell is where
+        //     the dragged window is going) swaps into the dragged window's vacated
+        //     origin — instead of falling through to the global first-fit scan
+        //     below, which can grab a third window's still-unplaced cell and
+        //     cascade (a 3-cycle of windows rather than a clean A<->B swap). Only
+        //     during a live drag (focusCell + snapshot both set).
+        if (!placed && focusCell && focused && snapshot && overlaps(desired, focusCell)) {
+          const origin = snapshot.get(focused.root)
+          if (origin && fits(origin.col, origin.row, desired.cols, desired.rows)) {
+            placed = { col: origin.col, row: origin.row, cols: desired.cols, rows: desired.rows }
+          }
+        }
+        // 2. Blocked → if this item is "much bigger" than the dragged stamp,
+        //    try shrinking it around the stamp instead of relocating. Skip
+        //    the most-recently-touched non-focused window — that one holds
+        //    its size.
+        if (
+          !placed &&
+          focusCell &&
+          item !== mostRecentItem &&
+          desired.cols * desired.rows >= 2 * (focusCell.cols * focusCell.rows)
+        ) {
+          placed = shrinkAroundFocus(desired, focusCell, fits)
+        }
       }
     }
     // 3. Last resort. New windows AND grid-step repacks use top-left first-fit
@@ -1228,7 +1245,8 @@ export function bestFitPack(
 function shrinkAroundFocus(
   desired: PackCell,
   focus: PackCell,
-  fits: (col: number, row: number, cols: number, rows: number) => boolean
+  fits: (col: number, row: number, cols: number, rows: number) => boolean,
+  axis?: "h" | "v"
 ) {
   const ic1 = desired.col
   const ir1 = desired.row
@@ -1281,12 +1299,24 @@ function shrinkAroundFocus(
     })
   }
 
-  // Filter to ones that actually fit, then pick the one with most cells.
+  // Filter to ones that actually fit.
   const valid = candidates.filter(
     c => c.cols > 0 && c.rows > 0 && fits(c.col, c.row, c.cols, c.rows)
   )
   if (valid.length === 0) return null
-  valid.sort((a, b) => b.cols * b.rows - a.cols * a.rows)
+  // Prefer subtracting along the resize axis: a horizontal resize keeps the
+  // full-height sliver beside the focus (rows === desired.rows), a vertical one
+  // keeps the full-width sliver (cols === desired.cols). Then by most cells.
+  // Without the axis bias an equal-area tie (e.g. a 1×3 right sliver vs a 3×1
+  // below sliver) picks the wrong shape — the neighbor flips to a flat strip.
+  const onAxis = (c: PackCell) =>
+    axis === "h" ? c.rows === desired.rows : axis === "v" ? c.cols === desired.cols : false
+  valid.sort((a, b) => {
+    const aa = onAxis(a)
+    const ba = onAxis(b)
+    if (aa !== ba) return aa ? -1 : 1
+    return b.cols * b.rows - a.cols * a.rows
+  })
   return valid[0]
 }
 
