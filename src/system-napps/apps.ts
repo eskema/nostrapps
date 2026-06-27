@@ -110,9 +110,11 @@ export function mount(
 
   // Both panes are built once and kept in the DOM; switching tabs just toggles
   // visibility (no rebuild) so each list, its scroll, and inputs persist. The
-  // discover pane is built lazily on first view; discovery itself runs up front.
+  // discover pane — and the relay subscription that feeds it — start lazily on
+  // the first view of the discover tab, and stay connected thereafter.
   let installedBuilt = false
   let discoverBuilt = false
+  let discoveryStarted = false
 
   function switchTab(tab: string) {
     currentTab = tab
@@ -128,6 +130,10 @@ export function mount(
     } else if (!discoverBuilt) {
       renderDiscover()
       discoverBuilt = true
+      // First view of discover opens the relay connection if the early path
+      // didn't already. It stays connected as tabs switch — only unmount closes
+      // it.
+      ensureDiscovery()
     }
     installedPane.hidden = tab !== "installed"
     discoverPane.hidden = tab !== "discover"
@@ -217,8 +223,9 @@ export function mount(
   }
 
   // The newest discovered manifest strictly newer than the one we installed, or
-  // null. Fed by the shared discovery subscription (started on mount), so the
-  // installed tab gets update detection for free — no per-app query.
+  // null. Fed by the shared discovery subscription (started on first discover
+  // view), so once discovery has run the installed tab gets update detection
+  // for free — no per-app query.
   function latestUpdateFor(app: any): any | null {
     const base = app.event?.created_at
     if (!base) return null // local/dev/temp apps have no manifest → no updates
@@ -671,6 +678,14 @@ export function mount(
     )
   }
 
+  // Open the relay subscription at most once. Both the early (installed apps
+  // present) and lazy (first discover view) paths funnel through here.
+  function ensureDiscovery() {
+    if (discoveryStarted) return
+    discoveryStarted = true
+    startDiscoverSubscription()
+  }
+
   function renderDiscover() {
     discoverPane.innerHTML = `
       <div class="apps-toolbar">
@@ -727,8 +742,9 @@ export function mount(
       startDiscoverSubscription()
     })
 
-    // The subscription is already running (started on mount); just paint what it
-    // has collected so far. Streaming arrivals append via flushPending.
+    // Paint whatever discovery has collected so far; streaming arrivals append
+    // via flushPending. On the very first open the subscription starts right
+    // after this (see switchTab), so there's nothing to paint yet.
     renderList()
     emitDiscoverState()
   }
@@ -739,10 +755,12 @@ export function mount(
   // view. Both are kept thereafter — switchTab only toggles their visibility.
   renderInstalled()
   installedBuilt = true
-  // Start discovery once, up front (above the tabs), so it feeds BOTH: the
-  // discover list when that tab is opened, and the installed tab's update
-  // detection — a single relay query instead of one per installed app.
-  startDiscoverSubscription()
+  // Connect to relays up front only when there's already a relay-installed app
+  // worth update-checking — then early update detection justifies the
+  // connection. A first-time user with nothing installed (or only local/dev
+  // apps) gets no relay connection — and no surprise auth prompt — until they
+  // open the discover tab, which starts discovery lazily (see switchTab).
+  if (ctx.apps.list().some(a => a.event?.created_at)) ensureDiscovery()
   const unsub = ctx.apps.subscribe(() => {
     if (!installedBuilt) return
     // Only rebuild when the set of installed apps actually changed — otherwise
