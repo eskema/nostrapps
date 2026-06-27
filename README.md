@@ -37,13 +37,11 @@ window.napp.utils.loadPins(pubkey, hints?, refreshStyle?, defaultItems?)
 window.napp.utils.loadBlossomServers(pubkey, hints?, refreshStyle?, defaultItems?)
 window.napp.utils.loadEmojis(pubkey, hints?, refreshStyle?, defaultItems?)
 window.napp.utils.loadFavoriteRelays(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadFavoriteScrolls(pubkey, hints?, refreshStyle?, defaultItems?)
 window.napp.utils.loadWikiAuthors(pubkey, hints?, refreshStyle?, defaultItems?)
 window.napp.utils.loadWikiRelays(pubkey, hints?, refreshStyle?, defaultItems?)
 
 // Addressable sets
 window.napp.utils.loadFollowSets(pubkey, hints?, forceUpdate?)
-window.napp.utils.loadFollowPacks(pubkey, hints?, forceUpdate?)
 window.napp.utils.loadRelaySets(pubkey, hints?, forceUpdate?)
 window.napp.utils.loadEmojiSets(pubkey, hints?, forceUpdate?)
 

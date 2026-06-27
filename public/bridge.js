@@ -34,7 +34,10 @@
       def("getRegistration", () => Promise.resolve(undefined))
       def("getRegistrations", () => Promise.resolve([]))
       try {
-        Object.defineProperty(swc, "ready", { configurable: true, get: () => Promise.resolve(stub) })
+        Object.defineProperty(swc, "ready", {
+          configurable: true,
+          get: () => Promise.resolve(stub)
+        })
       } catch {}
     }
   } catch {}
@@ -247,8 +250,6 @@
         rpc("napp.loadEmojis", { pubkey, hints, refreshStyle, defaultItems }),
       loadFavoriteRelays: (pubkey, hints, refreshStyle, defaultItems) =>
         rpc("napp.loadFavoriteRelays", { pubkey, hints, refreshStyle, defaultItems }),
-      loadFavoriteScrolls: (pubkey, hints, refreshStyle, defaultItems) =>
-        rpc("napp.loadFavoriteScrolls", { pubkey, hints, refreshStyle, defaultItems }),
       loadFollowsList: (pubkey, hints, refreshStyle, defaultItems) =>
         rpc("napp.loadFollowsList", { pubkey, hints, refreshStyle, defaultItems }),
       loadMuteList: (pubkey, hints, refreshStyle, defaultItems) =>
@@ -264,8 +265,6 @@
       // ── sets ───────────────────────────────────────
       loadEmojiSets: (pubkey, hints, forceUpdate) =>
         rpc("napp.loadEmojiSets", { pubkey, hints, forceUpdate }),
-      loadFollowPacks: (pubkey, hints, forceUpdate) =>
-        rpc("napp.loadFollowPacks", { pubkey, hints, forceUpdate }),
       loadFollowSets: (pubkey, hints, forceUpdate) =>
         rpc("napp.loadFollowSets", { pubkey, hints, forceUpdate }),
       loadRelaySets: (pubkey, hints, forceUpdate) =>

@@ -186,12 +186,6 @@ interface NappUtils {
     refreshStyle?: boolean | NostrEvent | null,
     defaultItems?: string[]
   ): Promise<ListResult<string>>
-  loadFavoriteScrolls(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
   loadWikiAuthors(
     pubkey: string,
     hints?: string[],
@@ -207,11 +201,6 @@ interface NappUtils {
 
   // Addressable sets
   loadFollowSets(
-    pubkey: string,
-    hints?: string[],
-    forceUpdate?: boolean
-  ): Promise<SetResult<string>>
-  loadFollowPacks(
     pubkey: string,
     hints?: string[],
     forceUpdate?: boolean
@@ -238,7 +227,10 @@ interface NappUtils {
 // ── Main napp object ─────────────────────────────────────────────────────
 interface Napp {
   instance: string
-  registerAction(pattern: string, fn?: ((name: string, payload: unknown) => Promise<unknown>) | null): void
+  registerAction(
+    pattern: string,
+    fn?: ((name: string, payload: unknown) => Promise<unknown>) | null
+  ): void
   action(name: string, payload?: unknown, opts?: { instance?: string }): Promise<unknown>
   feeds: NappFeeds
   utils: NappUtils

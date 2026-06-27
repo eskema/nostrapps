@@ -23,7 +23,6 @@ import {
   loadBookmarks,
   loadEmojis,
   loadFavoriteRelays,
-  loadFavoriteScrolls,
   loadFollowsList,
   loadMuteList,
   loadPins,
@@ -31,7 +30,7 @@ import {
   loadWikiAuthors,
   loadWikiRelays
 } from "@nostr/gadgets/lists"
-import { loadEmojiSets, loadFollowPacks, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
+import { loadEmojiSets, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 import { loadRelayInfo } from "@nostr/gadgets/relays"
 import { pool } from "@nostr/gadgets/global"
@@ -1591,7 +1590,7 @@ function setStageBottomSpacer(stage: HTMLElement, maxBottom: number) {
 // SETTLED. bestFitPack instead derives it from its target grid, since offsetTop
 // lags behind the in-flight `.packing` transition right after a repack (which is
 // why the spacer used to wait for a focus/re-pack to catch up).
-function measureMaxWindowBottom(stage: HTMLElement): number {
+function measureMaxWindowBottom(_stage: HTMLElement): number {
   let maxBottom = 0
   for (const win of openWindows.values()) {
     const r = win.root
@@ -2133,13 +2132,6 @@ async function dispatch(
         params.refreshStyle,
         params.defaultItems
       )
-    case "napp.loadFavoriteScrolls":
-      return loadFavoriteScrolls(
-        params.pubkey,
-        params.hints,
-        params.refreshStyle,
-        params.defaultItems
-      )
     case "napp.loadFollowsList":
       return loadFollowsList(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
     case "napp.loadMuteList":
@@ -2154,8 +2146,6 @@ async function dispatch(
       return loadWikiRelays(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
     case "napp.loadEmojiSets":
       return loadEmojiSets(params.pubkey, params.hints, params.forceUpdate)
-    case "napp.loadFollowPacks":
-      return loadFollowPacks(params.pubkey, params.hints, params.forceUpdate)
     case "napp.loadFollowSets":
       return loadFollowSets(params.pubkey, params.hints, params.forceUpdate)
     case "napp.loadRelaySets":
