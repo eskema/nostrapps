@@ -1562,6 +1562,12 @@ export function rescaleWindowGeom(root: HTMLElement) {
   root.style.left = `${Math.round(padL + (ref.left - padL) * sx)}px`
   root.style.top = `${Math.round(padT + (ref.top - padT) * sy)}px`
   root.style.width = `${Math.round(ref.width * sx)}px`
+  // Scale the 240px min-width floor with the recompose. Otherwise a window whose
+  // scaled width drops under that floor stops shrinking while its left keeps
+  // sliding inward, so neighbors overlap. A small absolute backstop keeps them
+  // from getting absurdly tiny; clear the override once we're back at/above the
+  // reference size so the CSS floor (240) takes over again.
+  root.style.minWidth = sx >= 1 ? "" : `${Math.round(Math.max(120, 240 * sx))}px`
   if (ref.height != null) {
     root.style.height = `${Math.round(ref.height * sy)}px`
   }
