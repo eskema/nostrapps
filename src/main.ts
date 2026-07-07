@@ -1239,7 +1239,10 @@ function buildSpacesBarSkeleton() {
 
   const right = document.createElement("div")
   right.className = "spaces-right"
-  right.append(spacesTabListEl, iconButton("plus", "New space", () => createSpaceAndSwitch()))
+  right.append(
+    spacesTabListEl,
+    iconButton("plus", "New space", () => createSpaceAndSwitch())
+  )
 
   spacesBar.append(spacesNameEl, controls, spacesWinListEl, right)
   spacesBarBuilt = true
@@ -1272,7 +1275,10 @@ function renderSpacesBar() {
   // Space tabs — REUSE existing elements so .active toggles (and its padding
   // transition) animate on a live node instead of being born already-active.
   const existing = new Map(
-    [...spacesTabListEl.children].map(c => [(c as HTMLElement).dataset.spaceId!, c as HTMLButtonElement])
+    [...spacesTabListEl.children].map(c => [
+      (c as HTMLElement).dataset.spaceId!,
+      c as HTMLButtonElement
+    ])
   )
   spaces.forEach((s, i) => {
     let tab = existing.get(s.id)
@@ -1355,7 +1361,9 @@ function makeReorder(opts: { itemSelector: string; commit: (orderedEls: HTMLElem
     if (after === el) return
     const settled = after ? el.nextElementSibling === after : el === list.lastElementChild
     if (settled) return
-    flipReorder(list, el, () => (after == null ? list.appendChild(el) : list.insertBefore(el, after)))
+    flipReorder(list, el, () =>
+      after == null ? list.appendChild(el) : list.insertBefore(el, after)
+    )
   }
 
   function onUp() {

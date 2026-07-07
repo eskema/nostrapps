@@ -23,30 +23,25 @@ window.nostrdb.event(id)
 window.nostrdb.replaceable(kind, author, identifier?)
 window.nostrdb.supports() // returns []
 
-// NIP-51 list loaders
-window.napp.utils.loadRelayList(
-  pubkey: string,
-  hints?: string[],
-  refreshStyle?: boolean | NostrEvent | null,
-  defaultItems?: RelayItem[]
-): Promise<ListResult<RelayItem>>
-window.napp.utils.loadFollowsList(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadMuteList(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadBookmarks(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadPins(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadBlossomServers(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadEmojis(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadFavoriteRelays(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadWikiAuthors(pubkey, hints?, refreshStyle?, defaultItems?)
-window.napp.utils.loadWikiRelays(pubkey, hints?, refreshStyle?, defaultItems?)
+// NIP-51 list loaders — accepts hex pubkey, npub, or nprofile
+window.napp.utils.loadRelayList(pubkey: string): Promise<ListResult<RelayItem>>
+window.napp.utils.loadFollowsList(pubkey)
+window.napp.utils.loadMuteList(pubkey)
+window.napp.utils.loadBookmarks(pubkey)
+window.napp.utils.loadPins(pubkey)
+window.napp.utils.loadBlossomServers(pubkey)
+window.napp.utils.loadEmojis(pubkey)
+window.napp.utils.loadFavoriteRelays(pubkey)
+window.napp.utils.loadWikiAuthors(pubkey)
+window.napp.utils.loadWikiRelays(pubkey)
 
 // Addressable sets
-window.napp.utils.loadFollowSets(pubkey, hints?, forceUpdate?)
-window.napp.utils.loadRelaySets(pubkey, hints?, forceUpdate?)
-window.napp.utils.loadEmojiSets(pubkey, hints?, forceUpdate?)
+window.napp.utils.loadFollowSets(pubkey)
+window.napp.utils.loadRelaySets(pubkey)
+window.napp.utils.loadEmojiSets(pubkey)
 
 // Relay metadata
-window.napp.utils.loadRelayInfo(url, refreshStyle?)
+window.napp.utils.loadRelayInfo(url)
 
 // Profile metadata
 window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrUser
@@ -60,6 +55,10 @@ window.napp.utils.publish(event, relays?)
 //   relays?: string[] — if omitted, publishes to the author's write relays
 //     (for kind 10002 also publishes to fallback + indexer relays)
 //   returns { relays: {[url]: { ok, error? }}, published, failed }
+//
+// For kinds handled by load* methods (NIP-51 lists, addressable sets, contacts),
+// publish() also updates the local cache with the published event so subsequent
+// load* calls reflect the change immediately without re-fetching from relays.
 ```
 
 ### Streaming feeds

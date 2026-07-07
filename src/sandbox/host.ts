@@ -1675,7 +1675,8 @@ function clampToStage(root: HTMLElement, stage: HTMLElement, opts: { pullIn?: bo
   // overflow-x is hidden.)
   const scrollsY = /(auto|scroll)/.test(getComputedStyle(stage).overflowY)
   const maxTop = Math.max(minTop, H - padB - 28)
-  const newTop = scrollsY || !pullIn ? Math.max(minTop, top) : Math.max(minTop, Math.min(maxTop, top))
+  const newTop =
+    scrollsY || !pullIn ? Math.max(minTop, top) : Math.max(minTop, Math.min(maxTop, top))
   if (newLeft !== left) root.style.left = `${newLeft}px`
   if (newTop !== top) root.style.top = `${newTop}px`
 }
@@ -2053,6 +2054,16 @@ async function startInboxFeed(
   }
 }
 
+function resolvePubkey(user: string): string {
+  if (typeof user !== "string") return user
+  if (user.startsWith("npub1") || user.startsWith("nprofile1")) {
+    const { type, data } = decode(user)
+    if (type === "npub") return data as string
+    if (type === "nprofile") return (data as { pubkey: string }).pubkey
+  }
+  return user
+}
+
 async function dispatch(
   signer: Signer,
   method: string,
@@ -2151,43 +2162,33 @@ async function dispatch(
     case "napp.feeds.cancel":
       return cancelFeedRequest(instanceId, params?.callbackId)
     case "napp.loadBlossomServers":
-      return loadBlossomServers(
-        params.pubkey,
-        params.hints,
-        params.refreshStyle,
-        params.defaultItems
-      )
+      return loadBlossomServers(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadBookmarks":
-      return loadBookmarks(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadBookmarks(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadEmojis":
-      return loadEmojis(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadEmojis(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadFavoriteRelays":
-      return loadFavoriteRelays(
-        params.pubkey,
-        params.hints,
-        params.refreshStyle,
-        params.defaultItems
-      )
+      return loadFavoriteRelays(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadFollowsList":
-      return loadFollowsList(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadFollowsList(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadMuteList":
-      return loadMuteList(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadMuteList(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadPins":
-      return loadPins(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadPins(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadRelayList":
-      return loadRelayList(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadRelayList(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadWikiAuthors":
-      return loadWikiAuthors(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadWikiAuthors(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadWikiRelays":
-      return loadWikiRelays(params.pubkey, params.hints, params.refreshStyle, params.defaultItems)
+      return loadWikiRelays(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadEmojiSets":
-      return loadEmojiSets(params.pubkey, params.hints, params.forceUpdate)
+      return loadEmojiSets(resolvePubkey(params))
     case "napp.loadFollowSets":
-      return loadFollowSets(params.pubkey, params.hints, params.forceUpdate)
+      return loadFollowSets(resolvePubkey(params))
     case "napp.loadRelaySets":
-      return loadRelaySets(params.pubkey, params.hints, params.forceUpdate)
+      return loadRelaySets(resolvePubkey(params))
     case "napp.loadRelayInfo":
-      return loadRelayInfo(params.url, params.refreshStyle)
+      return loadRelayInfo(params)
     case "napp.loadNostrUser":
       if (typeof params === "string") {
         if (isNip05(params)) {
@@ -2357,6 +2358,46 @@ async function publishEvent(event: NostrEvent, relays?: string[]): Promise<Publi
       relaysMap[relayUrl] = { ok: false, error: result.reason?.message ?? String(result.reason) }
       failed++
     }
+  }
+
+  // update cache for known replaceable kinds
+  switch (event.kind) {
+    case 3:
+      loadFollowsList(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10000:
+      loadMuteList(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10001:
+      loadPins(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10002:
+      loadRelayList(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10003:
+      loadBookmarks(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10012:
+      loadFavoriteRelays(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10030:
+      loadEmojis(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10063:
+      loadBlossomServers(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10101:
+      loadWikiAuthors(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10102:
+      loadWikiRelays(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 30000:
+      loadFollowSets(event.pubkey).catch(() => {})
+      break
+    case 30002:
+      loadEmojiSets(event.pubkey).catch(() => {})
+      break
   }
 
   return { relays: relaysMap, published, failed }

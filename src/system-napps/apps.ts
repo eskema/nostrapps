@@ -1333,7 +1333,11 @@ function detailInfo(req: DetailReq): HTMLElement {
         identifier: dTag,
         relays: seenOn
       })
-      const copyBtn = button({ label: "copy naddr", variant: "outline", class: "apps-detail-naddr" })
+      const copyBtn = button({
+        label: "copy naddr",
+        variant: "outline",
+        class: "apps-detail-naddr"
+      })
       copyBtn.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(naddr)
@@ -1384,9 +1388,7 @@ function detailInfo(req: DetailReq): HTMLElement {
       section.appendChild(row)
     }
 
-    const cats: string[] = event.tags
-      .filter((t: any) => t[0] === "l" && t[1])
-      .map((t: any) => t[1])
+    const cats: string[] = event.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
     if (cats.length) {
       section.appendChild(
         chipGroup(
@@ -1401,7 +1403,10 @@ function detailInfo(req: DetailReq): HTMLElement {
       .map((t: any) => t[1])
     if (hashtags.length) {
       section.appendChild(
-        chipGroup("tags", hashtags.map(t => detailChip("apps-chip-tag", `#${t}`)))
+        chipGroup(
+          "tags",
+          hashtags.map(t => detailChip("apps-chip-tag", `#${t}`))
+        )
       )
     }
   }
@@ -1443,7 +1448,11 @@ async function renderFiles(evt: any, list: HTMLElement) {
 
     // The per-file links are folded behind a "links" button: clicking it builds
     // the blossom links for this file and swaps itself out for them.
-    const linksBtn = button({ label: "links", variant: "link", class: "apps-detail-files-links-btn" })
+    const linksBtn = button({
+      label: "links",
+      variant: "link",
+      class: "apps-detail-files-links-btn"
+    })
     linksBtn.addEventListener("click", () => {
       const span = document.createElement("span")
       span.className = "apps-detail-files-links"

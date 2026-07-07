@@ -137,82 +137,25 @@ interface NappFeeds {
 
 // ── Data-loading utils ───────────────────────────────────────────────────
 interface NappUtils {
-  // NIP-51 lists
-  loadRelayList(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: RelayItem[]
-  ): Promise<ListResult<RelayItem>>
-  loadFollowsList(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
-  loadMuteList(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
-  loadBookmarks(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
-  loadPins(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
-  loadBlossomServers(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
-  loadEmojis(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
-  loadFavoriteRelays(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
-  loadWikiAuthors(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
-  loadWikiRelays(
-    pubkey: string,
-    hints?: string[],
-    refreshStyle?: boolean | NostrEvent | null,
-    defaultItems?: string[]
-  ): Promise<ListResult<string>>
+  // NIP-51 lists — accepts hex pubkey, npub, or nprofile
+  loadRelayList(pubkey: string): Promise<ListResult<RelayItem>>
+  loadFollowsList(pubkey: string): Promise<ListResult<string>>
+  loadMuteList(pubkey: string): Promise<ListResult<string>>
+  loadBookmarks(pubkey: string): Promise<ListResult<string>>
+  loadPins(pubkey: string): Promise<ListResult<string>>
+  loadBlossomServers(pubkey: string): Promise<ListResult<string>>
+  loadEmojis(pubkey: string): Promise<ListResult<string>>
+  loadFavoriteRelays(pubkey: string): Promise<ListResult<string>>
+  loadWikiAuthors(pubkey: string): Promise<ListResult<string>>
+  loadWikiRelays(pubkey: string): Promise<ListResult<string>>
 
   // Addressable sets
-  loadFollowSets(
-    pubkey: string,
-    hints?: string[],
-    forceUpdate?: boolean
-  ): Promise<SetResult<string>>
-  loadRelaySets(pubkey: string, hints?: string[], forceUpdate?: boolean): Promise<SetResult<string>>
-  loadEmojiSets(pubkey: string, hints?: string[], forceUpdate?: boolean): Promise<SetResult<string>>
+  loadFollowSets(pubkey: string): Promise<SetResult<string>>
+  loadRelaySets(pubkey: string): Promise<SetResult<string>>
+  loadEmojiSets(pubkey: string): Promise<SetResult<string>>
 
   // Relay info
-  loadRelayInfo(
-    url: string,
-    refreshStyle?: boolean | NostrEvent | null
-  ): Promise<RelayInfoDocument | null>
+  loadRelayInfo(url: string): Promise<RelayInfoDocument | null>
 
   // Profile metadata
   loadNostrUser(request: NostrUserRequest | string): Promise<NostrUser>

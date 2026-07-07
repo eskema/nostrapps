@@ -46,7 +46,8 @@ let showing = false
 export function openDialog<T = string>(opts: DialogOptions<T>): Promise<T> {
   return new Promise<T>(resolve => {
     queue.push({ opts, resolve })
-    if (showing) renderQueueBar() // refresh the count on the open dialog
+    if (showing)
+      renderQueueBar() // refresh the count on the open dialog
     else pump()
   })
 }
