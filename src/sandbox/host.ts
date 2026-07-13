@@ -2124,10 +2124,12 @@ async function dispatch(
       const res = await store.queryEvents({ ids: [params.id] }, 1)
       return res[0]
     case "nostrdb.replaceable":
+      // loadReplaceables returns [lastAttempt, event] tuples; napps are
+      // promised the bare event (env.d.ts).
       const result = await getStore().loadReplaceables([
         [params.kind, params.author, params.identifier]
       ])
-      return result[0]
+      return result[0][1]
     case "napp.action": {
       // The bridge forwards the in-iframe pointer; convert it to screen coords via
       // this napp's iframe rect so cursor-anchored UI (the handler popover) opens
@@ -2278,7 +2280,9 @@ export async function loadEvent(params: { code: string; relays?: string[]; autho
 
   // try store
   let event: NostrEvent | undefined
-  if (identifier && author && kind) {
+  // identifier != null (not truthiness): an naddr with an empty d tag ("") is a
+  // valid replaceable coordinate, so "" must still take the replaceable path.
+  if (identifier != null && author && kind) {
     const results = await store.loadReplaceables([[kind, author, identifier]])
     event = results[0][1] as NostrEvent | undefined
   } else if (id) {
@@ -2289,7 +2293,7 @@ export async function loadEvent(params: { code: string; relays?: string[]; autho
 
   // prepare filter for relays
   let filter: Record<string, any> = { limit: 1 }
-  if (identifier) {
+  if (identifier != null) {
     filter.kinds = [kind]
     filter.authors = [author]
     if (identifier !== "") filter["#d"] = [identifier]
