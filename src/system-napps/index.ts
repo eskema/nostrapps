@@ -22,8 +22,9 @@ const actions = [
     id: "dev",
     title: "Load dev app",
     slash: "/dev",
-    run(ctx: any) {
-      ctx.installDevApp()
+    run(ctx: any, args?: string) {
+      if (args) ctx.installDevAppFromUrl(args)
+      else ctx.installDevApp()
     }
   }
 ]

@@ -18,6 +18,7 @@ import {
   bootNapp,
   bootDevApp,
   setDevHandle,
+  setDevUrl,
   setTempFiles,
   removeDevHandle,
   setInstanceIdSerial,
@@ -594,6 +595,7 @@ const systemCtx: SystemCtx = {
   loadFolder,
   setStatus,
   installDevApp,
+  installDevAppFromUrl,
   launchSystemNapp,
   launchNapp: async (nappId: string, petname?: string) => {
     const win = await launch(stage, nappId, {
@@ -1594,25 +1596,84 @@ async function installDevApp() {
   }
 }
 
+async function installDevAppFromUrl(rawUrl: string) {
+  try {
+    const baseUrl = normalizeDevUrl(rawUrl)
+    setStatus(`Fetching ${baseUrl}metadata.json…`)
+    const metaRes = await fetch(new URL("metadata.json", baseUrl).toString())
+    if (!metaRes.ok) throw new Error(`Fetch metadata.json failed: ${metaRes.status}`)
+    const metadata = JSON.parse(await metaRes.text())
+    if (!metadata?.id) throw new Error("metadata.json must contain an .id field")
+
+    const nappId = `dev~${slug(baseUrl)}-${slug(metadata.id)}`
+    const origin = nappOriginFor(nappId)
+    const onProgress = setStatus
+    const label = metadata.title || nappId
+    const petname = metadata.title || nappId
+
+    setStatus(`Booting dev ${label}…`)
+    await bootDevApp(origin, nappId, onProgress, label)
+
+    setDevUrl(nappId, baseUrl)
+
+    persist.storeDevApp({
+      nappId,
+      title: metadata.title || null,
+      icon: metadata.icon || null,
+      petname,
+      actions: metadata.actions || [],
+      singleton: metadata.singleton
+    })
+    handlers.addApp(nappId, metadata.actions || [])
+
+    const win = await launch(stage, nappId, {
+      ...makeLaunchOpts(),
+      petname
+    })
+    syncDOM(win)
+    win.focus()
+    setStatus(`Launched dev ${petname}`)
+  } catch (err: any) {
+    setStatus(`Error: ${err.message}`)
+    console.error(err)
+  }
+}
+
+function normalizeDevUrl(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) throw new Error("URL is required")
+  const withScheme = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `http${trimmed === "localhost" ? "" : "s"}://${trimmed}`
+  const u = new URL(withScheme)
+  if (!u.pathname.endsWith("/")) u.pathname += "/"
+  return u.toString()
+}
+
 async function launchFromInput(raw: string): Promise<void> {
   console.debug("[launch] launchFromInput", { raw })
 
   // Slash commands → system napps or one-shot actions
   if (raw.startsWith("/")) {
-    const sysId = slashCommands[raw]
+    const spaceIdx = raw.indexOf(" ")
+    const cmd = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx)
+    const args = spaceIdx === -1 ? "" : raw.slice(spaceIdx + 1).trim()
+
+    const sysId = slashCommands[cmd]
     if (sysId) {
+      if (args) throw new Error(`${cmd} takes no arguments`)
       console.debug("[launch] slash command → system napp", { sysId })
       await invokeSystemNapp(sysId)
       return
     }
-    const actionId = slashActions[raw]
+    const actionId = slashActions[cmd]
     if (actionId) {
-      console.debug("[launch] slash command → action", { actionId })
-      actionRegistry[actionId]?.run(systemCtx)
+      console.debug("[launch] slash command → action", { actionId, args })
+      actionRegistry[actionId]?.run(systemCtx, args)
       return
     }
     console.debug("[launch] unknown slash command", { raw })
-    throw new Error(`Unknown command: ${raw}`)
+    throw new Error(`Unknown command: ${cmd}`)
   }
 
   const existing = persist.findSessionByPetname(raw)

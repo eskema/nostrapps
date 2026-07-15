@@ -1766,11 +1766,16 @@ export async function bootNapp(
 // ─── Dev apps ───────────────────────────────────────────
 
 const devHandles = new Map<string, FileSystemDirectoryHandle>()
+const devUrls = new Map<string, string>()
 const tempFiles = new Map<string, Map<string, NsiteFile>>()
 const devBootIframes = new Map<string, HTMLIFrameElement>()
 
 export function setDevHandle(nappId: string, handle: FileSystemDirectoryHandle) {
   devHandles.set(nappId, handle)
+}
+
+export function setDevUrl(nappId: string, baseUrl: string) {
+  devUrls.set(nappId, baseUrl)
 }
 
 export function setTempFiles(nappId: string, files: NsiteFile[]) {
@@ -1782,6 +1787,7 @@ export function setTempFiles(nappId: string, files: NsiteFile[]) {
 
 export function removeDevHandle(nappId: string) {
   devHandles.delete(nappId)
+  devUrls.delete(nappId)
   tempFiles.delete(nappId)
   const boot = devBootIframes.get(nappId)
   if (boot) {
@@ -1792,6 +1798,10 @@ export function removeDevHandle(nappId: string) {
 
 export function getDevHandle(nappId: string): FileSystemDirectoryHandle | null {
   return devHandles.get(nappId) || null
+}
+
+export function getDevUrl(nappId: string): string | null {
+  return devUrls.get(nappId) || null
 }
 
 export async function bootDevApp(
@@ -1832,9 +1842,10 @@ window.addEventListener("message", async event => {
 
   const { nappId, path, requestId } = data
   const dirHandle = devHandles.get(nappId)
+  const devUrl = devUrls.get(nappId)
   const tempAppFiles = tempFiles.get(nappId)
 
-  if (!dirHandle && !tempAppFiles) {
+  if (!dirHandle && !devUrl && !tempAppFiles) {
     ;(event.source as Window)?.postMessage(
       { __nostrapps: "napp-dev-file-result", requestId, error: "No files for " + nappId },
       "*"
@@ -1851,6 +1862,24 @@ window.addEventListener("message", async event => {
           requestId,
           body: await tempFile.body.arrayBuffer(),
           mime: tempFile.mime || "application/octet-stream"
+        },
+        "*"
+      )
+      return
+    }
+
+    if (devUrl) {
+      const rel = path.replace(/^\//, "")
+      const target = new URL(rel, devUrl).toString()
+      const res = await fetch(target)
+      if (!res.ok) throw new Error(`Fetch ${target} failed: ${res.status}`)
+      const body = await res.arrayBuffer()
+      ;(event.source as Window)?.postMessage(
+        {
+          __nostrapps: "napp-dev-file-result",
+          requestId,
+          body,
+          mime: res.headers.get("content-type") || "application/octet-stream"
         },
         "*"
       )

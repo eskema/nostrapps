@@ -217,6 +217,7 @@ export interface SystemCtx {
   uninstall(nappId: string): Promise<void>
   update(target: { pubkey: string; dTag: string; relayHints?: string[] }): Promise<void>
   installDevApp(): Promise<void>
+  installDevAppFromUrl(url: string): Promise<void>
 }
 
 export interface NsiteFile {
