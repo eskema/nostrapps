@@ -126,6 +126,7 @@ h1 span {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  padding: 0.2rem 0;
   /* padding: 0.2rem 0.5rem; */
   /* min-height: 1.7rem; */
   /* border-bottom: 1px dotted color-mix(in srgb, currentColor 40%, transparent); */
@@ -244,11 +245,13 @@ body.space-dragging * {
 }
 
 .spaces-controls .btn,
-.spaces-right > .btn {
+.spaces-right > .btn,
+.spaces-windows .btn {
   padding: 0.2rem;
 }
 
-#spaces-bar .spaces-controls .btn {
+#spaces-bar .spaces-controls .btn,
+#spaces-bar .spaces-right > .btn {
   font-size: 1rem;
 }
 
