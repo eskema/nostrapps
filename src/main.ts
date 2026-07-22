@@ -26,6 +26,8 @@ import {
   listOpenWindows,
   setActiveSpace,
   isWindowInactive,
+  moveWindowToSpace,
+  hasOpenWindow,
   allInstanceIds,
   spaceOfLiveSystem,
   loadEvent
@@ -1040,6 +1042,9 @@ async function restoreAll() {
     sessionCount: persist.readOpen().length
   })
   for (const state of persist.readOpen()) {
+    // Skip windows already live (e.g. one moved into this space while it was
+    // still unmaterialized) so materializing the space can't mount a duplicate.
+    if (hasOpenWindow(state.instanceId)) continue
     try {
       if (state.system && state.systemId) {
         const def = systemRegistry[state.systemId]
@@ -1121,6 +1126,62 @@ async function createSpaceAndSwitch(name?: string): Promise<string> {
   await switchSpace(id)
   renderSpacesBar()
   return id
+}
+
+// ─── Move a window to another space ─────────────────────────────
+// The window's move button (in napp-window.ts) bubbles a request up to the
+// stage; the launcher owns spaces so it opens the picker and does the move.
+stage.addEventListener("napp-move-request", e => {
+  const d = (e as CustomEvent).detail as { instanceId: string; x: number; y: number }
+  openMoveToSpace(d.instanceId, d.x, d.y)
+})
+
+const MOVE_NEW_SPACE = "__new__"
+function openMoveToSpace(instanceId: string, x: number, y: number) {
+  const others = persist.listSpaces().filter(s => s.id !== currentSpaceId)
+  openPopover<string | null>({
+    x,
+    y,
+    class: "move-popover",
+    dismissValue: null,
+    build: resolve => {
+      const wrap = document.createElement("div")
+      wrap.className = "move-popover-list"
+      const title = document.createElement("div")
+      title.className = "move-popover-title"
+      title.textContent = "Move to space"
+      wrap.append(title)
+      for (const s of others) {
+        wrap.append(
+          button({
+            variant: "ghost",
+            label: s.name,
+            class: "move-popover-item",
+            onClick: () => resolve(s.id)
+          })
+        )
+      }
+      wrap.append(
+        button({
+          variant: "ghost",
+          label: "+ new space",
+          class: "move-popover-item move-popover-new",
+          onClick: () => resolve(MOVE_NEW_SPACE)
+        })
+      )
+      return wrap
+    }
+  }).then(async choice => {
+    if (!choice) return
+    const targetId = choice === MOVE_NEW_SPACE ? persist.createSpace() : choice
+    persist.moveOpenToSpace(instanceId, targetId)
+    moveWindowToSpace(instanceId, targetId)
+    maybeRepack() // tidy the source layout now the window has left
+    await switchSpace(targetId) // follow the window into its new space
+    renderSpacesBar()
+    const name = persist.listSpaces().find(s => s.id === targetId)?.name || "space"
+    setStatus(`Moved to ${name}`)
+  })
 }
 
 // Commit the current windows as this space's saved layout.

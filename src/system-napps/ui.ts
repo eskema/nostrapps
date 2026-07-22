@@ -37,6 +37,7 @@ const ICONS: Record<string, string> = {
   reload: '<path d="M3.2 8a4.8 4.8 0 1 0 1.5-3.5"/><path d="M3 3v2.7h2.7"/>',
   back: '<path d="M13 8H3.5M7 4 3.5 8 7 12"/>',
   forward: '<path d="M3 8h9.5M9 4 12.5 8 9 12"/>',
+  move: '<path d="M2 8h8"/><path d="M7 5l3 3-3 3"/><path d="M13 4v8"/>',
   window: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6h12"/>',
   close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>'

@@ -109,10 +109,13 @@ export function createNappWindow({
   btnMax.classList.add("napp-btn-max")
   const btnPin = makeBtn("•", "Pin on top")
   btnPin.classList.add("napp-btn-pin")
+  const btnMove = makeBtn("", "Move to space")
+  btnMove.classList.add("napp-btn-move")
+  btnMove.append(icon("move"))
   const btnClose = makeBtn("×", system ? "Close" : "Close (keep state)")
   // Destroy (wipe-all) lives only in the Apps window, not on each window —
   // it's a napp-wide, origin-clearing operation, not a per-window control.
-  controls.append(btnMin, btnMax, btnPin, btnClose)
+  controls.append(btnMin, btnMax, btnPin, btnMove, btnClose)
 
   const body = document.createElement("div")
   body.className = "napp-body"
@@ -309,6 +312,18 @@ export function createNappWindow({
     // Re-stack: pinning lifts into pin tier, unpinning drops to top of normal.
     bringToFront(root)
     notifyState()
+  })
+  // Ask the launcher (which owns spaces) to open the move-to-space popover,
+  // anchored under this button. It handles the persist + re-tag.
+  btnMove.addEventListener("click", e => {
+    e.stopPropagation()
+    const r = btnMove.getBoundingClientRect()
+    root.dispatchEvent(
+      new CustomEvent("napp-move-request", {
+        bubbles: true,
+        detail: { instanceId, x: r.left, y: r.bottom + 4 }
+      })
+    )
   })
 
   if (!system) {

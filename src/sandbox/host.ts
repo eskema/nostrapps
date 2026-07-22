@@ -90,6 +90,20 @@ export function isWindowInactive(instanceId: string): boolean {
   return !!win && (win.root.dataset.space || "") !== activeSpace
 }
 
+export function hasOpenWindow(instanceId: string): boolean {
+  return openWindows.has(instanceId)
+}
+
+// Re-tag a live window to another space. It stays mounted (no reload); moving to
+// a non-active space just hides it via .space-inactive until that space is
+// shown. The persisted entry is relocated separately (persist.moveOpenToSpace).
+export function moveWindowToSpace(instanceId: string, targetSpaceId: string) {
+  const win = openWindows.get(instanceId)
+  if (!win) return
+  win.root.dataset.space = targetSpaceId
+  win.root.classList.toggle("space-inactive", targetSpaceId !== activeSpace)
+}
+
 // Every live instance id across all materialized spaces (for serial bumping).
 export function allInstanceIds(): string[] {
   return [...openWindows.keys()]

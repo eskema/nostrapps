@@ -113,6 +113,33 @@ export function removeOpen(instanceId: string) {
   if (changed) writeJson(SPACES_KEY, spaces)
 }
 
+// Relocate an open window's entry from the current space to another space,
+// keeping its state (position, params, …). Handles both persisted windows
+// (in the space's `open` list) and ephemeral dev windows (in devOpenBySpace).
+export function moveOpenToSpace(instanceId: string, targetId: string) {
+  const state = ensureSpaces()
+  const cur = currentSpace(state)
+  if (targetId === cur.id) return
+  const target = state.list.find(s => s.id === targetId)
+  if (!target) return
+
+  const eph = devOpenBySpace.get(cur.id)
+  const ei = eph ? eph.findIndex(n => n.instanceId === instanceId) : -1
+  if (eph && ei >= 0) {
+    const [entry] = eph.splice(ei, 1)
+    const dst = devOpenBySpace.get(targetId) || []
+    dst.push(entry)
+    devOpenBySpace.set(targetId, dst)
+    return
+  }
+
+  const i = cur.open.findIndex(n => n.instanceId === instanceId)
+  if (i === -1) return
+  const [entry] = cur.open.splice(i, 1)
+  target.open.push(entry)
+  writeJson(SPACES_KEY, state)
+}
+
 export function getLoadedActions(instanceId: string): Array<{ name: string; payload: unknown }> {
   return readOpen().find(n => n.instanceId === instanceId)?.loadedActions || []
 }
