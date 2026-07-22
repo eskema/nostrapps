@@ -108,6 +108,16 @@ The host also pushes runtime signals to every napp via `postMessage`. bridge.js 
 
 - **`napp-theme-change`**: sets `document.documentElement.dataset.theme` to `"light"` or `"dark"` and injects the launcher's resolved color tokens as `--surface`, `--text`, etc. on `:root`. Sent when the launcher's theme changes, so napps using `var(--surface)` / `var(--text)` track automatically.
 
+### Shared UI (opt-in)
+
+A napp can adopt the launcher's design system — matching buttons, inputs, disclosures, checkboxes, and icons — by declaring `"ui": "wrapper"` in its `metadata.json`:
+
+```json
+{ "ui": "wrapper" }
+```
+
+When set, the launcher's service worker injects `<link rel="stylesheet" href="/napp-ui.css">` at the top of the napp's `<head>` (before your own styles, so you can still override anything). The stylesheet provides `.btn` (+ `.btn-primary` / `.btn-outline` / `.btn-danger` / `.btn-warning` / `.btn-ghost` / `.btn-link`), `.ui-input`, `.ui-details`, `.ui-check`, and `.ui-icon-*` classes, with the launcher's fonts and icons inlined as data URIs. Its `--surface` / `--text` tokens track the theme via `napp-theme-change`, so opted-in napps match the launcher in both light and dark mode. Napps that don't set the flag are unaffected and render entirely in their own styles.
+
 ### Origin sandboxing
 
 Each napp runs at its own origin (a unique `<nappId>` subdomain). From the iframe, `window.parent` is cross-origin, so the napp can't reach into the launcher. The bridge is the only channel.
