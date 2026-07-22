@@ -125,11 +125,24 @@ export function getLoadedActions(instanceId: string): Array<{ name: string; payl
 function readSpacesRaw(): SpacesState | null {
   const v = readJson(SPACES_KEY, null)
   if (v && typeof v.current === "string" && Array.isArray(v.list) && v.list.length) {
+    // Repair: drop spaces with a duplicate or invalid id (a past id-collision bug
+    // could mint them), keeping the first of each id. Duplicate ids break every
+    // id-keyed lookup, so heal the document on load and persist the repair.
+    const seen = new Set<string>()
+    const deduped = v.list.filter((sp: SpaceData) => {
+      if (!sp || typeof sp.id !== "string" || seen.has(sp.id)) return false
+      seen.add(sp.id)
+      return true
+    })
+    const changed = deduped.length !== v.list.length
+    v.list = deduped
+    if (!seen.has(v.current)) v.current = v.list[0]?.id
     // Back-fill fields added later so older saved data keeps working.
     for (const sp of v.list) {
       if (!Array.isArray(sp.saved)) sp.saved = sp.open ?? []
       if (typeof sp.savedPackMode !== "boolean") sp.savedPackMode = !!sp.packMode
     }
+    if (changed) writeJson(SPACES_KEY, v)
     return v
   }
   return null
@@ -232,7 +245,13 @@ export function setCurrentSpaceId(id: string) {
 let spaceSerial = 0
 export function createSpace(name?: string): string {
   const state = ensureSpaces()
-  const id = "space" + spaceSerial++
+  // spaceSerial resets to 0 each page load, so a fresh session would otherwise
+  // regenerate "space0", "space1", … that collide with spaces persisted in an
+  // earlier session. Skip any id already taken — duplicate ids corrupt every
+  // id-keyed lookup (current-space, tab reconciliation, reorder…).
+  const taken = new Set(state.list.map(s => s.id))
+  let id = "space" + spaceSerial++
+  while (taken.has(id)) id = "space" + spaceSerial++
   // Default name is one past the highest existing "space N". Counting the list
   // length instead repeats a number after any delete (delete shrinks the list),
   // which is how two "space 4" can end up side by side.
