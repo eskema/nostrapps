@@ -116,15 +116,16 @@ window.napp.registerAction(pattern, handler?)
 
 The napp can omit the `handler` and opt into only handling actions via the `popstate` event. The host pushes history entries with `state: { action: { name, payload } }` — listen for `popstate` and read `event.state.action`. This lets actions participate in browser back/forward navigation.
 
-There is no policing of what actions are allowed, but these are some of the common ones that can be used:
+There is restriction of what actions are allowed, but these are some of the common ones:
 
-| Action               | Payload                                    |
-| ---                  | ---                                        |
-| `view`               | `nevent/naddr code` **or** full event      |
-| `view:<kind-number>` | `full event object` (always resolved)      |
-| `profile`            | `pubkey as hex`                            |
-| `feed`               | `list of pubkey strings`                   |
-| `relay_feed`         | `list of relay URLs`                       |
+| Action               | Payload                             | Returns                           |
+| -------------------- | ----------------------------------- | --------------------------------- |
+| `view`               | `nevent/naddr` **or** full event    |                                   |
+| `view:<kind-number>` | full event object (always resolved) |                                   |
+| `profile`            | `pubkey` as hex                     |                                   |
+| `feed`               | list of pubkey strings              |                                   |
+| `relay_feed`         | list of relay URLs                  |                                   |
+| `edit`               | either `event` or `content`         | the resulting `event` with `tags` |
 
 Apps registering `"view"` (generic, no number) may receive either a nip19 code string or a resolved event object and must handle both. Apps registering a specific `"view:<kind-number>"` always receive a resolved event object.
 
