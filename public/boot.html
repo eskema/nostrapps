@@ -137,8 +137,33 @@
         }
 
         try {
-          await navigator.serviceWorker.register("/sw.js")
+          const reg = await navigator.serviceWorker.register("/sw.js")
           await navigator.serviceWorker.ready
+          // `ready` resolves with the currently-ACTIVE worker — which is the
+          // old sw.js when this origin was last booted before the launcher
+          // changed it. The napp window that opens right after boot would then
+          // be served by the old worker (missing its newest serving behavior,
+          // e.g. the ui-wrapper injection) until a manual reload. update()
+          // completes the version check; if a newer worker came out of it,
+          // wait for it to activate (it skipWaiting()s) before reporting
+          // ready, with a timeout so boot never hangs.
+          try {
+            await reg.update()
+            const fresh = reg.installing || reg.waiting
+            if (fresh && fresh.state !== "activated") {
+              await new Promise(resolve => {
+                const timer = setTimeout(resolve, 3000)
+                fresh.addEventListener("statechange", () => {
+                  if (fresh.state === "activated" || fresh.state === "redundant") {
+                    clearTimeout(timer)
+                    resolve()
+                  }
+                })
+              })
+            }
+          } catch {
+            // update check unreachable (e.g. offline) — boot with what we have
+          }
           // `ready` means the worker is active, but not necessarily *controlling*
           // this origin yet. The visible napp iframe is created right after boot
           // finishes; if the SW isn't controlling by then, its request to
