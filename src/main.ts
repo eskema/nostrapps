@@ -30,6 +30,7 @@ import {
   hasOpenWindow,
   allInstanceIds,
   spaceOfLiveSystem,
+  findOpenWindowByNappId,
   loadEvent
 } from "./sandbox/host.js"
 import { button, chip, icon } from "./system-napps/ui.js"
@@ -1884,10 +1885,16 @@ localFolderInput.addEventListener("change", async (e: Event) => {
     })
     handlers.addApp(nappId, metadata?.actions || [])
 
+    // Was a window for this napp already open before the re-boot? launch()
+    // reuses it (singleton) without reloading its iframe — which would keep
+    // showing the OLD files/metadata (e.g. a freshly added ui-wrapper) until a
+    // manual reload. Detect the reuse and reload the page ourselves.
+    const preExisting = findOpenWindowByNappId(nappId)
     const win = await launch(stage, nappId, {
       ...makeLaunchOpts(),
       petname
     })
+    if (preExisting && win === preExisting) win.reload()
     syncDOM(win)
     win.focus()
     setStatus(`Launched ${petname}`)

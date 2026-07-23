@@ -88,6 +88,9 @@ export type NappWindow = {
   focus(): void
   notifyState(): void
   setIframe(src: string, sandbox?: string): void
+  /** Reload the napp page (via bridge.js — the parent can't drive a
+   *  cross-origin frame's history). No-op for system napps. */
+  reload(): void
   systemId?: string
 }
 

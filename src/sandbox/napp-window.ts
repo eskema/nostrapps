@@ -357,6 +357,15 @@ export function createNappWindow({
     newIframe.addEventListener("focus", () => bringToFront(root))
   }
 
+  // Same channel as the header's reload button: bridge.js (inside the napp)
+  // hears it and calls location.reload(). No iframe (system napp) → no-op.
+  function reload() {
+    iframeRef.current?.contentWindow?.postMessage(
+      { __nostrapps: "napp-nav", dir: "reload" },
+      origin || "*"
+    )
+  }
+
   return {
     root,
     iframe: iframeRef.current,
@@ -367,7 +376,8 @@ export function createNappWindow({
     getState,
     focus,
     notifyState,
-    setIframe
+    setIframe,
+    reload
   }
 }
 
