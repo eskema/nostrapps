@@ -197,6 +197,10 @@
   margin: 0.5rem 0;
   border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   transition: all 0.2s ease-in-out;
+  /* As a grid/flex item, allow shrinking below content size so nowrap content
+     inside (e.g. .ui-item-label urls) crops with an ellipsis instead of
+     forcing horizontal scroll. */
+  min-width: 0;
 }
 
 .ui-details[open] {
@@ -293,6 +297,7 @@
 .ui-items {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .ui-item {
   display: flex;
@@ -308,6 +313,7 @@
   flex: 1;
   min-width: 0;
   font-family: var(--font-mono);
+  font-size: 0.8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -340,6 +346,7 @@
 .ui-add-input {
   flex: 1;
   min-width: 0;
+  font-size: 0.8rem;
 }
 .ui-add-error {
   color: #e33;

@@ -2063,6 +2063,10 @@ body.napp-resizing .napp-body iframe {
   /* border-radius: 6px 6px 0 0; */
   transition: all 0.2s ease-in-out;
   /* border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); */
+  /* As a grid/flex item, allow shrinking below content size so nowrap content
+     inside (e.g. .ui-item-label urls) crops with an ellipsis instead of
+     forcing horizontal scroll. */
+  min-width: 0;
 }
 
 .ui-details[open] {
@@ -2166,11 +2170,13 @@ body.napp-resizing .napp-body iframe {
 }
 
 /* Design system: item list — a column of hairline-separated rows; the label
-   truncates, controls sit on the right (the relays-napp list shape).
+   (small mono, relays-napp size) truncates with an ellipsis, controls sit on
+   the right and always fit — no horizontal scroll.
    itemList()/item() in ui.ts. Mirrored in public/napp-ui.css. */
 .ui-items {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .ui-item {
   display: flex;
@@ -2186,6 +2192,7 @@ body.napp-resizing .napp-body iframe {
   flex: 1;
   min-width: 0;
   font-family: var(--font-mono);
+  font-size: 0.8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2211,6 +2218,7 @@ body.napp-resizing .napp-body iframe {
 .ui-add-input {
   flex: 1;
   min-width: 0;
+  font-size: 0.8rem;
 }
 .ui-add-error {
   color: #e33;
