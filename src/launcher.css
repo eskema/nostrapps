@@ -1448,11 +1448,6 @@ body.napp-resizing .napp-body iframe {
   min-width: 9rem;
 }
 
-.move-popover-title {
-  opacity: 0.6;
-  padding: 0.2rem 0.4rem 0.35rem;
-}
-
 .move-popover .move-popover-item {
   justify-content: flex-start;
   width: 100%;

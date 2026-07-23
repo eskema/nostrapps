@@ -1148,10 +1148,6 @@ function openMoveToSpace(instanceId: string, x: number, y: number) {
     build: resolve => {
       const wrap = document.createElement("div")
       wrap.className = "move-popover-list"
-      const title = document.createElement("div")
-      title.className = "move-popover-title"
-      title.textContent = "Move to space"
-      wrap.append(title)
       for (const s of others) {
         wrap.append(
           button({
