@@ -280,6 +280,74 @@
   transform: scale(1);
 }
 
+/* ─── Item list ────────────────────────────────────────────────────────
+   A column of hairline-separated rows; the label truncates, controls sit on
+   the right. Markup:
+     <div class="ui-items">
+       <div class="ui-item">
+         <code class="ui-item-label">wss://relay…</code>
+         <input type="checkbox" class="ui-check" />
+         <button class="btn btn-danger">remove</button>
+       </div>
+     </div> */
+.ui-items {
+  display: flex;
+  flex-direction: column;
+}
+.ui-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+.ui-item:last-child {
+  border-bottom: 0;
+}
+.ui-item-label {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Add control ──────────────────────────────────────────────────────
+   The two-step add affordance under an item list: collapsed it's a single
+   outline button; clicked, it swaps to a form with a .ui-input + add button,
+   with an inline error line underneath. Markup once open:
+     <div class="ui-add">
+       <form class="ui-add-form">
+         <input class="ui-input ui-add-input" /><button class="btn btn-outline">add</button>
+       </form>
+       <div class="ui-add-error"></div>
+     </div> */
+.ui-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+/* Collapsed state: the lone button keeps its natural width. */
+.ui-add > .btn {
+  align-self: flex-start;
+}
+.ui-add-form {
+  display: flex;
+  gap: 0.5rem;
+}
+.ui-add-input {
+  flex: 1;
+  min-width: 0;
+}
+.ui-add-error {
+  color: #e33;
+}
+.ui-add-error:empty {
+  display: none;
+}
+
 /* ─── Icons ────────────────────────────────────────────────────────────
    The launcher's icon set as themeable mask glyphs — `<span class="ui-icon
    ui-icon-<name>"></span>`. Sized to 1em, colored with currentColor, so they

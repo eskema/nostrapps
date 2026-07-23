@@ -15,7 +15,16 @@ import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NostrEvent } from "@nostr/tools"
-import { button, details, type ButtonVariant } from "./ui.js"
+import {
+  addControl,
+  button,
+  check,
+  details,
+  item,
+  itemList,
+  overline,
+  type ButtonVariant
+} from "./ui.js"
 
 const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
 
@@ -50,11 +59,21 @@ export function mount(
   let pending: any[] = [] // events arrived since the last incremental flush
   // Restore a previously-saved custom relay list. emitDiscoverState persists it
   // under the session's `params`, which restore feeds back in via opts.params.
-  // Empty / absent → fall back to the defaults.
+  // Empty / absent → fall back to the defaults. `disabled` is the subset the
+  // user has toggled off — still listed in the editor, but not subscribed, and
+  // events seen only on disabled relays are hidden from the list.
   let relays = sanitizeRelays(opts.params?.relays)
   if (!relays.length) relays = [...DEFAULT_RELAYS]
-  let sub: null | SubCloser = null
-  let sawEose = false
+  const disabled = new Set<string>(
+    sanitizeRelays(opts.params?.disabled).filter(r => relays.includes(r))
+  )
+  // One subscription per relay so a single relay can be toggled or removed
+  // without restarting the others. `relayEose` tracks which finished their
+  // initial load; `eventRelays` maps event.id → the relays it was seen on,
+  // which drives both the per-relay counts and disabled-relay hiding.
+  const subs = new Map<string, SubCloser>()
+  const relayEose = new Set<string>()
+  const eventRelays = new Map<string, Set<string>>()
 
   container.innerHTML = `
     <div class="apps-panel">
@@ -427,20 +446,31 @@ export function mount(
 
   // ─── Discover tab ──────────────────────────────────────────────
 
-  let _statusEl: HTMLElement | null = null
   let _listEl: HTMLElement | null = null
+  let _relayListEl: HTMLElement | null = null
+  // The relay panel's <summary> doubles as the status line: a title with the
+  // enabled-relay count plus an overline badge with the event count / loading
+  // state. Both are updated in place by updateStatus().
+  let _relaysTitleEl: HTMLElement | null = null
+  let _relaysStatusEl: HTMLElement | null = null
+
+  // Refresh the count badge on every relay row in the editor.
+  function updateRelayCounts() {
+    if (!_relayListEl) return
+    for (const row of _relayListEl.querySelectorAll(
+      ".ui-item[data-relay]"
+    ) as NodeListOf<HTMLElement>) {
+      const count = row.querySelector(".apps-relay-count") as HTMLElement
+      count.textContent = String(relayCount(row.dataset.relay!))
+    }
+  }
 
   function emitDiscoverState() {
     // Persist under `params` so it round-trips: the host merges this into the
     // session entry, and restore passes session.params back into mount.
-    opts.onStateChange?.({ params: { relays: [...relays] } })
+    opts.onStateChange?.({ params: { relays: [...relays], disabled: [...disabled] } })
   }
 
-  function setStatus(msg: string | undefined) {
-    if (!_statusEl) return
-    _statusEl.textContent = msg || ""
-    _statusEl.hidden = !msg
-  }
 
   // Resolve and assign icon URLs for a set of events. Queries each unique
   // author's blossom servers once, then points every matching card icon at it.
@@ -536,14 +566,16 @@ export function mount(
     }
   }
 
-  // Show/hide existing cards against the current filter — no rebuild, no
-  // refetch. O(N) boolean toggles instead of recreating the DOM per keystroke.
+  // Show/hide existing cards against the current filter AND the enabled-relay
+  // set — no rebuild, no refetch. O(N) boolean toggles instead of recreating
+  // the DOM per keystroke/toggle.
   function applyFilter() {
     if (!_listEl) return
     const needle = filter.trim().toLowerCase()
     const cards = _listEl.querySelectorAll(".apps-card") as NodeListOf<HTMLElement>
     for (const card of cards) {
-      card.hidden = needle ? !(card.dataset.search || "").includes(needle) : false
+      const searchOk = !needle || (card.dataset.search || "").includes(needle)
+      card.hidden = !searchOk || !seenOnEnabled(card.dataset.eventId)
     }
     refreshEmptyState()
   }
@@ -559,8 +591,8 @@ export function mount(
     const all = sortedManifests(events)
     const frag = document.createDocumentFragment()
     for (const evt of all) {
-      const card = renderCard(evt, ctx, relays, renderList, showDetail)
-      card.hidden = !matchesFilter(evt, filter)
+      const card = renderCard(evt, ctx, enabledRelays(), renderList, showDetail)
+      card.hidden = !matchesFilter(evt, filter) || !seenOnEnabled(evt.id)
       frag.appendChild(card)
     }
     _listEl.appendChild(frag)
@@ -579,6 +611,8 @@ export function mount(
     requestAnimationFrame(() => {
       flushScheduled = false
       flushPending() // discover list DOM (no-op until the tab is opened)
+      applyFilter() // a new sighting on an enabled relay may unhide a card
+      updateRelayCounts() // per-relay counts in the editor rows
       refreshInstalledUpdates() // installed tab's update badges
     })
   }
@@ -601,8 +635,8 @@ export function mount(
     // that don't match the active filter are inserted hidden.
     let ref = _listEl.firstElementChild
     for (const evt of toRender) {
-      const card = renderCard(evt, ctx, relays, renderList, showDetail)
-      card.hidden = !matchesFilter(evt, filter)
+      const card = renderCard(evt, ctx, enabledRelays(), renderList, showDetail)
+      card.hidden = !matchesFilter(evt, filter) || !seenOnEnabled(evt.id)
       while (ref && Number((ref as HTMLElement).dataset.createdAt || 0) >= evt.created_at) {
         ref = ref.nextElementSibling
       }
@@ -613,69 +647,102 @@ export function mount(
     refreshEmptyState()
   }
 
-  function closeSubscription() {
-    try {
-      sub?.close?.()
-    } catch {}
-    sub = null
+  const enabledRelays = () => relays.filter(r => !disabled.has(r))
+
+  // An event stays visible only while at least one relay it was seen on is
+  // enabled. Events with no sighting record (shouldn't happen) stay visible.
+  function seenOnEnabled(id: string | undefined): boolean {
+    if (!id) return true
+    const seen = eventRelays.get(id)
+    if (!seen) return true
+    for (const r of seen) if (!disabled.has(r)) return true
+    return false
   }
 
-  function startDiscoverSubscription() {
-    closeSubscription()
-    sawEose = false
-    // A relay change is a real refresh: drop the current set and re-query so the
-    // list reflects EXACTLY the new relays (removed relays' apps disappear, added
-    // relays' apps appear). The pool dedupes per-subscription — each subscribeMany
-    // gets a fresh _knownIds — so the relays re-send every matching event to the
-    // new REQ; clearing our own eventIds lets them all back in. renderList() then
-    // clears the discover DOM (a no-op before the tab is first built, where it's
-    // repainted from `events` on open).
-    events = []
-    eventIds.clear()
-    pending = []
-    renderList()
+  // Events seen on this relay — the count shown on its editor row. Derived from
+  // eventRelays (set membership) so re-subscribing after a toggle never double
+  // counts the re-sent events.
+  function relayCount(url: string): number {
+    let n = 0
+    for (const seen of eventRelays.values()) if (seen.has(url)) n++
+    return n
+  }
 
-    if (!relays.length) {
-      setStatus("No relays configured.")
+  function updateStatus() {
+    if (!_relaysTitleEl || !_relaysStatusEl) return
+    const active = enabledRelays()
+    // Title carries the enabled count ("relays (2/3)" when some are off).
+    _relaysTitleEl.textContent =
+      active.length < relays.length
+        ? `relays (${active.length}/${relays.length})`
+        : `relays (${relays.length})`
+    if (!active.length) {
+      _relaysStatusEl.textContent = relays.length ? "none enabled" : "none configured"
       return
     }
+    const loading = active.some(r => subs.has(r) && !relayEose.has(r))
+    // Count only events visible under the enabled set — a disabled relay's
+    // events are hidden, so they shouldn't inflate the total.
+    const total = events.filter(e => seenOnEnabled(e.id)).length
+    _relaysStatusEl.textContent = `${total} event${total === 1 ? "" : "s"}${loading ? " — loading…" : ""}`
+  }
 
-    const relaysDisplay = relays.map(r => r.replace(/^wss?:\/\//, ""))
-    setStatus(`Relays: ${relaysDisplay.join(", ")}`)
-    sub = pool.subscribeMany(
-      relays,
+  function openRelaySub(url: string) {
+    if (subs.has(url)) return
+    relayEose.delete(url)
+    const s = pool.subscribeMany(
+      [url],
       { kinds: [NSITE_NAMED_KIND], limit: 400 },
       {
         label: "napps",
         onevent(event: any) {
-          if (eventIds.has(event.id)) return
-          eventIds.add(event.id)
-          events.push(event)
-          pending.push(event)
-          scheduleFlush()
-          if (sawEose) {
-            setStatus(
-              `Relays: ${relaysDisplay.join(", ")} — ${events.length} event${events.length === 1 ? "" : "s"}`
-            )
-          } else {
-            setStatus(`Relays: ${relaysDisplay.join(", ")} — loading… ${events.length}`)
+          let seen = eventRelays.get(event.id)
+          if (!seen) eventRelays.set(event.id, (seen = new Set()))
+          seen.add(url)
+          if (!eventIds.has(event.id)) {
+            eventIds.add(event.id)
+            events.push(event)
+            pending.push(event)
           }
+          // Even for an already-known event the flush matters: the new sighting
+          // may unhide its card (applyFilter) and bumps this relay's count.
+          scheduleFlush()
+          updateStatus()
         },
         oneose() {
-          sawEose = true
+          relayEose.add(url)
           scheduleFlush()
-          setStatus(
-            `Relays: ${relaysDisplay.join(", ")} — ${events.length} event${events.length === 1 ? "" : "s"}`
-          )
-        },
-        onclose(reasons: string[]) {
-          setStatus(`Subscriptions closed: ${reasons}`)
+          updateStatus()
         },
         onauth(event) {
           return currentSigner().signEvent(event) as any
         }
       }
     )
+    subs.set(url, s)
+  }
+
+  function closeRelaySub(url: string) {
+    try {
+      subs.get(url)?.close?.()
+    } catch {}
+    subs.delete(url)
+    relayEose.delete(url)
+  }
+
+  // Full restart — initial start and "reset to defaults". Drops the current set
+  // and re-queries so the list reflects EXACTLY the enabled relays. Granular
+  // changes (add/toggle/delete one relay) don't come through here; they only
+  // touch that relay's own subscription.
+  function startDiscoverSubscription() {
+    for (const url of [...subs.keys()]) closeRelaySub(url)
+    events = []
+    eventIds.clear()
+    eventRelays.clear()
+    pending = []
+    renderList()
+    for (const url of enabledRelays()) openRelaySub(url)
+    updateStatus()
   }
 
   // Open the relay subscription at most once. Both the early (installed apps
@@ -686,33 +753,138 @@ export function mount(
     startDiscoverSubscription()
   }
 
+  // ── Relay editor (item list) ──
+  // Each configured relay is a row: enable checkbox · url · event count ·
+  // delete. Changes apply immediately, per relay — no save step, no restart of
+  // the other relays' subscriptions.
+
+  function toggleRelay(url: string, on: boolean) {
+    if (on) {
+      disabled.delete(url)
+      if (discoveryStarted) openRelaySub(url)
+    } else {
+      disabled.add(url)
+      closeRelaySub(url)
+    }
+    _relayListEl
+      ?.querySelector(`.ui-item[data-relay="${CSS.escape(url)}"]`)
+      ?.classList.toggle("disabled", !on)
+    emitDiscoverState()
+    // Events already collected keep their sighting record while the relay is
+    // off — so hiding (and un-hiding on re-enable) is just a filter pass.
+    applyFilter()
+    updateStatus()
+  }
+
+  function removeRelay(url: string) {
+    closeRelaySub(url)
+    relays = relays.filter(r => r !== url)
+    disabled.delete(url)
+    // Drop its sightings; events left with no source relay leave the list.
+    for (const [id, seen] of eventRelays) {
+      seen.delete(url)
+      if (seen.size === 0) eventRelays.delete(id)
+    }
+    events = events.filter(e => eventRelays.has(e.id))
+    pending = pending.filter(e => eventRelays.has(e.id))
+    eventIds.clear()
+    for (const e of events) eventIds.add(e.id)
+    renderRelayRows()
+    emitDiscoverState()
+    renderList()
+    updateStatus()
+  }
+
+  // Returns an inline error message, or nothing on success (the addControl
+  // contract: no error → the input clears and stays open).
+  function addRelay(raw: string): string | void {
+    let url = raw.trim()
+    if (!url) return
+    if (!/^wss?:\/\//.test(url)) url = `wss://${url}`
+    if (relays.includes(url)) return "already in list"
+    relays.push(url)
+    renderRelayRows()
+    emitDiscoverState()
+    if (discoveryStarted) openRelaySub(url)
+    updateStatus()
+  }
+
+  // Each relay is a .ui-item row composed from the design-system parts:
+  // url label · event count (overline) · enable checkbox · remove.
+  function renderRelayRows() {
+    if (!_relayListEl) return
+    _relayListEl.replaceChildren()
+    for (const url of relays) {
+      const count = overline(String(relayCount(url)), "apps-relay-count")
+      count.title = "events seen on this relay"
+      const row = item(
+        { label: url.replace(/^wss?:\/\//, ""), title: url },
+        count,
+        check({
+          checked: !disabled.has(url),
+          title: "search this relay",
+          onChange: on => toggleRelay(url, on)
+        }),
+        button({ label: "remove", variant: "danger", onClick: () => removeRelay(url) })
+      )
+      row.dataset.relay = url
+      if (disabled.has(url)) row.classList.add("disabled")
+      _relayListEl.appendChild(row)
+    }
+  }
+
   function renderDiscover() {
     discoverPane.innerHTML = `
       <div class="apps-toolbar">
         <input class="ui-input apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
       </div>
-      <details class="apps-relays">
-        <summary>edit relays</summary>
-        <label class="apps-relays-label">Relays (one per line — leave empty to use your kind 10002, or fall back to defaults)</label>
-        <textarea class="apps-relays-input" rows="4" spellcheck="false"></textarea>
-        <div class="apps-relays-actions">
-          <button type="button" class="btn btn-primary apps-relays-save">save &amp; refresh</button>
-          <button type="button" class="btn btn-outline apps-relays-clear">clear</button>
-        </div>
-      </details>
-      <div class="apps-status" hidden></div>
       <div class="apps-list"></div>
     `
 
-    _statusEl = discoverPane.querySelector(".apps-status") as HTMLElement
     _listEl = discoverPane.querySelector(".apps-list") as HTMLElement
     const searchEl = discoverPane.querySelector(".apps-search") as HTMLInputElement
-    const relaysPanel = discoverPane.querySelector(".apps-relays") as HTMLDetailsElement
-    const relaysInput = discoverPane.querySelector(".apps-relays-input") as HTMLInputElement
-    const relaysSaveBtn = discoverPane.querySelector(".apps-relays-save") as HTMLElement
-    const relaysClearBtn = discoverPane.querySelector(".apps-relays-clear") as HTMLElement
 
-    relaysInput.value = relays.join("\n")
+    // System disclosure whose summary doubles as the status line (relays-napp
+    // style): "relays (N)" + an overline badge with event count / loading.
+    const relaysPanel = details({ summary: "", class: "apps-relays" })
+    const sum = document.createElement("span")
+    sum.className = "apps-relays-sum"
+    _relaysTitleEl = document.createElement("span")
+    _relaysTitleEl.textContent = "relays"
+    _relaysStatusEl = overline("", "apps-relays-status")
+    sum.append(_relaysTitleEl, _relaysStatusEl)
+    relaysPanel.querySelector("summary")!.appendChild(sum)
+    discoverPane.insertBefore(relaysPanel, _listEl)
+
+    _relayListEl = itemList("apps-relays-list")
+    renderRelayRows()
+
+    const relaysActions = document.createElement("div")
+    relaysActions.className = "apps-relays-actions"
+    relaysActions.appendChild(
+      button({
+        label: "reset to defaults",
+        variant: "ghost",
+        onClick: () => {
+          relays = [...DEFAULT_RELAYS]
+          disabled.clear()
+          renderRelayRows()
+          emitDiscoverState()
+          if (discoveryStarted) startDiscoverSubscription()
+        }
+      })
+    )
+
+    relaysPanel.append(
+      _relayListEl,
+      addControl({
+        label: "add a relay",
+        placeholder: "wss://relay.example.com",
+        onAdd: addRelay
+      }),
+      relaysActions
+    )
+
     // Re-seed the search box from the persisted filter so switching away to the
     // Installed tab and back keeps the input in sync with the (still-filtered) list.
     searchEl.value = filter
@@ -725,27 +897,11 @@ export function mount(
       applyFilter()
     })
 
-    relaysSaveBtn.addEventListener("click", () => {
-      relays = sanitizeRelays(relaysInput.value.split("\n"))
-      if (relays.length === 0) relays = [...DEFAULT_RELAYS]
-      relaysInput.value = relays.join("\n")
-      emitDiscoverState()
-      relaysPanel.open = false
-      startDiscoverSubscription()
-    })
-
-    relaysClearBtn.addEventListener("click", () => {
-      relays = [...DEFAULT_RELAYS]
-      relaysInput.value = relays.join("\n")
-      emitDiscoverState()
-      relaysPanel.open = false
-      startDiscoverSubscription()
-    })
-
     // Paint whatever discovery has collected so far; streaming arrivals append
     // via flushPending. On the very first open the subscription starts right
     // after this (see switchTab), so there's nothing to paint yet.
     renderList()
+    updateStatus()
     emitDiscoverState()
   }
 
@@ -780,9 +936,7 @@ export function mount(
   return {
     unmount() {
       unsub()
-      try {
-        sub?.close?.()
-      } catch {}
+      for (const url of [...subs.keys()]) closeRelaySub(url)
     }
   }
 }
@@ -1089,6 +1243,10 @@ function renderCard(
   // The menu popover lives in the card so it's removed with it; top-layer
   // rendering means its DOM position doesn't affect where it shows.
   if (menuEl) card.appendChild(menuEl)
+
+  // Ties the card back to its manifest event so applyFilter can hide it when
+  // every relay it was seen on is disabled.
+  card.dataset.eventId = evt.id
 
   return card
 }

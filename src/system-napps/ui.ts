@@ -7,9 +7,20 @@
 //   • icon(name)                                → an inline `<svg>` (currentColor)
 //   • details({ summary, open, … })             → a `.ui-details` disclosure
 //   • input({ type, placeholder, … })           → a `.ui-input` text field
+//   • check({ checked, onChange, … })           → a `.ui-check` checkbox
+//   • overline(text)                            → a `.ui-overline` caption/badge
+//   • itemList() + item({ label }, …controls)   → `.ui-items` / `.ui-item` rows
+//   • addControl({ label, onAdd, … })           → the two-step "add an item" form
 // Variants: primary | outline | danger | warning | ghost. Layout (align-self,
 // margins, placement) belongs on the parent/context, not the variant. CSS lives
-// in launcher.css under "Design system".
+// in launcher.css under "Design system" and is mirrored in public/napp-ui.css
+// for napps that opt in (`"ui": "wrapper"`) — keep the two in sync.
+//
+// Editable lists (a column of entries + an add affordance + per-entry controls,
+// like the relays napp or the discover tab's relay editor) are COMPOSED from
+// the small parts above — itemList/item/check/addControl — never built as one
+// monolithic "list editor" component. Each context picks the controls its rows
+// need and wires its own handlers.
 
 export type ButtonVariant = "primary" | "outline" | "danger" | "warning" | "ghost" | "link"
 
@@ -20,7 +31,7 @@ export interface ButtonOpts {
   title?: string
   type?: "button" | "submit"
   disabled?: boolean
-  /** Extra classes for layout/context (e.g. "apps-relays-save"). */
+  /** Extra classes for layout/context (e.g. "apps-relay-delete"). */
   class?: string
 }
 
@@ -141,4 +152,103 @@ export function input(opts: InputOpts = {}): HTMLInputElement {
   if (opts.autocomplete) el.setAttribute("autocomplete", opts.autocomplete)
   if (opts.spellcheck === false) el.spellcheck = false
   return el
+}
+
+export interface CheckOpts {
+  checked?: boolean
+  title?: string
+  onChange?: (checked: boolean) => void
+  class?: string
+}
+
+// A themeable checkbox (`.ui-check`): checked takes a --surface fill with a
+// --text border and check, so it flips with the theme (same as the napps').
+export function check(opts: CheckOpts = {}): HTMLInputElement {
+  const c = document.createElement("input")
+  c.type = "checkbox"
+  c.className = `ui-check${opts.class ? ` ${opts.class}` : ""}`
+  if (opts.checked) c.checked = true
+  if (opts.title) c.title = opts.title
+  if (opts.onChange) c.addEventListener("change", () => opts.onChange!(c.checked))
+  return c
+}
+
+// Small uppercase letter-spaced caption (`.ui-overline`) — control captions,
+// metadata badges, counts.
+export function overline(text: string, cls?: string): HTMLSpanElement {
+  const s = document.createElement("span")
+  s.className = `ui-overline${cls ? ` ${cls}` : ""}`
+  s.textContent = text
+  return s
+}
+
+// ─── item lists ───────────────────────────────────────────────────
+// The editable-list shape (relays napp look): itemList() is the column, item()
+// one hairline-separated row — a mono label that truncates plus whatever
+// controls the context needs on the right — and addControl() the deliberate
+// two-step add affordance. Compose per context; there is no monolithic list
+// component on purpose.
+
+export function itemList(cls?: string): HTMLDivElement {
+  const el = document.createElement("div")
+  el.className = `ui-items${cls ? ` ${cls}` : ""}`
+  return el
+}
+
+export interface ItemOpts {
+  /** Row label, rendered as truncating mono text. */
+  label: string
+  /** Tooltip; defaults to the label. */
+  title?: string
+  class?: string
+}
+
+export function item(opts: ItemOpts, ...controls: HTMLElement[]): HTMLDivElement {
+  const row = document.createElement("div")
+  row.className = `ui-item${opts.class ? ` ${opts.class}` : ""}`
+  const label = document.createElement("code")
+  label.className = "ui-item-label"
+  label.textContent = opts.label
+  label.title = opts.title || opts.label
+  row.appendChild(label)
+  for (const c of controls) row.appendChild(c)
+  return row
+}
+
+export interface AddControlOpts {
+  /** Collapsed button label, e.g. "add a relay". */
+  label: string
+  placeholder?: string
+  class?: string
+  /** Return an error message to show it inline; return nothing on success —
+   *  the input clears and stays open so several entries can be added in a row. */
+  onAdd: (value: string) => string | void
+}
+
+// Collapsed: a single outline button. Clicked: an input + add button in its
+// place (and focused), so adding is one deliberate step.
+export function addControl(opts: AddControlOpts): HTMLDivElement {
+  const wrap = document.createElement("div")
+  wrap.className = `ui-add${opts.class ? ` ${opts.class}` : ""}`
+  const error = document.createElement("div")
+  error.className = "ui-add-error"
+  const open = () => {
+    const form = document.createElement("form")
+    form.className = "ui-add-form"
+    const inp = input({ placeholder: opts.placeholder, class: "ui-add-input", spellcheck: false })
+    inp.setAttribute("autocomplete", "off")
+    inp.addEventListener("input", () => (error.textContent = ""))
+    form.append(inp, button({ label: "add", variant: "outline", type: "submit" }))
+    form.addEventListener("submit", e => {
+      e.preventDefault()
+      const err = opts.onAdd(inp.value)
+      error.textContent = err || ""
+      if (!err) inp.value = ""
+      inp.focus()
+    })
+    wrap.replaceChildren(form, error)
+    inp.focus()
+  }
+  wrap.appendChild(button({ label: opts.label, variant: "outline", onClick: open }))
+  return wrap
 }

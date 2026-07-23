@@ -2120,6 +2120,110 @@ body.napp-resizing .napp-body iframe {
   /* padding-left: .4rem; */
 }
 
+/* Design system: overline — small, thin, uppercase, letter-spaced sans; the
+   typographic treatment for control captions, metadata badges, counts.
+   overline() in ui.ts. Mirrored in public/napp-ui.css. */
+.ui-overline {
+  font-size: 0.65rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+  user-select: none;
+}
+
+/* Design system: checkbox — when checked it takes a --surface fill with a
+   --text border and a --text check (drawn via a mask), so it flips with the
+   theme. check() in ui.ts. Mirrored in public/napp-ui.css. */
+.ui-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.ui-check::after {
+  content: "";
+  width: 0.7rem;
+  height: 0.7rem;
+  background-color: var(--text);
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMuNSA4LjVsMyAzIDYtNyIvPjwvc3ZnPg==") center / contain no-repeat;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMuNSA4LjVsMyAzIDYtNyIvPjwvc3ZnPg==") center / contain no-repeat;
+  transform: scale(0);
+  transition: transform 100ms ease;
+}
+.ui-check:checked {
+  background: var(--surface);
+  border-color: var(--text);
+}
+.ui-check:checked::after {
+  transform: scale(1);
+}
+
+/* Design system: item list — a column of hairline-separated rows; the label
+   truncates, controls sit on the right (the relays-napp list shape).
+   itemList()/item() in ui.ts. Mirrored in public/napp-ui.css. */
+.ui-items {
+  display: flex;
+  flex-direction: column;
+}
+.ui-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+.ui-item:last-child {
+  border-bottom: 0;
+}
+.ui-item-label {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Design system: add control — collapsed to a single button, expanding into an
+   input + add form on click. addControl() in ui.ts. Mirrored in
+   public/napp-ui.css. */
+.ui-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+/* Collapsed state: the lone button keeps its natural width. */
+.ui-add > .btn {
+  align-self: flex-start;
+}
+.ui-add-form {
+  display: flex;
+  gap: 0.5rem;
+}
+.ui-add-input {
+  flex: 1;
+  min-width: 0;
+}
+.ui-add-error {
+  color: #e33;
+}
+.ui-add-error:empty {
+  display: none;
+}
+
 /* Discover card: everything past the head collapses into this <details>, so
    each card stays as compact as an Installed-tab card until expanded. */
 .apps-card-more > summary {
@@ -2186,7 +2290,7 @@ body.napp-resizing .napp-body iframe {
   background: var(--surface);
   z-index: 1;
   padding-bottom: 0.2rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.2rem;
 }
 
 /* Appearance from .ui-input; only the toolbar layout lives here. */
@@ -2195,69 +2299,35 @@ body.napp-resizing .napp-body iframe {
   min-width: 0;
 }
 
-/* Relay editor: a <details> below the search. Collapsed shows just the
-   "edit relays" summary; expanded becomes a bordered box with the textarea. */
+/* Relay editor: a .ui-details below the search whose summary doubles as the
+   status line — "relays (N)" plus an overline badge (event count / loading).
+   The panel body, rows, add control, and checkbox all come from the design
+   system (.ui-items / .ui-item / .ui-add / .ui-check); only the summary row
+   layout, the disabled dimming, and the count badge tweak live here. */
 .apps-relays {
+  border-bottom: none;
+}
+
+.apps-relays-sum {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  /* border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
-  /* border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
-  margin-bottom: 1rem;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-width: 0;
 }
 
-.apps-relays[open] {
-  /* padding: 0.5rem; */
-  /* border: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
-  /* border-radius: 6px; */
+.apps-relays .ui-item.disabled .ui-item-label,
+.apps-relays .ui-item.disabled .apps-relay-count {
+  opacity: 0.4;
 }
 
-.apps-relays > summary {
-  /* width: fit-content; */
-  cursor: pointer;
-  font-family: var(--font-serif);
-  font-weight: 700;
-  /* opacity: 0.7; */
-  user-select: none;
-}
-
-.apps-relays > summary:hover {
-  opacity: 1;
-}
-
-.apps-relays-label {
-  font-size: 0.75rem;
-  /* opacity: 0.7; */
-}
-
-.apps-relays-input {
-  width: 100%;
-  box-sizing: border-box;
-  font-family: var(--font-mono);
-  /* font-size: 0.78rem; */
-  padding: 0.5rem;
-  border: none;
-  /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
-  border-radius: 4px;
-  background: color-mix(in srgb, currentColor 5%, transparent);
-  color: inherit;
-  resize: vertical;
-}
-
-.apps-relays-input:focus {
-  outline: none;
-  border-color: color-mix(in srgb, currentColor 50%, transparent);
+.apps-relay-count {
+  font-variant-numeric: tabular-nums;
 }
 
 .apps-relays-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.3rem;
-}
-
-.apps-status {
-  font-size: 0.75rem;
-  opacity: 0.65;
 }
 
 .apps-empty {
