@@ -74,8 +74,10 @@ window.napp.utils.publish(event, relays?)
 //   relays?: string[] — if omitted, publishes to the author's write relays
 //     (for kind 10002 also publishes to fallback + indexer relays)
 //   returns { relays: {[url]: { ok, error? }}, published, failed }
-//   for kinds handled by load* methods, also updates the local cache so
-//     subsequent load* calls reflect the change immediately
+//
+//   For kinds handled by load* methods (NIP-51 lists, addressable sets, contacts),
+//   publish() also updates the local cache with the published event so subsequent
+//   load* calls reflect the change immediately without re-fetching from relays.
 
 // Sync helpers (no rpc round-trip)
 window.napp.nip19.decode(bech) // npub/note/nsec/nprofile/nevent/naddr
@@ -84,6 +86,9 @@ window.napp.fx.isHex64(s)
 window.napp.fx.parseCoordinate("kind:pubkey:d") // → { kind, pubkey, identifier } | null
 window.napp.fx.formatCoordinate({ kind, pubkey, identifier })
 window.napp.fx.satsFromBolt11(invoice)
+
+// Opening external links
+window.napp.link(url)
 ```
 
 ### Streaming feeds

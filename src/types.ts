@@ -142,6 +142,11 @@ export type MessageData =
       callbackId: string
       events: unknown[]
     }
+  | {
+      __nostrapps: "napp-link"
+      url: string
+      instanceId: string
+    }
 
 // Per-napp security policy: the single list of capabilities the user granted.
 // One vocabulary, two enforcement paths — NAP domains (identity/theme/storage/

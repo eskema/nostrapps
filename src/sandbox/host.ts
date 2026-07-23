@@ -1812,6 +1812,10 @@ function mount(
           settleDispatch(data)
           return
         }
+        case "napp-link": {
+          if (typeof data.url === "string") window.open(data.url, "_blank")
+          return
+        }
       }
     },
     onClose: () => {
@@ -1969,6 +1973,10 @@ export function mountWithLoading(
         }
         case "napp-dispatch-result": {
           settleDispatch(data)
+          return
+        }
+        case "napp-link": {
+          if (typeof data.url === "string") window.open(data.url, "_blank")
           return
         }
       }

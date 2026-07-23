@@ -487,6 +487,9 @@
         "*"
       )
     },
+    link: url => {
+      window.parent.postMessage({ __nostrapps: "napp-link", url, instanceId: window.name }, "*")
+    },
     feeds: {
       profile: (pubkey, kinds, callback, { since, until, limit } = {}) =>
         feedRpc("napp.feeds.profile", { pubkey, kinds, since, until, limit }, callback),
