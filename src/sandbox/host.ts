@@ -2107,6 +2107,35 @@ function resolvePubkey(user: string): string {
   return user
 }
 
+// A 64-char hex string (event id / pubkey). Anything reaching the redstore wasm
+// as an id/author MUST match this: a malformed value panics query_events, and
+// its no_threads mutex stays locked afterward, poisoning the shared store for
+// the whole session ("cannot recursively acquire mutex" on every later call).
+const HEX64 = /^[0-9a-f]{64}$/i
+const isHex64 = (s: unknown): s is string => typeof s === "string" && HEX64.test(s)
+
+// Strip non-hex ids/authors from a napp-supplied filter before it hits the
+// store (handles a single filter or an array of them). A filter whose only
+// id/author constraint is emptied by this is dropped, so it can't silently
+// widen into a match-everything query.
+function sanitizeFilter(filter: any): any | null {
+  if (Array.isArray(filter)) {
+    const arr = filter.map(sanitizeFilter).filter(Boolean)
+    return arr.length ? arr : null
+  }
+  if (!filter || typeof filter !== "object") return null
+  const g: any = { ...filter }
+  if (Array.isArray(g.ids)) {
+    g.ids = g.ids.filter(isHex64)
+    if (g.ids.length === 0) return null
+  }
+  if (Array.isArray(g.authors)) {
+    g.authors = g.authors.filter(isHex64)
+    if (g.authors.length === 0) return null
+  }
+  return g
+}
+
 async function dispatch(
   signer: Signer,
   method: string,
@@ -2129,14 +2158,21 @@ async function dispatch(
       return signer.nip44.decrypt(params.pubkey, params.ciphertext)
     case "nostrdb.add":
       return store.saveEvent(params.event)
-    case "nostrdb.query":
-      return store.queryEvents(params.filters)
-    case "nostrdb.count":
-      const events = await store.queryEvents(params.filters, 10_000)
+    case "nostrdb.query": {
+      const filter = sanitizeFilter(params.filters)
+      return filter ? store.queryEvents(filter) : []
+    }
+    case "nostrdb.count": {
+      const filter = sanitizeFilter(params.filters)
+      if (!filter) return 0
+      const events = await store.queryEvents(filter, 10_000)
       return events.length
-    case "nostrdb.event":
+    }
+    case "nostrdb.event": {
+      if (!isHex64(params.id)) return undefined
       const res = await store.queryEvents({ ids: [params.id] }, 1)
       return res[0]
+    }
     case "nostrdb.replaceable":
       // loadReplaceables returns [lastAttempt, event] tuples; napps are
       // promised the bare event (env.d.ts).
@@ -2287,25 +2323,38 @@ export async function loadEvent(params: { code: string; relays?: string[]; autho
     author = ptr.pubkey
     kind = ptr.kind
     if (ptr.relays) relayHints.push(...ptr.relays)
+  } else if (params.code.startsWith("note1")) {
+    // Bare note reference — the decoded data IS the hex event id.
+    id = decode(params.code).data as string
   } else {
     id = params.code
     author = params.author
   }
 
-  // try store
-  let event: NostrEvent | undefined
+  // Validate BEFORE any store/relay query. A malformed id/author (a note1 that
+  // didn't decode, junk hex, …) panics redstore's wasm and — because its
+  // no_threads mutex stays locked after a panic — poisons the shared store for
+  // the rest of the session. Bail to null instead of querying.
   // identifier != null (not truthiness): an naddr with an empty d tag ("") is a
   // valid replaceable coordinate, so "" must still take the replaceable path.
-  if (identifier != null && author && kind) {
-    const results = await store.loadReplaceables([[kind, author, identifier]])
-    event = results[0][1] as NostrEvent | undefined
-  } else if (id) {
-    const results = await store.queryEvents({ ids: [id] }, 1)
+  if (identifier != null) {
+    if (!isHex64(author) || kind == null) return null
+  } else if (!isHex64(id)) {
+    return null
+  }
+
+  // try store
+  let event: NostrEvent | undefined
+  if (identifier != null) {
+    const results = await store.loadReplaceables([[kind!, author!, identifier]])
+    event = results[0]?.[1] as NostrEvent | undefined
+  } else {
+    const results = await store.queryEvents({ ids: [id!] }, 1)
     event = results[0]
   }
   if (event) return event
 
-  // prepare filter for relays
+  // prepare filter for relays (id / author+kind validated above)
   let filter: Record<string, any> = { limit: 1 }
   if (identifier != null) {
     filter.kinds = [kind]
