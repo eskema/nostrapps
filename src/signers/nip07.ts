@@ -1,5 +1,5 @@
 import { EventTemplate } from "@nostr/tools/pure"
-import { getPubkey, setPubkey } from "../account.js"
+import { cachedPublicKey } from "../account.js"
 
 function ext() {
   if (!window.nostr) {
@@ -9,12 +9,8 @@ function ext() {
 }
 
 export const nip07Signer = {
-  async getPublicKey() {
-    const cached = getPubkey()
-    if (cached) return cached
-    const pk = await ext().getPublicKey()
-    setPubkey(pk)
-    return pk
+  getPublicKey() {
+    return cachedPublicKey(() => ext().getPublicKey())
   },
   signEvent: (evt: EventTemplate) => ext().signEvent(evt),
   nip04: {

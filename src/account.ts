@@ -26,7 +26,31 @@ export function setPubkey(pk: string | null) {
 export function clearPubkey() {
   localStorage.removeItem(PUBKEY_KEY)
   localStorage.removeItem(TYPE_KEY)
+  inflightPubkey = null
   notify()
+}
+
+// Return the account pubkey, hitting the underlying signer only when we don't
+// already have it. A single in-flight fetch is shared, so a burst of
+// getPublicKey() calls (e.g. a napp asking repeatedly on load) can't fan out
+// into multiple signer round-trips — and multiple extension/bunker prompts.
+// The result is persisted, so every later call and every reload returns it
+// instantly with no prompt.
+let inflightPubkey: Promise<string> | null = null
+export function cachedPublicKey(fetchFromSigner: () => Promise<string>): Promise<string> {
+  const cached = getPubkey()
+  if (cached) return Promise.resolve(cached)
+  if (inflightPubkey) return inflightPubkey
+  inflightPubkey = (async () => {
+    try {
+      const pk = await fetchFromSigner()
+      setPubkey(pk)
+      return pk
+    } finally {
+      inflightPubkey = null
+    }
+  })()
+  return inflightPubkey
 }
 
 function notify() {
