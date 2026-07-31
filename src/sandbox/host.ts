@@ -73,6 +73,16 @@ function flagFreshInPack(stageEl: HTMLElement, win: NappWindow, hasPosition: boo
   if (!hasPosition && stageEl.classList.contains("pack-mode")) win.root.dataset.packNew = "1"
 }
 
+// Same flag, for a window arriving from another space: to the packed space it
+// lands in it may as well be new, and the position it carries describes the
+// layout it just left. Packing it last first-fits it into the leftover space
+// instead of letting it claim a cell and reflow its new neighbours.
+// bestFitPack clears the flag once consumed.
+export function markPackNew(instanceId: string) {
+  const win = openWindows.get(instanceId)
+  if (win) win.root.dataset.packNew = "1"
+}
+
 // Switch which space is visible: show its windows, hide every other space's.
 // Pure visibility — nothing is mounted or unmounted, so iframe state survives.
 export function setActiveSpace(id: string) {
@@ -1248,6 +1258,69 @@ export function bestFitPack(
   // Remember this layout so revisiting the grid restores it (instead of guessing
   // from pixels). Read-back via the same px the layout just wrote.
   packLayouts.set(gridKey({ cols: COLS, rows: ROWS }), snapshotCells(stageEl))
+}
+
+// Find a window arriving from another space a spot of its own. The coordinates
+// it brings describe the layout it just left, so reusing them drops it on top of
+// whatever already occupies those pixels here. Scan the pack grid in reading
+// order and take the first position where the window's current size clears every
+// other window in this space, growing downward past them if it has to (the stage
+// scrolls). Only the arriving window moves — in a freeform space the arrangement
+// is the user's. Packed spaces don't need this: markPackNew + bestFitPack slots
+// the window in there.
+export function placeInFreeSpot(stageEl: HTMLElement, instanceId: string) {
+  const win = openWindows.get(instanceId)
+  if (!stageEl || !win || !isPackable(win.root)) return
+  const { width: innerW, height: innerH, padL, padT } = getStageBounds(stageEl)
+  if (innerW <= 0 || innerH <= 0) return
+
+  const { cols: COLS, rows: ROWS } = gridForWidth(innerW)
+  const cellW = innerW / COLS
+  const cellH = innerH / ROWS
+  const w = win.root.offsetWidth
+  const h = win.root.offsetHeight
+
+  const obstacles = Array.from(openWindows.values())
+    .filter(o => o !== win && isPackable(o.root))
+    .map(o => {
+      const left = parseFloat(o.root.style.left) || padL
+      const top = parseFloat(o.root.style.top) || padT
+      return { left, top, right: left + o.root.offsetWidth, bottom: top + o.root.offsetHeight }
+    })
+
+  const clears = (left: number, top: number) =>
+    obstacles.every(
+      o =>
+        left + w + TILE_GAP <= o.left ||
+        left >= o.right + TILE_GAP ||
+        top + h + TILE_GAP <= o.top ||
+        top >= o.bottom + TILE_GAP
+    )
+
+  // One row past the lowest window is always clear, so the scan is bounded.
+  const lowest = obstacles.reduce((m, o) => Math.max(m, o.bottom), padT)
+  const maxRow = Math.ceil((lowest - padT) / cellH) + 1
+
+  let spot: { left: number; top: number } | null = null
+  for (let row = 0; row <= maxRow && !spot; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const left = Math.round(padL + col * cellW)
+      const top = Math.round(padT + row * cellH)
+      if (left + w > padL + innerW + 1) break // wider than the columns left of here
+      if (!clears(left, top)) continue
+      spot = { left, top }
+      break
+    }
+  }
+  // Wider than the whole stage, so no column start ever clears: park it below.
+  if (!spot) spot = { left: Math.round(padL), top: Math.round(lowest + TILE_GAP) }
+
+  const left = `${spot.left}px`
+  const top = `${spot.top}px`
+  if (win.root.style.left === left && win.root.style.top === top) return
+  win.root.style.left = left
+  win.root.style.top = top
+  win.notifyState?.() // persist the new position
 }
 
 // Try to fit `desired` around `focus` by trimming one of the four sides

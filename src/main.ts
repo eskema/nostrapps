@@ -27,6 +27,8 @@ import {
   setActiveSpace,
   isWindowInactive,
   moveWindowToSpace,
+  markPackNew,
+  placeInFreeSpot,
   hasOpenWindow,
   allInstanceIds,
   spaceOfLiveSystem,
@@ -118,6 +120,11 @@ function maybeRepack() {
   repackQueued = true
   requestAnimationFrame(() => {
     repackQueued = false
+    // packModeOn is read again here, not just at schedule time: a space switch in
+    // between (moving a window out of a packed space into a freeform one) would
+    // otherwise land this pack on the space we arrived in and flatten a layout
+    // that was never meant to be packed.
+    if (!packModeOn) return
     repackInProgress = true
     try {
       bestFitPack(stage)
@@ -1171,10 +1178,23 @@ function openMoveToSpace(instanceId: string, x: number, y: number) {
   }).then(async choice => {
     if (!choice) return
     const targetId = choice === MOVE_NEW_SPACE ? persist.createSpace() : choice
+    // The window arrives carrying the position it held in the space it left,
+    // which says nothing about what's already here — keep it and the window
+    // lands on top of whatever occupies those pixels. A packed target treats it
+    // as newly arrived and slots it into the leftover space (the flag has to be
+    // set before switchSpace, which packs on entry); a freeform one gets it a
+    // free spot of its own, leaving the rest of the layout alone.
+    const targetPacks = persist.getSpacePackMode(targetId)
+    if (targetPacks) markPackNew(instanceId)
     persist.moveOpenToSpace(instanceId, targetId)
     moveWindowToSpace(instanceId, targetId)
     maybeRepack() // tidy the source layout now the window has left
     await switchSpace(targetId) // follow the window into its new space
+    // Placed here rather than left to switchSpace's own maybeRepack: that one is
+    // rAF-coalesced and the maybeRepack above has already claimed the slot, so it
+    // returns early. Landing the window is part of the move — do it now.
+    if (targetPacks) bestFitPack(stage)
+    else placeInFreeSpot(stage, instanceId)
     renderSpacesBar()
     const name = persist.listSpaces().find(s => s.id === targetId)?.name || "space"
     setStatus(`Moved to ${name}`)
