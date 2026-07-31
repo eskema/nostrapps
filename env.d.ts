@@ -162,9 +162,45 @@ interface NappUtils {
 
   // Event fetching
   loadEvent(code: string, relays?: string[], author?: string): Promise<NostrEvent | null>
+  // Batched by-id fetch — one REQ over the id union; non-64-hex ids are dropped.
+  // Optional: absent on older cached bridges, so feature-detect before calling.
+  loadEvents?(ids: string[]): Promise<NostrEvent[]>
+  // Verify an event's id + signature on the host (nostr-tools verifyEvent).
+  // Optional: absent on older cached bridges.
+  verifyEvent?(event: NostrEvent): Promise<boolean>
 
   // Publishing
   publish(event: NostrEvent, relays?: string[]): Promise<PublishResult>
+}
+
+// ── Sync nostr primitives (bech32 / TLV, no rpc) ─────────────────────────
+type Nip19Decoded =
+  | { type: "npub" | "note" | "nsec"; data: string }
+  | { type: "nprofile"; data: { pubkey: string; relays: string[] } }
+  | { type: "nevent"; data: { id: string; relays: string[]; author?: string; kind?: number } }
+  | {
+      type: "naddr"
+      data: { identifier: string; pubkey: string; kind: number; relays: string[] }
+    }
+
+interface NappNip19 {
+  decode(bech: string): Nip19Decoded
+  npubEncode(hex: string): string
+  noteEncode(hex: string): string
+  neventEncode(pointer: { id: string; relays?: string[]; author?: string; kind?: number }): string
+  naddrEncode(pointer: {
+    identifier: string
+    pubkey: string
+    kind: number
+    relays?: string[]
+  }): string
+}
+
+interface NappFx {
+  isHex64(s: unknown): boolean
+  parseCoordinate(coord: string): { kind: number; pubkey: string; identifier: string } | null
+  formatCoordinate(coord: { kind: number; pubkey: string; identifier: string }): string
+  satsFromBolt11(invoice: string): number | null
 }
 
 // ── Main napp object ─────────────────────────────────────────────────────
@@ -177,6 +213,10 @@ interface Napp {
   action(name: string, payload?: unknown, opts?: { instance?: string }): Promise<unknown>
   feeds: NappFeeds
   utils: NappUtils
+  /** Sync bech32/nip19 helpers. Optional: absent on older cached bridges. */
+  nip19?: NappNip19
+  /** Sync misc helpers (hex / coordinates / bolt11). Optional on older bridges. */
+  fx?: NappFx
 }
 
 // ── Augment global Window ────────────────────────────────────────────────

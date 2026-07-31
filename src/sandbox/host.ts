@@ -39,6 +39,7 @@ import type { NostrEvent } from "@nostr/tools/core"
 import { matchFilter, type Filter } from "@nostr/tools/filter"
 import { isNip05, queryProfile } from "@nostr/tools/nip05"
 import { decode } from "@nostr/tools/nip19"
+import { verifyEvent } from "@nostr/tools/pure"
 import { getInstalledApp, updateOpen } from "../persistence.js"
 import { currentSigner } from "../signers/index.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS } from "../outbox.js"
@@ -2295,6 +2296,11 @@ async function dispatch(
       return publishEvent(params.event, params.relays)
     case "napp.loadEvent":
       return loadEvent(params)
+    case "napp.loadEvents":
+      return loadEvents(params)
+    case "napp.verifyEvent":
+      // params is the event; verifyEvent checks id + signature.
+      return verifyEvent(params)
     default:
       throw new Error(`unsupported method: ${method}`)
   }
@@ -2391,6 +2397,27 @@ export async function loadEvent(params: { code: string; relays?: string[]; autho
     if (evt) await store.saveEvent(evt)
     return evt || null
   }
+}
+
+// Batched by-id fetch: dedupe + validate the ids (drop anything not 64-hex —
+// see the redstore-poisoning note above), serve what the store has, then fetch
+// only the misses from the fallback relays in ONE REQ (id union) rather than N.
+export async function loadEvents(ids: unknown): Promise<NostrEvent[]> {
+  if (!Array.isArray(ids)) return []
+  const valid = [...new Set(ids.filter(isHex64))]
+  if (valid.length === 0) return []
+  const found = await store.queryEvents({ ids: valid })
+  const seen = new Set(found.map(e => e.id))
+  const missing = valid.filter(id => !seen.has(id))
+  if (missing.length === 0) return found
+  const fromRelays = await pool.querySync(FALLBACK_RELAYS, { ids: missing }, { maxWait: 4000 })
+  for (const e of fromRelays) {
+    if (seen.has(e.id)) continue
+    seen.add(e.id)
+    await store.saveEvent(e)
+    found.push(e)
+  }
+  return found
 }
 
 type PublishResult = {
