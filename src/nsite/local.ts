@@ -1,14 +1,21 @@
 import { guessMime } from "./mime.js"
+import { isIgnoredPath } from "./ignore.js"
 
 export async function collectLocalFolder(
   fileList: FileList,
   onProgress: (msg: string) => void = () => {}
 ) {
-  const files = Array.from(fileList)
-  if (files.length === 0) throw new Error("No files selected")
+  const picked = Array.from(fileList)
+  if (picked.length === 0) throw new Error("No files selected")
 
-  const rootName = files[0].webkitRelativePath.split("/")[0]
+  const rootName = picked[0].webkitRelativePath.split("/")[0]
   if (!rootName) throw new Error("Could not determine folder name")
+
+  // Drop OS/editor/toolchain junk before anything is read, so it never reaches
+  // napp storage (and the progress count reflects what's actually being read).
+  const files = picked.filter(f => !isIgnoredPath(f.webkitRelativePath))
+  if (files.length === 0) throw new Error("Nothing to install — every file was a system file")
+  const skipped = picked.length - files.length
 
   const out = []
   let metadata = null
@@ -39,6 +46,7 @@ export async function collectLocalFolder(
   return {
     nappId,
     files: out,
+    skipped,
     metadata: metadata as {
       id: string
       title?: string

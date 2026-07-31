@@ -16,6 +16,7 @@ const DEFAULT_RELAYS = [
 
 import type { SystemCtx } from "../types.js"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
+import { isIgnoredPath } from "../nsite/ignore.js"
 
 export function mount(
   container: HTMLElement,
@@ -55,8 +56,16 @@ export function mount(
     statusEl.hidden = !msg
   }
 
+  // Count of OS/editor junk left out, reported once the walk finishes — silently
+  // dropping files would be confusing when something expected doesn't publish.
+  let skipped = 0
+
   async function readDir(dirHandle: any, path: string) {
     for await (const entry of dirHandle.values()) {
+      if (isIgnoredPath(path + entry.name)) {
+        skipped++
+        continue // a directory here takes its whole subtree with it
+      }
       if (entry.kind === "file") {
         const file = await entry.getFile()
         files.push({ path: path + entry.name, file })
@@ -84,8 +93,11 @@ export function mount(
       await readDir(initial, "")
       buildEvent()
     } else if (Array.isArray(initial)) {
-      // Pre-read files array for local~ apps
-      files = initial
+      // Pre-read files array for local~ apps. Already filtered on the way in by
+      // collectLocalFolder, but a caller assembling its own list shouldn't be
+      // able to slip junk past the publish path.
+      files = initial.filter(f => !isIgnoredPath(f.path))
+      skipped = initial.length - files.length
       const metaEntry = initial.find(f => f.path === "metadata.json")
       if (metaEntry) {
         try {
@@ -129,7 +141,9 @@ export function mount(
       return
     }
 
-    setStatus("Uploading files…")
+    setStatus(
+      `Uploading files…${skipped ? ` (skipped ${skipped} system file${skipped === 1 ? "" : "s"})` : ""}`
+    )
     const tags = []
     for (const f of files) {
       if (f.path === "metadata.json") continue

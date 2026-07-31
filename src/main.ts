@@ -1878,8 +1878,13 @@ localFolderInput.addEventListener("change", async (e: Event) => {
   if (!inputFiles || inputFiles.length === 0) return
   console.debug("[launch] local folder selected", { fileCount: inputFiles.length })
   try {
-    const { nappId, files, metadata } = await collectLocalFolder(inputFiles!, setStatus)
-    console.debug("[launch] local folder collected", { nappId, fileCount: files.length, metadata })
+    const { nappId, files, metadata, skipped } = await collectLocalFolder(inputFiles!, setStatus)
+    console.debug("[launch] local folder collected", {
+      nappId,
+      fileCount: files.length,
+      skipped,
+      metadata
+    })
 
     // install(), but from local, not fetching an nsite
     const origin = nappOriginFor(nappId)
