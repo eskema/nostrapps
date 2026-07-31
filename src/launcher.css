@@ -1191,6 +1191,15 @@ body.napp-resizing .napp-body iframe {
   pointer-events: none;
 }
 
+/* Same trick while a popover is open, for a different reason: a napp iframe is
+   same-site, so a click inside it is dispatched only in the napp's document and
+   never light-dismisses the launcher's popover — which then sits there until
+   Esc. Worst over a maximized napp, where the toolbar is the only launcher
+   chrome left to click. Toggled from popover.ts, which has the details. */
+body.popover-open .napp-body iframe {
+  pointer-events: none;
+}
+
 @media (max-width: 791px) {
   /* Desktop-only chrome. #stage-controls is a sticky, full-HEIGHT element; as
      the first flow child it would push every window down by a whole stage-

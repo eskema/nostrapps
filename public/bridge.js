@@ -201,6 +201,29 @@
     { passive: true }
   )
 
+  // A click in the launcher can't light-dismiss a popover in here: this document
+  // only ever sees pointer events that land inside the iframe, so the Popover
+  // API's light-dismiss never runs and the napp's own menus stay open while the
+  // user clicks around outside. Losing window focus is the one signal that does
+  // cross the boundary — treat it as a click outside and run light-dismiss here,
+  // which is what the browser would have done. Only auto/hint popovers dismiss
+  // on their own; `manual` ones stay the napp's business. Note this also fires
+  // when the whole browser loses focus, matching how native menus behave.
+  window.addEventListener("blur", () => {
+    let open
+    try {
+      open = document.querySelectorAll(":popover-open")
+    } catch {
+      return // pre-Chrome-114 engines don't know the selector
+    }
+    for (const el of open) {
+      if (el.popover !== "auto" && el.popover !== "hint") continue
+      try {
+        el.hidePopover()
+      } catch {} // already closed with an ancestor popover
+    }
+  })
+
   // ── Shared nostr primitives (sync, pure — no rpc) ────────────────────
   // Hand-rolled bech32 (BIP-173) + TLV so bridge.js stays a static,
   // dependency-free file the launcher's service worker serves as-is (no build
