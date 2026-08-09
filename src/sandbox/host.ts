@@ -2116,6 +2116,11 @@ async function startOutboxFeed(
   ;(async () => {
     try {
       await outbox.sync(authors, kinds, { signal: controller.signal })
+      // The sync writes into the store from inside the gadgets package, past
+      // any ingest hook — re-apply stored deletions so a tombstoned event a
+      // lagging relay just re-delivered does not reach the next callback.
+      await sweepStoredDeletions()
+      notify()
       if (until && until < Math.round(Date.now() / 1000) - 5)
         await outbox.before(authors, kinds, until, { signal: controller.signal })
     } catch (err) {
@@ -2161,8 +2166,12 @@ async function startInboxFeed(
       label: `inbox-${pubkey.substring(0, 6)}`,
       abort: controller.signal,
       async onevent(event) {
+        if (await tombstoned(event)) return
         const isNew = await store.saveEvent(event)
-        if (isNew) notify()
+        if (isNew) {
+          await applyDeletionLocally(event)
+          notify()
+        }
       },
       oneose() {
         synced = true
@@ -2236,8 +2245,11 @@ async function dispatch(
       return signer.nip44.encrypt(params.pubkey, params.plaintext)
     case "nip44.decrypt":
       return signer.nip44.decrypt(params.pubkey, params.ciphertext)
-    case "nostrdb.add":
-      return store.saveEvent(params.event)
+    case "nostrdb.add": {
+      const saved = await store.saveEvent(params.event)
+      await applyDeletionLocally(params.event)
+      return saved
+    }
     case "nostrdb.query": {
       const filter = sanitizeFilter(params.filters)
       return filter ? store.queryEvents(filter) : []
@@ -2607,7 +2619,80 @@ type PublishResult = {
   failed: number
 }
 
+// ─── NIP-09 deletions ──────────────────────────────────────────
+// RedEventStore saves kind 5s like any other event but does not interpret
+// them, so without help the local store keeps serving events their author has
+// deleted — feeds then re-import "deleted" things and they come back.
+
+async function applyDeletionLocally(event: NostrEvent) {
+  if (event.kind !== 5) return
+  try {
+    const ids = event.tags.filter(t => t[0] === "e" && isHex64(t[1])).map(t => t[1])
+    if (ids.length) {
+      // NIP-09: only the author's own events are deletable.
+      const targets = await store.queryEvents({ ids }, ids.length)
+      const own = targets.filter(t => t.pubkey === event.pubkey).map(t => t.id)
+      if (own.length) await store.deleteEvents(own)
+    }
+    for (const tag of event.tags) {
+      if (tag[0] !== "a" || typeof tag[1] !== "string") continue
+      const [kindStr, author, ...rest] = tag[1].split(":")
+      const kind = Number(kindStr)
+      if (!Number.isFinite(kind) || author !== event.pubkey) continue
+      const filter: any = { kinds: [kind], authors: [author] }
+      const d = rest.join(":")
+      if (d) filter["#d"] = [d]
+      // An address deletion covers versions up to its own timestamp — a
+      // version published after it is a legitimate re-publish.
+      filter.until = event.created_at
+      await store.deleteEventsFilters([filter])
+    }
+  } catch (err) {
+    console.warn("[store] applying deletion failed", err)
+  }
+}
+
+// Whether a stored kind 5 already covers this addressable event — checked
+// before feed ingest re-saves one, so a deleted tree/article does not
+// resurrect from a relay that missed (or ignored) the deletion. Scoped to
+// addressable kinds: rare in feed traffic, and where resurrection bites.
+async function tombstoned(event: NostrEvent): Promise<boolean> {
+  if (event.kind < 30000 || event.kind >= 40000) return false
+  try {
+    const d = event.tags.find(t => t[0] === "d")?.[1] ?? ""
+    const addr = `${event.kind}:${event.pubkey}:${d}`
+    const dels = await store.queryEvents({ kinds: [5], authors: [event.pubkey], "#a": [addr] }, 5)
+    return dels.some(del => del.created_at >= event.created_at)
+  } catch {
+    return false
+  }
+}
+
+// Re-apply every stored deletion — run after outbox syncs, which write into
+// the store from inside the gadgets package where ingest cannot be hooked.
+let lastDeletionSweep = 0
+async function sweepStoredDeletions() {
+  if (Date.now() - lastDeletionSweep < 2000) return
+  lastDeletionSweep = Date.now()
+  try {
+    const dels = await store.queryEvents({ kinds: [5] }, 500)
+    for (const del of dels) await applyDeletionLocally(del)
+  } catch {}
+}
+
 async function publishEvent(event: NostrEvent, relays?: string[]): Promise<PublishResult> {
+  // A published deletion must also take effect here — the napp's own feeds
+  // answer from this store, and relays alone cannot clean it.
+  if (event.kind === 5) {
+    try {
+      await store.saveEvent(event)
+    } catch {}
+    await applyDeletionLocally(event)
+  }
+  return publishEventToRelays(event, relays)
+}
+
+async function publishEventToRelays(event: NostrEvent, relays?: string[]): Promise<PublishResult> {
   let targetRelays: string[]
 
   if (relays) {
