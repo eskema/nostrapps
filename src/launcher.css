@@ -895,8 +895,9 @@ html[data-theme="dark"] .napp-window.focused {
   background: color-mix(in srgb, currentColor 22%, transparent);
 }
 
-/* Maximized: only the maximize/restore button stays. */
-.napp-window.maximized .napp-btn:not(.napp-btn-max) {
+/* Maximized: of the window controls only maximize/restore stays; the nav
+   group (back/forward/reload, scoped under .napp-nav) is unaffected. */
+.napp-window.maximized .napp-controls .napp-btn:not(.napp-btn-max) {
   display: none;
 }
 
