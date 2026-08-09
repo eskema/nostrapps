@@ -146,7 +146,10 @@ export function mount(
     )
     const tags = []
     for (const f of files) {
-      if (f.path === "metadata.json") continue
+      // metadata.json ships as a real file alongside its derived tags: the
+      // serving worker reads /metadata.json from the installed files to
+      // decide things the event does not carry (e.g. `ui: "wrapper"` style
+      // injection), and local~ installs already treat it as part of the app.
       const results = await Promise.allSettled(
         serverList.map(s => new BlossomClient(s, signer as any).uploadFile(f.file))
       )
