@@ -143,7 +143,7 @@
     }
   })
 
-  window.nostr = {
+  const nostrShim = {
     getPublicKey: () => rpc("getPublicKey"),
     signEvent: evt => rpc("signEvent", evt),
     nip04: {
@@ -154,6 +154,26 @@
       encrypt: (pubkey, plaintext) => rpc("nip44.encrypt", { pubkey, plaintext }),
       decrypt: (pubkey, ciphertext) => rpc("nip44.decrypt", { pubkey, ciphertext })
     }
+  }
+  // NIP-07 extensions inject their own window.nostr into EVERY frame — including
+  // napp iframes. If theirs lands after ours, the napp talks straight to the
+  // extension: the host (and its pubkey cache / permission model) is bypassed,
+  // and since each napp is its own origin the extension re-prompts per napp.
+  // Pin the bridge shim as non-writable/non-configurable so a later extension
+  // assignment fails silently and all signer traffic keeps flowing through the
+  // launcher. If the extension somehow got here first with a non-configurable
+  // define, fall back to plain assignment (best effort).
+  try {
+    Object.defineProperty(window, "nostr", {
+      value: nostrShim,
+      writable: false,
+      configurable: false,
+      enumerable: true
+    })
+  } catch {
+    try {
+      window.nostr = nostrShim
+    } catch {}
   }
 
   window.nostrdb = {
