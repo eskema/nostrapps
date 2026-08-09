@@ -7,7 +7,14 @@ const GATED_METHODS = new Set([
   "nip04.encrypt",
   "nip04.decrypt",
   "nip44.encrypt",
-  "nip44.decrypt"
+  "nip44.decrypt",
+  // Writing to the user's disk. Napp iframes have no `allow-downloads`, so this
+  // rpc is the only route out — which is what makes it gateable at all.
+  "napp.saveFile",
+  // Writing to the user's clipboard. The sandbox has no `clipboard-write`
+  // delegation, so like saveFile this rpc is the only route — the prompt can
+  // show what is actually about to land on the clipboard.
+  "napp.copyText"
 ])
 
 export function isGated(method: string) {
@@ -77,14 +84,19 @@ export function subscribe(fn: () => void) {
   return () => subscribers.delete(fn)
 }
 
-export async function requireApproval(nappId: string, method: string) {
+// A detail can be a plain sentence, or a sentence plus a `code` payload — the
+// payload renders as a wrapping code block, matching the <code> chips the rest
+// of the dialog uses (a url or key would otherwise overflow the card).
+export type ApprovalDetail = string | { text: string; code?: string }
+
+export async function requireApproval(nappId: string, method: string, detail?: ApprovalDetail) {
   const cached = getDecision(nappId, method)
   if (cached === "allow") return true
   if (cached === "deny") return false
 
   const decision = await openDialog<string>({
     title: "Permission request",
-    body: permissionBody(nappId, method),
+    body: permissionBody(nappId, method, detail),
     actions: [
       { label: "Deny always", value: "deny-always", variant: "outline" },
       { label: "Deny", value: "deny-once", variant: "outline" },
@@ -98,12 +110,27 @@ export async function requireApproval(nappId: string, method: string) {
   return decision === "allow-once" || decision === "allow-always"
 }
 
-function permissionBody(nappId: string, method: string): Node {
+function permissionBody(nappId: string, method: string, detail?: ApprovalDetail): Node {
+  const wrap = document.createElement("div")
   const p = document.createElement("p")
   const napp = document.createElement("code")
   napp.textContent = nappId
   const meth = document.createElement("code")
   meth.textContent = method
   p.append("Napp ", napp, " wants to use ", meth)
-  return p
+  wrap.appendChild(p)
+  // Some methods can say what they are actually about to do — a filename is a
+  // far better basis for a decision than a method name.
+  if (detail) {
+    const d = document.createElement("p")
+    d.textContent = typeof detail === "string" ? detail : detail.text
+    wrap.appendChild(d)
+    if (typeof detail !== "string" && detail.code) {
+      const c = document.createElement("code")
+      c.className = "app-dialog-detail-code"
+      c.textContent = detail.code
+      wrap.appendChild(c)
+    }
+  }
+  return wrap
 }

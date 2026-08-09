@@ -169,6 +169,25 @@ interface NappUtils {
   // Optional: absent on older cached bridges.
   verifyEvent?(event: NostrEvent): Promise<boolean>
 
+  // Save bytes to the user's disk. Napp iframes deliberately omit the
+  // `allow-downloads` sandbox token, so a napp cannot download on its own and
+  // gets no error when it tries — this rpc is the only route out, and being an
+  // rpc is what puts it behind the permission prompt. Prefer passing a Blob:
+  // it survives structured clone by reference, so the bytes are not copied.
+  // Optional: absent on older cached bridges, so feature-detect before calling.
+  saveFile?(
+    name: string,
+    data: Blob | ArrayBuffer | ArrayBufferView,
+    type?: string
+  ): Promise<{ name: string; size: number }>
+
+  // Copy text to the user's clipboard. The napp sandbox has no
+  // `clipboard-write` delegation, so navigator.clipboard rejects inside the
+  // iframe — this rpc is the only route, and being an rpc puts it behind the
+  // permission prompt (which previews the text being copied). Max 100k chars.
+  // Optional: absent on older cached bridges, so feature-detect before calling.
+  copyText?(text: string): Promise<{ length: number }>
+
   // Publishing
   publish(event: NostrEvent, relays?: string[]): Promise<PublishResult>
 }

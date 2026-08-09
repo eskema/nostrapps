@@ -2040,7 +2040,13 @@ async function handleRpc(
   const { id, method, params, instanceId } = data
   try {
     if (isGated(method!)) {
-      const allowed = await requireApproval(nappId, method!)
+      const detail =
+        method === "napp.saveFile"
+          ? describeSaveFile(params)
+          : method === "napp.copyText"
+            ? describeCopyText(params)
+            : undefined
+      const allowed = await requireApproval(nappId, method!, detail)
       if (!allowed) throw new Error(`Permission denied: ${method!}`)
     }
     // Signer can be passed either as an object (legacy) or as a getter
@@ -2365,6 +2371,10 @@ async function dispatch(
         }
       }
       return loadNostrUser(params)
+    case "napp.saveFile":
+      return saveFileForNapp(params)
+    case "napp.copyText":
+      return copyTextForNapp(params)
     case "napp.publish":
       return publishEvent(params.event, params.relays)
     case "napp.loadEvent":
@@ -2377,6 +2387,104 @@ async function dispatch(
     default:
       throw new Error(`unsupported method: ${method}`)
   }
+}
+
+// A napp filename is untrusted input. Keep only a basename, drop anything that
+// could steer where the file lands or confuse the OS, and never let it be empty.
+function sanitizeFilename(raw: unknown): string {
+  const base = String(raw ?? "")
+    .split(/[\\/]/)
+    .pop()!
+  const cleaned = base
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/[:*?"<>|]/g, "")
+    .replace(/^\.+/, "") // no ".." and no accidental dotfiles
+    .trim()
+    .slice(0, 200)
+  return cleaned || "download"
+}
+
+export function describeSaveFile(params: any): string | undefined {
+  const name = sanitizeFilename(params?.name)
+  const size = params?.data?.size ?? params?.data?.byteLength ?? params?.data?.length
+  if (typeof size !== "number") return `Save “${name}” to your downloads folder.`
+  const units = ["B", "KiB", "MiB", "GiB"]
+  let n = size
+  let u = 0
+  while (n >= 1024 && u < units.length - 1) {
+    n /= 1024
+    u++
+  }
+  const pretty = `${u === 0 ? n : n.toFixed(1)} ${units[u]}`
+  return `Save “${name}” (${pretty}) to your downloads folder.`
+}
+
+// The clipboard preview shows enough to recognise what is being copied (an
+// address, a key, a url). It renders as a wrapping code block in the dialog —
+// these strings have no spaces, so a plain paragraph would overflow the card.
+export function describeCopyText(params: any): { text: string; code: string } {
+  const text = typeof params?.text === "string" ? params.text : ""
+  const oneLine = text.replace(/\s+/g, " ").trim()
+  const preview = oneLine.length > 120 ? `${oneLine.slice(0, 120)}…` : oneLine
+  return {
+    text: `Copy ${text.length} character${text.length === 1 ? "" : "s"} to your clipboard:`,
+    code: preview
+  }
+}
+
+// The napp sandbox has no clipboard-write delegation, so navigator.clipboard
+// rejects inside the iframe with nothing the user ever sees. Napps hand the
+// text here instead: this document is not sandboxed, so the write works, and
+// routing it through an rpc puts it behind the permission gate with a prompt
+// that shows the actual text about to land on the clipboard.
+async function copyTextForNapp(params: { text?: unknown }) {
+  const text = params?.text
+  if (typeof text !== "string") throw new Error("copyText: text must be a string")
+  // A clipboard payload is not a file transfer; cap it well below anything a
+  // reference, key or url needs so a napp cannot dump megabytes there.
+  if (text.length > 100_000) throw new Error("copyText: text too large")
+  await navigator.clipboard.writeText(text)
+  return { length: text.length }
+}
+
+// Napp iframes deliberately omit `allow-downloads`, so a napp cannot write to
+// disk on its own — and a blocked download throws nothing and logs nothing the
+// napp can see, so there is no way for it to even detect the refusal. Napps
+// hand the bytes here instead: this document is not sandboxed, so the save
+// works, and routing it through an rpc puts it behind the permission gate with
+// a prompt that can name the actual file.
+async function saveFileForNapp(params: {
+  name?: string
+  data?: Blob | ArrayBuffer | ArrayBufferView
+  type?: string
+}) {
+  const name = sanitizeFilename(params?.name)
+  const raw = params?.data
+  if (!raw) throw new Error("saveFile: no data")
+
+  // Blobs survive structured clone by reference, so a napp passing one avoids
+  // copying the bytes across the frame boundary at all.
+  const blob =
+    raw instanceof Blob
+      ? raw
+      : new Blob([raw as BlobPart], { type: params?.type || "application/octet-stream" })
+
+  const url = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement("a")
+    a.href = url
+    a.download = name
+    a.rel = "noopener"
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  } finally {
+    // Long enough for the download to be picked up, short enough not to pin
+    // large blobs in memory for the session.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+  return { name, size: blob.size }
 }
 
 export async function loadEvent(params: { code: string; relays?: string[]; author?: string }) {

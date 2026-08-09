@@ -49,6 +49,30 @@ window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrU
 // Arbitrary event fetching
 window.napp.utils.loadEvent(code, relays?, author?)
 
+// Saving a file to disk
+window.napp.utils.saveFile?(name, data, type?)
+//   name: string — treated as untrusted; the host keeps a basename only
+//   data: Blob | ArrayBuffer | ArrayBufferView — pass a Blob to avoid copying
+//     the bytes across the frame boundary (Blobs clone by reference)
+//   returns { name, size } — the sanitized name actually used
+//
+// Napp iframes deliberately omit the `allow-downloads` sandbox token, so an
+// <a download> inside a napp is silently ignored — it throws nothing and logs
+// nothing the napp can see. This rpc is the only route to disk, and being an
+// rpc is what puts it behind the permission prompt (which names the file).
+// Optional: feature-detect, since a cached older bridge will not have it.
+
+// Copying text to the clipboard
+window.napp.utils.copyText?(text)
+//   text: string, max 100k chars
+//   returns { length }
+//
+// The napp sandbox has no `clipboard-write` delegation, so
+// navigator.clipboard rejects inside the iframe. This rpc is the only route,
+// and being an rpc puts it behind the permission prompt — which previews the
+// text about to land on the clipboard, so the user approves the content, not
+// just the capability. Optional: feature-detect, like saveFile.
+
 // Publishing
 window.napp.utils.publish(event, relays?)
 //   event: NostrEvent (must be signed)

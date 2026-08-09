@@ -494,6 +494,18 @@
       loadEvents: ids => rpc("napp.loadEvents", ids),
       // verify an event's id + signature on the host (nostr-tools verifyEvent)
       verifyEvent: event => rpc("napp.verifyEvent", event),
+      // ── files ──────────────────────────────────
+      // Save bytes to the user's disk. Napp iframes have no `allow-downloads`,
+      // so an <a download> here is silently ignored — hand the data over and
+      // the host does it, behind a permission prompt naming the file. Pass a
+      // Blob to avoid copying the bytes across the frame boundary.
+      saveFile: (name, data, type) => rpc("napp.saveFile", { name, data, type }),
+      // ── clipboard ──────────────────────────────
+      // Copy text to the user's clipboard. The sandbox has no clipboard-write
+      // delegation, so navigator.clipboard rejects inside the iframe — hand
+      // the text over and the host writes it, behind a permission prompt that
+      // previews what is being copied.
+      copyText: text => rpc("napp.copyText", { text }),
       // ── publishing ──────────────────────────────
       publish: (event, relays) => rpc("napp.publish", { event, relays })
     }
