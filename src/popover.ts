@@ -4,9 +4,9 @@
 // dialog.ts — pick whichever fits the interaction.
 
 // A click inside a napp can't light-dismiss these. A napp iframe is cross-origin
-// but same-SITE (`<id>.napps.localhost` under `localhost`), so it shares the
-// launcher's renderer process and its pointerdown is dispatched only in the
-// napp's own document — the launcher never sees it and the Popover API's
+// but same-SITE — nappOriginFor puts every napp on `<slug>.<launcher host>` — so
+// it shares the launcher's renderer process and its pointerdown is dispatched
+// only in the napp's own document — the launcher never sees it and the Popover API's
 // light-dismiss never runs, leaving the popover stuck until Esc. (Cross-site
 // iframes get their own process and do dismiss the parent, which is a misleading
 // thing to test with — napps are not that.) A maximized napp makes it
