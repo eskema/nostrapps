@@ -3,6 +3,14 @@ import { InstalledApp, NappWindowState, SpaceData, SpacesState } from "./types"
 
 const INSTALLED_KEY = "nostrapps:installed"
 const SPACES_KEY = "nostrapps:spaces"
+// Origins of ephemeral napps (dev~/temp~) that have been booted. Everything
+// else about them is memory-only and dies with the page — but their ORIGIN data
+// (the napp's own IDB/localStorage, its service worker) outlives the launcher,
+// and no web API can enumerate another origin's storage. So without a note of
+// the id, a reload orphans that data permanently: unreachable by uninstall, by
+// factory reset, by anything. This is the minimum written down to make the
+// wipe possible, and each id is dropped the moment its origin is cleared.
+const EPHEMERAL_KEY = "nostrapps:ephemeral-origins"
 // Legacy keys — read once to migrate into the spaces document, then removed.
 const LEGACY_OPEN_KEY = "nostrapps:open"
 const LEGACY_PACK_MODE_KEY = "nostrapps:packMode"
@@ -454,7 +462,38 @@ export function getInstalledNappIds(): string[] {
   for (const nappId of devApps.keys()) {
     if (!ids.includes(nappId)) ids.push(nappId)
   }
+  // Ephemeral origins from an earlier session: devApps is empty after a reload,
+  // so these would otherwise be invisible to the factory reset too.
+  for (const nappId of listEphemeralOrigins()) {
+    if (!ids.includes(nappId)) ids.push(nappId)
+  }
   return ids
+}
+
+// ─── Ephemeral origins (dev~ / temp~) ───────────────────────────
+// See EPHEMERAL_KEY. Recorded when the origin is booted, dropped when wiped.
+
+export function listEphemeralOrigins(): string[] {
+  const list = readJson(EPHEMERAL_KEY, [])
+  return Array.isArray(list) ? list.filter(id => typeof id === "string" && id) : []
+}
+
+export function rememberEphemeralOrigin(nappId: string) {
+  if (!nappId) return
+  const list = listEphemeralOrigins()
+  if (list.includes(nappId)) return
+  list.push(nappId)
+  writeJson(EPHEMERAL_KEY, list)
+}
+
+export function forgetEphemeralOrigin(nappId: string) {
+  const list = listEphemeralOrigins()
+  const next = list.filter(id => id !== nappId)
+  if (next.length === list.length) return
+  // Drop the key entirely once the last one is gone, so a clean launcher leaves
+  // no evidence that a dev napp was ever run.
+  if (next.length === 0) localStorage.removeItem(EPHEMERAL_KEY)
+  else writeJson(EPHEMERAL_KEY, next)
 }
 
 export function getInstalledApp(nappId: string): InstalledApp | undefined {

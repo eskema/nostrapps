@@ -302,6 +302,7 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   setStatus(`${actionLabel} ${nappId}…`)
   try {
     await wipe(nappId)
+    persist.forgetEphemeralOrigin(nappId) // origin is clean; nothing left to sweep
     setStatus(`${actionLabel === "Wiping" ? "Destroyed" : "Uninstalled"} ${nappId}`)
   } catch (err: any) {
     setStatus(`Wipe error: ${err.message}`)
@@ -1561,11 +1562,34 @@ function maybeBootstrap() {
   localStorage.setItem(BOOTSTRAP_KEY, "1")
 }
 
+// A dev~/temp~ napp is meant to leave nothing behind: closing its window wipes
+// its origin (see onDestroy). A reload skips that — the window goes, and with it
+// every in-memory trace of the napp, while the origin's data and service worker
+// stay. Clear whatever the last session left, before anything else mounts, so
+// re-running /dev on the same app starts genuinely empty.
+async function sweepEphemeralOrigins() {
+  const stale = persist.listEphemeralOrigins()
+  if (stale.length === 0) return
+  setStatus(`Clearing ${stale.length} leftover dev napp${stale.length === 1 ? "" : "s"}…`)
+  for (const nappId of stale) {
+    try {
+      await wipe(nappId)
+      // The close path (finalizeNappRemoval) clears these too — a reload skips
+      // it, and an ephemeral napp's "Allow always" must not outlive its data.
+      clearDecisions(nappId)
+      persist.forgetEphemeralOrigin(nappId) // only on success, so a failure retries next boot
+    } catch (err: any) {
+      console.warn("[sandbox] sweep failed for", nappId, err)
+    }
+  }
+}
+
 async function init() {
   setStatus(
     "Ready — try /apps, /upload, /settings, /logs, /folder, or enter a pubkey/npub/nsite host"
   )
   handlers.setActionDispatcher(runNappAction)
+  await sweepEphemeralOrigins()
   // If the user is paired with a bunker, get the connection warm in the
   // background. First sign request will wait if it's still connecting.
   reconnectIfNeeded().catch(err => setStatus(`Bunker reconnect failed: ${err.message}`))

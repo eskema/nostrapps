@@ -40,7 +40,7 @@ import { matchFilter, type Filter } from "@nostr/tools/filter"
 import { isNip05, queryProfile } from "@nostr/tools/nip05"
 import { decode } from "@nostr/tools/nip19"
 import { verifyEvent } from "@nostr/tools/pure"
-import { getInstalledApp, updateOpen } from "../persistence.js"
+import { getInstalledApp, rememberEphemeralOrigin, updateOpen } from "../persistence.js"
 import { currentSigner } from "../signers/index.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS } from "../outbox.js"
 import { debounce } from "../utils.js"
@@ -1899,6 +1899,11 @@ export async function bootDevApp(
   label: string
 ) {
   console.debug("[sandbox] bootDevApp", { origin, label })
+  // Every ephemeral napp (both /dev flavours and both temp~ paths) boots through
+  // here. Note the id BEFORE anything touches the origin: if the boot dies
+  // half-way, having registered a service worker, that origin still has to be
+  // reachable for the wipe.
+  rememberEphemeralOrigin(nappId)
   const boot = document.createElement("iframe")
   boot.src = `${origin}/boot.html`
   boot.style.display = "none"
