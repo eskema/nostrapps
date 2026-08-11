@@ -214,7 +214,12 @@ export function createNappWindow({
     messageHandler = (event: MessageEvent) => {
       if (!origin || event.origin !== origin) return
       const data = event.data
-      if (!data || data.instanceId !== instanceId) return
+      if (!data) return
+      // Legacy dialect (__nostrapps) is demuxed by instanceId. NIP-5D messages
+      // (a `type` field) carry no instanceId — a spec napplet doesn't know our
+      // window.name — so the origin, unique per napp, identifies the window.
+      const isNip5d = typeof data.type === "string" && !data.__nostrapps
+      if (!isNip5d && data.instanceId !== instanceId) return
       const iframe = iframeRef.current
       if (!iframe) return
       onMessage(data, iframe)

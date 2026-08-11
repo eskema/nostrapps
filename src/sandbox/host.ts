@@ -210,9 +210,6 @@ function clearInstanceRuntimeState(
   reason = "Window closed before action registered"
 ) {
   clearReady(instanceId)
-  // A close/reload ends the napplet lifecycle: the bridge's cached shell.init
-  // died with the document, so the next shell.ready must get a fresh one.
-  nappletSessions.delete(instanceId)
   clearInstanceActionState(instanceId, reason)
   clearInstanceFeedRequests(instanceId)
 }
@@ -393,52 +390,44 @@ export function broadcastTheme() {
       }
     }
   }
-  // NIP-5D theme push — only napplets with an established session hear it.
+  // NIP-5D theme push — only napps granted the `theme` domain hear it.
   broadcastNappletThemeChanged()
 }
 
-// ─── NIP-5D (window.napplet) — NAP-SHELL + identity + theme ─────────
-// The napplet surface in bridge.js speaks the NIP-5D wire dialect
-// ({type:"domain.action", id, ...} / {type:"...result", id, ok, ...}) over the
-// same per-window postMessage channel as the legacy rpc; napp-window.ts has
-// already bound each message to this napp by its unique ORIGIN before we get
-// here (the spec's MessageEvent.source rule — instanceId on the wire is pure
-// transport addressing).
+// ─── NIP-5D (window.napplet) — the NAP capability seam ──────────────
+// Additive, and entirely separate from our napp surface (window.napp /
+// window.nostr): a napplet speaks the NIP-5D wire dialect
+// ({type:"domain.action", id, ...} → {type:"...result", id, ...fields}) over
+// postMessage. Per the spec there is NO shell handshake — availability is
+// signalled by PRESENCE of a domain object on window.napplet, and the shell
+// injects only the domains it grants (see the SW's __nappletDomains injection
+// + bridge.js). So the host's job is just: service a granted-domain call with
+// its exact per-domain result shape, and silently ignore everything else.
 //
-// NAP-SHELL session rules: shell.init is sent exactly once per lifecycle, a
-// duplicate shell.ready is idempotent, and no capability call is serviced
-// before the handshake. Withholding shell.init would deny a napplet everything
-// — the single total enforcement point.
-const nappletSessions = new Set<string>()
+// Result shapes are the @napplet/nap contracts verbatim — each result carries
+// named top-level fields (pubkey / relays / profile / pubkeys / entries /
+// theme …), NOT a generic {ok, result} wrapper, so an app built with
+// @napplet/shim runs here unchanged.
 
-// What the runtime can offer beyond the mandatory shell.
+// Capability domains the launcher implements (NAPPLET_OFFERED). Keep in sync
+// with DOMAIN_INFO in napp-permissions.ts and the bridge's known set.
 const NAPPLET_OFFERED = ["identity", "theme"]
 
-// The domains to advertise in shell.init, or null to withhold the handshake
-// entirely (the spec's way of saying "this runtime offers you nothing").
-//
-// An app marks itself a NAPPLET by declaring capability domains — ["requires",
-// "<domain>"] tags in its NIP-5A manifest, or a `requires` array in
-// metadata.json for local/dev/temp apps. Plain napps declare nothing, get no
-// shell.init, and never enter the NAP seam. A napplet is offered the
-// intersection of what it declared and what we implement (plus shell, which is
-// unconditional for any serviced napplet) — least privilege by declaration.
-// User-facing per-domain policy will further narrow this here.
-function nappletDomainsFor(nappId: string): string[] | null {
+// The capability domains this napp is actually granted: declared (via
+// ["requires", "<domain>"] manifest tags or a metadata.json `requires` array)
+// ∩ what we implement ∩ what the user granted in the permission screen. Empty
+// for a plain napp that declared nothing — it never enters the seam.
+export function nappletDomainsFor(nappId: string): string[] {
   const app = getInstalledApp(nappId)
-  if (!app) return null
+  if (!app) return []
   const declared = new Set<string>()
   for (const t of app.event?.tags ?? []) {
     if (t[0] === "requires" && typeof t[1] === "string" && t[1]) declared.add(t[1])
   }
   for (const d of app.requires ?? []) declared.add(d)
-  if (declared.size === 0) return null // not a napplet
-  // Offered = declared ∩ implemented ∩ granted. shell is unconditional for any
-  // napplet so the handshake still completes (the napplet learns it's in a
-  // runtime and can prompt the user), but every real capability also needs a
-  // user grant — a declared-but-ungranted domain simply isn't offered.
+  if (declared.size === 0) return []
   const granted = new Set(getPolicy(nappId).domains)
-  return ["shell", ...NAPPLET_OFFERED.filter(d => declared.has(d) && granted.has(d))]
+  return NAPPLET_OFFERED.filter(d => declared.has(d) && granted.has(d))
 }
 
 function nappletTheme() {
@@ -451,8 +440,9 @@ function nappletTheme() {
 
 function broadcastNappletThemeChanged() {
   const theme = nappletTheme()
-  for (const [instanceId, win] of openWindows) {
-    if (!nappletSessions.has(instanceId)) continue
+  for (const [, win] of openWindows) {
+    const nappId = win.root?.dataset.nappId
+    if (!nappId || !nappletDomainsFor(nappId).includes("theme")) continue
     if (!win.iframe?.contentWindow) continue
     try {
       const origin = new URL(win.iframe.src).origin
@@ -463,8 +453,9 @@ function broadcastNappletThemeChanged() {
 
 // identity.changed: pushed when the launcher account connects/disconnects.
 onAccountChanged(pk => {
-  for (const [instanceId, win] of openWindows) {
-    if (!nappletSessions.has(instanceId)) continue
+  for (const [, win] of openWindows) {
+    const nappId = win.root?.dataset.nappId
+    if (!nappId || !nappletDomainsFor(nappId).includes("identity")) continue
     if (!win.iframe?.contentWindow) continue
     try {
       const origin = new URL(win.iframe.src).origin
@@ -483,103 +474,62 @@ const NAPPLET_LISTS: Record<string, (pk: string) => Promise<{ items: unknown[] }
   "wiki-relays": pk => loadWikiRelays(pk)
 }
 
-// Read-only identity queries. Everything answers from the launcher's own
-// account state — getPublicKey returns the CACHED key or "" (it never asks the
-// signer, so it can never prompt), and the list queries return empties when no
-// account is connected rather than erroring.
-async function dispatchNapplet(type: string, data: any): Promise<unknown> {
+// Read-only identity queries + theme. Each case returns the RESULT PAYLOAD —
+// the exact named fields of the @napplet/nap result message — which the caller
+// spreads into `{type:"<type>.result", id, ...}`. Everything answers from the
+// launcher's own account state: getPublicKey returns the CACHED key or "" (it
+// never asks the signer, so it can never prompt); list queries return empties
+// when no account is connected rather than erroring.
+async function dispatchNapplet(type: string, data: any): Promise<Record<string, unknown>> {
   const pk = getPubkey()
   switch (type) {
     case "identity.getPublicKey":
-      return pk || ""
+      return { pubkey: pk || "" }
     case "identity.getRelays": {
-      if (!pk) return {}
+      if (!pk) return { relays: {} }
       const list = await loadRelayList(pk)
-      const map: Record<string, { read: boolean; write: boolean }> = {}
-      for (const item of list.items) map[item.url] = { read: !!item.read, write: !!item.write }
-      return map
+      const relays: Record<string, { read: boolean; write: boolean }> = {}
+      for (const item of list.items) relays[item.url] = { read: !!item.read, write: !!item.write }
+      return { relays }
     }
     case "identity.getProfile": {
-      if (!pk) return null
+      if (!pk) return { profile: null }
       const user = await loadNostrUser(pk)
-      return user?.metadata ?? null
+      return { profile: user?.metadata ?? null }
     }
     case "identity.getFollows":
-      return pk ? (await loadFollowsList(pk)).items : []
+      return { pubkeys: pk ? (await loadFollowsList(pk)).items : [] }
     case "identity.getMutes":
-      return pk ? (await loadMuteList(pk)).items : []
+      return { pubkeys: pk ? (await loadMuteList(pk)).items : [] }
     case "identity.getList": {
-      const loader = NAPPLET_LISTS[data?.list]
-      if (!loader) throw new Error(`unknown list: ${data?.list}`)
-      return pk ? (await loader(pk)).items : []
+      const loader = NAPPLET_LISTS[data?.listType]
+      if (!loader) throw new Error(`unknown list: ${data?.listType}`)
+      return { entries: pk ? (await loader(pk)).items : [] }
     }
     case "theme.get":
-      return nappletTheme()
+      return { theme: nappletTheme() }
     default:
       throw new Error(`unsupported napplet call: ${type}`)
   }
 }
 
+// Service one inbound napplet message. No handshake, no session: availability
+// is presence (the shell injected only granted domains), so here we just
+// re-check the grant as defense-in-depth and answer with the exact result
+// shape. An ungranted or unknown domain is SILENTLY IGNORED — per NIP-5D,
+// unrecognized messages get no reply, which also prevents capability probing.
 function handleNapplet(
   data: { type: string; id?: string },
   iframe: HTMLIFrameElement,
   origin: string,
-  nappId: string,
-  instanceId: string
+  nappId: string
 ) {
-  const post = (msg: object) => iframe.contentWindow?.postMessage(msg, origin)
-
-  if (data.type === "shell.ready") {
-    const domains = nappletDomainsFor(nappId)
-    // Not a napplet (nothing declared): withhold shell.init entirely — per
-    // NAP-SHELL, absence is how a runtime declines to service; the surface
-    // degrades to supports() === false for everything. The wire stays silent
-    // by design, so say why in the LAUNCHER console — for a developer this is
-    // otherwise indistinguishable from a broken handshake.
-    if (!domains) {
-      console.info(
-        `[napplet] ${nappId} sent shell.ready but declares no capability domains — ` +
-          `add ["requires", "<domain>"] manifest tags (or a "requires" array in ` +
-          `metadata.json for /dev) to enter the NIP-5D seam`
-      )
-      return
-    }
-    // A shell.ready on an existing session is either a replay or — more likely
-    // on this transport — a RELOADED document (same window, new lifecycle; its
-    // bridge lost the cached env). We can't tell the two apart, so answer both
-    // with the same deterministic shell.init: a reload gets its env back, and a
-    // replay learns nothing new and re-keys nothing (the session object never
-    // changes — NAP-SHELL's actual invariant).
-    nappletSessions.add(instanceId)
-    post({
-      type: "shell.init",
-      instanceId,
-      capabilities: { domains },
-      services: []
-    })
-    return
-  }
-
-  const fail = (error: string) =>
-    post({ type: `${data.type}.result`, id: data.id, instanceId, ok: false, error })
-
-  if (!nappletSessions.has(instanceId)) {
-    fail("no session — send shell.ready first")
-    return
-  }
-  // Domain enforcement: a session unlocks only the domains advertised in this
-  // napplet's shell.init — the same list, recomputed (it's deterministic).
   const domain = data.type.split(".")[0]
-  const granted = nappletDomainsFor(nappId)
-  if (!granted || !granted.includes(domain)) {
-    fail(`domain not granted: ${domain}`)
-    return
-  }
+  if (!nappletDomainsFor(nappId).includes(domain)) return
+  const post = (msg: object) => iframe.contentWindow?.postMessage(msg, origin)
   dispatchNapplet(data.type, data)
-    .then(result =>
-      post({ type: `${data.type}.result`, id: data.id, instanceId, ok: true, result })
-    )
-    .catch(err => fail(err?.message ?? String(err)))
+    .then(payload => post({ type: `${data.type}.result`, id: data.id, ...payload }))
+    .catch(err => post({ type: `${data.type}.result`, id: data.id, error: err?.message ?? String(err) }))
 }
 
 export function focusInstance(instanceId: string): boolean {
@@ -859,7 +809,7 @@ function mount(
       // NIP-5D dialect (window.napplet) carries `type`; legacy carries
       // `__nostrapps`. Same channel, two routers.
       if (typeof (data as any).type === "string" && !data.__nostrapps) {
-        handleNapplet(data as any, iframe, origin, nappId, instanceId)
+        handleNapplet(data as any, iframe, origin, nappId)
         return
       }
       switch (data.__nostrapps) {
@@ -934,7 +884,7 @@ export function mountWithLoading(
     onMessage: (data, iframe) => {
       // NIP-5D dialect — same routing as mount() above.
       if (typeof (data as any).type === "string" && !data.__nostrapps) {
-        handleNapplet(data as any, iframe, origin, nappId, instanceId)
+        handleNapplet(data as any, iframe, origin, nappId)
         return
       }
       switch (data.__nostrapps) {

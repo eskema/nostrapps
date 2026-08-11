@@ -57,10 +57,11 @@ async function handleFetch(req, url) {
         if (mime.startsWith("text/html")) {
           const text =
             typeof devFile.body === "string" ? devFile.body : await new Blob([devFile.body]).text()
-          return new Response(injectBridge(text, { wrapperUi: await devWantsWrapper() }), {
-            status: 200,
-            headers: htmlHeaders(mime, await readDevPolicy())
-          })
+          const policy = await readDevPolicy()
+          return new Response(
+            injectBridge(text, { wrapperUi: await devWantsWrapper(), domains: policy?.domains }),
+            { status: 200, headers: htmlHeaders(mime, policy) }
+          )
         }
         return new Response(devFile.body, {
           status: 200,
@@ -93,10 +94,11 @@ async function handleFetch(req, url) {
       const mime = record.mime || "application/octet-stream"
       if (mime.startsWith("text/html")) {
         const text = typeof record.body === "string" ? record.body : await record.body.text()
-        return new Response(injectBridge(text, { wrapperUi: await installedWantsWrapper() }), {
-          status: 200,
-          headers: htmlHeaders(mime, await readInstalledPolicy())
-        })
+        const policy = await readInstalledPolicy()
+        return new Response(
+          injectBridge(text, { wrapperUi: await installedWantsWrapper(), domains: policy?.domains }),
+          { status: 200, headers: htmlHeaders(mime, policy) }
+        )
       }
       return new Response(record.body, {
         status: 200,
@@ -204,10 +206,20 @@ async function readDevPolicy() {
   }
 }
 
-function injectBridge(html, { wrapperUi = false } = {}) {
+function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
+  // NIP-5D presence model: the shell declares the granted capability domains as
+  // window.__nappletDomains BEFORE bridge.js runs; bridge.js then builds
+  // window.napplet with exactly those domain objects. `<` is escaped so a domain
+  // string can never break out of the inline <script>.
+  const domainList = Array.isArray(domains) ? domains : []
+  const domainsScript =
+    "<script>window.__nappletDomains=" +
+    JSON.stringify(domainList).replace(/</g, "\\u003c") +
+    "</script>"
   // Injected at the top of <head>, so the shared stylesheet lands BEFORE the
   // napp's own styles and the napp can still override it.
   const headInject =
+    domainsScript +
     '<script src="/bridge.js"></script>' +
     (wrapperUi ? '<link rel="stylesheet" href="/napp-ui.css">' : "")
   const readyTag =

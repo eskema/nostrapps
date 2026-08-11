@@ -78,37 +78,27 @@
   const actionHandlers = []
 
   // ── NIP-5D (window.napplet) state ───────────────────────────────────
-  // The napplet surface speaks the NIP-5D wire dialect ({type:"domain.action",
-  // id, ...payload} / {type:"domain.action.result", id, ok, ...}) over the same
-  // postMessage channel as the legacy rpc. shell.init is cached so
-  // shell.supports() answers synchronously and locally, per NAP-SHELL.
-  let nappletEnv = null
-  const nappletEnvWaiters = []
+  // The napplet surface speaks the NIP-5D wire dialect: request
+  // {type:"domain.action", id, ...params} → result {type:"...result", id,
+  // ...namedFields}. There is NO shell handshake — availability is the presence
+  // of a domain object on window.napplet (see the injection below). Each result
+  // carries the domain's own named fields (pubkey / relays / entries / theme …),
+  // not a generic wrapper, so a `pick` fn plucks the value; a result with an
+  // `error` field rejects.
   const pending5d = new Map()
   let n5dSerial = 0
   const themeHandlers = new Set()
   const identityHandlers = new Set()
-  function nappletCall(type, payload) {
+  function nappletCall(type, params, pick) {
     const id = "n5d" + n5dSerial++
     return new Promise((resolve, reject) => {
-      pending5d.set(id, { resolve, reject })
-      window.parent.postMessage({ type, id, instanceId: window.name, ...payload }, "*")
+      pending5d.set(id, { resolve, reject, pick })
+      // napplet → shell posts to '*'; the shell demuxes by message source/origin,
+      // so we carry no instanceId (a spec napplet wouldn't know our window.name).
+      window.parent.postMessage({ type, id, ...(params || {}) }, "*")
     })
   }
   function handleNappletMessage(data) {
-    if (data.type === "shell.init") {
-      if (nappletEnv) return // exactly-once; ignore any duplicate
-      nappletEnv = {
-        capabilities: data.capabilities || { domains: [] },
-        services: Array.isArray(data.services) ? data.services : []
-      }
-      for (const w of nappletEnvWaiters.splice(0)) {
-        try {
-          w(nappletEnv)
-        } catch {}
-      }
-      return
-    }
     if (data.type === "theme.changed") {
       for (const fn of themeHandlers) {
         try {
@@ -125,12 +115,12 @@
       }
       return
     }
-    if (typeof data.type === "string" && data.type.endsWith(".result")) {
+    if (data.type.endsWith(".result")) {
       const p = pending5d.get(data.id)
       if (!p) return
       pending5d.delete(data.id)
-      if (data.ok) p.resolve(data.result)
-      else p.reject(new Error(data.error || "napplet call failed"))
+      if (data.error != null) p.reject(new Error(data.error))
+      else p.resolve(p.pick ? p.pick(data) : data)
     }
   }
 
@@ -598,66 +588,63 @@
   window.napp = napp
 
   // ── NIP-5D: window.napplet ──────────────────────────────────────────
-  // The NAP capability seam (github.com/napplet/naps), web projection. Domains
-  // offered in phase 1: shell (mandatory), identity, theme. Feature-detect with
-  // `window.napplet?.shell.supports("identity")` — supports() is synchronous and
-  // answers false for anything the runtime didn't advertise in shell.init.
+  // The NAP capability seam (github.com/napplet/naps), web projection. Per the
+  // spec, AVAILABILITY IS PRESENCE: the shell injects `window.__nappletDomains`
+  // (the granted domains) before this script runs, and we build window.napplet
+  // with exactly those domain objects — no more. A napplet feature-detects with
+  // `if (window.napplet?.identity)`. Method signatures + result field names
+  // match @napplet/nap so an app built with @napplet/shim runs here unchanged.
   //
-  // Wire divergence, documented: our transport multiplexes every napp through
-  // the parent's one listener, so 5D messages carry `instanceId` for ADDRESSING.
-  // Identity is still bound host-side by the message's origin (each napp has its
-  // own), never by this field — the spec's creation-time-assignment rule holds.
-  window.napplet = {
-    shell: {
-      supports: domain =>
-        !!nappletEnv &&
-        Array.isArray(nappletEnv.capabilities.domains) &&
-        nappletEnv.capabilities.domains.includes(domain),
-      services: () => (nappletEnv ? [...nappletEnv.services] : []),
-      ready: () =>
-        nappletEnv
-          ? Promise.resolve(nappletEnv)
-          : new Promise(resolve => nappletEnvWaiters.push(resolve)),
-      onReady: handler => {
-        let active = true
-        if (nappletEnv) {
-          try {
-            handler(nappletEnv)
-          } catch {}
-        } else {
-          nappletEnvWaiters.push(env => {
-            if (active) handler(env)
-          })
-        }
-        return { close: () => (active = false) }
-      }
-    },
-    identity: {
-      // Read-only queries answered by the launcher; getPublicKey returns the
-      // cached account key or "" when no signer is connected — it never
+  // Each domain object is a factory so we only instantiate granted ones. `pick`
+  // pulls the domain's named result field off the wire message.
+  const NAPPLET_DOMAIN_FACTORIES = {
+    identity: () => ({
+      // Read-only; getPublicKey returns the cached account key or "" — it never
       // triggers a signer prompt.
-      getPublicKey: () => nappletCall("identity.getPublicKey"),
-      getRelays: () => nappletCall("identity.getRelays"),
-      getProfile: () => nappletCall("identity.getProfile"),
-      getFollows: () => nappletCall("identity.getFollows"),
-      getMutes: () => nappletCall("identity.getMutes"),
-      getList: type => nappletCall("identity.getList", { list: type }),
+      getPublicKey: () => nappletCall("identity.getPublicKey", null, d => d.pubkey),
+      getRelays: () => nappletCall("identity.getRelays", null, d => d.relays),
+      getProfile: () => nappletCall("identity.getProfile", null, d => d.profile),
+      getFollows: () => nappletCall("identity.getFollows", null, d => d.pubkeys),
+      getMutes: () => nappletCall("identity.getMutes", null, d => d.pubkeys),
+      getBlocked: () => nappletCall("identity.getBlocked", null, d => d.pubkeys),
+      getList: listType => nappletCall("identity.getList", { listType }, d => d.entries),
+      getZaps: () => nappletCall("identity.getZaps", null, d => d.zaps),
+      getBadges: () => nappletCall("identity.getBadges", null, d => d.badges),
       onChanged: handler => {
         identityHandlers.add(handler)
         return { close: () => identityHandlers.delete(handler) }
       }
-    },
-    theme: {
-      get: () => nappletCall("theme.get"),
+    }),
+    theme: () => ({
+      get: () => nappletCall("theme.get", null, d => d.theme),
       onChanged: handler => {
         themeHandlers.add(handler)
         return { close: () => themeHandlers.delete(handler) }
       }
-    }
+    })
   }
 
-  // NAP-SHELL handshake: the bridge runs at the top of <head> and its listener
-  // is already installed, so the receiver is live — signal readiness now. The
-  // host replies with shell.init exactly once.
-  window.parent.postMessage({ type: "shell.ready", instanceId: window.name }, "*")
+  const grantedDomains = Array.isArray(window.__nappletDomains) ? window.__nappletDomains : []
+  if (grantedDomains.length) {
+    const napplet = {}
+    for (const d of grantedDomains) {
+      const factory = NAPPLET_DOMAIN_FACTORIES[d]
+      if (factory) napplet[d] = Object.freeze(factory())
+    }
+    // Freeze + pin so the napplet (or a later extension) can't reshape its own
+    // capability surface.
+    Object.freeze(napplet)
+    try {
+      Object.defineProperty(window, "napplet", {
+        value: napplet,
+        writable: false,
+        configurable: false,
+        enumerable: true
+      })
+    } catch {
+      try {
+        window.napplet = napplet
+      } catch {}
+    }
+  }
 })()

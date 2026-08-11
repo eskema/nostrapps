@@ -239,26 +239,19 @@ interface Napp {
 }
 
 // ── NIP-5D (window.napplet) — the NAP capability seam ────────────────────
-// Web projection of github.com/napplet/naps. Phase-1 domains: shell
-// (mandatory), identity, theme. Feature-detect with
-// `window.napplet?.shell.supports("identity")` — supports() is synchronous,
-// answered locally from the cached shell.init environment.
-
-interface NappletShellEnvironment {
-  capabilities: { domains: string[] }
-  services: string[]
-}
+// Web projection of github.com/napplet/naps. Availability is PRESENCE: the
+// shell injects window.napplet with only the granted domain objects, so a
+// napplet feature-detects with `if (window.napplet?.identity)`. Shapes match
+// the @napplet/nap contracts (result field names verbatim), so an app built
+// with @napplet/shim runs unchanged. This surface is separate from window.napp.
 
 interface NappletSubscription {
   close(): void
 }
 
-interface NappletShell {
-  /** Synchronous, local; false before shell.init and for unknown domains. */
-  supports(domain: string): boolean
-  services(): string[]
-  ready(): Promise<NappletShellEnvironment>
-  onReady(handler: (env: NappletShellEnvironment) => void): NappletSubscription
+interface NappletTheme_Payload {
+  colors: { background: string; text: string; primary: string }
+  title?: string
 }
 
 interface NappletIdentity {
@@ -269,24 +262,24 @@ interface NappletIdentity {
   getProfile(): Promise<Record<string, unknown> | null>
   getFollows(): Promise<string[]>
   getMutes(): Promise<string[]>
+  getBlocked(): Promise<string[]>
   /** NIP-51 lists: "bookmarks" | "pins" | "emojis" | "blossom-servers" |
    *  "favorite-relays" | "wiki-authors" | "wiki-relays". */
-  getList(type: string): Promise<unknown[]>
+  getList(listType: string): Promise<string[]>
+  getZaps(): Promise<unknown[]>
+  getBadges(): Promise<unknown[]>
   onChanged(handler: (pubkey: string) => void): NappletSubscription
 }
 
 interface NappletTheme {
-  get(): Promise<{
-    title: string
-    colors: { background: string; text: string; primary: string }
-  }>
-  onChanged(handler: (theme: unknown) => void): NappletSubscription
+  get(): Promise<NappletTheme_Payload>
+  onChanged(handler: (theme: NappletTheme_Payload) => void): NappletSubscription
 }
 
+// Every domain is optional: presence = the shell granted it.
 interface Napplet {
-  shell: NappletShell
-  identity: NappletIdentity
-  theme: NappletTheme
+  identity?: NappletIdentity
+  theme?: NappletTheme
 }
 
 // ── Augment global Window ────────────────────────────────────────────────
@@ -294,6 +287,8 @@ interface Window {
   nostr: NostrSigner
   nostrdb: NostrDB
   napp: Napp
-  /** NIP-5D surface. Optional: absent on older cached bridges — feature-detect. */
+  /** NIP-5D surface. Present only when the shell grants ≥1 domain — feature-detect. */
   napplet?: Napplet
+  /** Injected by the shell before bridge.js: the granted NIP-5D domains. */
+  __nappletDomains?: string[]
 }
