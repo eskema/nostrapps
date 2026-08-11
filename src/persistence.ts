@@ -513,6 +513,57 @@ export function clearPolicy(nappId: string) {
   writeJson(POLICY_KEY, all)
 }
 
+// ─── NIP-5D napplet storage (NAP-STORAGE) ───────────────────────
+// Host-backed key-value store proxied to napplets via window.napplet.storage.
+// A napplet has an opaque origin (or, for our nsite-hosted case, we still route
+// it here) so it can't use its own localStorage — this is the durable store.
+// Keyed nappId → scope → key → string. `scope` is "shared" (per-napp, the
+// default) or "instance"; true per-window isolation needs an instance token we
+// don't have on this transport yet, so "instance" is a separate per-napp
+// namespace for now — isolated from shared, not yet per-window.
+const NAPPLET_STORAGE_KEY = "nostrapps:napplet-storage"
+type NappletStore = Record<string, Record<string, Record<string, string>>>
+
+function readNappletStore(): NappletStore {
+  const raw = readJson(NAPPLET_STORAGE_KEY, {})
+  return raw && typeof raw === "object" ? raw : {}
+}
+function nappletScope(store: NappletStore, nappId: string, scope: string): Record<string, string> {
+  const s = scope === "instance" ? "instance" : "shared"
+  return (store[nappId] && store[nappId][s]) || {}
+}
+
+export function nappletStorageGet(nappId: string, scope: string, key: string): string | null {
+  const v = nappletScope(readNappletStore(), nappId, scope)[key]
+  return typeof v === "string" ? v : null
+}
+export function nappletStorageKeys(nappId: string, scope: string): string[] {
+  return Object.keys(nappletScope(readNappletStore(), nappId, scope))
+}
+export function nappletStorageSet(nappId: string, scope: string, key: string, value: string) {
+  const s = scope === "instance" ? "instance" : "shared"
+  const store = readNappletStore()
+  store[nappId] = store[nappId] || {}
+  store[nappId][s] = store[nappId][s] || {}
+  store[nappId][s][key] = value
+  writeJson(NAPPLET_STORAGE_KEY, store)
+}
+export function nappletStorageRemove(nappId: string, scope: string, key: string) {
+  const s = scope === "instance" ? "instance" : "shared"
+  const store = readNappletStore()
+  if (store[nappId]?.[s] && key in store[nappId][s]) {
+    delete store[nappId][s][key]
+    writeJson(NAPPLET_STORAGE_KEY, store)
+  }
+}
+export function clearNappletStorage(nappId: string) {
+  const store = readNappletStore()
+  if (nappId in store) {
+    delete store[nappId]
+    writeJson(NAPPLET_STORAGE_KEY, store)
+  }
+}
+
 export function getInstalledNappIds(): string[] {
   const ids = Object.keys(readInstalled())
   for (const nappId of devApps.keys()) {

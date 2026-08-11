@@ -34,7 +34,8 @@ import {
   spaceOfLiveSystem,
   findOpenWindowByNappId,
   loadEvent,
-  applyNappPolicy
+  applyNappPolicy,
+  closeNappletSubs
 } from "./sandbox/host.js"
 import { button, chip, icon } from "./system-napps/ui.js"
 import { promptNappPolicy } from "./napp-permissions.js"
@@ -299,6 +300,9 @@ const uninstallingNapps = new Set<string>()
 async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling") {
   clearDecisions(nappId)
   persist.forgetInstalledNapp(nappId)
+  persist.clearPolicy(nappId)
+  persist.clearNappletStorage(nappId)
+  closeNappletSubs(nappId)
   handlers.removeApp(nappId)
   removeDevHandle(nappId)
   setStatus(`${actionLabel} ${nappId}…`)

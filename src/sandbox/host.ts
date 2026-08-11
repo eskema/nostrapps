@@ -43,6 +43,10 @@ import { verifyEvent } from "@nostr/tools/pure"
 import {
   getInstalledApp,
   getPolicy,
+  nappletStorageGet,
+  nappletStorageKeys,
+  nappletStorageRemove,
+  nappletStorageSet,
   rememberEphemeralOrigin,
   updateOpen
 } from "../persistence.js"
@@ -410,8 +414,8 @@ export function broadcastTheme() {
 // @napplet/shim runs here unchanged.
 
 // Capability domains the launcher implements (NAPPLET_OFFERED). Keep in sync
-// with DOMAIN_INFO in napp-permissions.ts and the bridge's known set.
-const NAPPLET_OFFERED = ["identity", "theme"]
+// with DOMAIN_INFO in napp-permissions.ts and the bridge's factory set.
+const NAPPLET_OFFERED = ["identity", "theme", "storage", "resource", "relay"]
 
 // The capability domains this napp is actually granted: declared (via
 // ["requires", "<domain>"] manifest tags or a metadata.json `requires` array)
@@ -474,52 +478,284 @@ const NAPPLET_LISTS: Record<string, (pk: string) => Promise<{ items: unknown[] }
   "wiki-relays": pk => loadWikiRelays(pk)
 }
 
-// Read-only identity queries + theme. Each case returns the RESULT PAYLOAD —
-// the exact named fields of the @napplet/nap result message — which the caller
-// spreads into `{type:"<type>.result", id, ...}`. Everything answers from the
-// launcher's own account state: getPublicKey returns the CACHED key or "" (it
-// never asks the signer, so it can never prompt); list queries return empties
-// when no account is connected rather than erroring.
-async function dispatchNapplet(type: string, data: any): Promise<Record<string, unknown>> {
+// Request/response napplet ops. Each case returns the FULL result message
+// (its own `type` + named fields) — the @napplet/nap contracts differ per
+// domain (resource uses a `.error` type; relay.publish carries `ok`), so the
+// handler owns its exact shape rather than a generic wrapper. `id` is attached
+// by the caller. Streaming ops (relay.subscribe/close, resource.cancel) are
+// handled in handleNapplet, not here — they have no single .result.
+async function dispatchNapplet(
+  type: string,
+  data: any,
+  nappId: string
+): Promise<Record<string, unknown>> {
   const pk = getPubkey()
   switch (type) {
+    // ── identity (read-only; never prompts the signer) ──
     case "identity.getPublicKey":
-      return { pubkey: pk || "" }
+      return { type: "identity.getPublicKey.result", pubkey: pk || "" }
     case "identity.getRelays": {
-      if (!pk) return { relays: {} }
-      const list = await loadRelayList(pk)
       const relays: Record<string, { read: boolean; write: boolean }> = {}
-      for (const item of list.items) relays[item.url] = { read: !!item.read, write: !!item.write }
-      return { relays }
+      if (pk)
+        for (const item of (await loadRelayList(pk)).items)
+          relays[item.url] = { read: !!item.read, write: !!item.write }
+      return { type: "identity.getRelays.result", relays }
     }
     case "identity.getProfile": {
-      if (!pk) return { profile: null }
-      const user = await loadNostrUser(pk)
-      return { profile: user?.metadata ?? null }
+      const profile = pk ? ((await loadNostrUser(pk))?.metadata ?? null) : null
+      return { type: "identity.getProfile.result", profile }
     }
     case "identity.getFollows":
-      return { pubkeys: pk ? (await loadFollowsList(pk)).items : [] }
+      return {
+        type: "identity.getFollows.result",
+        pubkeys: pk ? (await loadFollowsList(pk)).items : []
+      }
     case "identity.getMutes":
-      return { pubkeys: pk ? (await loadMuteList(pk)).items : [] }
+      return {
+        type: "identity.getMutes.result",
+        pubkeys: pk ? (await loadMuteList(pk)).items : []
+      }
     case "identity.getList": {
       const loader = NAPPLET_LISTS[data?.listType]
       if (!loader) throw new Error(`unknown list: ${data?.listType}`)
-      return { entries: pk ? (await loader(pk)).items : [] }
+      return { type: "identity.getList.result", entries: pk ? (await loader(pk)).items : [] }
     }
+
+    // ── theme (read-only) ──
     case "theme.get":
-      return { theme: nappletTheme() }
+      return { type: "theme.get.result", theme: nappletTheme() }
+
+    // ── storage (host-backed KV, per-napp) ──
+    case "storage.get":
+      return {
+        type: "storage.get.result",
+        value: nappletStorageGet(nappId, data?.scope, String(data?.key ?? ""))
+      }
+    case "storage.set":
+      nappletStorageSet(nappId, data?.scope, String(data?.key ?? ""), String(data?.value ?? ""))
+      return { type: "storage.set.result" }
+    case "storage.remove":
+      nappletStorageRemove(nappId, data?.scope, String(data?.key ?? ""))
+      return { type: "storage.remove.result" }
+    case "storage.keys":
+      return { type: "storage.keys.result", keys: nappletStorageKeys(nappId, data?.scope) }
+
+    // ── resource (the sanctioned fetch — works even when direct network is
+    //    locked, because the host, not the napplet, makes the request) ──
+    case "resource.bytes":
+      return fetchNappletResource(data?.url)
+    case "resource.bytesMany": {
+      const urls: string[] = Array.isArray(data?.urls) ? data.urls : []
+      const items = await Promise.all(
+        urls.map(async url => {
+          const r = await fetchNappletResource(url)
+          return r.type === "resource.bytes.result"
+            ? { ok: true, url, blob: r.blob, mime: r.mime }
+            : { ok: false, url, error: r.error, message: r.message }
+        })
+      )
+      return { type: "resource.bytesMany.result", items }
+    }
+
+    // ── relay (the napplet never holds keys: publish sends an UNSIGNED
+    //    template, the host signs behind a permission prompt) ──
+    case "relay.publish":
+      return publishNappletEvent(nappId, data?.event, null)
+    case "relay.publishEncrypted":
+      return publishNappletEvent(nappId, data?.event, {
+        recipient: String(data?.recipient ?? ""),
+        encryption: data?.encryption === "nip04" ? "nip04" : "nip44"
+      })
+    case "relay.query": {
+      const filters: any[] = Array.isArray(data?.filters) ? data.filters : []
+      const relays = await nappletReadRelays(pk)
+      const seen = new Set<string>()
+      const events: { event: NostrEvent }[] = []
+      for (const f of filters) {
+        const filter = sanitizeFilter(f)
+        if (!filter) continue
+        for (const e of await pool.querySync(relays, filter, { maxWait: 4000 })) {
+          if (seen.has(e.id)) continue
+          seen.add(e.id)
+          events.push({ event: e })
+        }
+      }
+      return { type: "relay.query.result", events }
+    }
+
     default:
       throw new Error(`unsupported napplet call: ${type}`)
   }
 }
 
+// Fetch a URL's bytes on the host. Returns a resource.bytes result (Blob +
+// content-type) or a typed resource.bytes.error.
+async function fetchNappletResource(url: unknown): Promise<Record<string, unknown>> {
+  if (typeof url !== "string" || !url) {
+    return { type: "resource.bytes.error", error: "invalid-request", message: "missing url" }
+  }
+  try {
+    const u = new URL(url)
+    if (!["https:", "http:", "data:", "blob:"].includes(u.protocol)) {
+      return {
+        type: "resource.bytes.error",
+        error: "unsupported-scheme",
+        message: `scheme ${u.protocol} not allowed`
+      }
+    }
+    const res = await fetch(url)
+    if (!res.ok) {
+      return { type: "resource.bytes.error", error: "http-error", message: `HTTP ${res.status}` }
+    }
+    const blob = await res.blob()
+    return {
+      type: "resource.bytes.result",
+      blob,
+      mime: res.headers.get("content-type") || blob.type || "application/octet-stream"
+    }
+  } catch (err: any) {
+    return { type: "resource.bytes.error", error: "fetch-failed", message: err?.message ?? String(err) }
+  }
+}
+
+// Sign (and optionally encrypt) a napplet's event template with the user's
+// signer, behind a permission prompt, then publish. The napplet never sees a
+// key. Returns a relay.publish(.Encrypted).result.
+async function publishNappletEvent(
+  nappId: string,
+  template: any,
+  enc: { recipient: string; encryption: "nip44" | "nip04" } | null
+): Promise<Record<string, unknown>> {
+  const resultType = enc ? "relay.publishEncrypted.result" : "relay.publish.result"
+  if (!template || typeof template !== "object") {
+    return { type: resultType, ok: false, error: "invalid event template" }
+  }
+  const signer = currentSigner()
+  if (!signer) return { type: resultType, ok: false, error: "no signer connected" }
+
+  const kind = Number(template.kind)
+  const detail = enc
+    ? `Encrypt (${enc.encryption}) and publish a kind ${kind} event to ${enc.recipient.slice(0, 12)}…`
+    : `Sign and publish a kind ${kind} event on your behalf.`
+  if (!(await requireApproval(nappId, enc ? "relay.publishEncrypted" : "relay.publish", detail))) {
+    return { type: resultType, ok: false, error: "permission denied" }
+  }
+
+  try {
+    const tags: string[][] = Array.isArray(template.tags) ? template.tags : []
+    let content = String(template.content ?? "")
+    let finalTags = tags
+    if (enc) {
+      content = await signer[enc.encryption].encrypt(enc.recipient, content)
+      if (!finalTags.some(t => t[0] === "p" && t[1] === enc.recipient))
+        finalTags = [...finalTags, ["p", enc.recipient]]
+    }
+    const signed = await signer.signEvent({
+      kind,
+      content,
+      tags: finalTags,
+      created_at: Number(template.created_at) || Math.floor(Date.now() / 1000)
+    })
+    const relays = await nappletWriteRelays(getPubkey())
+    await Promise.allSettled(pool.publish(relays, signed))
+    return { type: resultType, ok: true, event: signed, eventId: signed.id }
+  } catch (err: any) {
+    return { type: resultType, ok: false, error: err?.message ?? String(err) }
+  }
+}
+
+// The user's read/write relays, or fallbacks — used for relay.query/subscribe
+// and relay.publish targets.
+async function nappletReadRelays(pk: string | null): Promise<string[]> {
+  if (!pk) return FALLBACK_RELAYS
+  try {
+    const r = (await loadRelayList(pk)).items.filter(i => i.read).map(i => i.url)
+    return r.length ? r : FALLBACK_RELAYS
+  } catch {
+    return FALLBACK_RELAYS
+  }
+}
+async function nappletWriteRelays(pk: string | null): Promise<string[]> {
+  if (!pk) return FALLBACK_RELAYS
+  try {
+    const r = (await loadRelayList(pk)).items.filter(i => i.write).map(i => i.url)
+    return r.length ? r : FALLBACK_RELAYS
+  } catch {
+    return FALLBACK_RELAYS
+  }
+}
+
+// ── relay streaming (relay.subscribe → relay.event/eose, relay.close) ──
+// Each subscription is an AbortController keyed by nappId+subId; the napplet
+// owns its lifecycle via subId. Cleared for a napp when it's uninstalled.
+const nappletSubs = new Map<string, AbortController>()
+const nappletSubKey = (nappId: string, subId: string) => `${nappId} ${subId}`
+
+async function nappletRelaySubscribe(
+  nappId: string,
+  data: any,
+  post: (msg: object) => void
+) {
+  const subId = String(data?.subId ?? "")
+  if (!subId) return
+  const filters: any[] = Array.isArray(data?.filters) ? data.filters : []
+  const key = nappletSubKey(nappId, subId)
+  nappletSubs.get(key)?.abort() // replace an existing sub with the same id
+  const controller = new AbortController()
+  nappletSubs.set(key, controller)
+  const relays = data?.relay ? [String(data.relay)] : await nappletReadRelays(getPubkey())
+  let eosed = false
+  const clean = filters.map(f => sanitizeFilter(f)).filter(Boolean) as any[]
+  if (clean.length === 0) {
+    post({ type: "relay.eose", subId })
+    return
+  }
+  for (const filter of clean) {
+    pool.subscribeMany(relays, filter, {
+      label: `napplet-${nappId.slice(0, 8)}-${subId}`,
+      abort: controller.signal,
+      onevent(event: NostrEvent) {
+        if (controller.signal.aborted) return
+        post({ type: "relay.event", subId, result: { event } })
+      },
+      oneose() {
+        if (!eosed && !controller.signal.aborted) {
+          eosed = true
+          post({ type: "relay.eose", subId })
+        }
+      }
+    })
+  }
+}
+
+function nappletRelayClose(nappId: string, subId: unknown, post: (msg: object) => void) {
+  const key = nappletSubKey(nappId, String(subId ?? ""))
+  const controller = nappletSubs.get(key)
+  if (controller) {
+    controller.abort()
+    nappletSubs.delete(key)
+  }
+  post({ type: "relay.closed", subId: String(subId ?? "") })
+}
+
+// Abort every live subscription of a napp (called on uninstall/reset).
+export function closeNappletSubs(nappId: string) {
+  const prefix = `${nappId} `
+  for (const [key, controller] of nappletSubs) {
+    if (key.startsWith(prefix)) {
+      controller.abort()
+      nappletSubs.delete(key)
+    }
+  }
+}
+
 // Service one inbound napplet message. No handshake, no session: availability
-// is presence (the shell injected only granted domains), so here we just
-// re-check the grant as defense-in-depth and answer with the exact result
-// shape. An ungranted or unknown domain is SILENTLY IGNORED — per NIP-5D,
-// unrecognized messages get no reply, which also prevents capability probing.
+// is presence (the shell injected only granted domains), so here we re-check
+// the grant as defense-in-depth and answer with the exact result shape. An
+// ungranted or unknown domain is SILENTLY IGNORED — per NIP-5D, unrecognized
+// messages get no reply, which also prevents capability probing.
 function handleNapplet(
-  data: { type: string; id?: string },
+  data: { type: string; id?: string; subId?: string },
   iframe: HTMLIFrameElement,
   origin: string,
   nappId: string
@@ -527,9 +763,16 @@ function handleNapplet(
   const domain = data.type.split(".")[0]
   if (!nappletDomainsFor(nappId).includes(domain)) return
   const post = (msg: object) => iframe.contentWindow?.postMessage(msg, origin)
-  dispatchNapplet(data.type, data)
-    .then(payload => post({ type: `${data.type}.result`, id: data.id, ...payload }))
-    .catch(err => post({ type: `${data.type}.result`, id: data.id, error: err?.message ?? String(err) }))
+
+  // Streaming ops have no single .result — they push by subId.
+  if (data.type === "relay.subscribe") return void nappletRelaySubscribe(nappId, data, post)
+  if (data.type === "relay.close") return nappletRelayClose(nappId, data.subId, post)
+
+  dispatchNapplet(data.type, data, nappId)
+    .then(result => post({ ...result, id: data.id }))
+    .catch(err =>
+      post({ type: `${data.type}.result`, id: data.id, error: err?.message ?? String(err) })
+    )
 }
 
 export function focusInstance(instanceId: string): boolean {

@@ -89,6 +89,7 @@
   let n5dSerial = 0
   const themeHandlers = new Set()
   const identityHandlers = new Set()
+  const relaySubs = new Map() // subId -> { onEvent, onEose, onClosed }
   function nappletCall(type, params, pick) {
     const id = "n5d" + n5dSerial++
     return new Promise((resolve, reject) => {
@@ -115,11 +116,33 @@
       }
       return
     }
-    if (data.type.endsWith(".result")) {
+    // relay streaming pushes are keyed by subId, not a correlation id.
+    if (data.type === "relay.event") {
+      const s = relaySubs.get(data.subId)
+      if (s && s.onEvent) try { s.onEvent(data.result && data.result.event) } catch {}
+      return
+    }
+    if (data.type === "relay.eose") {
+      const s = relaySubs.get(data.subId)
+      if (s && s.onEose) try { s.onEose() } catch {}
+      return
+    }
+    if (data.type === "relay.closed") {
+      const s = relaySubs.get(data.subId)
+      if (s) {
+        if (s.onClosed) try { s.onClosed(data.reason) } catch {}
+        relaySubs.delete(data.subId)
+      }
+      return
+    }
+    // Request/response results. Success carries named fields; failure is a
+    // `.error`-typed message, an `error` field, or `ok === false` (relay.publish).
+    if (data.type.endsWith(".result") || data.type.endsWith(".error")) {
       const p = pending5d.get(data.id)
       if (!p) return
       pending5d.delete(data.id)
-      if (data.error != null) p.reject(new Error(data.error))
+      if (data.type.endsWith(".error") || data.error != null || data.ok === false)
+        p.reject(new Error(data.message || data.error || "napplet call failed"))
       else p.resolve(p.pick ? p.pick(data) : data)
     }
   }
@@ -620,6 +643,46 @@
       onChanged: handler => {
         themeHandlers.add(handler)
         return { close: () => themeHandlers.delete(handler) }
+      }
+    }),
+    storage: () => {
+      const ops = scope => ({
+        get: key => nappletCall("storage.get", { key, scope }, d => d.value),
+        set: (key, value) => nappletCall("storage.set", { key, value, scope }, () => undefined),
+        remove: key => nappletCall("storage.remove", { key, scope }, () => undefined),
+        keys: () => nappletCall("storage.keys", { scope }, d => d.keys)
+      })
+      // Top-level = shared scope; `.instance` = per-instance sugar.
+      return Object.assign(ops("shared"), { instance: Object.freeze(ops("instance")) })
+    },
+    resource: () => ({
+      // Fetch bytes for a URL through the shell — the sanctioned network path
+      // for a locked napplet. Resolves { blob, mime }.
+      bytes: url => nappletCall("resource.bytes", { url }, d => ({ blob: d.blob, mime: d.mime })),
+      bytesMany: urls => nappletCall("resource.bytesMany", { urls }, d => d.items)
+    }),
+    relay: () => ({
+      // publish sends an UNSIGNED template; the shell signs (behind a prompt)
+      // and publishes. Resolves with the signed event.
+      publish: event => nappletCall("relay.publish", { event }, d => d.event),
+      publishEncrypted: (event, recipient, encryption) =>
+        nappletCall("relay.publishEncrypted", { event, recipient, encryption }, d => d.event),
+      query: filters => nappletCall("relay.query", { filters }, d => d.events),
+      // subscribe streams via callbacks keyed by subId; returns a close handle.
+      subscribe: (subId, filters, handlers, relay) => {
+        relaySubs.set(subId, handlers || {})
+        const msg = { type: "relay.subscribe", id: "n5d" + n5dSerial++, subId, filters }
+        if (relay) msg.relay = relay
+        window.parent.postMessage(msg, "*")
+        return {
+          close: () => {
+            relaySubs.delete(subId)
+            window.parent.postMessage(
+              { type: "relay.close", id: "n5d" + n5dSerial++, subId },
+              "*"
+            )
+          }
+        }
       }
     })
   }

@@ -16,6 +16,18 @@ const DOMAIN_INFO: Record<string, { label: string; desc: string }> = {
   theme: {
     label: "Theme",
     desc: "Match the launcher's colors and follow theme changes."
+  },
+  storage: {
+    label: "Storage",
+    desc: "A private key-value store for this app's own data, kept by the launcher."
+  },
+  resource: {
+    label: "Fetch resources",
+    desc: "Load images and files from the web through the launcher — the only way out when direct network is off."
+  },
+  relay: {
+    label: "Relays",
+    desc: "Read from relays, and publish events — each publish still asks your signer to approve it."
   }
 }
 

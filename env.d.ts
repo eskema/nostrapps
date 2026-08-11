@@ -276,10 +276,56 @@ interface NappletTheme {
   onChanged(handler: (theme: NappletTheme_Payload) => void): NappletSubscription
 }
 
+interface NappletStorageOps {
+  get(key: string): Promise<string | null>
+  set(key: string, value: string): Promise<void>
+  remove(key: string): Promise<void>
+  keys(): Promise<string[]>
+}
+interface NappletStorage extends NappletStorageOps {
+  /** Per-instance scope (top-level ops are the shared scope). */
+  instance: NappletStorageOps
+}
+
+interface NappletResource {
+  /** Fetch bytes for a URL through the shell — works even when direct network
+   *  is locked. */
+  bytes(url: string): Promise<{ blob: Blob; mime: string }>
+  bytesMany(urls: string[]): Promise<unknown[]>
+}
+
+interface NappletRelaySubscription {
+  close(): void
+}
+interface NappletRelay {
+  /** Publish an UNSIGNED template; the shell signs (behind a prompt) and
+   *  publishes. Resolves with the signed event. */
+  publish(event: EventTemplate): Promise<NostrEvent>
+  publishEncrypted(
+    event: EventTemplate,
+    recipient: string,
+    encryption?: "nip44" | "nip04"
+  ): Promise<NostrEvent>
+  query(filters: unknown[]): Promise<{ event: NostrEvent }[]>
+  subscribe(
+    subId: string,
+    filters: unknown[],
+    handlers: {
+      onEvent?: (event: NostrEvent) => void
+      onEose?: () => void
+      onClosed?: (reason?: string) => void
+    },
+    relay?: string
+  ): NappletRelaySubscription
+}
+
 // Every domain is optional: presence = the shell granted it.
 interface Napplet {
   identity?: NappletIdentity
   theme?: NappletTheme
+  storage?: NappletStorage
+  resource?: NappletResource
+  relay?: NappletRelay
 }
 
 // ── Augment global Window ────────────────────────────────────────────────
