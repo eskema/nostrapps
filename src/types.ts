@@ -143,6 +143,17 @@ export type MessageData =
       events: unknown[]
     }
 
+// Per-napp security policy the user grants. Enforced two ways: `network` drives
+// the CSP the service worker attaches to the napp document (false = connect-src
+// 'self', no direct fetch/WebSocket — the lockdown), and `domains` is the set of
+// NIP-5D capability domains the host will actually service for this napp. Absent
+// = fully locked (see DEFAULT_LOCKED_POLICY): every app, ours included, starts
+// with no direct network and no granted capabilities until the user opens some.
+export type NappPolicy = {
+  network: boolean
+  domains: string[]
+}
+
 export type InstalledApp = {
   nappId: string
   icon: string

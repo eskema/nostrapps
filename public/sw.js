@@ -36,6 +36,10 @@ async function handleFetch(req, url) {
   let path = url.pathname
   if (path.endsWith("/")) path += "index.html"
 
+  // The policy record is internal — it's how the launcher tells this worker the
+  // napp's network grant. Never serve it back to the napp as a file.
+  if (path === "/__policy__") return new Response("not found", { status: 404 })
+
   if (path === "/boot.html") return fetch(req)
   if (path === "/sw.js") return fetch(req)
   if (path === "/bridge.js") return fetch(req)
@@ -55,7 +59,7 @@ async function handleFetch(req, url) {
             typeof devFile.body === "string" ? devFile.body : await new Blob([devFile.body]).text()
           return new Response(injectBridge(text, { wrapperUi: await devWantsWrapper() }), {
             status: 200,
-            headers: { "Content-Type": mime }
+            headers: htmlHeaders(mime, await readDevPolicy())
           })
         }
         return new Response(devFile.body, {
@@ -91,7 +95,7 @@ async function handleFetch(req, url) {
         const text = typeof record.body === "string" ? record.body : await record.body.text()
         return new Response(injectBridge(text, { wrapperUi: await installedWantsWrapper() }), {
           status: 200,
-          headers: { "Content-Type": mime }
+          headers: htmlHeaders(mime, await readInstalledPolicy())
         })
       }
       return new Response(record.body, {
@@ -127,6 +131,65 @@ async function requestFileFromHost(path) {
       }
     })
   })
+}
+
+// The document response headers for a napp's HTML. Beyond Content-Type, this is
+// where the per-napp network lockdown is ENFORCED: a locked napp (network !==
+// true, which includes every app with no policy yet) gets a Content-Security-
+// Policy that pins connect-src to 'self', so it cannot fetch/XHR/WebSocket/
+// EventSource/sendBeacon anywhere but its own origin. Its only route off-origin
+// is then the bridge's postMessage rpc — i.e. the launcher's mediated
+// capabilities, which is exactly the point. We restrict connect-src (the actual
+// data-exfil / arbitrary-REQ channel) plus form-action and base-uri, and leave
+// script/style/img/font untouched so the napp still renders (remote images stay
+// a known coarse-mode gap). When network is granted we attach no CSP at all —
+// identical to the pre-lockdown behavior.
+function htmlHeaders(mime, policy) {
+  const headers = { "Content-Type": mime }
+  if (!policy || policy.network !== true) {
+    headers["Content-Security-Policy"] = "connect-src 'self'; form-action 'self'; base-uri 'self'"
+  }
+  return headers
+}
+
+function parsePolicy(text) {
+  try {
+    const p = JSON.parse(text)
+    return p && typeof p === "object" ? p : null
+  } catch {
+    return null
+  }
+}
+
+async function readInstalledPolicy() {
+  try {
+    const db = await openDB()
+    const rec = await new Promise(resolve => {
+      const tx = db.transaction(STORE, "readonly")
+      const r = tx.objectStore(STORE).get("/__policy__")
+      r.onsuccess = () => resolve(r.result ?? null)
+      r.onerror = () => resolve(null)
+    })
+    try {
+      db.close()
+    } catch {}
+    if (!rec) return null // no record = locked
+    const text = typeof rec.body === "string" ? rec.body : await rec.body.text()
+    return parsePolicy(text)
+  } catch {
+    return null
+  }
+}
+
+async function readDevPolicy() {
+  try {
+    const rec = await requestFileFromHost("/__policy__")
+    if (!rec || rec.error) return null
+    const text = typeof rec.body === "string" ? rec.body : await new Blob([rec.body]).text()
+    return parsePolicy(text)
+  } catch {
+    return null
+  }
 }
 
 function injectBridge(html, { wrapperUi = false } = {}) {

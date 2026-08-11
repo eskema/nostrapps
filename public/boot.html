@@ -191,6 +191,12 @@
               for (const f of data.files) {
                 await putFile(f.path, f.body, f.mime)
               }
+              // The service worker reads /__policy__ from this store to decide
+              // the napp's CSP (network lockdown). Written here so it's in place
+              // before the napp's first document load.
+              if (data.policy) {
+                await putFile("/__policy__", JSON.stringify(data.policy), "application/json")
+              }
               event.source.postMessage(
                 {
                   __nostrapps: "napp-install-done",
@@ -240,6 +246,18 @@
             } catch (err) {
               event.source.postMessage(
                 { __nostrapps: "napp-dev-install-error", error: err.message },
+                event.origin
+              )
+            }
+          } else if (data.__nostrapps === "napp-set-policy") {
+            // Update just the policy record (a grant edit after install), then
+            // the launcher reloads the napp so its SW re-reads the new CSP.
+            try {
+              await putFile("/__policy__", JSON.stringify(data.policy || {}), "application/json")
+              event.source.postMessage({ __nostrapps: "napp-set-policy-done" }, event.origin)
+            } catch (err) {
+              event.source.postMessage(
+                { __nostrapps: "napp-set-policy-error", error: err.message },
                 event.origin
               )
             }

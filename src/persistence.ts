@@ -1,8 +1,11 @@
 import { NostrEvent } from "@nostr/tools"
-import { InstalledApp, NappWindowState, SpaceData, SpacesState } from "./types"
+import { InstalledApp, NappPolicy, NappWindowState, SpaceData, SpacesState } from "./types"
 
 const INSTALLED_KEY = "nostrapps:installed"
 const SPACES_KEY = "nostrapps:spaces"
+// Per-napp security policy (network + granted capability domains). See
+// NappPolicy. Keyed by nappId; an absent entry means fully locked.
+const POLICY_KEY = "nostrapps:policy"
 // Origins of ephemeral napps (dev~/temp~) that have been booted. Everything
 // else about them is memory-only and dies with the page — but their ORIGIN data
 // (the napp's own IDB/localStorage, its service worker) outlives the launcher,
@@ -463,6 +466,51 @@ export function storeInstalledLocalApp(app: {
 function sanitizeRequires(v: unknown): string[] {
   if (!Array.isArray(v)) return []
   return v.filter(s => typeof s === "string" && s && s.length <= 64).slice(0, 32)
+}
+
+// ─── Per-napp security policy ───────────────────────────────────
+// The default for any napp without a stored entry: fully locked. This is what
+// makes "everything locked until granted" true for already-installed apps too —
+// they have no entry, so they get this.
+export const DEFAULT_LOCKED_POLICY: NappPolicy = { network: false, domains: [] }
+
+function readPolicies(): Record<string, NappPolicy> {
+  const raw = readJson(POLICY_KEY, {})
+  return raw && typeof raw === "object" ? raw : {}
+}
+
+export function getPolicy(nappId: string): NappPolicy {
+  const p = readPolicies()[nappId]
+  if (!p || typeof p !== "object") return { ...DEFAULT_LOCKED_POLICY }
+  return {
+    network: !!p.network,
+    domains: Array.isArray(p.domains)
+      ? p.domains.filter(d => typeof d === "string" && d).slice(0, 32)
+      : []
+  }
+}
+
+export function setPolicy(nappId: string, policy: NappPolicy) {
+  if (!nappId) return
+  const all = readPolicies()
+  all[nappId] = {
+    network: !!policy.network,
+    domains: Array.isArray(policy.domains)
+      ? policy.domains.filter(d => typeof d === "string" && d).slice(0, 32)
+      : []
+  }
+  writeJson(POLICY_KEY, all)
+}
+
+export function hasPolicy(nappId: string): boolean {
+  return !!readPolicies()[nappId]
+}
+
+export function clearPolicy(nappId: string) {
+  const all = readPolicies()
+  if (!(nappId in all)) return
+  delete all[nappId]
+  writeJson(POLICY_KEY, all)
 }
 
 export function getInstalledNappIds(): string[] {

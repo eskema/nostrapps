@@ -40,7 +40,13 @@ import { matchFilter, type Filter } from "@nostr/tools/filter"
 import { isNip05, queryProfile } from "@nostr/tools/nip05"
 import { decode } from "@nostr/tools/nip19"
 import { verifyEvent } from "@nostr/tools/pure"
-import { getInstalledApp, rememberEphemeralOrigin, updateOpen } from "../persistence.js"
+import {
+  getInstalledApp,
+  getPolicy,
+  rememberEphemeralOrigin,
+  updateOpen
+} from "../persistence.js"
+import type { NappPolicy } from "../types.js"
 import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS } from "../outbox.js"
@@ -427,7 +433,12 @@ function nappletDomainsFor(nappId: string): string[] | null {
   }
   for (const d of app.requires ?? []) declared.add(d)
   if (declared.size === 0) return null // not a napplet
-  return ["shell", ...NAPPLET_OFFERED.filter(d => declared.has(d))]
+  // Offered = declared ∩ implemented ∩ granted. shell is unconditional for any
+  // napplet so the handshake still completes (the napplet learns it's in a
+  // runtime and can prompt the user), but every real capability also needs a
+  // user grant — a declared-but-ungranted domain simply isn't offered.
+  const granted = new Set(getPolicy(nappId).domains)
+  return ["shell", ...NAPPLET_OFFERED.filter(d => declared.has(d) && granted.has(d))]
 }
 
 function nappletTheme() {
@@ -2022,7 +2033,8 @@ export async function bootNapp(
   origin: string,
   files: NsiteFile[],
   onProgress: (msg: string) => void,
-  label: string
+  label: string,
+  policy?: NappPolicy
 ) {
   console.debug("[sandbox] bootNapp", { origin, fileCount: files.length, label })
   const boot = document.createElement("iframe")
@@ -2037,7 +2049,9 @@ export async function bootNapp(
     }
 
     onProgress(`Installing ${files.length} file(s) for ${label}…`)
-    boot.contentWindow!.postMessage({ __nostrapps: "napp-install", files }, origin)
+    // Ship the granted policy alongside the files so the SW's CSP is correct on
+    // the napp's very first load (no unlocked window before the grant applies).
+    boot.contentWindow!.postMessage({ __nostrapps: "napp-install", files, policy }, origin)
 
     const result = await waitForMessage(origin, "napp-install-done", "napp-install-error")
     if (result.__nostrapps === "napp-install-error") {
@@ -2045,6 +2059,30 @@ export async function bootNapp(
     }
   } finally {
     boot.remove()
+  }
+}
+
+// Write a new policy for an already-installed napp and reload its open windows
+// so the SW re-serves their documents under the updated CSP. Spins up a
+// transient boot iframe (same channel as install) to write the record into the
+// napp-origin IDB, which the launcher can't touch directly (cross-origin).
+export async function applyNappPolicy(origin: string, nappId: string, policy: NappPolicy) {
+  const boot = document.createElement("iframe")
+  boot.src = `${origin}/boot.html`
+  boot.style.display = "none"
+  document.body.appendChild(boot)
+  try {
+    const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
+    if (ready.__nostrapps === "napp-boot-error") throw new Error(ready.error)
+    boot.contentWindow!.postMessage({ __nostrapps: "napp-set-policy", policy }, origin)
+    const result = await waitForMessage(origin, "napp-set-policy-done", "napp-set-policy-error")
+    if (result.__nostrapps === "napp-set-policy-error") throw new Error(result.error)
+  } finally {
+    boot.remove()
+  }
+  // Reload every open window of this napp so the new CSP takes effect now.
+  for (const [, win] of openWindows) {
+    if (win.root?.dataset.nappId === nappId) win.reload?.()
   }
 }
 
@@ -2131,6 +2169,22 @@ window.addEventListener("message", async event => {
   if (!data || data.__nostrapps !== "napp-dev-read-file") return
 
   const { nappId, path, requestId } = data
+
+  // The dev SW asks for /__policy__ the same way it asks for a file; answer it
+  // from the policy store (dev apps have no IDB record to read).
+  if (path === "/__policy__") {
+    ;(event.source as Window)?.postMessage(
+      {
+        __nostrapps: "napp-dev-file-result",
+        requestId,
+        body: JSON.stringify(getPolicy(nappId)),
+        mime: "application/json"
+      },
+      "*"
+    )
+    return
+  }
+
   const dirHandle = devHandles.get(nappId)
   const devUrl = devUrls.get(nappId)
   const tempAppFiles = tempFiles.get(nappId)
