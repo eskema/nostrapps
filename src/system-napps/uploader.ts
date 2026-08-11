@@ -176,6 +176,15 @@ export function mount(
     if (Array.isArray(metadata?.actions)) {
       for (const a of metadata.actions) tags.push(["action", a])
     }
+    // NIP-5D: metadata.json's requires array is the local stand-in for the
+    // manifest's ["requires", "<domain>"] tags — translate it at publish so a
+    // napplet that worked under /dev keeps its capability seam once installed
+    // from a relay (where the host reads the event tags, not metadata.json).
+    if (Array.isArray(metadata?.requires)) {
+      for (const r of metadata.requires) {
+        if (typeof r === "string" && r) tags.push(["requires", r])
+      }
+    }
 
     tags.push(["d", metadata.id])
 

@@ -522,8 +522,17 @@ function handleNapplet(
     const domains = nappletDomainsFor(nappId)
     // Not a napplet (nothing declared): withhold shell.init entirely — per
     // NAP-SHELL, absence is how a runtime declines to service; the surface
-    // degrades to supports() === false for everything.
-    if (!domains) return
+    // degrades to supports() === false for everything. The wire stays silent
+    // by design, so say why in the LAUNCHER console — for a developer this is
+    // otherwise indistinguishable from a broken handshake.
+    if (!domains) {
+      console.info(
+        `[napplet] ${nappId} sent shell.ready but declares no capability domains — ` +
+          `add ["requires", "<domain>"] manifest tags (or a "requires" array in ` +
+          `metadata.json for /dev) to enter the NIP-5D seam`
+      )
+      return
+    }
     // A shell.ready on an existing session is either a replay or — more likely
     // on this transport — a RELOADED document (same window, new lifecycle; its
     // bridge lost the cached env). We can't tell the two apart, so answer both
