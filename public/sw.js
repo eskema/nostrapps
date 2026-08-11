@@ -133,22 +133,34 @@ async function requestFileFromHost(path) {
   })
 }
 
-// The document response headers for a napp's HTML. Beyond Content-Type, this is
-// where the per-napp network lockdown is ENFORCED: a locked napp (network !==
-// true, which includes every app with no policy yet) gets a Content-Security-
-// Policy that pins connect-src to 'self', so it cannot fetch/XHR/WebSocket/
-// EventSource/sendBeacon anywhere but its own origin. Its only route off-origin
-// is then the bridge's postMessage rpc — i.e. the launcher's mediated
-// capabilities, which is exactly the point. We restrict connect-src (the actual
-// data-exfil / arbitrary-REQ channel) plus form-action and base-uri, and leave
-// script/style/img/font untouched so the napp still renders (remote images stay
-// a known coarse-mode gap). When network is granted we attach no CSP at all —
-// identical to the pre-lockdown behavior.
+// The Content-Security-Policy that SEALS a locked napp to its own origin. It's
+// not enough to pin connect-src: a napp — especially a full-website nsite —
+// reaches the network through resource tags connect-src never sees (<script
+// src>, <img>, <link>, nested <iframe>, <form>), and a cross-origin child frame
+// would then have its own unrestricted network. So the lock is default-src
+// 'self' with only LOCAL escape hatches (blob:/data:, both same-document), which
+// blocks every off-origin load and connection at once. 'unsafe-inline' stays for
+// script/style because inline code is ubiquitous in real napps and can't defeat
+// the seal — it still can't fetch, open a socket, pull an external script/image,
+// or embed an external frame. A napp's only route off-origin is then the
+// bridge's postMessage rpc (not CSP-governed) — the launcher's mediated
+// capabilities, which is the point. Granting network drops the CSP entirely.
+const LOCKED_CSP = [
+  "default-src 'self' blob: data:",
+  "script-src 'self' 'unsafe-inline' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' blob: data:",
+  "frame-src 'self'",
+  "child-src 'self' blob:",
+  "form-action 'self'",
+  "base-uri 'self'"
+].join("; ")
+
 function htmlHeaders(mime, policy) {
   const headers = { "Content-Type": mime }
-  if (!policy || policy.network !== true) {
-    headers["Content-Security-Policy"] = "connect-src 'self'; form-action 'self'; base-uri 'self'"
-  }
+  if (!policy || policy.network !== true) headers["Content-Security-Policy"] = LOCKED_CSP
   return headers
 }
 
