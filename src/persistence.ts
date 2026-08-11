@@ -467,6 +467,10 @@ export function storeInstalledLocalApp(app: {
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)
+  // Local/dev apps are your own code being iterated on — auto-grant whatever
+  // they declare (no permission screen), so the SW's CSP/wrapper and the bridge
+  // domains work from first load.
+  setPolicy(app.nappId, { domains: sanitizeRequires(app.requires) })
 }
 
 // NIP-5D `requires` domains from metadata.json — untrusted napp input.
@@ -479,33 +483,45 @@ function sanitizeRequires(v: unknown): string[] {
 // The default for any napp without a stored entry: fully locked. This is what
 // makes "everything locked until granted" true for already-installed apps too —
 // they have no entry, so they get this.
-export const DEFAULT_LOCKED_POLICY: NappPolicy = { network: false, domains: [] }
+export const DEFAULT_LOCKED_POLICY: NappPolicy = { domains: [] }
 
-function readPolicies(): Record<string, NappPolicy> {
+// The declarable `requires` vocabulary. NAP_DOMAINS are real NIP-5D capability
+// domains serviced over the bridge; LAUNCHER_DOMAINS are our two extensions,
+// enforced by the service worker (ui = inject the component kit, network =
+// allow direct network). Keep NAP_DOMAINS in sync with NAPPLET_OFFERED (host).
+export const NAP_DOMAINS = ["identity", "theme", "storage", "resource", "relay"]
+export const LAUNCHER_DOMAINS = ["ui", "network"]
+export const ALL_REQUIRES = [...NAP_DOMAINS, ...LAUNCHER_DOMAINS]
+
+// `ui` implies `theme`: the component kit is built on theme's color tokens, so a
+// napp that takes the kit must also get the colors — otherwise it renders
+// colorless. Applied whenever grants are normalized.
+export function expandGrants(domains: unknown): string[] {
+  const s = new Set<string>()
+  if (Array.isArray(domains)) for (const d of domains) if (typeof d === "string" && d) s.add(d)
+  if (s.has("ui")) s.add("theme")
+  return [...s].slice(0, 32)
+}
+
+function readPolicies(): Record<string, any> {
   const raw = readJson(POLICY_KEY, {})
   return raw && typeof raw === "object" ? raw : {}
 }
 
 export function getPolicy(nappId: string): NappPolicy {
   const p = readPolicies()[nappId]
-  if (!p || typeof p !== "object") return { ...DEFAULT_LOCKED_POLICY }
-  return {
-    network: !!p.network,
-    domains: Array.isArray(p.domains)
-      ? p.domains.filter(d => typeof d === "string" && d).slice(0, 32)
-      : []
-  }
+  if (!p || typeof p !== "object") return { domains: [] }
+  const domains = expandGrants(p.domains)
+  // Migrate the old {network:boolean} shape: a granted network boolean becomes
+  // the "network" domain entry.
+  if (p.network === true && !domains.includes("network")) domains.push("network")
+  return { domains }
 }
 
 export function setPolicy(nappId: string, policy: NappPolicy) {
   if (!nappId) return
   const all = readPolicies()
-  all[nappId] = {
-    network: !!policy.network,
-    domains: Array.isArray(policy.domains)
-      ? policy.domains.filter(d => typeof d === "string" && d).slice(0, 32)
-      : []
-  }
+  all[nappId] = { domains: expandGrants(policy.domains) }
   writeJson(POLICY_KEY, all)
 }
 
@@ -702,4 +718,6 @@ export function storeDevApp(app: {
     requires: sanitizeRequires(app.requires),
     installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000)
   })
+  // Dev/temp apps are your own code — auto-grant declared requires (no screen).
+  setPolicy(app.nappId, { domains: sanitizeRequires(app.requires) })
 }

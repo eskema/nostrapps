@@ -176,15 +176,16 @@ export function mount(
     if (Array.isArray(metadata?.actions)) {
       for (const a of metadata.actions) tags.push(["action", a])
     }
-    // NIP-5D: metadata.json's requires array is the local stand-in for the
-    // manifest's ["requires", "<domain>"] tags — translate it at publish so a
-    // napplet that worked under /dev keeps its capability seam once installed
-    // from a relay (where the host reads the event tags, not metadata.json).
+    // metadata.json's requires array is the authored source for the manifest's
+    // ["requires", "<domain>"] tags. `ui`, `network` and the NAP domains all
+    // ride the same list, so they project to tags with no special-casing.
+    const requires = new Set<string>()
     if (Array.isArray(metadata?.requires)) {
-      for (const r of metadata.requires) {
-        if (typeof r === "string" && r) tags.push(["requires", r])
-      }
+      for (const r of metadata.requires) if (typeof r === "string" && r) requires.add(r)
     }
+    // Back-compat: the retired `ui: "wrapper"` field becomes requires: ["ui"].
+    if (metadata?.ui === "wrapper") requires.add("ui")
+    for (const r of requires) tags.push(["requires", r])
 
     tags.push(["d", metadata.id])
 

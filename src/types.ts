@@ -143,15 +143,14 @@ export type MessageData =
       events: unknown[]
     }
 
-// Per-napp security policy the user grants. Enforced two ways: `network` drives
-// the CSP the service worker attaches to the napp document (false = default-src
-// 'self', sealing the napp to its own origin — no external fetch, socket,
-// script, image, or nested frame; see LOCKED_CSP in sw.js), and `domains` is the
-// set of NIP-5D capability domains the host will actually service for this napp.
-// Absent = fully locked (see DEFAULT_LOCKED_POLICY): every app, ours included,
-// starts sealed with no granted capabilities until the user opens some.
+// Per-napp security policy: the single list of capabilities the user granted.
+// One vocabulary, two enforcement paths — NAP domains (identity/theme/storage/
+// resource/relay) are serviced by the host over the bridge; the launcher-local
+// values are enforced by the service worker: `network` relaxes the CSP (its
+// absence seals the napp to its own origin — see LOCKED_CSP in sw.js), and `ui`
+// injects the shared component kit (napp-ui.css). Absent = fully locked (see
+// DEFAULT_LOCKED_POLICY): every app starts sealed until the user opens something.
 export type NappPolicy = {
-  network: boolean
   domains: string[]
 }
 

@@ -1,21 +1,25 @@
-// The per-napp permission screen (NIP-5D + network lockdown). Shown at install
-// and re-openable from an app card. It turns `requires` declarations and the
-// network toggle into a NappPolicy the user actually grants — nothing is
-// serviced or reachable until it's ticked here.
+// The per-napp permission screen. Shown at install and re-openable from an app
+// card. It turns the app's `requires` declarations into the single granted
+// `domains` list — nothing is serviced or reachable until it's ticked here.
 import { openDialog } from "./dialog.js"
 import { check, button } from "./system-napps/ui.js"
 import type { NappPolicy } from "./types.js"
 
-// Capability domains the launcher actually implements, with human copy. Keep the
-// keys in sync with NAPPLET_OFFERED in sandbox/host.ts.
+// The declarable capabilities, with human copy. NAP domains + the two
+// launcher-local values (ui = component kit, network = direct network). Network
+// is presented in its own section, not here.
 const DOMAIN_INFO: Record<string, { label: string; desc: string }> = {
   identity: {
     label: "Identity",
     desc: "Read-only: your public key, profile, follows, mutes and relay list. It never signs or prompts your signer."
   },
   theme: {
-    label: "Theme",
+    label: "Theme colors",
     desc: "Match the launcher's colors and follow theme changes."
+  },
+  ui: {
+    label: "Shared UI kit",
+    desc: "Use the launcher's buttons, inputs, fonts and icons so this app matches the rest. Cosmetic — no access to your data."
   },
   storage: {
     label: "Storage",
@@ -23,12 +27,17 @@ const DOMAIN_INFO: Record<string, { label: string; desc: string }> = {
   },
   resource: {
     label: "Fetch resources",
-    desc: "Load images and files from the web through the launcher — the only way out when direct network is off."
+    desc: "Load images and files from the web through the launcher — works even when direct network is off."
   },
   relay: {
     label: "Relays",
     desc: "Read from relays, and publish events — each publish still asks your signer to approve it."
   }
+}
+
+const NETWORK_INFO = {
+  label: "Direct network access",
+  desc: "Let this app connect to any server on its own (fetch, WebSocket, relays). Off keeps it sealed to its own files — its only way out is the capabilities above, through the launcher."
 }
 
 export interface PolicyPromptOpts {
@@ -45,9 +54,13 @@ export interface PolicyPromptOpts {
 
 // Resolves to the granted policy, or null if the user cancelled/dismissed.
 export function promptNappPolicy(opts: PolicyPromptOpts): Promise<NappPolicy | null> {
-  const known = opts.declaredDomains.filter(d => d in DOMAIN_INFO)
   const cur = opts.current
   const edit = opts.mode === "edit"
+  // Capability rows: declared capabilities we know (incl `ui`), minus `network`
+  // which has its own section. `network` is always offered even if undeclared,
+  // so already-installed apps that declared nothing can still be un-sealed.
+  const known = opts.declaredDomains.filter(d => d !== "network" && d in DOMAIN_INFO)
+  const declaredNetwork = opts.declaredDomains.includes("network")
 
   return openDialog<NappPolicy | null>({
     title: edit ? "App permissions" : "Install — permissions",
@@ -88,14 +101,10 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<NappPolicy | n
       }
 
       wrap.appendChild(section("Network"))
-      const netBox = check({ checked: cur ? cur.network : false })
-      wrap.appendChild(
-        permRow(
-          netBox,
-          "Allow direct network access",
-          "Let this app connect to any server on its own (fetch, WebSocket, relays). Off keeps it sealed to its own files — its only way out is the capabilities above, through the launcher."
-        )
-      )
+      const netBox = check({
+        checked: cur ? cur.domains.includes("network") : declaredNetwork
+      })
+      wrap.appendChild(permRow(netBox, NETWORK_INFO.label, NETWORK_INFO.desc))
 
       const actions = document.createElement("div")
       actions.className = "napp-perms-actions"
@@ -104,11 +113,11 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<NappPolicy | n
         button({
           label: edit ? "Save" : "Install",
           variant: "primary",
-          onClick: () =>
-            resolve({
-              network: netBox.checked,
-              domains: [...boxes].filter(([, b]) => b.checked).map(([d]) => d)
-            })
+          onClick: () => {
+            const domains = [...boxes].filter(([, b]) => b.checked).map(([d]) => d)
+            if (netBox.checked) domains.push("network")
+            resolve({ domains })
+          }
         })
       )
       wrap.appendChild(actions)
