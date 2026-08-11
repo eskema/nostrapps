@@ -150,6 +150,11 @@ export type InstalledApp = {
   petname: string
   singleton: boolean
   actions: string[]
+  // NIP-5D capability domains this app declared (["requires", "<domain>"]
+  // manifest tags, or a `requires` array in metadata.json). Declaring any is
+  // what marks the app as a napplet; relay installs carry the manifest event
+  // itself, so this field is only populated for local/dev/temp apps.
+  requires?: string[]
   event?: NostrEvent
   // Unix seconds when a local/dev/temp app was added (apps with no manifest
   // event, so no publish date). Surfaced as the card's date for those.

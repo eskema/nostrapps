@@ -53,6 +53,7 @@ export async function collectLocalFolder(
       icon?: string
       singleton?: boolean
       actions: string[]
+      requires?: string[]
     }
   }
 }

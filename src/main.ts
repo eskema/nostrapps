@@ -440,6 +440,20 @@ function capabilitiesFromEvent(event: { tags: string[][] } | null | undefined): 
   return actions
 }
 
+// NIP-5D capability domains declared in a manifest (["requires", "<domain>"]).
+// Declaring any marks the app as a napplet — the host only performs the NAP
+// shell handshake for apps that asked for the seam.
+function requiresFromEvent(event: { tags: string[][] } | null | undefined): string[] {
+  if (!event) return []
+  const domains = []
+  for (const t of event.tags) {
+    if (t[0] === "requires" && typeof t[1] === "string" && t[1]) {
+      domains.push(t[1])
+    }
+  }
+  return domains
+}
+
 // Update flow: re-fetch the manifest + files at the same target, swap them
 // into the napp's existing origin storage (no new window), persist the new
 // version, and force any open iframes to reload so they pick up new files.
@@ -1681,6 +1695,7 @@ async function installDevApp() {
       icon: metadata.icon || null,
       petname,
       actions: metadata.actions || [],
+      requires: metadata.requires || [],
       singleton: metadata.singleton
     })
     handlers.addApp(nappId, metadata.actions || [])
@@ -1724,6 +1739,7 @@ async function installDevAppFromUrl(rawUrl: string) {
       icon: metadata.icon || null,
       petname,
       actions: metadata.actions || [],
+      requires: metadata.requires || [],
       singleton: metadata.singleton
     })
     handlers.addApp(nappId, metadata.actions || [])
@@ -1872,6 +1888,7 @@ async function launchFromInput(raw: string): Promise<void> {
       icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1] || null,
       petname: title || resolved.dTag || nappId,
       actions: capabilitiesFromEvent(manifest),
+      requires: requiresFromEvent(manifest),
       singleton
     })
     handlers.addApp(nappId, capabilitiesFromEvent(manifest))
@@ -1926,6 +1943,7 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       icon: metadata?.icon || null,
       petname,
       actions: metadata?.actions || [],
+      requires: metadata?.requires || [],
       singleton: metadata.singleton
     })
     handlers.addApp(nappId, metadata?.actions || [])
@@ -2011,6 +2029,7 @@ async function loadTempNappFromNaddr(naddr: string): Promise<string> {
     icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1] || null,
     petname,
     actions: capabilitiesFromEvent(manifest),
+    requires: requiresFromEvent(manifest),
     singleton
   })
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))

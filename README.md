@@ -144,7 +144,17 @@ When set, the launcher's service worker injects `<link rel="stylesheet" href="/n
 
 ### NIP-5D — `window.napplet` (experimental)
 
-The launcher is a (partial) [NAP](https://github.com/napplet/naps) runtime: napps can use the NIP-5D capability seam alongside (or instead of) `window.napp`. Feature-detect it — older cached bridges won't have it:
+The launcher is a (partial) [NAP](https://github.com/napplet/naps) runtime: napps can use the NIP-5D capability seam alongside (or instead of) `window.napp`.
+
+The seam is **opt-in by declaration**: an app becomes a napplet by declaring the capability domains it needs — `["requires", "<domain>"]` tags in its NIP-5A manifest, or a `requires` array in `metadata.json` for local/dev apps:
+
+```json
+{ "requires": ["identity", "theme"] }
+```
+
+Apps that declare nothing never enter the seam: the host withholds `shell.init`, so `window.napplet.shell.supports()` answers `false` for everything (the spec's conformant "this runtime offers you nothing"). A napplet is offered the intersection of what it declared and what the launcher implements — and each call is enforced against that grant, not just the session.
+
+Feature-detect the surface — older cached bridges won't have it:
 
 ```js
 if (window.napplet?.shell.supports("identity")) {

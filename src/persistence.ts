@@ -442,6 +442,7 @@ export function storeInstalledLocalApp(app: {
   petname?: string | null
   singleton?: boolean
   actions?: string[]
+  requires?: string[]
 }) {
   if (!app?.nappId) return
   const all = readInstalled()
@@ -451,10 +452,17 @@ export function storeInstalledLocalApp(app: {
     icon: sanitizeString(app.icon),
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
     actions: app.actions || [],
+    requires: sanitizeRequires(app.requires),
     singleton: !!app.singleton,
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)
+}
+
+// NIP-5D `requires` domains from metadata.json — untrusted napp input.
+function sanitizeRequires(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter(s => typeof s === "string" && s && s.length <= 64).slice(0, 32)
 }
 
 export function getInstalledNappIds(): string[] {
@@ -563,6 +571,7 @@ export interface DevAppData {
   petname: string
   singleton: boolean
   actions: string[]
+  requires?: string[]
   installedAt: number
 }
 
@@ -575,6 +584,7 @@ export function storeDevApp(app: {
   petname?: string | null
   singleton?: boolean
   actions?: string[]
+  requires?: string[]
 }) {
   if (!app?.nappId) return
   devApps.set(app.nappId, {
@@ -583,6 +593,7 @@ export function storeDevApp(app: {
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
     singleton: !!app.singleton,
     actions: app.actions || [],
+    requires: sanitizeRequires(app.requires),
     installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000)
   })
 }

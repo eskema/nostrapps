@@ -405,11 +405,29 @@ export function broadcastTheme() {
 // — the single total enforcement point.
 const nappletSessions = new Set<string>()
 
-// Per-napp capability scoping lands with manifest `requires` policy (phase 2);
-// the handshake already routes through here so that slots in without changing
-// the wire.
-function nappletDomainsFor(_nappId: string): string[] {
-  return ["shell", "identity", "theme"]
+// What the runtime can offer beyond the mandatory shell.
+const NAPPLET_OFFERED = ["identity", "theme"]
+
+// The domains to advertise in shell.init, or null to withhold the handshake
+// entirely (the spec's way of saying "this runtime offers you nothing").
+//
+// An app marks itself a NAPPLET by declaring capability domains — ["requires",
+// "<domain>"] tags in its NIP-5A manifest, or a `requires` array in
+// metadata.json for local/dev/temp apps. Plain napps declare nothing, get no
+// shell.init, and never enter the NAP seam. A napplet is offered the
+// intersection of what it declared and what we implement (plus shell, which is
+// unconditional for any serviced napplet) — least privilege by declaration.
+// User-facing per-domain policy will further narrow this here.
+function nappletDomainsFor(nappId: string): string[] | null {
+  const app = getInstalledApp(nappId)
+  if (!app) return null
+  const declared = new Set<string>()
+  for (const t of app.event?.tags ?? []) {
+    if (t[0] === "requires" && typeof t[1] === "string" && t[1]) declared.add(t[1])
+  }
+  for (const d of app.requires ?? []) declared.add(d)
+  if (declared.size === 0) return null // not a napplet
+  return ["shell", ...NAPPLET_OFFERED.filter(d => declared.has(d))]
 }
 
 function nappletTheme() {
@@ -501,6 +519,11 @@ function handleNapplet(
   const post = (msg: object) => iframe.contentWindow?.postMessage(msg, origin)
 
   if (data.type === "shell.ready") {
+    const domains = nappletDomainsFor(nappId)
+    // Not a napplet (nothing declared): withhold shell.init entirely — per
+    // NAP-SHELL, absence is how a runtime declines to service; the surface
+    // degrades to supports() === false for everything.
+    if (!domains) return
     // A shell.ready on an existing session is either a replay or — more likely
     // on this transport — a RELOADED document (same window, new lifecycle; its
     // bridge lost the cached env). We can't tell the two apart, so answer both
@@ -511,7 +534,7 @@ function handleNapplet(
     post({
       type: "shell.init",
       instanceId,
-      capabilities: { domains: nappletDomainsFor(nappId) },
+      capabilities: { domains },
       services: []
     })
     return
@@ -522,6 +545,14 @@ function handleNapplet(
 
   if (!nappletSessions.has(instanceId)) {
     fail("no session — send shell.ready first")
+    return
+  }
+  // Domain enforcement: a session unlocks only the domains advertised in this
+  // napplet's shell.init — the same list, recomputed (it's deterministic).
+  const domain = data.type.split(".")[0]
+  const granted = nappletDomainsFor(nappId)
+  if (!granted || !granted.includes(domain)) {
+    fail(`domain not granted: ${domain}`)
     return
   }
   dispatchNapplet(data.type, data)
