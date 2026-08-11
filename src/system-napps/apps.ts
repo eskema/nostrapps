@@ -211,6 +211,10 @@ export function mount(
       })
       return [inst]
     }
+    const perms = button({ label: "permissions", variant: "outline" })
+    perms.addEventListener("click", () => {
+      ctx.editPermissions?.(app.nappId)
+    })
     const del = button({ label: "delete", variant: "danger" })
     del.addEventListener("click", async () => {
       ctx.setStatus?.(`Apps: delete requested for ${app.nappId}`)
@@ -238,7 +242,7 @@ export function mount(
         }, 3000)
       }
     })
-    return [del]
+    return [perms, del]
   }
 
   // The newest discovered manifest strictly newer than the one we installed, or

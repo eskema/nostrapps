@@ -33,9 +33,11 @@ import {
   allInstanceIds,
   spaceOfLiveSystem,
   findOpenWindowByNappId,
-  loadEvent
+  loadEvent,
+  applyNappPolicy
 } from "./sandbox/host.js"
 import { button, chip, icon } from "./system-napps/ui.js"
+import { promptNappPolicy } from "./napp-permissions.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
@@ -635,7 +637,36 @@ const systemCtx: SystemCtx = {
   wasInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
   install: (raw: string) => install(raw),
   uninstall: (nappId: string) => uninstall(nappId),
+  editPermissions: (nappId: string) => editPermissions(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
+}
+
+// Re-open the permission screen for an already-installed napp, then write the
+// new policy into its origin and reload its windows so the CSP takes effect.
+async function editPermissions(nappId: string) {
+  const app = persist.getInstalledApp(nappId)
+  if (!app) return
+  const declared = new Set<string>()
+  for (const t of app.event?.tags ?? []) {
+    if (t[0] === "requires" && typeof t[1] === "string" && t[1]) declared.add(t[1])
+  }
+  for (const d of app.requires ?? []) declared.add(d)
+
+  const policy = await promptNappPolicy({
+    title: app.petname || app.title || nappId,
+    icon: app.icon || undefined,
+    declaredDomains: [...declared],
+    current: persist.getPolicy(nappId),
+    mode: "edit"
+  })
+  if (!policy) return
+  persist.setPolicy(nappId, policy)
+  try {
+    await applyNappPolicy(nappOriginFor(nappId), nappId, policy)
+    setStatus(`Updated permissions for ${app.petname || nappId}`)
+  } catch (err: any) {
+    setStatus(`Couldn't apply permissions: ${err?.message || String(err)}`)
+  }
 }
 
 function makeSystemLaunchOpts(sysId: string) {
@@ -1656,9 +1687,21 @@ async function install(raw: string): Promise<string> {
   const onProgress = setStatus
   const label = title || nappId
 
+  // Permission screen before anything is written: the user grants network +
+  // capability domains, and that policy ships with the install so the napp's
+  // very first load is already under the right CSP. Cancelling aborts install.
+  const iconUrl = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
+  const policy = await promptNappPolicy({
+    title: label,
+    icon: iconUrl,
+    declaredDomains: requiresFromEvent(manifest)
+  })
+  if (!policy) throw new Error("Install cancelled")
+  persist.setPolicy(nappId, policy)
+
   console.debug("[sandbox] install", { nappId, label, origin })
   onProgress(`Booting ${label}…`)
-  await bootNapp(origin, files, onProgress, label)
+  await bootNapp(origin, files, onProgress, label, policy)
 
   if (manifest) persist.storeInstalledEvent(manifest, petname)
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))

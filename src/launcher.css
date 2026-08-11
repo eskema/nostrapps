@@ -1395,6 +1395,77 @@ body.popover-open .napp-body iframe {
   padding: 0;
 }
 
+/* ─── Napp permission screen (install / edit) ─────────────────────────── */
+.napp-perms {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.napp-perms-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.napp-perms-icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.napp-perms-name {
+  font-weight: 600;
+}
+
+/* Secondary text: dimmed, never smaller (per the 16px-base rule). */
+.napp-perms-sub {
+  margin: 0;
+  opacity: 0.7;
+}
+
+.napp-perms-section {
+  margin-top: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.55;
+}
+
+/* A grantable row: checkbox at the left, label + description stacked. The whole
+   row is a <label>, so clicking anywhere toggles the box. */
+.napp-perms-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  cursor: pointer;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.napp-perms-row .ui-check {
+  margin-top: 0.15rem;
+}
+
+.napp-perms-text {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.napp-perms-desc {
+  opacity: 0.7;
+}
+
+.napp-perms-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
 /* Queue card: collapsible. Collapsed shows only the count; expanded reveals the
    list of waiting requests and the "Dismiss all" button. */
 .app-dialog-queue {
