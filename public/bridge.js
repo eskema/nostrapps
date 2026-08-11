@@ -77,9 +77,73 @@
 
   const actionHandlers = []
 
+  // ── NIP-5D (window.napplet) state ───────────────────────────────────
+  // The napplet surface speaks the NIP-5D wire dialect ({type:"domain.action",
+  // id, ...payload} / {type:"domain.action.result", id, ok, ...}) over the same
+  // postMessage channel as the legacy rpc. shell.init is cached so
+  // shell.supports() answers synchronously and locally, per NAP-SHELL.
+  let nappletEnv = null
+  const nappletEnvWaiters = []
+  const pending5d = new Map()
+  let n5dSerial = 0
+  const themeHandlers = new Set()
+  const identityHandlers = new Set()
+  function nappletCall(type, payload) {
+    const id = "n5d" + n5dSerial++
+    return new Promise((resolve, reject) => {
+      pending5d.set(id, { resolve, reject })
+      window.parent.postMessage({ type, id, instanceId: window.name, ...payload }, "*")
+    })
+  }
+  function handleNappletMessage(data) {
+    if (data.type === "shell.init") {
+      if (nappletEnv) return // exactly-once; ignore any duplicate
+      nappletEnv = {
+        capabilities: data.capabilities || { domains: [] },
+        services: Array.isArray(data.services) ? data.services : []
+      }
+      for (const w of nappletEnvWaiters.splice(0)) {
+        try {
+          w(nappletEnv)
+        } catch {}
+      }
+      return
+    }
+    if (data.type === "theme.changed") {
+      for (const fn of themeHandlers) {
+        try {
+          fn(data.theme)
+        } catch {}
+      }
+      return
+    }
+    if (data.type === "identity.changed") {
+      for (const fn of identityHandlers) {
+        try {
+          fn(data.pubkey)
+        } catch {}
+      }
+      return
+    }
+    if (typeof data.type === "string" && data.type.endsWith(".result")) {
+      const p = pending5d.get(data.id)
+      if (!p) return
+      pending5d.delete(data.id)
+      if (data.ok) p.resolve(data.result)
+      else p.reject(new Error(data.error || "napplet call failed"))
+    }
+  }
+
   window.addEventListener("message", event => {
     const data = event.data
     if (!data) return
+
+    // NIP-5D dialect messages carry `type`; the legacy dialect carries
+    // `__nostrapps`. Route on whichever is present.
+    if (typeof data.type === "string" && !data.__nostrapps) {
+      handleNappletMessage(data)
+      return
+    }
 
     switch (data.__nostrapps) {
       case "rpc-result":
@@ -532,4 +596,68 @@
   }
 
   window.napp = napp
+
+  // ── NIP-5D: window.napplet ──────────────────────────────────────────
+  // The NAP capability seam (github.com/napplet/naps), web projection. Domains
+  // offered in phase 1: shell (mandatory), identity, theme. Feature-detect with
+  // `window.napplet?.shell.supports("identity")` — supports() is synchronous and
+  // answers false for anything the runtime didn't advertise in shell.init.
+  //
+  // Wire divergence, documented: our transport multiplexes every napp through
+  // the parent's one listener, so 5D messages carry `instanceId` for ADDRESSING.
+  // Identity is still bound host-side by the message's origin (each napp has its
+  // own), never by this field — the spec's creation-time-assignment rule holds.
+  window.napplet = {
+    shell: {
+      supports: domain =>
+        !!nappletEnv &&
+        Array.isArray(nappletEnv.capabilities.domains) &&
+        nappletEnv.capabilities.domains.includes(domain),
+      services: () => (nappletEnv ? [...nappletEnv.services] : []),
+      ready: () =>
+        nappletEnv
+          ? Promise.resolve(nappletEnv)
+          : new Promise(resolve => nappletEnvWaiters.push(resolve)),
+      onReady: handler => {
+        let active = true
+        if (nappletEnv) {
+          try {
+            handler(nappletEnv)
+          } catch {}
+        } else {
+          nappletEnvWaiters.push(env => {
+            if (active) handler(env)
+          })
+        }
+        return { close: () => (active = false) }
+      }
+    },
+    identity: {
+      // Read-only queries answered by the launcher; getPublicKey returns the
+      // cached account key or "" when no signer is connected — it never
+      // triggers a signer prompt.
+      getPublicKey: () => nappletCall("identity.getPublicKey"),
+      getRelays: () => nappletCall("identity.getRelays"),
+      getProfile: () => nappletCall("identity.getProfile"),
+      getFollows: () => nappletCall("identity.getFollows"),
+      getMutes: () => nappletCall("identity.getMutes"),
+      getList: type => nappletCall("identity.getList", { list: type }),
+      onChanged: handler => {
+        identityHandlers.add(handler)
+        return { close: () => identityHandlers.delete(handler) }
+      }
+    },
+    theme: {
+      get: () => nappletCall("theme.get"),
+      onChanged: handler => {
+        themeHandlers.add(handler)
+        return { close: () => themeHandlers.delete(handler) }
+      }
+    }
+  }
+
+  // NAP-SHELL handshake: the bridge runs at the top of <head> and its listener
+  // is already installed, so the receiver is live — signal readiness now. The
+  // host replies with shell.init exactly once.
+  window.parent.postMessage({ type: "shell.ready", instanceId: window.name }, "*")
 })()

@@ -142,6 +142,23 @@ A napp can adopt the launcher's design system — matching buttons, inputs, disc
 
 When set, the launcher's service worker injects `<link rel="stylesheet" href="/napp-ui.css">` at the top of the napp's `<head>` (before your own styles, so you can still override anything). The stylesheet provides `.btn` (+ `.btn-primary` / `.btn-outline` / `.btn-danger` / `.btn-warning` / `.btn-ghost` / `.btn-link`), `.ui-input`, `.ui-details`, `.ui-check`, and `.ui-icon-*` classes, with the launcher's fonts and icons inlined as data URIs. Its `--surface` / `--text` tokens track the theme via `napp-theme-change`, so opted-in napps match the launcher in both light and dark mode. Napps that don't set the flag are unaffected and render entirely in their own styles.
 
+### NIP-5D — `window.napplet` (experimental)
+
+The launcher is a (partial) [NAP](https://github.com/napplet/naps) runtime: napps can use the NIP-5D capability seam alongside (or instead of) `window.napp`. Feature-detect it — older cached bridges won't have it:
+
+```js
+if (window.napplet?.shell.supports("identity")) {
+  const pk = await window.napplet.identity.getPublicKey() // cached key or "" — never prompts
+}
+```
+
+Domains offered so far: `shell` (the NAP-SHELL handshake — `supports()` / `services()` / `ready()` / `onReady()`), `identity` (read-only account queries: `getPublicKey`, `getRelays`, `getProfile`, `getFollows`, `getMutes`, `getList`, `onChanged`), and `theme` (`get`, `onChanged`). `shell.supports()` answers truthfully: anything not listed above returns `false`.
+
+Two deliberate divergences from the draft spec, documented here on purpose:
+
+- Napps run at real per-napp origins (see below) rather than `sandbox="allow-scripts"` opaque-origin iframes — origin isolation does the same job while leaving napps the full web platform (IndexedDB, service worker, caches).
+- NIP-5D messages carry an `instanceId` field for transport addressing (many napps share the parent's one listener). Identity is still bound host-side by each message's unique origin, never by that field.
+
 ### Origin sandboxing
 
 Each napp runs at its own origin (a unique `<nappId>` subdomain). From the iframe, `window.parent` is cross-origin, so the napp can't reach into the launcher. The bridge is the only channel.

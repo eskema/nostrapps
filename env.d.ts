@@ -238,9 +238,62 @@ interface Napp {
   fx?: NappFx
 }
 
+// ── NIP-5D (window.napplet) — the NAP capability seam ────────────────────
+// Web projection of github.com/napplet/naps. Phase-1 domains: shell
+// (mandatory), identity, theme. Feature-detect with
+// `window.napplet?.shell.supports("identity")` — supports() is synchronous,
+// answered locally from the cached shell.init environment.
+
+interface NappletShellEnvironment {
+  capabilities: { domains: string[] }
+  services: string[]
+}
+
+interface NappletSubscription {
+  close(): void
+}
+
+interface NappletShell {
+  /** Synchronous, local; false before shell.init and for unknown domains. */
+  supports(domain: string): boolean
+  services(): string[]
+  ready(): Promise<NappletShellEnvironment>
+  onReady(handler: (env: NappletShellEnvironment) => void): NappletSubscription
+}
+
+interface NappletIdentity {
+  /** The launcher's cached account key, or "" when no signer is connected.
+   *  Read-only — never triggers a signer prompt. */
+  getPublicKey(): Promise<string>
+  getRelays(): Promise<Record<string, { read: boolean; write: boolean }>>
+  getProfile(): Promise<Record<string, unknown> | null>
+  getFollows(): Promise<string[]>
+  getMutes(): Promise<string[]>
+  /** NIP-51 lists: "bookmarks" | "pins" | "emojis" | "blossom-servers" |
+   *  "favorite-relays" | "wiki-authors" | "wiki-relays". */
+  getList(type: string): Promise<unknown[]>
+  onChanged(handler: (pubkey: string) => void): NappletSubscription
+}
+
+interface NappletTheme {
+  get(): Promise<{
+    title: string
+    colors: { background: string; text: string; primary: string }
+  }>
+  onChanged(handler: (theme: unknown) => void): NappletSubscription
+}
+
+interface Napplet {
+  shell: NappletShell
+  identity: NappletIdentity
+  theme: NappletTheme
+}
+
 // ── Augment global Window ────────────────────────────────────────────────
 interface Window {
   nostr: NostrSigner
   nostrdb: NostrDB
   napp: Napp
+  /** NIP-5D surface. Optional: absent on older cached bridges — feature-detect. */
+  napplet?: Napplet
 }

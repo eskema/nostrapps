@@ -41,6 +41,7 @@ import { isNip05, queryProfile } from "@nostr/tools/nip05"
 import { decode } from "@nostr/tools/nip19"
 import { verifyEvent } from "@nostr/tools/pure"
 import { getInstalledApp, rememberEphemeralOrigin, updateOpen } from "../persistence.js"
+import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS } from "../outbox.js"
 import { debounce } from "../utils.js"
@@ -203,6 +204,9 @@ function clearInstanceRuntimeState(
   reason = "Window closed before action registered"
 ) {
   clearReady(instanceId)
+  // A close/reload ends the napplet lifecycle: the bridge's cached shell.init
+  // died with the document, so the next shell.ready must get a fresh one.
+  nappletSessions.delete(instanceId)
   clearInstanceActionState(instanceId, reason)
   clearInstanceFeedRequests(instanceId)
 }
@@ -383,6 +387,148 @@ export function broadcastTheme() {
       }
     }
   }
+  // NIP-5D theme push — only napplets with an established session hear it.
+  broadcastNappletThemeChanged()
+}
+
+// ─── NIP-5D (window.napplet) — NAP-SHELL + identity + theme ─────────
+// The napplet surface in bridge.js speaks the NIP-5D wire dialect
+// ({type:"domain.action", id, ...} / {type:"...result", id, ok, ...}) over the
+// same per-window postMessage channel as the legacy rpc; napp-window.ts has
+// already bound each message to this napp by its unique ORIGIN before we get
+// here (the spec's MessageEvent.source rule — instanceId on the wire is pure
+// transport addressing).
+//
+// NAP-SHELL session rules: shell.init is sent exactly once per lifecycle, a
+// duplicate shell.ready is idempotent, and no capability call is serviced
+// before the handshake. Withholding shell.init would deny a napplet everything
+// — the single total enforcement point.
+const nappletSessions = new Set<string>()
+
+// Per-napp capability scoping lands with manifest `requires` policy (phase 2);
+// the handshake already routes through here so that slots in without changing
+// the wire.
+function nappletDomainsFor(_nappId: string): string[] {
+  return ["shell", "identity", "theme"]
+}
+
+function nappletTheme() {
+  const cs = getComputedStyle(document.documentElement)
+  const surface = cs.getPropertyValue("--surface").trim()
+  const text = cs.getPropertyValue("--text").trim()
+  const primary = cs.getPropertyValue("--primary").trim() || text
+  return { title: currentTheme(), colors: { background: surface, text, primary } }
+}
+
+function broadcastNappletThemeChanged() {
+  const theme = nappletTheme()
+  for (const [instanceId, win] of openWindows) {
+    if (!nappletSessions.has(instanceId)) continue
+    if (!win.iframe?.contentWindow) continue
+    try {
+      const origin = new URL(win.iframe.src).origin
+      win.iframe.contentWindow.postMessage({ type: "theme.changed", theme }, origin)
+    } catch {}
+  }
+}
+
+// identity.changed: pushed when the launcher account connects/disconnects.
+onAccountChanged(pk => {
+  for (const [instanceId, win] of openWindows) {
+    if (!nappletSessions.has(instanceId)) continue
+    if (!win.iframe?.contentWindow) continue
+    try {
+      const origin = new URL(win.iframe.src).origin
+      win.iframe.contentWindow.postMessage({ type: "identity.changed", pubkey: pk || "" }, origin)
+    } catch {}
+  }
+})
+
+const NAPPLET_LISTS: Record<string, (pk: string) => Promise<{ items: unknown[] }>> = {
+  bookmarks: pk => loadBookmarks(pk),
+  pins: pk => loadPins(pk),
+  emojis: pk => loadEmojis(pk),
+  "blossom-servers": pk => loadBlossomServers(pk),
+  "favorite-relays": pk => loadFavoriteRelays(pk),
+  "wiki-authors": pk => loadWikiAuthors(pk),
+  "wiki-relays": pk => loadWikiRelays(pk)
+}
+
+// Read-only identity queries. Everything answers from the launcher's own
+// account state — getPublicKey returns the CACHED key or "" (it never asks the
+// signer, so it can never prompt), and the list queries return empties when no
+// account is connected rather than erroring.
+async function dispatchNapplet(type: string, data: any): Promise<unknown> {
+  const pk = getPubkey()
+  switch (type) {
+    case "identity.getPublicKey":
+      return pk || ""
+    case "identity.getRelays": {
+      if (!pk) return {}
+      const list = await loadRelayList(pk)
+      const map: Record<string, { read: boolean; write: boolean }> = {}
+      for (const item of list.items) map[item.url] = { read: !!item.read, write: !!item.write }
+      return map
+    }
+    case "identity.getProfile": {
+      if (!pk) return null
+      const user = await loadNostrUser(pk)
+      return user?.metadata ?? null
+    }
+    case "identity.getFollows":
+      return pk ? (await loadFollowsList(pk)).items : []
+    case "identity.getMutes":
+      return pk ? (await loadMuteList(pk)).items : []
+    case "identity.getList": {
+      const loader = NAPPLET_LISTS[data?.list]
+      if (!loader) throw new Error(`unknown list: ${data?.list}`)
+      return pk ? (await loader(pk)).items : []
+    }
+    case "theme.get":
+      return nappletTheme()
+    default:
+      throw new Error(`unsupported napplet call: ${type}`)
+  }
+}
+
+function handleNapplet(
+  data: { type: string; id?: string },
+  iframe: HTMLIFrameElement,
+  origin: string,
+  nappId: string,
+  instanceId: string
+) {
+  const post = (msg: object) => iframe.contentWindow?.postMessage(msg, origin)
+
+  if (data.type === "shell.ready") {
+    // A shell.ready on an existing session is either a replay or — more likely
+    // on this transport — a RELOADED document (same window, new lifecycle; its
+    // bridge lost the cached env). We can't tell the two apart, so answer both
+    // with the same deterministic shell.init: a reload gets its env back, and a
+    // replay learns nothing new and re-keys nothing (the session object never
+    // changes — NAP-SHELL's actual invariant).
+    nappletSessions.add(instanceId)
+    post({
+      type: "shell.init",
+      instanceId,
+      capabilities: { domains: nappletDomainsFor(nappId) },
+      services: []
+    })
+    return
+  }
+
+  const fail = (error: string) =>
+    post({ type: `${data.type}.result`, id: data.id, instanceId, ok: false, error })
+
+  if (!nappletSessions.has(instanceId)) {
+    fail("no session — send shell.ready first")
+    return
+  }
+  dispatchNapplet(data.type, data)
+    .then(result =>
+      post({ type: `${data.type}.result`, id: data.id, instanceId, ok: true, result })
+    )
+    .catch(err => fail(err?.message ?? String(err)))
 }
 
 export function focusInstance(instanceId: string): boolean {
@@ -659,6 +805,12 @@ function mount(
     position,
     status,
     onMessage: (data, iframe) => {
+      // NIP-5D dialect (window.napplet) carries `type`; legacy carries
+      // `__nostrapps`. Same channel, two routers.
+      if (typeof (data as any).type === "string" && !data.__nostrapps) {
+        handleNapplet(data as any, iframe, origin, nappId, instanceId)
+        return
+      }
       switch (data.__nostrapps) {
         case "napp-ready": {
           resolveReady(data.instanceId!)
@@ -729,6 +881,11 @@ export function mountWithLoading(
     position,
     status,
     onMessage: (data, iframe) => {
+      // NIP-5D dialect — same routing as mount() above.
+      if (typeof (data as any).type === "string" && !data.__nostrapps) {
+        handleNapplet(data as any, iframe, origin, nappId, instanceId)
+        return
+      }
       switch (data.__nostrapps) {
         case "napp-ready": {
           resolveReady(data.instanceId!)
