@@ -35,12 +35,14 @@ import {
   findOpenWindowByNappId,
   loadEvent,
   applyNappPolicy,
-  closeNappletSubs
+  closeNappletSubs,
+  launchNapplet
 } from "./sandbox/host.js"
 import { button, chip, icon } from "./system-napps/ui.js"
 import { promptNappPolicy } from "./napp-permissions.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
+import { resolveNapplet, isNappletKind } from "./nsite/napplet.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
 import { currentSigner, reconnectIfNeeded } from "./signers/index.js"
 import { connectBunkerInput, disconnectBunkerSigner } from "./signers/nip46.js"
@@ -1676,6 +1678,11 @@ async function install(raw: string): Promise<string> {
     )
   }
 
+  // NIP-5D napplet (its own kind) takes the srcdoc loader, not the nsite path.
+  if (resolved.kind && isNappletKind(resolved.kind)) {
+    return installNapplet({ ...resolved, kind: resolved.kind })
+  }
+
   const { nappId, files, title, manifest } = await fetchNsite(resolved, setStatus)
   console.debug("[install] nsite fetched", {
     nappId,
@@ -1711,6 +1718,39 @@ async function install(raw: string): Promise<string> {
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
 
   setStatus(`Installed ${label}`)
+  return nappId
+}
+
+// NIP-5D napplet install/launch — the srcdoc path, entirely separate from the
+// nsite install above. Resolve + verify the manifest, gate on the permission
+// screen (declaredDomains = its `requires`), store it as an installed app so
+// nappletDomainsFor sees the grant, then launch it into an opaque srcdoc window.
+async function installNapplet(target: {
+  pubkey: string
+  dTag: string
+  relayHints: string[]
+  kind: number
+}): Promise<string> {
+  setStatus("Resolving napplet…")
+  const resolved = await resolveNapplet(target, setStatus)
+  const nappId = persist.computeNappId(resolved.manifest)
+
+  const policy = await promptNappPolicy({
+    title: resolved.title || resolved.dTag,
+    declaredDomains: resolved.requires
+  })
+  if (!policy) throw new Error("Install cancelled")
+  persist.setPolicy(nappId, policy)
+  persist.storeInstalledEvent(resolved.manifest, resolved.title || resolved.dTag)
+  handlers.addApp(nappId, [])
+
+  const win = launchNapplet(stage, nappId, resolved.html, {
+    ...makeLaunchOpts(),
+    petname: resolved.title || resolved.dTag
+  })
+  syncDOM(win)
+  win.focus()
+  setStatus(`Launched napplet ${resolved.title || resolved.dTag}`)
   return nappId
 }
 

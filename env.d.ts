@@ -1,3 +1,9 @@
+// Vite raw-text imports (e.g. the napplet bridge inlined into a srcdoc).
+declare module "*?raw" {
+  const src: string
+  export default src
+}
+
 // ── Nostr core types (same as from @nostr/tools) ──────────────────────────
 interface NostrEvent {
   id: string

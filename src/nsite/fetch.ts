@@ -132,7 +132,7 @@ function getTag(evt: { tags: string[][] }, name: string): string | undefined {
   return t?.[1]
 }
 
-async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
+export async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
   // Try each server at most once. A throwing server (timeout / network / CORS)
   // is skipped like any other failure — never retried in place, so an
   // unreachable server can't spin this loop forever and stall the install.

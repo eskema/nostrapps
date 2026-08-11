@@ -409,7 +409,14 @@ export function computeNappId(event: { kind: number; pubkey: string; tags: strin
     return `local-${dTag || ""}`
   }
   const dTag = event.tags.find(t => t[0] === "d")?.[1]
-  return `${event.pubkey.slice(0, 16)}~${dTag || ""}`
+  const base = `${event.pubkey.slice(0, 16)}~${dTag || ""}`
+  // NIP-5D napplets (kinds 5129/15129/35129) get their own namespace so a
+  // pubkey can publish both a 35128 nsite and a napplet under the same d tag
+  // without colliding.
+  if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) {
+    return `napplet~${base}`
+  }
+  return base
 }
 
 function writeInstalled(all: Record<string, Omit<InstalledApp, "nappId">>) {

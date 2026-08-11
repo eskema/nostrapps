@@ -46,6 +46,8 @@ export function createNappWindow({
   instanceId,
   origin,
   src,
+  srcdoc,
+  sourceRouting = false,
   petname,
   sandbox = "allow-scripts allow-same-origin allow-forms",
   onMessage,
@@ -63,6 +65,12 @@ export function createNappWindow({
   instanceId: string
   origin?: string
   src?: string
+  // A NIP-5D napplet is loaded as a single self-contained document via srcdoc
+  // into an opaque-origin (allow-scripts only) iframe — no src, no SW.
+  srcdoc?: string
+  // Opaque-origin napplets send messages with origin "null", so identify the
+  // sender by MessageEvent.source instead of origin.
+  sourceRouting?: boolean
   petname?: string
   sandbox?: string
   onMessage?: (data: MessageData, iframe: HTMLIFrameElement) => void
@@ -135,7 +143,8 @@ export function createNappWindow({
     // window.name is cross-origin readable from inside the iframe, so the bridge
     // can pick up the instance id without us polluting the URL.
     iframe.name = instanceId || "<missing-window-name>"
-    iframe.src = src || "<missing-iframe-src>"
+    if (srcdoc != null) iframe.srcdoc = srcdoc
+    else iframe.src = src || "<missing-iframe-src>"
     body.appendChild(iframe)
     iframeRef.current = iframe
   }
@@ -212,16 +221,24 @@ export function createNappWindow({
   let messageHandler: ((event: MessageEvent) => void) | null = null
   if (onMessage) {
     messageHandler = (event: MessageEvent) => {
-      if (!origin || event.origin !== origin) return
+      const iframe = iframeRef.current
+      if (!iframe) return
       const data = event.data
       if (!data) return
+      if (sourceRouting) {
+        // Opaque-origin napplet: origin is "null", so identify by the Window
+        // reference (the spec's MessageEvent.source rule). NIP-5D messages only.
+        if (event.source !== iframe.contentWindow) return
+        if (typeof data.type !== "string" || data.__nostrapps) return
+        onMessage(data, iframe)
+        return
+      }
+      if (!origin || event.origin !== origin) return
       // Legacy dialect (__nostrapps) is demuxed by instanceId. NIP-5D messages
       // (a `type` field) carry no instanceId — a spec napplet doesn't know our
       // window.name — so the origin, unique per napp, identifies the window.
       const isNip5d = typeof data.type === "string" && !data.__nostrapps
       if (!isNip5d && data.instanceId !== instanceId) return
-      const iframe = iframeRef.current
-      if (!iframe) return
       onMessage(data, iframe)
     }
     window.addEventListener("message", messageHandler)

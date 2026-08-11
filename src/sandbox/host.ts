@@ -18,6 +18,9 @@ import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
 import { getStore } from "../store.js"
 import { createNappWindow } from "./napp-window.js"
+// The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
+// into a napplet's srcdoc before its verified bytes.
+import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
 import {
   loadBlossomServers,
   loadBookmarks,
@@ -689,7 +692,7 @@ async function nappletWriteRelays(pk: string | null): Promise<string[]> {
 // Each subscription is an AbortController keyed by nappId+subId; the napplet
 // owns its lifecycle via subId. Cleared for a napp when it's uninstalled.
 const nappletSubs = new Map<string, AbortController>()
-const nappletSubKey = (nappId: string, subId: string) => `${nappId} ${subId}`
+const nappletSubKey = (nappId: string, subId: string) => `${nappId}\u0000${subId}`
 
 async function nappletRelaySubscribe(
   nappId: string,
@@ -740,7 +743,7 @@ function nappletRelayClose(nappId: string, subId: unknown, post: (msg: object) =
 
 // Abort every live subscription of a napp (called on uninstall/reset).
 export function closeNappletSubs(nappId: string) {
-  const prefix = `${nappId} `
+  const prefix = `${nappId}\u0000`
   for (const [key, controller] of nappletSubs) {
     if (key.startsWith(prefix)) {
       controller.abort()
@@ -1093,6 +1096,90 @@ function mount(
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
   resetInstanceRuntimeState(instanceId, "Window remounted before action registered")
+  ensureStageObserver(stageEl)
+  clampToStage(win.root, stageEl)
+  captureWindowGeom(win.root)
+  return win
+}
+
+// ─── NIP-5D napplet loader (kind 35129 — separate from the nsite path) ──
+// A napplet is a single verified index.html run in an opaque-origin
+// (allow-scripts only) srcdoc iframe with no service worker and no window.nostr.
+// The spec's conservative baseline: sealed to itself, every resource/socket via
+// a NAP domain over postMessage (not CSP-governed).
+const NAPPLET_CSP =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+  "img-src data: blob:; font-src data:; connect-src 'none'; worker-src 'none'; " +
+  "child-src 'none'; frame-src 'none'; media-src 'none'; object-src 'none'; " +
+  "manifest-src 'none'; base-uri 'none'; form-action 'none'"
+
+// Wrap the verified bytes with the runtime injection — CSP meta FIRST in <head>,
+// then the granted-domain declaration, then the napplet bridge. All of this is
+// outside the bytes that were hashed (per NIP-5D), so it doesn't affect identity.
+function buildNappletDoc(html: string, domains: string[]): string {
+  const inject =
+    `<meta http-equiv="Content-Security-Policy" content="${NAPPLET_CSP}">` +
+    `<script>window.__nappletDomains=${JSON.stringify(domains).replace(/</g, "\\u003c")}</script>` +
+    `<script>${nappletBridgeSource}</script>`
+  const headMatch = html.match(/<head[^>]*>/i)
+  if (headMatch) {
+    const idx = headMatch.index! + headMatch[0].length
+    return html.slice(0, idx) + inject + html.slice(idx)
+  }
+  return `<!doctype html><head>${inject}</head>${html}`
+}
+
+// Load a resolved+verified napplet into a window. nappId must already be a
+// stored InstalledApp (so nappletDomainsFor sees its requires) with a policy.
+export function launchNapplet(
+  stageEl: HTMLElement,
+  nappId: string,
+  html: string,
+  opts: LaunchOpts = {}
+) {
+  const {
+    instanceId = `${instanceIdSerial++}`,
+    petname,
+    onStateChange,
+    onReorder,
+    onClose,
+    onDestroy,
+    position,
+    status
+  } = opts
+  const srcdoc = buildNappletDoc(html, nappletDomainsFor(nappId))
+  const win = createNappWindow({
+    nappId,
+    instanceId,
+    srcdoc,
+    sourceRouting: true,
+    sandbox: "allow-scripts",
+    petname,
+    position,
+    status,
+    onMessage: (data, iframe) => {
+      // Napplets speak only NIP-5D; postback targets '*' (opaque origin).
+      if (typeof (data as any).type === "string" && !data.__nostrapps) {
+        handleNapplet(data as any, iframe, "*", nappId)
+      }
+    },
+    onClose: () => {
+      openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
+      onClose?.(instanceId)
+    },
+    onDestroy: () => {
+      openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
+      onDestroy?.(instanceId)
+    },
+    onStateChange,
+    onReorder
+  })
+  adoptWindow(win)
+  flagFreshInPack(stageEl, win, !!position)
+  stageEl.appendChild(win.root)
+  openWindows.set(instanceId, win)
   ensureStageObserver(stageEl)
   clampToStage(win.root, stageEl)
   captureWindowGeom(win.root)

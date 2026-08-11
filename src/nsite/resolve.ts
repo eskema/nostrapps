@@ -10,6 +10,7 @@ export function resolveInput(input: string): {
   pubkey: string
   dTag: string
   relayHints: string[]
+  kind?: number
 } {
   const s = input.trim()
   if (!s) throw new Error("empty input")
@@ -39,7 +40,9 @@ function resolveNaddr(s: string): {
     identifier: string
     relays?: string[]
   }
-  if (addr.kind !== 35128) {
+  // 35128 = nsite; 35129 = named NIP-5D napplet. Both resolve here; install()
+  // routes on the kind.
+  if (addr.kind !== 35128 && addr.kind !== 35129) {
     throw new Error(`Unsupported naddr kind: ${addr.kind}`)
   }
   return {

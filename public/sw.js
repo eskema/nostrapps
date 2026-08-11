@@ -43,6 +43,7 @@ async function handleFetch(req, url) {
   if (path === "/boot.html") return fetch(req)
   if (path === "/sw.js") return fetch(req)
   if (path === "/bridge.js") return fetch(req)
+  if (path === "/napplet-bridge.js") return fetch(req)
   // Launcher-owned shared stylesheet (opt-in via metadata `ui: "wrapper"`),
   // served from the launcher origin for every napp subdomain like bridge.js.
   // Its fonts are inlined as data URIs inside it (a separate /fonts/ request is
@@ -217,9 +218,12 @@ function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
     JSON.stringify(domainList).replace(/</g, "\\u003c") +
     "</script>"
   // Injected at the top of <head>, so the shared stylesheet lands BEFORE the
-  // napp's own styles and the napp can still override it.
+  // napp's own styles and the napp can still override it. __nappletDomains must
+  // precede napplet-bridge.js (which reads it). bridge.js owns window.nostr /
+  // window.napp; napplet-bridge.js owns window.napplet.
   const headInject =
     domainsScript +
+    '<script src="/napplet-bridge.js"></script>' +
     '<script src="/bridge.js"></script>' +
     (wrapperUi ? '<link rel="stylesheet" href="/napp-ui.css">' : "")
   const readyTag =
