@@ -1897,14 +1897,9 @@ body.popover-open .napp-body iframe {
   grid-template-areas:
     "icon handlers actions"
     "title title title"
-    /* "icon title title" */
-    /* "author author actions" */
-    /* "title title title" */
     "about about about"
-    "author author author"
-    /* "handlers handlers handlers" */
-    /* "actions actions actions" */
-    /* "handlers handlers handlers" */;
+    "type type type"
+    "author author author";
   grid-template-columns: auto 1fr;
   grid-gap: 0 1rem;
   padding: 1rem 0.4rem;
@@ -1994,6 +1989,29 @@ body.popover-open .napp-body iframe {
   justify-self: start;
 
   /* align-self: end; */
+}
+
+/* Type badge — sits just above the "from <author>" line. */
+.apps-card-type {
+  grid-area: type;
+  justify-self: start;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  opacity: 0.85;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+}
+.apps-type-napplet {
+  color: var(--primary, currentColor);
+}
+
+/* Segmented type filter in the toolbar (all · nsites · napps · napplets). */
+.apps-typeseg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
 }
 
 .apps-detail-overlay .apps-author {
@@ -2383,8 +2401,9 @@ body.popover-open .napp-body iframe {
 /* ─── store toolbar / search / relays config ────────────────── */
 .apps-toolbar {
   display: flex;
+  flex-direction: column;
   gap: 0.4rem;
-  align-items: center;
+  align-items: stretch;
   position: sticky;
   top: 0;
   background: var(--surface);

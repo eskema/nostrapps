@@ -19,6 +19,7 @@ import {
   addControl,
   button,
   check,
+  chip,
   details,
   item,
   itemList,
@@ -51,6 +52,38 @@ export function mount(
   // Signature of which installed apps currently have an update available, so the
   // streaming discovery subscription only re-renders the list when it changes.
   let _installedUpdatesSig = ""
+
+  // Type filter shared across both tabs (all · nsites · napps · napplets).
+  let typeFilter: "all" | AppType = "all"
+  // A segmented control bound to typeFilter; re-applies both tabs' filters on
+  // change. Each pane renders its own instance (kept in sync via typeFilter).
+  function buildTypeSegments(): HTMLElement {
+    const seg = document.createElement("div")
+    seg.className = "apps-typeseg"
+    const opts: Array<["all" | AppType, string]> = [
+      ["all", "all"],
+      ["nsite", "nsites"],
+      ["napp", "napps"],
+      ["napplet", "napplets"]
+    ]
+    const btns = opts.map(([val, label]) =>
+      chip({
+        label,
+        active: typeFilter === val,
+        onClick: () => {
+          typeFilter = val
+          btns.forEach((b, i) => {
+            b.classList.toggle("btn-primary", opts[i][0] === val)
+            b.classList.toggle("btn-ghost", opts[i][0] !== val)
+          })
+          applyInstalledFilter()
+          applyFilter()
+        }
+      })
+    )
+    for (const b of btns) seg.appendChild(b)
+    return seg
+  }
 
   // ─── Discover tab state ───
   let filter = ""
@@ -351,6 +384,7 @@ export function mount(
     return {
       nappId: app.nappId,
       title,
+      type: classifyInstalled(app),
       description,
       iconSha,
       iconUrl: iconSha ? null : installedIconUrl(app),
@@ -413,7 +447,8 @@ export function mount(
     const cards = listEl.querySelectorAll(".apps-card") as NodeListOf<HTMLElement>
     let shown = 0
     for (const card of cards) {
-      const match = !needle || (card.dataset.search || "").includes(needle)
+      const typeOk = typeFilter === "all" || card.dataset.type === typeFilter
+      const match = typeOk && (!needle || (card.dataset.search || "").includes(needle))
       card.hidden = !match
       if (match) shown++
     }
@@ -440,6 +475,7 @@ export function mount(
     `
     const searchEl = installedPane.querySelector(".apps-search") as HTMLInputElement
     _installedListEl = installedPane.querySelector(".apps-list") as HTMLElement
+    installedPane.querySelector(".apps-toolbar")?.appendChild(buildTypeSegments())
     searchEl.value = installedFilter
     searchEl.addEventListener("input", () => {
       installedFilter = searchEl.value
@@ -578,8 +614,9 @@ export function mount(
     const needle = filter.trim().toLowerCase()
     const cards = _listEl.querySelectorAll(".apps-card") as NodeListOf<HTMLElement>
     for (const card of cards) {
+      const typeOk = typeFilter === "all" || card.dataset.type === typeFilter
       const searchOk = !needle || (card.dataset.search || "").includes(needle)
-      card.hidden = !searchOk || !seenOnEnabled(card.dataset.eventId)
+      card.hidden = !typeOk || !searchOk || !seenOnEnabled(card.dataset.eventId)
     }
     refreshEmptyState()
   }
@@ -847,6 +884,7 @@ export function mount(
 
     _listEl = discoverPane.querySelector(".apps-list") as HTMLElement
     const searchEl = discoverPane.querySelector(".apps-search") as HTMLInputElement
+    discoverPane.querySelector(".apps-toolbar")?.appendChild(buildTypeSegments())
 
     // System disclosure whose summary doubles as the status line (relays-napp
     // style): "relays (N)" + an overline badge with event count / loading.
@@ -947,9 +985,29 @@ export function mount(
 
 // ─── Unified app card (Installed + Discover render the same shape) ──
 
+// The three app tiers. napplet = a NIP-5D capability app (its own kinds). napp =
+// an nsite (35128) that declares capabilities (action or requires tags). nsite =
+// a plain static site declaring neither.
+type AppType = "nsite" | "napp" | "napplet"
+
+function classifyEvent(event: { kind: number; tags: string[][] }): AppType {
+  if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) return "napplet"
+  const caps = event.tags.some(t => (t[0] === "action" || t[0] === "requires") && t[1])
+  return caps ? "napp" : "nsite"
+}
+
+function classifyInstalled(app: InstalledApp): AppType {
+  if (app.nappId.startsWith("napplet~") || app.event?.kind === 35129) return "napplet"
+  if (app.event) return classifyEvent(app.event)
+  // dev/local/temp: no manifest event — classify from the stored declarations.
+  const caps = (app.actions?.length ?? 0) > 0 || (app.requires?.length ?? 0) > 0
+  return caps ? "napp" : "nsite"
+}
+
 interface AppCardOpts {
   nappId: string
   title: string
+  type: AppType
   description?: string | null
   iconSha?: string | null
   iconMime?: string | null
@@ -975,7 +1033,9 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
   card.dataset.nappId = o.nappId
   if (o.authorPubkey) card.dataset.author = o.authorPubkey
   if (o.createdAt) card.dataset.createdAt = String(o.createdAt)
-  card.dataset.search = o.search
+  card.dataset.type = o.type
+  // Fold the type into the haystack so typing "napplet" narrows the list too.
+  card.dataset.search = `${o.search}\n${o.type}`
 
   // Flat structure: icon, title, author/label, date, meta extras, handlers and
   // actions are all direct children of .apps-card.
@@ -1010,6 +1070,12 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
     desc.textContent = o.description
     card.appendChild(desc)
   }
+
+  // Type chip — reads "napplet · <author>" / "nsite · <author>".
+  const typeEl = document.createElement("span")
+  typeEl.className = `apps-card-type apps-type-${o.type}`
+  typeEl.textContent = o.type
+  card.appendChild(typeEl)
 
   if (o.authorPubkey) {
     const author = document.createElement("span")
@@ -1220,6 +1286,7 @@ function renderCard(
   card = renderAppCard({
     nappId,
     title: title || `(${dTag})`,
+    type: classifyEvent(evt),
     description: tag("description") || tag("summary"),
     iconSha,
     iconMime,
