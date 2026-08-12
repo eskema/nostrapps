@@ -313,8 +313,11 @@ export function createNappWindow({
     notifyState()
   })
   const toggleMaximize = () => {
-    root.classList.toggle("maximized")
+    const nowMaximized = root.classList.toggle("maximized")
     notifyState()
+    // Restoring from maximize: the window shrinks back to its old spot, which may
+    // be behind others or scrolled off. Reselect it and bring it into view.
+    if (!nowMaximized) focus()
   }
   btnMax.addEventListener("click", e => {
     e.stopPropagation()
