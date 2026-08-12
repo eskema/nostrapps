@@ -255,9 +255,7 @@
   // ── Shared nostr primitives (sync, pure — no rpc) ────────────────────
   // Hand-rolled bech32 (BIP-173) + TLV so bridge.js stays a static,
   // dependency-free file the launcher's service worker serves as-is (no build
-  // step). Shapes match nostr-tools nip19. Napps feature-detect these via
-  // `window.napp.nip19?.decode` / `window.napp.fx?.*`, so an older cached bridge
-  // simply lacks them — absence is harmless.
+  // step). Shapes match nostr-tools nip19.
   const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
   const BECH32_MAP = {}
   for (let i = 0; i < BECH32_CHARSET.length; i++) BECH32_MAP[BECH32_CHARSET[i]] = i

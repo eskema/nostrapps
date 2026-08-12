@@ -169,19 +169,16 @@ interface NappUtils {
   // Event fetching
   loadEvent(code: string, relays?: string[], author?: string): Promise<NostrEvent | null>
   // Batched by-id fetch — one REQ over the id union; non-64-hex ids are dropped.
-  // Optional: absent on older cached bridges, so feature-detect before calling.
-  loadEvents?(ids: string[]): Promise<NostrEvent[]>
+  loadEvents(ids: string[]): Promise<NostrEvent[]>
   // Verify an event's id + signature on the host (nostr-tools verifyEvent).
-  // Optional: absent on older cached bridges.
-  verifyEvent?(event: NostrEvent): Promise<boolean>
+  verifyEvent(event: NostrEvent): Promise<boolean>
 
   // Save bytes to the user's disk. Napp iframes deliberately omit the
   // `allow-downloads` sandbox token, so a napp cannot download on its own and
   // gets no error when it tries — this rpc is the only route out, and being an
   // rpc is what puts it behind the permission prompt. Prefer passing a Blob:
   // it survives structured clone by reference, so the bytes are not copied.
-  // Optional: absent on older cached bridges, so feature-detect before calling.
-  saveFile?(
+  saveFile(
     name: string,
     data: Blob | ArrayBuffer | ArrayBufferView,
     type?: string
@@ -191,8 +188,7 @@ interface NappUtils {
   // `clipboard-write` delegation, so navigator.clipboard rejects inside the
   // iframe — this rpc is the only route, and being an rpc puts it behind the
   // permission prompt (which previews the text being copied). Max 100k chars.
-  // Optional: absent on older cached bridges, so feature-detect before calling.
-  copyText?(text: string): Promise<{ length: number }>
+  copyText(text: string): Promise<{ length: number }>
 
   // Publishing
   publish(event: NostrEvent, relays?: string[]): Promise<PublishResult>
@@ -238,10 +234,10 @@ interface Napp {
   action(name: string, payload?: unknown, opts?: { instance?: string }): Promise<unknown>
   feeds: NappFeeds
   utils: NappUtils
-  /** Sync bech32/nip19 helpers. Optional: absent on older cached bridges. */
-  nip19?: NappNip19
-  /** Sync misc helpers (hex / coordinates / bolt11). Optional on older bridges. */
-  fx?: NappFx
+  /** Sync bech32/nip19 helpers. */
+  nip19: NappNip19
+  /** Sync misc helpers (hex / coordinates / bolt11). */
+  fx: NappFx
 }
 
 // ── NIP-5D (window.napplet) — the NAP capability seam ────────────────────

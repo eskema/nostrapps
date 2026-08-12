@@ -9,7 +9,9 @@ The idea is that each napp is a very small, specialized app. It should do one (o
 A napp is any folder with an `index.html`. Inside the iframe you get:
 
 ```js
-// NIP-07 signer, forwarded to your extension via the launcher
+// NIP-07 signer, mediated by the launcher. Present only when `identity` is
+// granted (see Permissions below). getPublicKey() answers from the cached
+// account key and never prompts.
 window.nostr.getPublicKey()
 window.nostr.signEvent(evt)
 window.nostr.nip04.encrypt|decrypt(pubkey, text)
@@ -49,29 +51,22 @@ window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrU
 // Arbitrary event fetching
 window.napp.utils.loadEvent(code, relays?, author?)
 
-// Saving a file to disk
-window.napp.utils.saveFile?(name, data, type?)
-//   name: string — treated as untrusted; the host keeps a basename only
-//   data: Blob | ArrayBuffer | ArrayBufferView — pass a Blob to avoid copying
-//     the bytes across the frame boundary (Blobs clone by reference)
-//   returns { name, size } — the sanitized name actually used
-//
-// Napp iframes deliberately omit the `allow-downloads` sandbox token, so an
-// <a download> inside a napp is silently ignored — it throws nothing and logs
-// nothing the napp can see. This rpc is the only route to disk, and being an
-// rpc is what puts it behind the permission prompt (which names the file).
-// Optional: feature-detect, since a cached older bridge will not have it.
+// Batched by-id fetching: one REQ over the id union; non-64-hex ids dropped.
+window.napp.utils.loadEvents(ids)
 
-// Copying text to the clipboard
-window.napp.utils.copyText?(text)
+// Verify an event's id + signature on the host (nostr-tools verifyEvent).
+window.napp.utils.verifyEvent(event)
+
+// Saving a file to disk (the sandbox blocks <a download>; prompts the user)
+window.napp.utils.saveFile(name, data, type?)
+//   data: Blob | ArrayBuffer | ArrayBufferView — prefer Blob (clones by reference)
+//   returns { name, size } — name reduced to a basename
+
+// Copying text to the clipboard (navigator.clipboard rejects in the sandbox;
+// prompts the user with a preview of the text)
+window.napp.utils.copyText(text)
 //   text: string, max 100k chars
 //   returns { length }
-//
-// The napp sandbox has no `clipboard-write` delegation, so
-// navigator.clipboard rejects inside the iframe. This rpc is the only route,
-// and being an rpc puts it behind the permission prompt — which previews the
-// text about to land on the clipboard, so the user approves the content, not
-// just the capability. Optional: feature-detect, like saveFile.
 
 // Publishing
 window.napp.utils.publish(event, relays?)
@@ -79,10 +74,16 @@ window.napp.utils.publish(event, relays?)
 //   relays?: string[] — if omitted, publishes to the author's write relays
 //     (for kind 10002 also publishes to fallback + indexer relays)
 //   returns { relays: {[url]: { ok, error? }}, published, failed }
-//
-// For kinds handled by load* methods (NIP-51 lists, addressable sets, contacts),
-// publish() also updates the local cache with the published event so subsequent
-// load* calls reflect the change immediately without re-fetching from relays.
+//   for kinds handled by load* methods, also updates the local cache so
+//     subsequent load* calls reflect the change immediately
+
+// Sync helpers (no rpc round-trip)
+window.napp.nip19.decode(bech) // npub/note/nsec/nprofile/nevent/naddr
+window.napp.nip19.npubEncode|noteEncode|neventEncode|naddrEncode(...)
+window.napp.fx.isHex64(s)
+window.napp.fx.parseCoordinate("kind:pubkey:d") // → { kind, pubkey, identifier } | null
+window.napp.fx.formatCoordinate({ kind, pubkey, identifier })
+window.napp.fx.satsFromBolt11(invoice)
 ```
 
 ### Streaming feeds
@@ -130,48 +131,50 @@ TypeScript types for everything above live in [`env.d.ts`](./env.d.ts). Referenc
 
 The host also pushes runtime signals to every napp via `postMessage`. bridge.js relays them:
 
-- **`napp-theme-change`**: sets `document.documentElement.dataset.theme` to `"light"` or `"dark"` and injects the launcher's resolved color tokens as `--surface`, `--text`, etc. on `:root`. Sent when the launcher's theme changes, so napps using `var(--surface)` / `var(--text)` track automatically.
+- **`napp-theme-change`**: sets `data-theme` (`"light"`/`"dark"`) on `<html>` and the launcher's `--surface`/`--text` tokens on `:root`, so napps using them track the theme automatically.
 
 ### Shared UI (opt-in)
 
-A napp can adopt the launcher's design system — matching buttons, inputs, disclosures, checkboxes, and icons — by declaring `"ui": "wrapper"` in its `metadata.json`:
+A napp can adopt the launcher's design system (buttons, inputs, disclosures, checkboxes, icons) by declaring the `ui` capability in its `requires`:
 
 ```json
-{ "ui": "wrapper" }
+{ "requires": ["ui"] }
 ```
 
-When set, the launcher's service worker injects `<link rel="stylesheet" href="/napp-ui.css">` at the top of the napp's `<head>` (before your own styles, so you can still override anything). The stylesheet provides `.btn` (+ `.btn-primary` / `.btn-outline` / `.btn-danger` / `.btn-warning` / `.btn-ghost` / `.btn-link`), `.ui-input`, `.ui-details`, `.ui-check`, and `.ui-icon-*` classes, with the launcher's fonts and icons inlined as data URIs. Its `--surface` / `--text` tokens track the theme via `napp-theme-change`, so opted-in napps match the launcher in both light and dark mode. Napps that don't set the flag are unaffected and render entirely in their own styles.
+`ui` is auto-granted (never a permission toggle) and implies `theme`. The service worker injects `<link rel="stylesheet" href="/napp-ui.css">` before your own styles, so you can override anything. It provides `.btn` (+ `-primary`/`-outline`/`-danger`/`-warning`/`-ghost`/`-link`), `.ui-input`, `.ui-details`, `.ui-check`, and `.ui-icon-*`, with fonts and icons inlined and `--surface`/`--text` tracking the theme. Napps that don't declare `ui` are unaffected. (`"ui": "wrapper"` in `metadata.json` still works as back-compat.)
 
-### NIP-5D — `window.napplet` (experimental)
+### `window.napplet` (NIP-5D, experimental)
 
-The launcher is a (partial) [NAP](https://github.com/napplet/naps) runtime: napps can use the NIP-5D capability seam alongside (or instead of) `window.napp`.
-
-The seam is **opt-in by declaration**: an app becomes a napplet by declaring the capability domains it needs — `["requires", "<domain>"]` tags in its NIP-5A manifest, or a `requires` array in `metadata.json` for local/dev apps:
+The launcher is a partial [NAP](https://github.com/napplet/naps) runtime. An app opts in by declaring the capability domains it needs, either as `["requires", "<domain>"]` manifest tags or as a `requires` array in `metadata.json`:
 
 ```json
-{ "requires": ["identity", "theme"] }
+{ "requires": ["identity", "theme", "storage"] }
 ```
 
-Apps that declare nothing never enter the seam: the host withholds `shell.init`, so `window.napplet.shell.supports()` answers `false` for everything (the spec's conformant "this runtime offers you nothing"). A napplet is offered the intersection of what it declared and what the launcher implements — and each call is enforced against that grant, not just the session.
-
-Feature-detect the surface — older cached bridges won't have it:
+`window.napplet` contains only the granted domains, so to know if you have one, check that it exists:
 
 ```js
-if (window.napplet?.shell.supports("identity")) {
-  const pk = await window.napplet.identity.getPublicKey() // cached key or "" — never prompts
+if (window.napplet?.identity) {
+  const pk = await window.napplet.identity.getPublicKey() // cached key, never prompts
 }
 ```
 
-Domains offered so far: `shell` (the NAP-SHELL handshake — `supports()` / `services()` / `ready()` / `onReady()`), `identity` (read-only account queries: `getPublicKey`, `getRelays`, `getProfile`, `getFollows`, `getMutes`, `getList`, `onChanged`), and `theme` (`get`, `onChanged`). `shell.supports()` answers truthfully: anything not listed above returns `false`.
+Domains implemented: `identity`, `theme`, `storage`, `resource`, `relay`, `outbox`. Shapes follow [`@napplet/nap`](https://github.com/napplet/web); the exact surface is in [`env.d.ts`](./env.d.ts).
 
-Two deliberate divergences from the draft spec, documented here on purpose:
+nsites get `window.napplet` alongside `window.napp` and can mix both. True napplets (kind 35129) are single-file apps loaded as a sealed `srcdoc` iframe, with no origin and no `window.nostr`. They publish unsigned templates through `relay`/`outbox` and the host signs behind a prompt.
 
-- Napps run at real per-napp origins (see below) rather than `sandbox="allow-scripts"` opaque-origin iframes — origin isolation does the same job while leaving napps the full web platform (IndexedDB, service worker, caches).
-- NIP-5D messages carry an `instanceId` field for transport addressing (many napps share the parent's one listener). Identity is still bound host-side by each message's unique origin, never by that field.
+### Permissions
+
+Before an app first runs, the launcher shows what it declared; the grants are stored and enforced per call. Two launcher-local capabilities join the NAP domains:
+
+- `identity`: `window.nostr`. When denied the signer is gone, pinned so an extension can't re-inject it.
+- `network`: the app's own direct connections, on by default for nsites. Not relay access: nostr always flows through the bridge, which works sealed. When denied the app is served under a locked CSP (`default-src 'self'`, and `worker-src 'none'` since workers have their own network) and any service worker it registered is unregistered.
+
+Declared domains the launcher doesn't implement are shown as non-grantable, so it's visible what won't work. Sensitive calls (`signEvent`, `nip04`/`nip44`, `saveFile`, `copyText`) still prompt per call. App data is only cleared on uninstall.
 
 ### Origin sandboxing
 
-Each napp runs at its own origin (a unique `<nappId>` subdomain). From the iframe, `window.parent` is cross-origin, so the napp can't reach into the launcher. The bridge is the only channel.
+Each napp runs at its own origin (a unique `<nappId>` subdomain). From the iframe, `window.parent` is cross-origin, so the napp can't reach into the launcher. The bridge is the only channel. True napplets don't get an origin at all; their only persistence is the `storage` domain.
 
 ### Boot flow
 
