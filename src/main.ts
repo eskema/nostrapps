@@ -2,7 +2,7 @@ import "@fontsource-variable/source-sans-3"
 import "@fontsource-variable/source-serif-4"
 import "@fontsource-variable/source-code-pro"
 import {
-  launch,
+  launch as launchNsite,
   focusInstance,
   launchSystem,
   mountWithLoading,
@@ -61,7 +61,8 @@ import type {
   NappWindowState,
   NappPolicy,
   SystemCtx,
-  NappWindow
+  NappWindow,
+  LaunchOpts
 } from "./types.js"
 import {
   registry as systemRegistry,
@@ -1806,19 +1807,60 @@ async function installNapplet(target: {
   return nappId
 }
 
-// Re-materialize a napplet window on reload: re-verify + re-fetch its bytes from
-// the stored manifest and srcdoc it, instead of the nsite launch path.
-async function restoreNapplet(state: NappWindowState): Promise<NappWindow | null> {
-  const app = persist.getInstalledApp(state.nappId)
+// Unified launch entry point. Installed napplets have no service-worker origin,
+// so the nsite launcher (`launchNsite`) would point their iframe at a URL that
+// falls back to the launcher page itself. Route them to the srcdoc path instead.
+// Every call site (input, apps, restore, direct paste) goes through here.
+async function launch(
+  stageEl: HTMLElement,
+  nappId: string,
+  opts: LaunchOpts = {}
+): Promise<NappWindow> {
+  if (nappId.startsWith("napplet~")) {
+    const win = await launchInstalledNapplet(nappId, {
+      instanceId: opts.instanceId,
+      petname: opts.petname,
+      position: opts.position,
+      status: opts.status
+    })
+    if (!win) throw new Error(`napplet ${nappId} could not be launched — its manifest is gone`)
+    return win
+  }
+  return launchNsite(stageEl, nappId, opts)
+}
+
+// Materialize a napplet window from its stored manifest: re-verify + re-fetch
+// its bytes and srcdoc them. Used for a fresh launch (via `launch` above) and
+// for reload restore alike.
+async function launchInstalledNapplet(
+  nappId: string,
+  opts: {
+    instanceId?: string
+    petname?: string | null
+    position?: NappWindowState["position"]
+    status?: NappWindowState["status"]
+  } = {}
+): Promise<NappWindow | null> {
+  const app = persist.getInstalledApp(nappId)
   if (!app?.event) {
-    setStatus(`Can't restore napplet ${state.nappId} — its manifest is gone`)
+    setStatus(`Can't launch napplet ${nappId} — its manifest is gone`)
     return null
   }
   const resolved = await loadNappletFromManifest(app.event, setStatus)
-  return launchNapplet(stage, state.nappId, resolved.html, {
+  return launchNapplet(stage, nappId, resolved.html, {
     ...makeLaunchOpts(),
+    ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
+    petname: opts.petname || resolved.title || resolved.dTag,
+    ...(opts.position ? { position: opts.position } : {}),
+    ...(opts.status ? { status: opts.status } : {})
+  })
+}
+
+// Re-materialize a napplet window on reload from its saved window state.
+async function restoreNapplet(state: NappWindowState): Promise<NappWindow | null> {
+  return launchInstalledNapplet(state.nappId, {
     instanceId: state.instanceId,
-    petname: state.petname || resolved.title || resolved.dTag,
+    petname: state.petname,
     position: state.position,
     status: state.status
   })
