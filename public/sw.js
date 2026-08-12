@@ -165,8 +165,18 @@ const LOCKED_CSP = [
   "base-uri 'self'"
 ].join("; ")
 
+// The granted domains, with version-aware back-fills applied so an upgrade
+// doesn't silently strip access that older policy records couldn't have named.
+// The SW only ever serves nsites/napps (napplets are srcdoc, never served), so
+// pre-v2 records — written before `identity` gated window.nostr — are treated
+// as identity-granted. New records (v>=2) are honored exactly, so unchecking
+// identity or network in the permission screen takes effect.
 function grantsFor(policy) {
-  return policy && Array.isArray(policy.domains) ? policy.domains : []
+  if (!policy) return []
+  const domains = Array.isArray(policy.domains) ? [...policy.domains] : []
+  if (policy.network === true && !domains.includes("network")) domains.push("network")
+  if ((policy.v || 0) < 2 && !domains.includes("identity")) domains.push("identity")
+  return domains
 }
 
 function htmlHeaders(mime, policy) {

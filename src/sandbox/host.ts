@@ -46,6 +46,7 @@ import { verifyEvent } from "@nostr/tools/pure"
 import {
   getInstalledApp,
   getPolicy,
+  getStoredPolicy,
   nappletStorageGet,
   nappletStorageKeys,
   nappletStorageRemove,
@@ -2314,7 +2315,8 @@ export async function bootNapp(
   files: NsiteFile[],
   onProgress: (msg: string) => void,
   label: string,
-  policy?: NappPolicy
+  // The versioned stored record (domains + v) — written verbatim to /__policy__.
+  policy?: { domains: string[]; v?: number }
 ) {
   console.debug("[sandbox] bootNapp", { origin, fileCount: files.length, label })
   const boot = document.createElement("iframe")
@@ -2346,7 +2348,7 @@ export async function bootNapp(
 // so the SW re-serves their documents under the updated CSP. Spins up a
 // transient boot iframe (same channel as install) to write the record into the
 // napp-origin IDB, which the launcher can't touch directly (cross-origin).
-export async function applyNappPolicy(origin: string, nappId: string, policy: NappPolicy) {
+export async function applyNappPolicy(origin: string, nappId: string) {
   const boot = document.createElement("iframe")
   boot.src = `${origin}/boot.html`
   boot.style.display = "none"
@@ -2354,7 +2356,11 @@ export async function applyNappPolicy(origin: string, nappId: string, policy: Na
   try {
     const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
     if (ready.__nostrapps === "napp-boot-error") throw new Error(ready.error)
-    boot.contentWindow!.postMessage({ __nostrapps: "napp-set-policy", policy }, origin)
+    // Ship the versioned stored record so the SW honors the exact grant.
+    boot.contentWindow!.postMessage(
+      { __nostrapps: "napp-set-policy", policy: getStoredPolicy(nappId) },
+      origin
+    )
     const result = await waitForMessage(origin, "napp-set-policy-done", "napp-set-policy-error")
     if (result.__nostrapps === "napp-set-policy-error") throw new Error(result.error)
   } finally {
@@ -2567,6 +2573,16 @@ function waitForMessage(
   })
 }
 
+// The NIP-07 signer surface (window.nostr) — gated on the `identity` grant.
+const SIGNER_METHODS = new Set([
+  "getPublicKey",
+  "signEvent",
+  "nip04.encrypt",
+  "nip04.decrypt",
+  "nip44.encrypt",
+  "nip44.decrypt"
+])
+
 async function handleRpc(
   data: Extract<MessageData, { __nostrapps: "rpc" }>,
   iframe: HTMLIFrameElement,
@@ -2575,6 +2591,13 @@ async function handleRpc(
 ) {
   const { id, method, params, instanceId } = data
   try {
+    // Signer access (NIP-07 / window.nostr) requires the granted `identity`
+    // capability. The bridge pins window.nostr to undefined when it's ungranted,
+    // but a site could postMessage this rpc directly, so enforce it here too —
+    // this is the real boundary.
+    if (SIGNER_METHODS.has(method!) && !getPolicy(nappId).domains.includes("identity")) {
+      throw new Error(`identity access not granted: ${method!}`)
+    }
     if (isGated(method!)) {
       const detail =
         method === "napp.saveFile"

@@ -10,7 +10,7 @@ import type { NappPolicy } from "./types.js"
 // domain names. `ui` isn't here — it's auto-granted and only named in the
 // summary line, never a toggle.
 const CAP_INFO: Record<string, { title: string; desc: string }> = {
-  identity: { title: "identity", desc: "can read your identity" },
+  identity: { title: "identity", desc: "read your key and sign as you (NIP-07)" },
   theme: { title: "theme", desc: "matches your colors" },
   storage: { title: "storage", desc: "keeps its own data" },
   resource: { title: "resource", desc: "loads files via the launcher" },
@@ -39,9 +39,16 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<NappPolicy | n
   const edit = opts.mode === "edit"
   // Declared caps we implement (order-stable), minus network (its own row) and
   // ui (auto-granted). network is always offered so any app can be un-sealed.
-  const known = CAP_ORDER.filter(d => opts.declaredDomains.includes(d))
-  const declaredNetwork = opts.declaredDomains.includes("network")
+  const declaredCaps = CAP_ORDER.filter(d => opts.declaredDomains.includes(d))
   const declaredUi = opts.declaredDomains.includes("ui")
+  // napplet: exactly its declared NAP domains, no network (sealed). nsite/napp:
+  // `identity` (the NIP-07 signer we intercept) is always offered even though
+  // nsites don't declare it, plus any declared domains, plus network — all
+  // default ON for a website, all deselectable.
+  const rows =
+    opts.type === "napplet"
+      ? declaredCaps
+      : [...new Set(["identity", ...declaredCaps, "network"])]
 
   return openDialog<NappPolicy | null>({
     dismissValue: null,
@@ -86,12 +93,7 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<NappPolicy | n
         boxes.set(domain, box)
         wrap.appendChild(permRow(box, CAP_INFO[domain].title, CAP_INFO[domain].desc))
       }
-      for (const d of known) addRow(d, cur ? cur.domains.includes(d) : true)
-      // Napplets are sealed by design (srcdoc CSP blocks direct network no
-      // matter what), so there's nothing to grant — don't offer network.
-      if (opts.type !== "napplet") {
-        addRow("network", cur ? cur.domains.includes("network") : declaredNetwork)
-      }
+      for (const d of rows) addRow(d, cur ? cur.domains.includes(d) : true)
 
       const actions = document.createElement("div")
       actions.className = "napp-perms-actions"

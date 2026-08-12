@@ -504,6 +504,12 @@ function readPolicies(): Record<string, any> {
   return raw && typeof raw === "object" ? raw : {}
 }
 
+// Bumped whenever a stored policy's meaning changes so getPolicy can back-fill
+// grants that older entries couldn't have recorded. v2: `identity` gained a
+// meaning (it now gates window.nostr) — pre-v2 non-napplet policies had the
+// signer injected unconditionally, so treat them as identity-granted.
+const POLICY_VERSION = 2
+
 export function getPolicy(nappId: string): NappPolicy {
   const p = readPolicies()[nappId]
   if (!p || typeof p !== "object") return { domains: [] }
@@ -511,14 +517,30 @@ export function getPolicy(nappId: string): NappPolicy {
   // Migrate the old {network:boolean} shape: a granted network boolean becomes
   // the "network" domain entry.
   if (p.network === true && !domains.includes("network")) domains.push("network")
+  // Pre-v2 non-napplet policies had window.nostr injected unconditionally — keep
+  // their signer so upgrading doesn't strip it. New/edited policies (v2) record
+  // identity explicitly, so unchecking it there is honored.
+  if ((p.v ?? 0) < 2 && !nappId.startsWith("napplet~") && !domains.includes("identity")) {
+    domains.push("identity")
+  }
   return { domains }
 }
 
 export function setPolicy(nappId: string, policy: NappPolicy) {
   if (!nappId) return
   const all = readPolicies()
-  all[nappId] = { domains: expandGrants(policy.domains) }
+  all[nappId] = { domains: expandGrants(policy.domains), v: POLICY_VERSION }
   writeJson(POLICY_KEY, all)
+}
+
+// The raw stored record (domains + version) written verbatim into the napp's
+// /__policy__, so the service worker applies the same version-aware migration.
+export function getStoredPolicy(nappId: string): { domains: string[]; v: number } {
+  const p = readPolicies()[nappId]
+  return {
+    domains: expandGrants(p?.domains),
+    v: typeof p?.v === "number" ? p.v : 0
+  }
 }
 
 export function hasPolicy(nappId: string): boolean {

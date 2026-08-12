@@ -675,7 +675,7 @@ async function editPermissions(nappId: string) {
   if (!policy) return
   persist.setPolicy(nappId, policy)
   try {
-    await applyNappPolicy(nappOriginFor(nappId), nappId, policy)
+    await applyNappPolicy(nappOriginFor(nappId), nappId)
     setStatus(`Updated permissions for ${app.petname || nappId}`)
   } catch (err: any) {
     setStatus(`Couldn't apply permissions: ${err?.message || String(err)}`)
@@ -1760,7 +1760,7 @@ async function install(raw: string): Promise<string> {
 
   console.debug("[sandbox] install", { nappId, label, origin })
   onProgress(`Booting ${label}…`)
-  await bootNapp(origin, files, onProgress, label, policy)
+  await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId))
 
   if (manifest) persist.storeInstalledEvent(manifest, petname)
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
@@ -2137,7 +2137,7 @@ localFolderInput.addEventListener("change", async (e: Event) => {
 
     console.debug("[sandbox] install", { nappId, label, origin })
     setStatus(`Booting ${label}…`)
-    await bootNapp(origin, files, onProgress, label, policy)
+    await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId))
 
     const petname = metadata?.title || nappId
 

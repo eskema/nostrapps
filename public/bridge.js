@@ -157,25 +157,31 @@
       decrypt: (pubkey, ciphertext) => rpc("nip44.decrypt", { pubkey, ciphertext })
     }
   }
-  // NIP-07 extensions inject their own window.nostr into EVERY frame — including
-  // napp iframes. If theirs lands after ours, the napp talks straight to the
-  // extension: the host (and its pubkey cache / permission model) is bypassed,
-  // and since each napp is its own origin the extension re-prompts per napp.
-  // Pin the bridge shim as non-writable/non-configurable so a later extension
-  // assignment fails silently and all signer traffic keeps flowing through the
-  // launcher. If the extension somehow got here first with a non-configurable
-  // define, fall back to plain assignment (best effort).
+  // window.nostr (NIP-07) is GATED on the granted `identity` capability — the
+  // shell declares the grant via window.__nappletDomains before this runs.
+  //
+  // We ALWAYS pin window.nostr non-writable/non-configurable, whether we grant it
+  // or not. If granted, it's our shim (routing signer traffic through the host).
+  // If NOT granted, it's pinned to `undefined` — otherwise a NIP-07 browser
+  // extension (Alby, nos2x…) would inject its own window.nostr into the frame and
+  // hand the site a signer anyway, bypassing the denial. Pinning blocks that; the
+  // host also refuses the signer rpc when identity is ungranted (defense in depth
+  // — a site could postMessage the rpc directly).
+  const identityGranted =
+    Array.isArray(window.__nappletDomains) && window.__nappletDomains.includes("identity")
   try {
     Object.defineProperty(window, "nostr", {
-      value: nostrShim,
+      value: identityGranted ? nostrShim : undefined,
       writable: false,
       configurable: false,
       enumerable: true
     })
   } catch {
-    try {
-      window.nostr = nostrShim
-    } catch {}
+    if (identityGranted) {
+      try {
+        window.nostr = nostrShim
+      } catch {}
+    }
   }
 
   window.nostrdb = {
