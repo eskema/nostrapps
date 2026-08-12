@@ -152,6 +152,13 @@ async function requestFileFromHost(path) {
 // or embed an external frame. A napp's only route off-origin is then the
 // bridge's postMessage rpc (not CSP-governed) — the launcher's mediated
 // capabilities, which is the point. Granting network drops the CSP entirely.
+//
+// worker-src 'none' is load-bearing, not decorative: a document's connect-src
+// does NOT govern a service/web worker's network — a worker's connections are
+// bounded only by the CSP on its OWN script response, which we don't set. So a
+// same-origin worker (worker-src otherwise falls back to child-src 'self') could
+// open a wss:// to any relay, entirely outside this connect-src. Denying worker
+// creation while locked closes that bypass (matches napplets' NAPPLET_CSP).
 const LOCKED_CSP = [
   "default-src 'self' blob: data:",
   "script-src 'self' 'unsafe-inline' blob:",
@@ -161,6 +168,7 @@ const LOCKED_CSP = [
   "connect-src 'self' blob: data:",
   "frame-src 'self'",
   "child-src 'self' blob:",
+  "worker-src 'none'",
   "form-action 'self'",
   "base-uri 'self'"
 ].join("; ")

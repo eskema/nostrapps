@@ -116,6 +116,31 @@
           }
         }
 
+        // Tear down any service worker the NAPP registered for itself, keeping
+        // only the launcher's own (served at /sw.js). A napp's SW isn't governed
+        // by the document CSP, so it could keep talking to the network after the
+        // user revokes `network` — this makes the grant toggle authoritative:
+        // flip network off, the launcher re-applies the policy, and the rogue SW
+        // is gone on reload. No manual unregistering. (Locked napps can't create
+        // one in the first place — LOCKED_CSP has worker-src 'none' — so this
+        // only matters for a napp that registered one while it was allowed.)
+        async function unregisterForeignSWs() {
+          if (!navigator.serviceWorker?.getRegistrations) return
+          try {
+            const regs = await navigator.serviceWorker.getRegistrations()
+            await Promise.all(
+              regs.map(async r => {
+                const script = (r.active || r.waiting || r.installing)?.scriptURL || ""
+                if (!script.endsWith("/sw.js")) {
+                  try {
+                    await r.unregister()
+                  } catch {}
+                }
+              })
+            )
+          } catch {}
+        }
+
         async function putFile(path, body, mime) {
           const db = await openDB()
           return new Promise((resolve, reject) => {
@@ -188,6 +213,7 @@
           if (data.__nostrapps === "napp-install") {
             try {
               await clearAll()
+              await unregisterForeignSWs()
               for (const f of data.files) {
                 await putFile(f.path, f.body, f.mime)
               }
@@ -251,9 +277,12 @@
             }
           } else if (data.__nostrapps === "napp-set-policy") {
             // Update just the policy record (a grant edit after install), then
-            // the launcher reloads the napp so its SW re-reads the new CSP.
+            // the launcher reloads the napp so its SW re-reads the new CSP. Also
+            // tear down any SW the napp registered for itself, so revoking
+            // `network` actually cuts it off (its SW ignores the document CSP).
             try {
               await putFile("/__policy__", JSON.stringify(data.policy || {}), "application/json")
+              await unregisterForeignSWs()
               event.source.postMessage({ __nostrapps: "napp-set-policy-done" }, event.origin)
             } catch (err) {
               event.source.postMessage(
