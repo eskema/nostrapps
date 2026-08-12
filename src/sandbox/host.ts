@@ -21,6 +21,7 @@ import { createNappWindow } from "./napp-window.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
+import { fetchBlob } from "../nsite/fetch.js"
 import {
   loadBlossomServers,
   loadBookmarks,
@@ -597,6 +598,31 @@ async function dispatchNapplet(
 async function fetchNappletResource(url: unknown): Promise<Record<string, unknown>> {
   if (typeof url !== "string" || !url) {
     return { type: "resource.bytes.error", error: "invalid-request", message: "missing url" }
+  }
+  // blossom:<sha256> (optional "sha256:" prefix) — resolve the blob from Blossom
+  // by hash, where napplet assets and nostr avatars actually live. fetchBlob
+  // verifies sha256(blob) === hash across the user's servers + our default.
+  if (url.startsWith("blossom:")) {
+    const sha = url.slice("blossom:".length).replace(/^sha256:/, "")
+    if (!isHex64(sha)) {
+      return { type: "resource.bytes.error", error: "invalid-request", message: "expected blossom:<sha256>" }
+    }
+    try {
+      const pk = getPubkey()
+      const userServers = pk ? ((await loadBlossomServers(pk)).items ?? []) : []
+      const servers = ["relay.nostrapps.com", ...new Set(userServers)].filter(Boolean) as string[]
+      const blob = await fetchBlob(servers, sha)
+      if (!blob) {
+        return { type: "resource.bytes.error", error: "not-found", message: `blossom blob ${sha} unreachable` }
+      }
+      return {
+        type: "resource.bytes.result",
+        blob,
+        mime: blob.type || "application/octet-stream"
+      }
+    } catch (err: any) {
+      return { type: "resource.bytes.error", error: "fetch-failed", message: err?.message ?? String(err) }
+    }
   }
   try {
     const u = new URL(url)

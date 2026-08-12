@@ -294,10 +294,14 @@ interface NappletStorage extends NappletStorageOps {
 }
 
 interface NappletResource {
-  /** Fetch bytes for a URL through the shell — works even when direct network
-   *  is locked. */
-  bytes(url: string): Promise<{ blob: Blob; mime: string }>
+  /** Fetch a URL's bytes through the shell — works even when the napplet is
+   *  sealed. Schemes: https/http/data/blob and blossom:<sha256>. The Blob's
+   *  `.type` carries the MIME. */
+  bytes(url: string): Promise<Blob>
   bytesMany(urls: string[]): Promise<unknown[]>
+  /** Fetch + wrap in a managed object URL. `img.src = h.url` after `await
+   *  h.ready`; `h.revoke()` releases it. */
+  bytesAsObjectURL(url: string): { url: string; revoke(): void; ready?: Promise<unknown> }
 }
 
 interface NappletRelaySubscription {

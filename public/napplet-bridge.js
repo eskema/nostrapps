@@ -113,8 +113,33 @@
       return Object.assign(ops("shared"), { instance: Object.freeze(ops("instance")) })
     },
     resource: () => ({
-      bytes: url => nappletCall("resource.bytes", { url }, d => ({ blob: d.blob, mime: d.mime })),
-      bytesMany: urls => nappletCall("resource.bytesMany", { urls }, d => d.items)
+      // Returns a Blob (its .type carries the mime), matching @napplet/nap. The
+      // host handles https/http/data/blob and blossom:<sha256>.
+      bytes: url => nappletCall("resource.bytes", { url }, d => d.blob),
+      bytesMany: urls => nappletCall("resource.bytesMany", { urls }, d => d.items),
+      // Ergonomic media helper: fetch bytes, wrap in a managed object URL. Set
+      // `img.src = h.url` after `await h.ready`; call `h.revoke()` on load.
+      bytesAsObjectURL: url => {
+        const handle = { url: "", revoke: () => {} }
+        let objectUrl = null
+        let revoked = false
+        const ready = nappletCall("resource.bytes", { url }, d => d.blob).then(blob => {
+          if (revoked) return
+          objectUrl = URL.createObjectURL(blob)
+          handle.url = objectUrl
+          return objectUrl
+        })
+        handle.revoke = () => {
+          if (revoked) return
+          revoked = true
+          if (objectUrl) {
+            URL.revokeObjectURL(objectUrl)
+            objectUrl = null
+          }
+        }
+        Object.defineProperty(handle, "ready", { value: ready, enumerable: false })
+        return handle
+      }
     }),
     relay: () => ({
       publish: event => nappletCall("relay.publish", { event }, d => d.event),
