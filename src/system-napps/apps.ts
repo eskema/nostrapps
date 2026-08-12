@@ -14,7 +14,11 @@ import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
+import { NAPPLET_NAMED_KIND } from "../nsite/napplet.js"
 import { NostrEvent } from "@nostr/tools"
+
+// Addressable app kinds shown in Discover: nsites (35128) + named napplets (35129).
+const DISCOVER_KINDS = [NSITE_NAMED_KIND, NAPPLET_NAMED_KIND]
 import {
   addControl,
   button,
@@ -149,7 +153,25 @@ export function mount(
     detailOverlay.replaceChildren(back)
     const imgs = detailImages(req.event)
     if (imgs) detailOverlay.appendChild(imgs)
-    detailOverlay.appendChild(req.buildCard())
+    const card = req.buildCard()
+    // Requires — lumped in with the action chips, detail view only (too noisy
+    // in the list).
+    const reqs = req.event ? requiresOf(req.event) : []
+    if (reqs.length) {
+      let chips = card.querySelector<HTMLElement>(".apps-handlers")
+      if (!chips) {
+        chips = document.createElement("div")
+        chips.className = "apps-handlers"
+        card.appendChild(chips)
+      }
+      for (const r of reqs) {
+        const c = document.createElement("span")
+        c.className = "apps-handler"
+        c.textContent = r
+        chips.appendChild(c)
+      }
+    }
+    detailOverlay.appendChild(card)
     detailOverlay.appendChild(detailInfo(req))
     const files = detailFiles(req.event)
     if (files) detailOverlay.appendChild(files)
@@ -287,7 +309,7 @@ export function mount(
     if (!base) return null // local/dev/temp apps have no manifest → no updates
     let best: any = null
     for (const e of events) {
-      if (e.kind !== NSITE_NAMED_KIND || e.created_at <= base) continue
+      if (!DISCOVER_KINDS.includes(e.kind) || e.created_at <= base) continue
       if (computeNappId(e) !== app.nappId) continue
       if (!best || e.created_at > best.created_at) best = e
     }
@@ -380,14 +402,17 @@ export function mount(
     // Published apps carry a manifest → resolve the icon from blossom (same as
     // discover, doesn't depend on the napp's SW). Local/dev/temp apps have no
     // manifest → fall back to their own origin path, served by their SW.
-    const iconSha = app.event ? resolveCardIcon(app.event).sha : null
+    const resolvedIcon = app.event ? resolveCardIcon(app.event) : null
+    const iconSha = resolvedIcon?.sha ?? null
     return {
       nappId: app.nappId,
       title,
       type: classifyInstalled(app),
       description,
       iconSha,
-      iconUrl: iconSha ? null : installedIconUrl(app),
+      // Direct data:/URL icon (self-contained napplets), else the napp's own
+      // origin path.
+      iconUrl: iconSha ? null : resolvedIcon?.url || installedIconUrl(app),
       authorPubkey: author,
       authorLabel,
       createdAt,
@@ -580,7 +605,7 @@ export function mount(
   // (see applyFilter), not by excluding events here — so every manifest gets a
   // card and the filter can show/hide them without rebuilding.
   function sortedManifests(evts: any[]) {
-    return evts.filter(e => e.kind === NSITE_NAMED_KIND).sort((a, b) => b.created_at - a.created_at)
+    return evts.filter(e => DISCOVER_KINDS.includes(e.kind)).sort((a, b) => b.created_at - a.created_at)
   }
 
   // Add / update / remove the placeholder based on whether there are any cards
@@ -733,7 +758,7 @@ export function mount(
     relayEose.delete(url)
     const s = pool.subscribeMany(
       [url],
-      { kinds: [NSITE_NAMED_KIND], limit: 400 },
+      { kinds: DISCOVER_KINDS, limit: 400 },
       {
         label: "napps",
         onevent(event: any) {
@@ -1071,15 +1096,12 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
     card.appendChild(desc)
   }
 
-  // Type chip — reads "napplet · <author>" / "nsite · <author>".
-  const typeEl = document.createElement("span")
-  typeEl.className = `apps-card-type apps-type-${o.type}`
-  typeEl.textContent = o.type
-  card.appendChild(typeEl)
-
+  // The type reads inline as part of the author line — "<type> from <author>"
+  // (or "<type> · <label>" for dev/local), same style as the "from" text.
   if (o.authorPubkey) {
     const author = document.createElement("span")
     author.className = "apps-author"
+    author.dataset.type = o.type // CSS ::before renders "<type> from "
     if (o.onAuthorClick) {
       author.style.cursor = "pointer"
       author.addEventListener("click", e => {
@@ -1095,10 +1117,10 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
     name.setAttribute("pubkey", o.authorPubkey)
     author.append(pic, name)
     card.appendChild(author)
-  } else if (o.authorLabel) {
+  } else {
     const label = document.createElement("span")
     label.className = "apps-author apps-author-label"
-    label.textContent = o.authorLabel
+    label.textContent = o.authorLabel ? `${o.type} · ${o.authorLabel}` : o.type
     card.appendChild(label)
   }
 
@@ -1158,7 +1180,7 @@ function renderCard(
   const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
 
   const title = tag("title")
-  const { sha: iconSha, mime: iconMime } = resolveCardIcon(evt)
+  const { sha: iconSha, mime: iconMime, url: iconUrl } = resolveCardIcon(evt)
 
   // Assigned after renderAppCard() returns; menu/buttons close over it.
   let card: HTMLElement
@@ -1231,14 +1253,16 @@ function renderCard(
       } else if (action === "install") {
         const raw = naddrEncode({
           pubkey: evt.pubkey,
-          kind: NSITE_NAMED_KIND,
+          kind: evt.kind, // 35128 nsite → install(); 35129 napplet → installNapplet()
           identifier: dTag,
           relays: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
         })
         const nappId = await ctx.install(raw)
-        // Launch right after install — the boot just completed so the napp's
-        // service worker is freshly active, the best moment to open its window.
-        await ctx.launchNapp?.(nappId, title || dTag || undefined)
+        // Napplets self-launch during install (srcdoc); nsites don't, so launch
+        // here — the boot just finished, the best moment to open the window.
+        if (!nappId.startsWith("napplet~")) {
+          await ctx.launchNapp?.(nappId, title || dTag || undefined)
+        }
       }
       if (onChange) {
         onChange()
@@ -1290,6 +1314,7 @@ function renderCard(
     description: tag("description") || tag("summary"),
     iconSha,
     iconMime,
+    iconUrl: iconSha ? null : iconUrl,
     authorPubkey: evt.pubkey,
     createdAt: evt.created_at,
     actions: actionsOf(evt),
@@ -1324,7 +1349,11 @@ function renderCard(
 
 function computeNappId(evt: any) {
   const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1]
-  return `${evt.pubkey.slice(0, 16)}~${dTag || ""}`
+  const base = `${evt.pubkey.slice(0, 16)}~${dTag || ""}`
+  // Match persistence.computeNappId: napplets (5129/15129/35129) get their own
+  // namespace so a napplet and an nsite under the same d tag don't collide.
+  if (evt.kind === 5129 || evt.kind === 15129 || evt.kind === 35129) return `napplet~${base}`
+  return base
 }
 
 // Conventional icon filenames to fall back to when no icon is declared.
@@ -1346,7 +1375,11 @@ const ICON_FALLBACK_NAMES = [
 // via the manifest's `path` tags. With no usable icon tag we look through the
 // manifest's files BY FILENAME (so icons in subfolders are found, not just at
 // the root), preferring an apple-touch-icon, then a conventional favicon name.
-function resolveCardIcon(evt: any): { sha: string | null; mime: string | null } {
+function resolveCardIcon(evt: any): {
+  sha: string | null
+  mime: string | null
+  url: string | null
+} {
   const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
   const basename = (p: any) => String(p).replace(/^.*\//, "").toLowerCase()
   // Match the full declared path (manifests vary on the leading slash).
@@ -1359,22 +1392,25 @@ function resolveCardIcon(evt: any): { sha: string | null; mime: string | null } 
   const iconTag = evt.tags.find((t: any) => t[0] === "icon" && t[1])
   if (iconTag) {
     const val = iconTag[1] as string
-    if (/^[0-9a-f]{64}$/i.test(val)) return { sha: val, mime: iconTag[2] || null }
+    if (/^[0-9a-f]{64}$/i.test(val)) return { sha: val, mime: iconTag[2] || null, url: null }
+    // A self-contained napplet has no file paths to point at, so its icon is an
+    // inline data: URI or an absolute URL — use it directly.
+    if (/^(data:|https?:)/i.test(val)) return { sha: null, mime: null, url: val }
     // The declared path may not match exactly (root vs subfolder); fall back to
     // its filename anywhere in the manifest.
     const pt = byFullPath(val) || byName(basename(val))
-    if (pt) return { sha: pt[2], mime: pt[3] || null }
+    if (pt) return { sha: pt[2], mime: pt[3] || null, url: null }
   }
 
   // Prefer an apple-touch-icon (a real app icon), wherever it lives.
   const apple = pathTags.find((t: any) => basename(t[1]).startsWith("apple-touch-icon"))
-  if (apple) return { sha: apple[2], mime: apple[3] || null }
+  if (apple) return { sha: apple[2], mime: apple[3] || null, url: null }
 
   for (const name of ICON_FALLBACK_NAMES) {
     const pt = byName(name)
-    if (pt) return { sha: pt[2], mime: pt[3] || null }
+    if (pt) return { sha: pt[2], mime: pt[3] || null, url: null }
   }
-  return { sha: null, mime: null }
+  return { sha: null, mime: null, url: null }
 }
 
 // ─── helpers ─────────────────────────────────────────────────────
@@ -1448,6 +1484,10 @@ function searchHaystack(evt: NostrEvent): string {
 // Action/handler names a manifest declares.
 function actionsOf(evt: NostrEvent): string[] {
   return evt.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
+}
+
+function requiresOf(evt: NostrEvent): string[] {
+  return evt.tags.filter((t: any) => t[0] === "requires" && t[1]).map((t: any) => t[1])
 }
 
 function appendSearch(card: HTMLElement, text: string) {
@@ -1540,8 +1580,16 @@ function detailInfo(req: DetailReq): HTMLElement {
   const section = document.createElement("div")
   section.className = "apps-detail-info"
 
-  // id — value only, no label.
-  section.appendChild(detailField("id", code(req.nappId)))
+  // released date + id as one block (no gap between them), value-only.
+  const idBlock = document.createElement("div")
+  idBlock.className = "apps-detail-idblock"
+  if (req.event?.created_at) {
+    idBlock.appendChild(
+      detailField("released", code(new Date(req.event.created_at * 1000).toLocaleDateString()))
+    )
+  }
+  idBlock.appendChild(detailField("id", code(req.nappId)))
+  section.appendChild(idBlock)
 
   const event = req.event
   if (event) {

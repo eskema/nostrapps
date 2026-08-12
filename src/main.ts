@@ -42,7 +42,7 @@ import { button, chip, icon } from "./system-napps/ui.js"
 import { promptNappPolicy } from "./napp-permissions.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
-import { resolveNapplet, isNappletKind } from "./nsite/napplet.js"
+import { resolveNapplet, isNappletKind, loadNappletFromManifest } from "./nsite/napplet.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
 import { currentSigner, reconnectIfNeeded } from "./signers/index.js"
 import { connectBunkerInput, disconnectBunkerSigner } from "./signers/nip46.js"
@@ -59,6 +59,7 @@ import type {
   SuggestionItem,
   NsiteResult,
   NappWindowState,
+  NappPolicy,
   SystemCtx,
   NappWindow
 } from "./types.js"
@@ -658,9 +659,15 @@ async function editPermissions(nappId: string) {
   }
   for (const d of app.requires ?? []) declared.add(d)
 
+  const type = nappId.startsWith("napplet~")
+    ? "napplet"
+    : app.event
+      ? manifestAppType(app.event)
+      : metaAppType(app)
   const policy = await promptNappPolicy({
     title: app.petname || app.title || nappId,
     icon: app.icon || undefined,
+    type,
     declaredDomains: [...declared],
     current: persist.getPolicy(nappId),
     mode: "edit"
@@ -962,12 +969,16 @@ function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
         win.focus()
       } else if (item.raw) {
         const nappId = await install(item.raw)
-        const win = await launch(stage, nappId, {
-          ...makeLaunchOpts(),
-          petname: friendlyNameFor(nappId)
-        })
-        syncDOM(win)
-        win.focus()
+        // Napplets self-launch inside install() (srcdoc path); only nsites need
+        // launching here.
+        if (!nappId.startsWith("napplet~")) {
+          const win = await launch(stage, nappId, {
+            ...makeLaunchOpts(),
+            petname: friendlyNameFor(nappId)
+          })
+          syncDOM(win)
+          win.focus()
+        }
       }
       setStatus(`Launched ${label}`)
       input!.value = ""
@@ -1123,14 +1134,20 @@ async function restoreAll() {
         })
         continue
       }
-      const win = await launch(stage, state.nappId, {
-        ...makeLaunchOpts(),
-        instanceId: state.instanceId,
-        petname: state.petname,
-        params: state.params,
-        position: state.position,
-        status: state.status
-      })
+      // Napplets aren't served from an origin — re-verify + srcdoc them from
+      // the stored manifest, not the nsite launch path (which would point the
+      // iframe at a non-existent SW origin and load the launcher instead).
+      const win = state.nappId.startsWith("napplet~")
+        ? await restoreNapplet(state)
+        : await launch(stage, state.nappId, {
+            ...makeLaunchOpts(),
+            instanceId: state.instanceId,
+            petname: state.petname,
+            params: state.params,
+            position: state.position,
+            status: state.status
+          })
+      if (!win) continue
       const restoredState = win.getState()
       persist.updateOpen(state.instanceId, restoredState)
       void replayLoadedActions(restoredState.instanceId).catch((err: any) => {
@@ -1666,6 +1683,37 @@ async function init() {
 }
 init()
 
+// nsite/napp/napplet, for the summary screen.
+function manifestAppType(event: { kind: number; tags: string[][] } | null | undefined): string {
+  if (!event) return "napp"
+  if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) return "napplet"
+  return event.tags.some(t => (t[0] === "action" || t[0] === "requires") && t[1]) ? "napp" : "nsite"
+}
+// Same, from a dev/local metadata.json.
+function metaAppType(m: any): string {
+  return m?.actions?.length || m?.requires?.length ? "napp" : "nsite"
+}
+
+// First-run-remembered permission gate, shared by every launch path (published,
+// dev, folder, temp). Shows the summary + grant screen the first time an app is
+// seen; later launches reuse the remembered grant (the app card's permissions
+// button re-opens it). Returns the effective policy, or null if cancelled.
+async function resolvePolicyForLaunch(
+  nappId: string,
+  opts: {
+    title: string
+    icon?: string
+    type?: string
+    declaredDomains: string[]
+  }
+): Promise<NappPolicy | null> {
+  if (persist.hasPolicy(nappId)) return persist.getPolicy(nappId)
+  const granted = await promptNappPolicy(opts)
+  if (!granted) return null
+  persist.setPolicy(nappId, granted)
+  return persist.getPolicy(nappId)
+}
+
 async function install(raw: string): Promise<string> {
   let resolved
   try {
@@ -1698,17 +1746,17 @@ async function install(raw: string): Promise<string> {
   const onProgress = setStatus
   const label = title || nappId
 
-  // Permission screen before anything is written: the user grants network +
-  // capability domains, and that policy ships with the install so the napp's
-  // very first load is already under the right CSP. Cancelling aborts install.
+  // Summary + permission screen before anything is written; the granted policy
+  // ships with the install so the napp's first load is already under the right
+  // CSP. Cancelling aborts. First run only — a reinstall keeps the prior grant.
   const iconUrl = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
-  const policy = await promptNappPolicy({
+  const policy = await resolvePolicyForLaunch(nappId, {
     title: label,
     icon: iconUrl,
+    type: manifestAppType(manifest),
     declaredDomains: requiresFromEvent(manifest)
   })
   if (!policy) throw new Error("Install cancelled")
-  persist.setPolicy(nappId, policy)
 
   console.debug("[sandbox] install", { nappId, label, origin })
   onProgress(`Booting ${label}…`)
@@ -1735,12 +1783,12 @@ async function installNapplet(target: {
   const resolved = await resolveNapplet(target, setStatus)
   const nappId = persist.computeNappId(resolved.manifest)
 
-  const policy = await promptNappPolicy({
+  const policy = await resolvePolicyForLaunch(nappId, {
     title: resolved.title || resolved.dTag,
+    type: "napplet",
     declaredDomains: resolved.requires
   })
   if (!policy) throw new Error("Install cancelled")
-  persist.setPolicy(nappId, policy)
   persist.storeInstalledEvent(resolved.manifest, resolved.title || resolved.dTag)
   handlers.addApp(nappId, [])
 
@@ -1752,6 +1800,24 @@ async function installNapplet(target: {
   win.focus()
   setStatus(`Launched napplet ${resolved.title || resolved.dTag}`)
   return nappId
+}
+
+// Re-materialize a napplet window on reload: re-verify + re-fetch its bytes from
+// the stored manifest and srcdoc it, instead of the nsite launch path.
+async function restoreNapplet(state: NappWindowState): Promise<NappWindow | null> {
+  const app = persist.getInstalledApp(state.nappId)
+  if (!app?.event) {
+    setStatus(`Can't restore napplet ${state.nappId} — its manifest is gone`)
+    return null
+  }
+  const resolved = await loadNappletFromManifest(app.event, setStatus)
+  return launchNapplet(stage, state.nappId, resolved.html, {
+    ...makeLaunchOpts(),
+    instanceId: state.instanceId,
+    petname: state.petname || resolved.title || resolved.dTag,
+    position: state.position,
+    status: state.status
+  })
 }
 
 async function installDevApp() {
@@ -1770,6 +1836,20 @@ async function installDevApp() {
     const onProgress = setStatus
     const label = metadata.title || nappId
     const petname = metadata.title || nappId
+
+    // Summary + grant screen (first run only), before boot — same gate as a
+    // published install, so dev apps are shown and configurable from the start.
+    if (
+      !(await resolvePolicyForLaunch(nappId, {
+        title: label,
+        icon: metadata.icon || undefined,
+        type: metaAppType(metadata),
+        declaredDomains: metadata.requires || []
+      }))
+    ) {
+      setStatus("Cancelled")
+      return
+    }
 
     setStatus(`Booting dev ${label}…`)
     await bootDevApp(origin, nappId, onProgress, label)
@@ -1814,6 +1894,18 @@ async function installDevAppFromUrl(rawUrl: string) {
     const onProgress = setStatus
     const label = metadata.title || nappId
     const petname = metadata.title || nappId
+
+    if (
+      !(await resolvePolicyForLaunch(nappId, {
+        title: label,
+        icon: metadata.icon || undefined,
+        type: metaAppType(metadata),
+        declaredDomains: metadata.requires || []
+      }))
+    ) {
+      setStatus("Cancelled")
+      return
+    }
 
     setStatus(`Booting dev ${label}…`)
     await bootDevApp(origin, nappId, onProgress, label)
@@ -1963,6 +2055,19 @@ async function launchFromInput(raw: string): Promise<void> {
 
     if (title) win.titleEl.textContent = title
 
+    if (
+      !(await resolvePolicyForLaunch(nappId, {
+        title: label,
+        icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1],
+        type: manifestAppType(manifest),
+        declaredDomains: requiresFromEvent(manifest)
+      }))
+    ) {
+      win.close()
+      setStatus("Cancelled")
+      return
+    }
+
     setTempFiles(nappId, files)
     setStatus(`Booting temp ${label}…`)
     await bootDevApp(origin, nappId, setStatus, label)
@@ -2018,9 +2123,21 @@ localFolderInput.addEventListener("change", async (e: Event) => {
     const origin = nappOriginFor(nappId)
     const onProgress = setStatus
     const label = metadata.title || nappId
+
+    const policy = await resolvePolicyForLaunch(nappId, {
+      title: label,
+      icon: metadata?.icon || undefined,
+      type: metaAppType(metadata),
+      declaredDomains: metadata?.requires || []
+    })
+    if (!policy) {
+      setStatus("Cancelled")
+      return
+    }
+
     console.debug("[sandbox] install", { nappId, label, origin })
     setStatus(`Booting ${label}…`)
-    await bootNapp(origin, files, onProgress, label)
+    await bootNapp(origin, files, onProgress, label, policy)
 
     const petname = metadata?.title || nappId
 
@@ -2105,6 +2222,17 @@ async function loadTempNappFromNaddr(naddr: string): Promise<string> {
   const petname = title || resolved.dTag || nappId
   const origin = nappOriginFor(nappId)
   const label = title || nappId
+
+  if (
+    !(await resolvePolicyForLaunch(nappId, {
+      title: label,
+      icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1],
+      type: manifestAppType(manifest),
+      declaredDomains: requiresFromEvent(manifest)
+    }))
+  ) {
+    throw new Error("Cancelled")
+  }
 
   setTempFiles(nappId, files)
   setStatus(`Booting temp ${label}…`)

@@ -60,10 +60,11 @@ async function handleFetch(req, url) {
             typeof devFile.body === "string" ? devFile.body : await new Blob([devFile.body]).text()
           const policy = await readDevPolicy()
           const grants = grantsFor(policy)
-          return new Response(
-            injectBridge(text, { wrapperUi: grants.includes("ui"), domains: grants }),
-            { status: 200, headers: htmlHeaders(mime, policy) }
-          )
+          const wrapperUi = grants.includes("ui") || (await devWantsWrapper())
+          return new Response(injectBridge(text, { wrapperUi, domains: grants }), {
+            status: 200,
+            headers: htmlHeaders(mime, policy)
+          })
         }
         return new Response(devFile.body, {
           status: 200,
@@ -98,10 +99,11 @@ async function handleFetch(req, url) {
         const text = typeof record.body === "string" ? record.body : await record.body.text()
         const policy = await readInstalledPolicy()
         const grants = grantsFor(policy)
-        return new Response(
-          injectBridge(text, { wrapperUi: grants.includes("ui"), domains: grants }),
-          { status: 200, headers: htmlHeaders(mime, policy) }
-        )
+        const wrapperUi = grants.includes("ui") || (await installedWantsWrapper())
+        return new Response(injectBridge(text, { wrapperUi, domains: grants }), {
+          status: 200,
+          headers: htmlHeaders(mime, policy)
+        })
       }
       return new Response(record.body, {
         status: 200,
@@ -255,9 +257,50 @@ function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
   return result
 }
 
-// The wrapper design system is now a granted capability (`ui`) read from the
-// per-napp policy — see grantsFor() at the serve sites — so the service worker
-// no longer cracks open metadata.json to decide it.
+// The wrapper design system is a granted capability (`ui`) read from the
+// per-napp policy — see grantsFor() at the serve sites. TEMPORARY back-compat:
+// existing apps still declare `ui: "wrapper"` in metadata.json rather than
+// `requires: ["ui"]`, so we also detect that flag and apply the wrapper. Remove
+// once apps have migrated to the requires declaration.
+function wrapperFromMetaText(text) {
+  try {
+    const m = JSON.parse(text)
+    return !!m && m.ui === "wrapper"
+  } catch {
+    return false
+  }
+}
+
+async function installedWantsWrapper() {
+  try {
+    const db = await openDB()
+    const rec = await new Promise(resolve => {
+      const tx = db.transaction(STORE, "readonly")
+      const r = tx.objectStore(STORE).get("/metadata.json")
+      r.onsuccess = () => resolve(r.result ?? null)
+      r.onerror = () => resolve(null)
+    })
+    try {
+      db.close()
+    } catch {}
+    if (!rec) return false
+    const text = typeof rec.body === "string" ? rec.body : await rec.body.text()
+    return wrapperFromMetaText(text)
+  } catch {
+    return false
+  }
+}
+
+async function devWantsWrapper() {
+  try {
+    const meta = await requestFileFromHost("/metadata.json")
+    if (!meta || meta.error) return false
+    const text = typeof meta.body === "string" ? meta.body : await new Blob([meta.body]).text()
+    return wrapperFromMetaText(text)
+  } catch {
+    return false
+  }
+}
 
 function openDB() {
   return new Promise((resolve, reject) => {

@@ -467,10 +467,6 @@ export function storeInstalledLocalApp(app: {
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)
-  // Local/dev apps are your own code being iterated on — auto-grant whatever
-  // they declare (no permission screen), so the SW's CSP/wrapper and the bridge
-  // domains work from first load.
-  setPolicy(app.nappId, { domains: sanitizeRequires(app.requires) })
 }
 
 // NIP-5D `requires` domains from metadata.json — untrusted napp input.
@@ -718,6 +714,4 @@ export function storeDevApp(app: {
     requires: sanitizeRequires(app.requires),
     installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000)
   })
-  // Dev/temp apps are your own code — auto-grant declared requires (no screen).
-  setPolicy(app.nappId, { domains: sanitizeRequires(app.requires) })
 }

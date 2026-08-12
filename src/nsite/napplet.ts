@@ -67,6 +67,17 @@ export async function resolveNapplet(
     : { kinds: [kind], authors: [pubkey], ...(dTag ? { "#d": [dTag] } : {}) }
   const manifest = latest(await pool.querySync(relays, filter, { maxWait: 6000 }))
   if (!manifest) throw new Error("napplet manifest not found")
+  return loadNappletFromManifest(manifest, onProgress)
+}
+
+// The verify + fetch half, given the manifest event we already hold — used both
+// by resolveNapplet (after the relay query) and on RESTORE, where the launcher
+// already has the stored manifest and just needs to re-fetch + re-verify the
+// bytes (content-addressed: never trust a cached document, re-verify each load).
+export async function loadNappletFromManifest(
+  manifest: NostrEvent,
+  onProgress: (m: string) => void = () => {}
+): Promise<ResolvedNapplet> {
   if (!verifyEvent(manifest)) throw new Error("napplet manifest signature is invalid")
 
   const pathTags = manifest.tags.filter(t => t[0] === "path" && t.length >= 3 && t[1] && t[2])
@@ -83,6 +94,7 @@ export async function resolveNapplet(
   )
   if (!indexTag) throw new Error("napplet manifest has no /index.html path")
 
+  const pubkey = manifest.pubkey
   const manifestServers = manifest.tags.filter(t => t[0] === "server" && t[1]).map(t => t[1])
   const userServers = pubkey ? ((await loadBlossomServers(pubkey)).items ?? []) : []
   const servers = [
@@ -96,8 +108,8 @@ export async function resolveNapplet(
   if (!blob) throw new Error(`Could not fetch napplet index.html (${indexTag[2]})`)
 
   return {
-    dTag: manifest.tags.find(t => t[0] === "d")?.[1] || dTag,
-    pubkey: manifest.pubkey,
+    dTag: manifest.tags.find(t => t[0] === "d")?.[1] || "",
+    pubkey,
     html: await blob.text(),
     title: manifest.tags.find(t => t[0] === "title")?.[1] ?? null,
     requires: manifest.tags.filter(t => t[0] === "requires" && t[1]).map(t => t[1]),
