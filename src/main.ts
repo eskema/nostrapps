@@ -820,6 +820,7 @@ function buildSuggestionItems(): SuggestionItem[] {
     seen.add(key)
     out.push({
       source: "napp",
+      appType: persist.classifyInstalled(app),
       nappId: app.nappId,
       petname: petnameForNappId(app.nappId, allSessions)
     })
@@ -847,7 +848,8 @@ function itemSearchText(item: SuggestionItem): string {
     item.raw,
     item.slash,
     item.systemId,
-    item.actionId
+    item.actionId,
+    item.appType
   ]
     .filter(Boolean)
     .join(" ")
@@ -941,7 +943,9 @@ function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
 
   const source = document.createElement("span")
   source.className = "source"
-  source.textContent = item.source
+  // Installed-app rows read their flavor (nsite / napp / napplet) instead of the
+  // generic "napp" source; window/slash rows keep their affordance label.
+  source.textContent = item.appType ?? item.source
   row.append(main, source)
 
   row.addEventListener("mousedown", async (e: MouseEvent) => {

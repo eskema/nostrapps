@@ -8,7 +8,8 @@ import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 import "nostr-web-components"
 
-import type { InstalledApp, SystemCtx } from "../types.js"
+import type { AppType, InstalledApp, SystemCtx } from "../types.js"
+import { classifyEvent, classifyInstalled } from "../persistence.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
@@ -1010,24 +1011,6 @@ export function mount(
 
 // ─── Unified app card (Installed + Discover render the same shape) ──
 
-// The three app tiers. napplet = a NIP-5D capability app (its own kinds). napp =
-// an nsite (35128) that declares capabilities (action or requires tags). nsite =
-// a plain static site declaring neither.
-type AppType = "nsite" | "napp" | "napplet"
-
-function classifyEvent(event: { kind: number; tags: string[][] }): AppType {
-  if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) return "napplet"
-  const caps = event.tags.some(t => (t[0] === "action" || t[0] === "requires") && t[1])
-  return caps ? "napp" : "nsite"
-}
-
-function classifyInstalled(app: InstalledApp): AppType {
-  if (app.nappId.startsWith("napplet~") || app.event?.kind === 35129) return "napplet"
-  if (app.event) return classifyEvent(app.event)
-  // dev/local/temp: no manifest event — classify from the stored declarations.
-  const caps = (app.actions?.length ?? 0) > 0 || (app.requires?.length ?? 0) > 0
-  return caps ? "napp" : "nsite"
-}
 
 interface AppCardOpts {
   nappId: string

@@ -154,6 +154,10 @@ export type NappPolicy = {
   domains: string[]
 }
 
+// nsite = plain static site; napp = declares actions/requires; napplet = a
+// self-contained kind-35129 app. The three flavors the launcher runs.
+export type AppType = "nsite" | "napp" | "napplet"
+
 export type InstalledApp = {
   nappId: string
   icon: string
@@ -174,6 +178,9 @@ export type InstalledApp = {
 
 export interface SuggestionItem {
   source: "system" | "action" | "open" | "napp"
+  // For "open" / "napp" rows: which flavor the app is, so the row can read
+  // "nsite" / "napp" / "napplet" instead of the generic "napp" source label.
+  appType?: AppType
   nappId?: string
   instanceId?: string
   petname?: string | null

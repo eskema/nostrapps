@@ -1,5 +1,5 @@
 import { NostrEvent } from "@nostr/tools"
-import { InstalledApp, NappPolicy, NappWindowState, SpaceData, SpacesState } from "./types"
+import { AppType, InstalledApp, NappPolicy, NappWindowState, SpaceData, SpacesState } from "./types"
 
 const INSTALLED_KEY = "nostrapps:installed"
 const SPACES_KEY = "nostrapps:spaces"
@@ -650,6 +650,29 @@ export function getInstalledApp(nappId: string): InstalledApp | undefined {
 
   const dev = devApps.get(nappId)
   if (dev) return { nappId, ...dev }
+}
+
+// The three app tiers. napplet = a NIP-5D capability app (its own kinds). napp =
+// an nsite (35128) that declares capabilities (action or requires tags). nsite =
+// a plain static site declaring neither.
+export function classifyEvent(event: { kind: number; tags: string[][] }): AppType {
+  if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) return "napplet"
+  const caps = event.tags.some(t => (t[0] === "action" || t[0] === "requires") && t[1])
+  return caps ? "napp" : "nsite"
+}
+
+export function classifyInstalled(app: InstalledApp): AppType {
+  if (app.nappId.startsWith("napplet~") || app.event?.kind === 35129) return "napplet"
+  if (app.event) return classifyEvent(app.event)
+  // dev/local/temp: no manifest event — classify from the stored declarations.
+  const caps = (app.actions?.length ?? 0) > 0 || (app.requires?.length ?? 0) > 0
+  return caps ? "napp" : "nsite"
+}
+
+export function classifyNappId(nappId: string): AppType {
+  const app = getInstalledApp(nappId)
+  if (app) return classifyInstalled(app)
+  return nappId.startsWith("napplet~") ? "napplet" : "nsite"
 }
 
 export function getInstalledApps(): InstalledApp[] {
