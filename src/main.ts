@@ -1846,6 +1846,16 @@ async function launchInstalledNapplet(
     setStatus(`Can't launch napplet ${nappId} — its manifest is gone`)
     return null
   }
+  // A napplet with no stored policy launches with zero granted domains, which
+  // presents as every required domain missing. Run the same first-run gate as
+  // install (returns the stored policy when one exists, so no re-prompt).
+  const policy = await resolvePolicyForLaunch(nappId, {
+    title: app.petname || app.title || nappId,
+    icon: app.icon || undefined,
+    type: "napplet",
+    declaredDomains: requiresFromEvent(app.event)
+  })
+  if (!policy) return null
   const resolved = await loadNappletFromManifest(app.event, setStatus)
   return launchNapplet(stage, nappId, resolved.html, {
     ...makeLaunchOpts(),

@@ -226,17 +226,11 @@
       if (factory) napplet[d] = Object.freeze(factory())
     }
     Object.freeze(napplet)
+    // Left replaceable on purpose: apps built with @napplet/shim assign their
+    // own window.napplet (same wire, and the host enforces grants regardless).
+    // Only window.nostr is pinned — that one is a signer.
     try {
-      Object.defineProperty(window, "napplet", {
-        value: napplet,
-        writable: false,
-        configurable: false,
-        enumerable: true
-      })
-    } catch {
-      try {
-        window.napplet = napplet
-      } catch {}
-    }
+      window.napplet = napplet
+    } catch {}
   }
 })()
