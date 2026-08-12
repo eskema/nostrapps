@@ -18,6 +18,7 @@
   const themeHandlers = new Set()
   const identityHandlers = new Set()
   const relaySubs = new Map() // subId -> { onEvent, onEose, onClosed }
+  const outboxSubs = new Map() // subId -> { event: Set, closed: Set }
 
   function nappletCall(type, params, pick) {
     const id = "n5d" + n5dSerial++
@@ -60,6 +61,19 @@
       if (s) {
         if (s.onClosed) try { s.onClosed(data.reason) } catch {}
         relaySubs.delete(data.subId)
+      }
+      return
+    }
+    if (data.type === "outbox.event") {
+      const s = outboxSubs.get(data.subId)
+      if (s) for (const fn of s.event) try { fn(data.result) } catch {}
+      return
+    }
+    if (data.type === "outbox.closed") {
+      const s = outboxSubs.get(data.subId)
+      if (s) {
+        for (const fn of s.closed) try { fn(data.reason) } catch {}
+        outboxSubs.delete(data.subId)
       }
       return
     }
@@ -155,6 +169,49 @@
           close: () => {
             relaySubs.delete(subId)
             window.parent.postMessage({ type: "relay.close", id: "n5d" + n5dSerial++, subId }, "*")
+          }
+        }
+      }
+    }),
+    // Outbox-model routing: the shell discovers each author's relays (NIP-65),
+    // queries/publishes there, and dedups. Result shapes match @napplet/nap:
+    // getEvent → OutboxEventResult, query → OutboxResult, publish →
+    // OutboxPublishResult, resolveRelays → OutboxRelayPlan.
+    outbox: () => ({
+      getEvent: (eventId, options) =>
+        nappletCall("outbox.getEvent", { eventId, options }, d => ({
+          result: d.result,
+          incomplete: d.incomplete
+        })),
+      query: (filters, options) =>
+        nappletCall("outbox.query", { filters, options }, d => ({
+          events: d.events,
+          incomplete: d.incomplete
+        })),
+      publish: (event, options) =>
+        nappletCall("outbox.publish", { event, options }, d => ({
+          ok: d.ok,
+          event: d.event,
+          eventId: d.eventId,
+          relays: d.relays
+        })),
+      resolveRelays: target => nappletCall("outbox.resolveRelays", { target }, d => d.plan),
+      subscribe: (filters, options) => {
+        const subId = "ob" + n5dSerial++
+        const listeners = { event: new Set(), closed: new Set() }
+        outboxSubs.set(subId, listeners)
+        window.parent.postMessage(
+          { type: "outbox.subscribe", id: "n5d" + n5dSerial++, subId, filters, options },
+          "*"
+        )
+        return {
+          on: (evt, cb) => {
+            if (evt === "event") listeners.event.add(cb)
+            else if (evt === "closed") listeners.closed.add(cb)
+          },
+          close: () => {
+            outboxSubs.delete(subId)
+            window.parent.postMessage({ type: "outbox.close", id: "n5d" + n5dSerial++, subId }, "*")
           }
         }
       }

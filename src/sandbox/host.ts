@@ -35,6 +35,7 @@ import {
   loadWikiRelays
 } from "@nostr/gadgets/lists"
 import { loadEmojiSets, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
+import { outboxFilterRelayBatch } from "@nostr/gadgets/outbox"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 import { loadRelayInfo } from "@nostr/gadgets/relays"
 import { pool } from "@nostr/gadgets/global"
@@ -420,7 +421,7 @@ export function broadcastTheme() {
 
 // Capability domains the launcher implements (NAPPLET_OFFERED). Keep in sync
 // with DOMAIN_INFO in napp-permissions.ts and the bridge's factory set.
-const NAPPLET_OFFERED = ["identity", "theme", "storage", "resource", "relay"]
+const NAPPLET_OFFERED = ["identity", "theme", "storage", "resource", "relay", "outbox"]
 
 // The capability domains this napp is actually granted: declared (via
 // ["requires", "<domain>"] manifest tags or a metadata.json `requires` array)
@@ -588,8 +589,194 @@ async function dispatchNapplet(
       return { type: "relay.query.result", events }
     }
 
+    // ── outbox (NIP-65 outbox-model routing: the host discovers each author's
+    //    write relays, queries there, dedups; publish fans out to writer +
+    //    recipient inboxes) ──
+    case "outbox.getEvent": {
+      const eventId = String(data?.eventId ?? "")
+      if (!isHex64(eventId)) {
+        return { type: "outbox.getEvent.result", error: "invalid-request" }
+      }
+      const opts = data?.options ?? {}
+      const authorHint = isHex64(opts?.author) ? [opts.author] : []
+      const events = await outboxQueryEvents([{ ids: [eventId] }], {
+        authors: authorHint,
+        relays: Array.isArray(opts?.relays) ? opts.relays : [],
+        limit: 1
+      })
+      return events.length
+        ? { type: "outbox.getEvent.result", result: { event: events[0] } }
+        : { type: "outbox.getEvent.result", incomplete: true }
+    }
+    case "outbox.query": {
+      const filters = Array.isArray(data?.filters) ? data.filters : [data?.filters]
+      const opts = data?.options ?? {}
+      const events = await outboxQueryEvents(filters, {
+        authors: Array.isArray(opts?.authors) ? opts.authors.filter(isHex64) : [],
+        relays: Array.isArray(opts?.relays) ? opts.relays : [],
+        limit: Number.isFinite(opts?.limit) ? opts.limit : undefined
+      })
+      return { type: "outbox.query.result", events: events.map(event => ({ event })) }
+    }
+    case "outbox.publish":
+      return publishNappletOutbox(nappId, data?.event, data?.options ?? {})
+    case "outbox.resolveRelays":
+      return { type: "outbox.resolveRelays.result", plan: await outboxResolvePlan(data?.target) }
+
     default:
       throw new Error(`unsupported napplet call: ${type}`)
+  }
+}
+
+// Union of hex64 authors across a set of (possibly array) filters.
+function authorsFromFilters(filters: any[]): string[] {
+  const out = new Set<string>()
+  for (const f of filters) {
+    if (Array.isArray(f?.authors)) for (const a of f.authors) if (isHex64(a)) out.add(a)
+  }
+  return [...out]
+}
+
+// Outbox-model read (one-shot): resolve each author's write relays (NIP-65) and
+// query there, deduping by id. Filters with no authors fall back to the user's
+// read relays (+ any relay hints). Bounded by a wall-clock budget.
+async function outboxQueryEvents(
+  rawFilters: any[],
+  opts: { authors?: string[]; relays?: string[]; limit?: number }
+): Promise<NostrEvent[]> {
+  const clean = rawFilters.map(f => sanitizeFilter(f)).filter(Boolean) as any[]
+  if (clean.length === 0) return []
+  const authors = [...new Set([...(opts.authors ?? []), ...authorsFromFilters(clean)])]
+  const hintRelays = (opts.relays ?? []).filter(u => typeof u === "string" && u)
+
+  const seen = new Set<string>()
+  const events: NostrEvent[] = []
+  const collect = (event: NostrEvent) => {
+    if (seen.has(event.id)) return
+    seen.add(event.id)
+    events.push(event)
+  }
+
+  if (authors.length) {
+    // Outbox routing needs authors. Strip `authors` from the base filter and let
+    // outboxFilterRelayBatch fan it out across each author's write relays.
+    const maps = await outboxFilterRelayBatch(
+      authors,
+      clean.map(({ authors: _drop, ...rest }) => rest),
+      { fallbackRelays: [...hintRelays, ...FALLBACK_RELAYS] }
+    )
+    if (maps.length) {
+      await new Promise<void>(resolve => {
+        let done = false
+        const finish = () => {
+          if (done) return
+          done = true
+          clearTimeout(timer)
+          try {
+            sub.close()
+          } catch {}
+          resolve()
+        }
+        const timer = setTimeout(finish, 4500)
+        const sub: SubCloser = pool.subscribeMap(maps, {
+          label: "napplet-outbox",
+          onevent: collect,
+          oneose: finish
+        })
+      })
+    }
+  } else {
+    const relays = [...hintRelays, ...FALLBACK_RELAYS]
+    for (const filter of clean)
+      for (const e of await pool.querySync(relays, filter, { maxWait: 4000 })) collect(e)
+  }
+
+  const limit = opts.limit
+  return typeof limit === "number" && limit >= 0 ? events.slice(0, limit) : events
+}
+
+// Resolve the relay plan the shell would use for a read/write target. Reading
+// someone's notes uses their WRITE relays (outbox); writing to them (an inbox)
+// uses their READ relays. Mirrors OutboxRelayPlan.
+async function outboxResolvePlan(
+  target: any
+): Promise<{ relays: string[]; source: string; missingAuthors?: string[] }> {
+  const direction: "read" | "write" = target?.direction === "write" ? "write" : "read"
+  const authors = new Set<string>()
+  if (isHex64(target?.pubkey)) authors.add(target.pubkey)
+  if (Array.isArray(target?.authors)) for (const a of target.authors) if (isHex64(a)) authors.add(a)
+  if (authors.size === 0) return { relays: [...FALLBACK_RELAYS], source: "fallback" }
+
+  const relays = new Set<string>()
+  const missing: string[] = []
+  for (const pk of authors) {
+    try {
+      // read the author's notes  → their write relays; write to their inbox → read.
+      const items = (await loadRelayList(pk)).items.filter(i =>
+        direction === "read" ? i.write : i.read
+      )
+      if (items.length) for (const i of items) relays.add(i.url)
+      else missing.push(pk)
+    } catch {
+      missing.push(pk)
+    }
+  }
+  if (relays.size === 0) return { relays: [...FALLBACK_RELAYS], source: "fallback", missingAuthors: missing }
+  const plan: { relays: string[]; source: string; missingAuthors?: string[] } = {
+    relays: [...relays],
+    source: "nip65"
+  }
+  if (missing.length) plan.missingAuthors = missing
+  return plan
+}
+
+// Outbox publish: sign the template (behind a prompt), then fan out to the
+// user's write relays (toOutbox, default on), each recipient's read relays
+// (toInboxes), and any explicit relay hints. Returns per-relay success.
+async function publishNappletOutbox(
+  nappId: string,
+  template: any,
+  options: any
+): Promise<Record<string, unknown>> {
+  const resultType = "outbox.publish.result"
+  if (!template || typeof template !== "object") {
+    return { type: resultType, ok: false, error: "invalid event template" }
+  }
+  const signer = currentSigner()
+  if (!signer) return { type: resultType, ok: false, error: "no signer connected" }
+
+  const kind = Number(template.kind)
+  if (!(await requireApproval(nappId, "outbox.publish", `Sign and publish a kind ${kind} event on your behalf.`))) {
+    return { type: resultType, ok: false, error: "permission denied" }
+  }
+
+  try {
+    const signed = await signer.signEvent({
+      kind,
+      content: String(template.content ?? ""),
+      tags: Array.isArray(template.tags) ? template.tags : [],
+      created_at: Number(template.created_at) || Math.floor(Date.now() / 1000)
+    })
+
+    const targets = new Set<string>()
+    if (options?.toOutbox !== false) for (const u of await nappletWriteRelays(getPubkey())) targets.add(u)
+    if (Array.isArray(options?.relays)) for (const u of options.relays) if (typeof u === "string" && u) targets.add(u)
+    const inboxes: string[] = Array.isArray(options?.toInboxes) ? options.toInboxes.filter(isHex64) : []
+    for (const pk of inboxes) {
+      try {
+        for (const i of (await loadRelayList(pk)).items) if (i.read) targets.add(i.url)
+      } catch {}
+    }
+    if (targets.size === 0) for (const u of FALLBACK_RELAYS) targets.add(u)
+
+    const urls = [...targets]
+    const results = await Promise.allSettled(pool.publish(urls, signed))
+    const relays: Record<string, boolean> = {}
+    urls.forEach((u, i) => (relays[u] = results[i]?.status === "fulfilled"))
+    const ok = Object.values(relays).some(Boolean)
+    return { type: resultType, ok, event: signed, eventId: signed.id, relays }
+  } catch (err: any) {
+    return { type: resultType, ok: false, error: err?.message ?? String(err) }
   }
 }
 
@@ -758,6 +945,69 @@ async function nappletRelaySubscribe(
   }
 }
 
+// Live outbox subscription: outbox-route the filters, then stream matching
+// events as outbox.event. Same AbortController lifecycle as relay.subscribe,
+// keyed by nappId+subId; the outbox wire has no eose, only event/closed.
+async function nappletOutboxSubscribe(nappId: string, data: any, post: (msg: object) => void) {
+  const subId = String(data?.subId ?? "")
+  if (!subId) return
+  const key = nappletSubKey(nappId, subId)
+  nappletSubs.get(key)?.abort()
+  const controller = new AbortController()
+  nappletSubs.set(key, controller)
+
+  const clean = (Array.isArray(data?.filters) ? data.filters : [data?.filters])
+    .map((f: any) => sanitizeFilter(f))
+    .filter(Boolean) as any[]
+  if (clean.length === 0) {
+    post({ type: "outbox.closed", subId, reason: "empty filter" })
+    nappletSubs.delete(key)
+    return
+  }
+  const opts = data?.options ?? {}
+  const hints = Array.isArray(opts?.relays) ? opts.relays.filter((u: any) => typeof u === "string" && u) : []
+  const authors = [
+    ...new Set([
+      ...(Array.isArray(opts?.authors) ? opts.authors.filter(isHex64) : []),
+      ...authorsFromFilters(clean)
+    ])
+  ]
+  const emit = (event: NostrEvent) => {
+    if (!controller.signal.aborted) post({ type: "outbox.event", subId, result: { event } })
+  }
+  try {
+    const maps = authors.length
+      ? await outboxFilterRelayBatch(
+          authors,
+          clean.map(({ authors: _drop, ...rest }) => rest),
+          { fallbackRelays: [...hints, ...FALLBACK_RELAYS] }
+        )
+      : []
+    if (controller.signal.aborted) return
+    const label = `napplet-outbox-${nappId.slice(0, 8)}-${subId}`
+    if (maps.length) {
+      pool.subscribeMap(maps, { label, abort: controller.signal, onevent: emit })
+    } else {
+      const relays = [...hints, ...FALLBACK_RELAYS]
+      for (const filter of clean)
+        pool.subscribeMany(relays, filter, { label, abort: controller.signal, onevent: emit })
+    }
+  } catch (err: any) {
+    post({ type: "outbox.closed", subId, reason: err?.message ?? String(err) })
+    nappletSubs.delete(key)
+  }
+}
+
+function nappletOutboxClose(nappId: string, subId: unknown, post: (msg: object) => void) {
+  const key = nappletSubKey(nappId, String(subId ?? ""))
+  const controller = nappletSubs.get(key)
+  if (controller) {
+    controller.abort()
+    nappletSubs.delete(key)
+  }
+  post({ type: "outbox.closed", subId: String(subId ?? "") })
+}
+
 function nappletRelayClose(nappId: string, subId: unknown, post: (msg: object) => void) {
   const key = nappletSubKey(nappId, String(subId ?? ""))
   const controller = nappletSubs.get(key)
@@ -797,6 +1047,8 @@ function handleNapplet(
   // Streaming ops have no single .result — they push by subId.
   if (data.type === "relay.subscribe") return void nappletRelaySubscribe(nappId, data, post)
   if (data.type === "relay.close") return nappletRelayClose(nappId, data.subId, post)
+  if (data.type === "outbox.subscribe") return void nappletOutboxSubscribe(nappId, data, post)
+  if (data.type === "outbox.close") return nappletOutboxClose(nappId, data.subId, post)
 
   dispatchNapplet(data.type, data, nappId)
     .then(result => post({ ...result, id: data.id }))

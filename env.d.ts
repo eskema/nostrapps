@@ -329,6 +329,67 @@ interface NappletRelay {
   ): NappletRelaySubscription
 }
 
+// ── NIP-5D outbox domain (NIP-65 outbox-model relay routing) ──────────────
+interface NappletRelayEventResult {
+  event: NostrEvent
+}
+interface NappletOutboxEventResult {
+  result?: NappletRelayEventResult
+  incomplete?: boolean
+  error?: string
+}
+interface NappletOutboxResult {
+  events: NappletRelayEventResult[]
+  incomplete?: boolean
+  error?: string
+}
+interface NappletOutboxPublishResult {
+  ok: boolean
+  event?: NostrEvent
+  eventId?: string
+  relays?: Record<string, boolean>
+  error?: string
+}
+interface NappletOutboxRelayPlan {
+  relays: string[]
+  source: "nip65" | "cache" | "policy" | "fallback"
+  missingAuthors?: string[]
+}
+interface NappletOutboxSubscription {
+  on(event: "event", cb: (result: NappletRelayEventResult) => void): void
+  on(event: "closed", cb: (reason?: string) => void): void
+  close(): void
+}
+interface NappletOutbox {
+  /** Fetch one event by id through shell-owned outbox routing. */
+  getEvent(
+    eventId: string,
+    options?: { author?: string; relays?: string[]; timeoutMs?: number }
+  ): Promise<NappletOutboxEventResult>
+  /** One-shot outbox-aware query; the shell resolves authors' relays + dedups. */
+  query(
+    filters: unknown[] | unknown,
+    options?: { authors?: string[]; relays?: string[]; limit?: number; timeoutMs?: number }
+  ): Promise<NappletOutboxResult>
+  /** Live outbox-aware subscription. `sub.on("event", …)` / `sub.close()`. */
+  subscribe(
+    filters: unknown[] | unknown,
+    options?: { authors?: string[]; relays?: string[]; timeoutMs?: number }
+  ): NappletOutboxSubscription
+  /** Publish an UNSIGNED template; the shell signs (behind a prompt) and fans
+   *  out to writer + recipient inboxes. `toOutbox` defaults on. */
+  publish(
+    event: EventTemplate,
+    options?: { relays?: string[]; toOutbox?: boolean; toInboxes?: string[] }
+  ): Promise<NappletOutboxPublishResult>
+  /** Resolve which relays the shell would use for a read/write target. */
+  resolveRelays(target: {
+    authors?: string[]
+    pubkey?: string
+    direction?: "read" | "write"
+  }): Promise<NappletOutboxRelayPlan>
+}
+
 // Every domain is optional: presence = the shell granted it.
 interface Napplet {
   identity?: NappletIdentity
@@ -336,6 +397,7 @@ interface Napplet {
   storage?: NappletStorage
   resource?: NappletResource
   relay?: NappletRelay
+  outbox?: NappletOutbox
 }
 
 // ── Augment global Window ────────────────────────────────────────────────

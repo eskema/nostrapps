@@ -15,11 +15,12 @@ const CAP_INFO: Record<string, { title: string; desc: string }> = {
   storage: { title: "storage", desc: "keeps its own data" },
   resource: { title: "resource", desc: "loads files via the launcher" },
   relay: { title: "relay", desc: "reads and posts events" },
+  outbox: { title: "outbox", desc: "finds the right relays for you" },
   network: { title: "network", desc: "can communicate" }
 }
 
 // Grantable rows are the NAP domains (network is appended separately).
-const CAP_ORDER = ["identity", "theme", "storage", "resource", "relay"]
+const CAP_ORDER = ["identity", "theme", "storage", "resource", "relay", "outbox"]
 
 export interface PolicyPromptOpts {
   title: string
