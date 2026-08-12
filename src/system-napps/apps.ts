@@ -1237,11 +1237,16 @@ function renderCard(
     btn.disabled = true
     btn.textContent = action === "update" ? "updating…" : "launching…"
     try {
+      // Relay hints: where the event was actually seen, falling back to the
+      // enabled discover relays (subscribeMany doesn't always populate seenOn,
+      // and the author's advertised relays may not hold the manifest).
+      const seenRelays = Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
+      const relayHints = [...new Set([...seenRelays, ...relays])]
       if (action === "update") {
         await ctx.update({
           pubkey: evt.pubkey,
           dTag: dTag,
-          relayHints: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
+          relayHints
         })
         // NOTE: an "uninstall" action used to live here, calling ctx.uninstall(nappId)
         // with no confirm. It was never wired to any button (makeActionBtn is only
@@ -1255,7 +1260,7 @@ function renderCard(
           pubkey: evt.pubkey,
           kind: evt.kind, // 35128 nsite → install(); 35129 napplet → installNapplet()
           identifier: dTag,
-          relays: Array.from(pool.seenOn.get(evt.id) || []).map(r => r.url)
+          relays: relayHints
         })
         const nappId = await ctx.install(raw)
         // Napplets self-launch during install (srcdoc); nsites don't, so launch
