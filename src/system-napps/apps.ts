@@ -10,6 +10,7 @@ import "nostr-web-components"
 
 import type { AppType, InstalledApp, SystemCtx } from "../types.js"
 import { classifyEvent, classifyInstalled } from "../persistence.js"
+import { unsupportedRequires } from "../napp-permissions.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
@@ -159,6 +160,7 @@ export function mount(
     // in the list).
     const reqs = req.event ? requiresOf(req.event) : []
     if (reqs.length) {
+      const unsupported = new Set(unsupportedRequires(reqs))
       let chips = card.querySelector<HTMLElement>(".apps-handlers")
       if (!chips) {
         chips = document.createElement("div")
@@ -167,7 +169,9 @@ export function mount(
       }
       for (const r of reqs) {
         const c = document.createElement("span")
-        c.className = "apps-handler"
+        // Unsupported requirements are flagged red — the launcher can't provide
+        // them, so those features won't work.
+        c.className = unsupported.has(r) ? "apps-handler is-unsupported" : "apps-handler"
         c.textContent = r
         chips.appendChild(c)
       }
@@ -418,6 +422,8 @@ export function mount(
       authorLabel,
       createdAt,
       actions: app.actions,
+      unsupported:
+        unsupportedRequires(app.event ? requiresOf(app.event) : (app.requires ?? [])).length > 0,
       search,
       buttons,
       onAuthorClick: author
@@ -1024,6 +1030,8 @@ interface AppCardOpts {
   authorLabel?: string | null // plain text shown in place of author (e.g. "local")
   createdAt?: number | null
   actions: string[]
+  // True when the app declares `requires` domains this launcher can't provide.
+  unsupported?: boolean
   search: string
   buttons: HTMLElement[]
   menuTrigger?: HTMLElement | null
@@ -1105,6 +1113,13 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
     label.className = "apps-author apps-author-label"
     label.textContent = o.authorLabel ? `${o.type} · ${o.authorLabel}` : o.type
     card.appendChild(label)
+  }
+
+  if (o.unsupported) {
+    const warn = document.createElement("span")
+    warn.className = "apps-unsupported"
+    warn.textContent = "requires unsupported features"
+    card.appendChild(warn)
   }
 
   if (o.createdAt) {
@@ -1306,6 +1321,7 @@ function renderCard(
     authorPubkey: evt.pubkey,
     createdAt: evt.created_at,
     actions: actionsOf(evt),
+    unsupported: unsupportedRequires(requiresOf(evt)).length > 0,
     search: searchHaystack(evt),
     buttons,
     menuTrigger,

@@ -16,11 +16,24 @@ const CAP_INFO: Record<string, { title: string; desc: string }> = {
   resource: { title: "resource", desc: "loads files via the launcher" },
   relay: { title: "relay", desc: "reads and posts events" },
   outbox: { title: "outbox", desc: "finds the right relays for you" },
-  network: { title: "network", desc: "can communicate" }
+  // Not relay access — nostr reads/writes always go through the launcher. This
+  // is the app opening its OWN connections to the wider web.
+  network: { title: "network", desc: "connects directly to the web (nostr works without it)" }
 }
 
 // Grantable rows are the NAP domains (network is appended separately).
 const CAP_ORDER = ["identity", "theme", "storage", "resource", "relay", "outbox"]
+
+// Everything the launcher can actually provide: the NAP domains we implement,
+// plus the launcher-local extensions (ui auto-granted, network toggle).
+const SUPPORTED_REQUIRES = new Set([...CAP_ORDER, "ui", "network"])
+
+// The subset of a napp's declared `requires` this launcher doesn't implement —
+// features that will silently not work. Shared with the Apps window so the card
+// and detail view can flag them.
+export function unsupportedRequires(domains: string[]): string[] {
+  return [...new Set(domains.filter(d => d && !SUPPORTED_REQUIRES.has(d)))]
+}
 
 export interface PolicyPromptOpts {
   title: string
@@ -50,6 +63,10 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<NappPolicy | n
     opts.type === "napplet"
       ? declaredCaps
       : [...new Set(["identity", ...declaredCaps, "network"])]
+  // Requirements this launcher doesn't implement. We can't grant them, but the
+  // app declared them — surface them (unchecked, non-grantable) so the user
+  // knows some features won't work rather than us silently dropping them.
+  const unsupported = unsupportedRequires(opts.declaredDomains)
 
   return openDialog<NappPolicy | null>({
     dismissValue: null,
@@ -95,6 +112,8 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<NappPolicy | n
         wrap.appendChild(permRow(box, CAP_INFO[domain].title, CAP_INFO[domain].desc))
       }
       for (const d of rows) addRow(d, cur ? cur.domains.includes(d) : true)
+      // Declared-but-unsupported requirements: shown, dimmed, never grantable.
+      for (const d of unsupported) wrap.appendChild(unsupportedRow(d))
 
       const actions = document.createElement("div")
       actions.className = "napp-perms-actions"
@@ -131,5 +150,31 @@ function permRow(box: HTMLInputElement, title: string, desc: string): HTMLLabelE
   d.textContent = desc
   text.append(l, d)
   row.append(box, text)
+  return row
+}
+
+// A declared requirement this launcher can't provide: same layout as a grantable
+// row but non-interactive (a plain div, no checkbox), with a muted "✕" marker
+// and an "unsupported" tag. Never added to the granted set.
+function unsupportedRow(domain: string): HTMLDivElement {
+  const row = document.createElement("div")
+  row.className = "napp-perms-row is-unsupported"
+  const mark = document.createElement("span")
+  mark.className = "napp-perms-mark"
+  mark.textContent = "✕"
+  const text = document.createElement("div")
+  text.className = "napp-perms-text"
+  const l = document.createElement("div")
+  l.className = "napp-perms-label"
+  l.textContent = domain
+  const tag = document.createElement("span")
+  tag.className = "napp-perms-tag"
+  tag.textContent = "unsupported"
+  l.appendChild(tag)
+  const d = document.createElement("div")
+  d.className = "napp-perms-desc"
+  d.textContent = "this launcher can't provide this — the app may not work fully"
+  text.append(l, d)
+  row.append(mark, text)
   return row
 }

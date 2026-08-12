@@ -9,6 +9,7 @@
   --font-mono: "Source Code Pro Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --surface: #ffffff;
   --text: #111111;
+  --danger: #d64545;
   /* ── design-system tokens ── */
   --btn-radius: 4px;
   --btn-pad-y: 0.35rem;
@@ -19,6 +20,7 @@
   :root:not([data-theme="light"]) {
     --surface: #333;
     --text: #ececec;
+    --danger: #ff6b6b;
     color-scheme: dark;
   }
 }
@@ -32,6 +34,7 @@
 :root[data-theme="dark"] {
   --surface: #333;
   --text: #ececec;
+  --danger: #ff6b6b;
   color-scheme: dark;
 }
 
@@ -1460,6 +1463,23 @@ body.popover-open .napp-body iframe {
   opacity: 0.7;
 }
 
+/* A declared-but-unsupported requirement: non-interactive, dimmed. The "✕"
+   sits in the checkbox column; an "unsupported" tag trails the domain name. */
+.napp-perms-row.is-unsupported {
+  cursor: default;
+}
+.napp-perms-mark {
+  margin-top: 0.15rem;
+  opacity: 0.5;
+  font-weight: 600;
+}
+.napp-perms-tag {
+  margin-left: 0.4rem;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .napp-perms-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1900,6 +1920,7 @@ body.popover-open .napp-body iframe {
     "icon handlers actions"
     "title title title"
     "about about about"
+    "warn warn warn"
     "author author author";
   grid-template-columns: auto 1fr;
   grid-gap: 0 1rem;
@@ -1921,6 +1942,7 @@ body.popover-open .napp-body iframe {
     /* "title title title" */
     "about about about"
     "handlers handlers handlers"
+    "warn warn warn"
     "author author author"
     /* "actions actions actions" */
     /* "handlers handlers handlers" */;
@@ -2072,6 +2094,24 @@ body.popover-open .napp-body iframe {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-all;
+}
+
+/* A required NAP domain the launcher can't provide — struck through in the
+   detail requires list to read as "missing", staying muted like its siblings. */
+.apps-handler.is-unsupported {
+  text-decoration: line-through;
+}
+
+/* The "requires unsupported features" line: red, serif, left-aligned. On the
+   card it sits below the meta; in detail it's the row below the requires list. */
+.apps-unsupported {
+  grid-area: warn;
+  justify-self: start;
+  margin-top: 0.4rem;
+  color: var(--danger);
+  font-family: var(--font-serif);
+  font-size: 0.75rem;
+  text-align: left;
 }
 
 
