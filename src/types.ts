@@ -242,7 +242,12 @@ export interface SystemCtx {
   install(nappId: string): Promise<string>
   uninstall(nappId: string): Promise<void>
   editPermissions(nappId: string): Promise<void>
-  update(target: { pubkey: string; dTag: string; relayHints?: string[] }): Promise<void>
+  update(target: {
+    pubkey: string
+    dTag: string
+    relayHints?: string[]
+    kind?: number
+  }): Promise<void>
   installDevApp(): Promise<void>
   installDevAppFromUrl(url: string): Promise<void>
 }

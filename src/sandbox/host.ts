@@ -1210,6 +1210,22 @@ export async function reinstallFiles(
 // Reload every open iframe whose dataset.nappId matches. Reassigning
 // iframe.src triggers a same-origin navigation; window.name (the bridge's
 // instanceId) is preserved across same-origin reloads.
+// Swap every open window of a napplet onto freshly verified bytes (after an
+// update). A srcdoc document is baked at launch, so a plain reload would just
+// re-run the old bytes; reassigning srcdoc reloads with the new ones.
+export function reloadNappletWindows(nappId: string, html: string): number {
+  let count = 0
+  const doc = buildNappletDoc(html, nappletDomainsFor(nappId))
+  for (const win of openWindows.values()) {
+    if (win.root.dataset.nappId === nappId && win.iframe) {
+      resetInstanceRuntimeState(win.root.dataset.instanceId || "")
+      win.iframe.srcdoc = doc
+      count++
+    }
+  }
+  return count
+}
+
 export function reloadIframesByNappId(nappId: string): number {
   let count = 0
   for (const win of openWindows.values()) {

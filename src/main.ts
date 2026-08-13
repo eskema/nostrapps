@@ -36,7 +36,8 @@ import {
   loadEvent,
   applyNappPolicy,
   closeNappletSubs,
-  launchNapplet
+  launchNapplet,
+  reloadNappletWindows
 } from "./sandbox/host.js"
 import { button, chip, icon } from "./system-napps/ui.js"
 import { promptNappPolicy } from "./napp-permissions.js"
@@ -467,13 +468,19 @@ function requiresFromEvent(event: { tags: string[][] } | null | undefined): stri
 // Update flow: re-fetch the manifest + files at the same target, swap them
 // into the napp's existing origin storage (no new window), persist the new
 // version, and force any open iframes to reload so they pick up new files.
-async function updateNapp(target: { pubkey: string; dTag: string; relayHints: string[] }) {
+async function updateNapp(target: {
+  pubkey: string
+  dTag: string
+  relayHints: string[]
+  kind?: number
+}) {
   if (!target?.pubkey) throw new Error("updateNapp: missing pubkey")
   console.debug("[launch] updateNapp", {
     pubkey: target.pubkey,
     dTag: target.dTag,
     relayHints: target.relayHints
   })
+  if (target.kind != null && isNappletKind(target.kind)) return updateNapplet(target)
   setStatus(`Checking update…`)
   const updateResult = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
   const { nappId, files, title, manifest } = updateResult
@@ -483,6 +490,29 @@ async function updateNapp(target: { pubkey: string; dTag: string; relayHints: st
   if (manifest) persist.storeInstalledEvent(manifest)
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
   const reloaded = reloadIframesByNappId(nappId)
+  setStatus(
+    `Updated ${label}` +
+      (reloaded ? ` — reloaded ${reloaded} window${reloaded === 1 ? "" : "s"}` : "")
+  )
+  refreshSuggestions()
+}
+
+// Napplet update: re-resolve + re-verify the newest manifest, store it, and
+// swap open windows onto the new bytes (srcdoc is baked at launch, so this
+// rebuilds it rather than reloading).
+async function updateNapplet(target: {
+  pubkey: string
+  dTag: string
+  relayHints: string[]
+  kind?: number
+}) {
+  setStatus(`Checking update…`)
+  const resolved = await resolveNapplet({ ...target, kind: target.kind! }, setStatus)
+  const nappId = persist.computeNappId(resolved.manifest)
+  const label = resolved.title || resolved.dTag
+  setStatus(`Updating ${label}…`)
+  persist.storeInstalledEvent(resolved.manifest)
+  const reloaded = reloadNappletWindows(nappId, resolved.html)
   setStatus(
     `Updated ${label}` +
       (reloaded ? ` — reloaded ${reloaded} window${reloaded === 1 ? "" : "s"}` : "")

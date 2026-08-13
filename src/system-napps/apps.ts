@@ -332,6 +332,7 @@ export function mount(
         await ctx.update({
           pubkey: evt.pubkey,
           dTag,
+          kind: evt.kind,
           relayHints: Array.from(pool.seenOn.get(evt.id) || []).map((r: any) => r.url)
         })
         ctx.setStatus?.(`Apps: updated ${app.petname || app.title || app.nappId}`)
@@ -1244,6 +1245,7 @@ function renderCard(
         await ctx.update({
           pubkey: evt.pubkey,
           dTag: dTag,
+          kind: evt.kind,
           relayHints
         })
         // NOTE: an "uninstall" action used to live here, calling ctx.uninstall(nappId)
