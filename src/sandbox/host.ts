@@ -2993,10 +2993,26 @@ function clampToStage(root: HTMLElement, stage: HTMLElement, opts: { pullIn?: bo
   if (newTop !== top) root.style.top = `${newTop}px`
 }
 
+// Restore mounts windows one by one, and the stage's bounds only settle once
+// the last one is in (scrollbar, bar heights). Rescaling against those
+// transient bounds is how windows shrank a little on every reload — while
+// settling, the observer only re-baselines the geometry refs; the release
+// re-captures them once against the final bounds.
+let stageSettling = false
+export function setStageSettling(on: boolean) {
+  stageSettling = on
+  if (!on) for (const win of openWindows.values()) captureWindowGeom(win.root)
+}
+
 let stageObserver: ResizeObserver | null = null
 function ensureStageObserver(stageEl: HTMLElement) {
   if (stageObserver) return
   stageObserver = new ResizeObserver(() => {
+    if (stageSettling) {
+      for (const win of openWindows.values()) captureWindowGeom(win.root)
+      setStageBottomSpacer(stageEl, measureMaxWindowBottom(stageEl))
+      return
+    }
     const grid = gridForWidth(getStageBounds(stageEl).width)
     const stepped = grid.cols !== lastPackGrid.cols || grid.rows !== lastPackGrid.rows
     if (stageEl.classList.contains("pack-mode") && stepped) {

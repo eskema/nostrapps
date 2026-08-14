@@ -800,6 +800,12 @@ button {
   position: relative;
   overflow-x: hidden;
   overflow-y: auto;
+  /* The scrollbar appearing/disappearing must not change clientWidth: the
+     stage ResizeObserver rescales every window proportionally on width
+     changes, so a toggling scrollbar (e.g. windows mounting below the fold
+     during restore) would shrink the whole layout by its width — and persist
+     it. stable reserves the gutter up front; overlay scrollbars reserve 0. */
+  scrollbar-gutter: stable;
   /* Inner gutter so windows never touch the edge. clampToStage in host.js
      reads this padding from computed style and uses it as the bound for
      window left/top. */

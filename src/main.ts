@@ -13,6 +13,7 @@ import {
   callIframe,
   tileWindows,
   bestFitPack,
+  setStageSettling,
   broadcastTheme,
   nappOriginFor,
   bootNapp,
@@ -1148,6 +1149,20 @@ async function restoreAll() {
   console.debug("[launch] restoreAll — restoring", {
     sessionCount: persist.readOpen().length
   })
+  // Stage bounds are in flux while windows mount (scrollbar appears once one
+  // lands below the fold) — hold the observer's rescale until we're done, or
+  // every reload shrinks the layout by the transient delta. See host.ts.
+  setStageSettling(true)
+  try {
+    await restoreAllInner()
+  } finally {
+    // Two frames: one for layout, one for the scrollbar/spacer to settle,
+    // then refs re-baseline against the final bounds.
+    requestAnimationFrame(() => requestAnimationFrame(() => setStageSettling(false)))
+  }
+}
+
+async function restoreAllInner() {
   for (const state of persist.readOpen()) {
     // Skip windows already live (e.g. one moved into this space while it was
     // still unmaterialized) so materializing the space can't mount a duplicate.
