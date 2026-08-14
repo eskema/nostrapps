@@ -703,14 +703,15 @@ export function mount(
     const all = sortedManifests(events)
     const frag = document.createDocumentFragment()
     for (const evt of all) {
-      const card = renderCard(evt, ctx, enabledRelays(), renderList, showDetail)
-      card.hidden = !matchesFilter(evt, filter) || !seenOnEnabled(evt.id)
-      frag.appendChild(card)
+      frag.appendChild(renderCard(evt, ctx, enabledRelays(), renderList, showDetail))
     }
     _listEl.appendChild(frag)
     loadIcons(all)
     loadAuthorNames(_listEl, applyFilter)
-    refreshEmptyState()
+    // applyFilter is the one place that decides visibility (type + search +
+    // relay) — deciding it inline here too is how the type filter got skipped
+    // on repaints. Same synchronous frame, so nothing flashes.
+    applyFilter()
   }
 
   // Incremental append. Builds cards only for the buffered batch and appends
@@ -743,12 +744,13 @@ export function mount(
     // Merge the sorted-desc batch into the sorted-desc list. Both are ordered
     // newest-first, so a single forward walk of the existing cards inserts each
     // new card in its created_at slot — O(batch + N) and order stays correct
-    // even for late arrivals, instead of dumping the batch at the end. Cards
-    // that don't match the active filter are inserted hidden.
+    // even for late arrivals, instead of dumping the batch at the end. New
+    // cards are inserted hidden: the applyFilter() that follows every flush
+    // (scheduleFlush, same frame) is the one place visibility is decided.
     let ref = _listEl.firstElementChild
     for (const evt of toRender) {
       const card = renderCard(evt, ctx, enabledRelays(), renderList, showDetail)
-      card.hidden = !matchesFilter(evt, filter) || !seenOnEnabled(evt.id)
+      card.hidden = true
       while (ref && Number((ref as HTMLElement).dataset.createdAt || 0) >= evt.created_at) {
         ref = ref.nextElementSibling
       }
@@ -1466,7 +1468,7 @@ function sanitizeRelays(relays: string[]): string[] {
 
 // The lowercased text a card is searched against. Stored on each card as
 // data-search so filtering can be done by toggling visibility instead of
-// rebuilding, and used by matchesFilter so both stay in sync.
+// rebuilding.
 // One placeholder + one field set for both tabs so search behaves identically.
 const SEARCH_PLACEHOLDER = "Search name, author, description, id…"
 
@@ -1578,12 +1580,6 @@ function loadAuthorNames(listEl: HTMLElement | null, refilter: () => void) {
       })
       .catch(() => authorNamesInFlight.delete(pk))
   }
-}
-
-function matchesFilter(evt: any, filter: string) {
-  const needle = filter.trim().toLowerCase()
-  if (!needle) return true
-  return searchHaystack(evt).includes(needle)
 }
 
 
