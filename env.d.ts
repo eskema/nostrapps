@@ -279,9 +279,9 @@ interface NappletTheme {
 }
 
 interface NappletStorageOps {
-  get(key: string): Promise<string | null>
-  set(key: string, value: string): Promise<void>
-  remove(key: string): Promise<void>
+  getItem(key: string): Promise<string | null>
+  setItem(key: string, value: string): Promise<void>
+  removeItem(key: string): Promise<void>
   keys(): Promise<string[]>
 }
 interface NappletStorage extends NappletStorageOps {
@@ -386,6 +386,85 @@ interface NappletOutbox {
   }): Promise<NappletOutboxRelayPlan>
 }
 
+// ── NAP-COMMON (shell-mediated social actions) ────────────────────────────
+// Results carry `ok` — ok:false is an answer (bad input, denied), not a throw.
+interface NappletCommonActionResult {
+  ok: boolean
+  eventId?: string
+  event?: NostrEvent
+  error?: string
+}
+interface NappletCommon {
+  /** Public nip19 only — never nsec. */
+  encodeNip19(input: {
+    type: "npub" | "note" | "nprofile" | "nevent" | "naddr"
+    [key: string]: unknown
+  }): Promise<{ ok: boolean; value?: string; nip19Type?: string; error?: string }>
+  decodeNip19(value: string): Promise<{
+    ok: boolean
+    nip19Type?: string
+    hex?: string
+    pubkey?: string
+    eventId?: string
+    identifier?: string
+    relays?: string[]
+    author?: string
+    kind?: number
+    error?: string
+  }>
+  /** Shell profile cache. `result.event` is reconstructed from the cached
+   *  kind 0 (content/created_at real, id/sig empty). */
+  getProfile(target: string): Promise<{
+    ok: boolean
+    pubkey: string
+    profile?: Record<string, unknown> | null
+    result?: { event: NostrEvent }
+    error?: string
+  }>
+  follows(): Promise<{ ok: boolean; pubkeys: string[]; error?: string }>
+  /** Writes rewrite kind 3 / publish kinds 7 and 1984 — behind a prompt. */
+  follow(...pubkeys: string[]): Promise<NappletCommonActionResult>
+  unfollow(...pubkeys: string[]): Promise<NappletCommonActionResult>
+  react(
+    targetEventId: string,
+    reaction: string,
+    customEmojiHref?: string
+  ): Promise<NappletCommonActionResult>
+  report(
+    target: { type: "event"; id: string; pubkey?: string } | { type: "pubkey"; pubkey: string },
+    reason: string,
+    text: string
+  ): Promise<NappletCommonActionResult>
+}
+
+interface NappletInc {
+  /** `content` is a JSON string that becomes the payload; extraTags unused. */
+  emit(topic: string, extraTags?: string[][], content?: string): void
+  /** callback(payload, syntheticEvent) — the second arg is a kind-0-shaped
+   *  envelope carrying the sender's napp id as `pubkey`. */
+  on(topic: string, callback: (payload: unknown, event: NostrEvent) => void): NappletSubscription
+}
+
+interface NappletLink {
+  /** Opens in a new tab behind a prompt. Malformed or non-http(s) URLs reject;
+   *  a user denial (or blocked popup) resolves with status "denied". */
+  open(url: string, options?: { label?: string }): Promise<{ status: "opened" | "denied" }>
+}
+
+interface NappletConfig {
+  /** Restricted JSON Schema: no $ref, no regex keywords, depth ≤ 6, secrets
+   *  (`x-napplet-secret`) carry no default. Rejections throw "<code>: <detail>". */
+  registerSchema(schema: Record<string, unknown>, version?: number): Promise<void>
+  get(): Promise<Record<string, unknown>>
+  /** First subscriber gets an immediate snapshot; every settings save pushes. */
+  subscribe(callback: (values: Record<string, unknown>) => void): NappletSubscription
+  /** Ask the launcher to open the settings form (optionally at a section). */
+  openSettings(options?: { section?: string }): void
+  onSchemaError(callback: (err: { code: string; error: string }) => void): () => void
+  /** The registered schema, else the napplet-config-schema meta tag. */
+  readonly schema: Record<string, unknown> | null
+}
+
 // Every domain is optional: presence = the shell granted it.
 interface Napplet {
   identity?: NappletIdentity
@@ -394,6 +473,10 @@ interface Napplet {
   resource?: NappletResource
   relay?: NappletRelay
   outbox?: NappletOutbox
+  common?: NappletCommon
+  inc?: NappletInc
+  link?: NappletLink
+  config?: NappletConfig
 }
 
 // ── Augment global Window ────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { guessMime } from "./mime.js"
 import { isIgnoredPath } from "./ignore.js"
+import { nappletMetaFromHtml } from "./napplet.js"
 
 export async function collectLocalFolder(
   fileList: FileList,
@@ -38,6 +39,29 @@ export async function collectLocalFolder(
     }
   }
 
+  // A lone index.html with no metadata.json is ambiguous — it could be a
+  // napplet or a single-file nsite. Return it with its html-derived metadata
+  // and let the caller ask the user; a napplet/napplet-* meta only picks the
+  // default answer.
+  if (!metadata && out.length === 1 && out[0].path === "/index.html") {
+    const html = await (out[0].body as File).text()
+    const m = nappletMetaFromHtml(html)
+    const id = m.id || slug(rootName)
+    return {
+      nappId: `local~${slug(id)}`,
+      files: out,
+      skipped,
+      single: { html, napplet: m.napplet },
+      metadata: {
+        id,
+        title: m.title || undefined,
+        icon: m.icon || undefined,
+        actions: [],
+        requires: m.requires
+      }
+    }
+  }
+
   if (!metadata) throw new Error("missing metadata.json")
   if (!metadata?.id) throw new Error("metadata.json must contain an .id field")
 
@@ -47,6 +71,7 @@ export async function collectLocalFolder(
     nappId,
     files: out,
     skipped,
+    single: null as { html: string; napplet: boolean } | null,
     metadata: metadata as {
       id: string
       title?: string

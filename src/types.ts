@@ -171,6 +171,9 @@ export type InstalledApp = {
   // itself, so this field is only populated for local/dev/temp apps.
   requires?: string[]
   event?: NostrEvent
+  // Local napplets only: the folder's index.html, kept so reload can rebuild
+  // the srcdoc (published napplets re-fetch from Blossom via `event` instead).
+  html?: string
   // Unix seconds when a local/dev/temp app was added (apps with no manifest
   // event, so no publish date). Surfaced as the card's date for those.
   installedAt?: number

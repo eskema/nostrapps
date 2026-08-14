@@ -307,6 +307,7 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   persist.forgetInstalledNapp(nappId)
   persist.clearPolicy(nappId)
   persist.clearNappletStorage(nappId)
+  persist.clearNappletConfig(nappId)
   closeNappletSubs(nappId)
   handlers.removeApp(nappId)
   removeDevHandle(nappId)
@@ -1872,7 +1873,7 @@ async function launchInstalledNapplet(
   } = {}
 ): Promise<NappWindow | null> {
   const app = persist.getInstalledApp(nappId)
-  if (!app?.event) {
+  if (!app?.event && !app?.html) {
     setStatus(`Can't launch napplet ${nappId} — its manifest is gone`)
     return null
   }
@@ -1883,14 +1884,17 @@ async function launchInstalledNapplet(
     title: app.petname || app.title || nappId,
     icon: app.icon || undefined,
     type: "napplet",
-    declaredDomains: requiresFromEvent(app.event)
+    declaredDomains: app.event ? requiresFromEvent(app.event) : (app.requires ?? [])
   })
   if (!policy) return null
-  const resolved = await loadNappletFromManifest(app.event, setStatus)
-  return launchNapplet(stage, nappId, resolved.html, {
+  // Published napplets re-fetch + re-verify from the manifest; local ones run
+  // the stored folder bytes directly.
+  const resolved = app.event ? await loadNappletFromManifest(app.event, setStatus) : null
+  const html = resolved?.html ?? app.html!
+  return launchNapplet(stage, nappId, html, {
     ...makeLaunchOpts(),
     ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
-    petname: opts.petname || resolved.title || resolved.dTag,
+    petname: opts.petname || resolved?.title || app.petname || nappId,
     ...(opts.position ? { position: opts.position } : {}),
     ...(opts.status ? { status: opts.status } : {})
   })
@@ -2197,13 +2201,86 @@ localFolderInput.addEventListener("change", async (e: Event) => {
   if (!inputFiles || inputFiles.length === 0) return
   console.debug("[launch] local folder selected", { fileCount: inputFiles.length })
   try {
-    const { nappId, files, metadata, skipped } = await collectLocalFolder(inputFiles!, setStatus)
+    const { nappId, files, metadata, skipped, single } = await collectLocalFolder(
+      inputFiles!,
+      setStatus
+    )
     console.debug("[launch] local folder collected", {
       nappId,
       fileCount: files.length,
       skipped,
       metadata
     })
+
+    // A lone index.html: declaring `requires` (or a napplet meta) makes it a
+    // napplet outright — only a file declaring nothing is ambiguous, and then
+    // the permission screen asks. A previous load's choice is remembered
+    // (napplet~ record with html, or a plain local~ one).
+    if (single) {
+      const nappletId = `napplet~${nappId}`
+      const label = metadata.title || metadata.id
+      const impliedNapplet = single.napplet || (metadata.requires?.length ?? 0) > 0
+      let type: string
+      if (persist.getInstalledApp(nappletId)?.html) type = "napplet"
+      else if (persist.getInstalledApp(nappId)) type = "nsite"
+      else if (impliedNapplet) {
+        const granted = await resolvePolicyForLaunch(nappletId, {
+          title: label,
+          icon: metadata.icon || undefined,
+          type: "napplet",
+          declaredDomains: metadata.requires || []
+        })
+        if (!granted) {
+          setStatus("Cancelled")
+          return
+        }
+        type = "napplet"
+      } else {
+        const granted = await promptNappPolicy({
+          title: label,
+          icon: metadata.icon || undefined,
+          type: "nsite",
+          chooseType: true,
+          declaredDomains: []
+        })
+        if (!granted) {
+          setStatus("Cancelled")
+          return
+        }
+        type = granted.type === "napplet" ? "napplet" : "nsite"
+        persist.setPolicy(type === "napplet" ? nappletId : nappId, granted)
+      }
+
+      if (type === "napplet") {
+        persist.storeInstalledLocalApp({
+          nappId: nappletId,
+          title: metadata.title || null,
+          icon: metadata.icon || null,
+          petname: label,
+          requires: metadata.requires || [],
+          html: single.html
+        })
+        handlers.addApp(nappletId, [])
+        // Re-picking the folder while a window is open hot-swaps it onto the
+        // new bytes instead of opening a second window.
+        const reloaded = reloadNappletWindows(nappletId, single.html)
+        if (!reloaded) {
+          const win = launchNapplet(stage, nappletId, single.html, {
+            ...makeLaunchOpts(),
+            petname: label
+          })
+          syncDOM(win)
+          win.focus()
+        }
+        setStatus(
+          `Launched ${label}` +
+            (reloaded ? ` — reloaded ${reloaded} window${reloaded === 1 ? "" : "s"}` : "")
+        )
+        return
+      }
+      // nsite: fall through to the normal local install (the policy stored
+      // above makes resolvePolicyForLaunch a no-prompt pass-through).
+    }
 
     // install(), but from local, not fetching an nsite
     const origin = nappOriginFor(nappId)

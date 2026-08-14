@@ -28,6 +28,45 @@ export function computeAggregateHash(pathTags: string[][]): string {
   return bytesToHex(sha256(new TextEncoder().encode(lines.join(""))))
 }
 
+// Authoring metadata for a single-file napplet, read from the html itself — a
+// napplet has no metadata.json. `napplet` is the explicit opt-in: any
+// napplet/napplet-* meta marks the file (a lone index.html could just as well
+// be a single-file nsite). Then <title>, <meta name="description">, <meta
+// name="napplet-id"> (the d tag), <meta name="napplet-requires"
+// content="identity,outbox"> (what @napplet/vite-plugin emits; the bare names
+// are also accepted), and <link rel="icon"> (data:/https only).
+export function nappletMetaFromHtml(html: string): {
+  napplet: boolean
+  id: string | null
+  title: string | null
+  description: string | null
+  requires: string[]
+  icon: string | null
+} {
+  const meta = (name: string) => {
+    const tag = new RegExp(`<meta\\b[^>]*\\bname\\s*=\\s*["']?${name}["']?[^>]*>`, "i").exec(
+      html
+    )?.[0]
+    if (!tag) return null
+    const m = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag)
+    return m ? (m[1] ?? m[2]).trim() || null : null
+  }
+  const iconTag = /<link\b[^>]*\brel\s*=\s*["']?[^"'>]*icon[^"'>]*["']?[^>]*>/i.exec(html)?.[0]
+  const iconHref = iconTag
+    ? (/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(iconTag)?.[1] ?? null)
+    : null
+  return {
+    napplet: /<meta\b[^>]*\bname\s*=\s*["']?napplet(-[a-z]+)?["'\s/>]/i.test(html),
+    id: meta("napplet-id") || meta("id"),
+    title: /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1].trim() || null,
+    description: meta("description"),
+    requires: (meta("napplet-requires") || meta("requires") || "")
+      .split(/[,\s]+/)
+      .filter(Boolean),
+    icon: iconHref && /^(data:|https:)/.test(iconHref) ? iconHref : null
+  }
+}
+
 export interface ResolvedNapplet {
   dTag: string
   pubkey: string

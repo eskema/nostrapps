@@ -453,6 +453,7 @@ export function storeInstalledLocalApp(app: {
   singleton?: boolean
   actions?: string[]
   requires?: string[]
+  html?: string | null
 }) {
   if (!app?.nappId) return
   const all = readInstalled()
@@ -464,6 +465,7 @@ export function storeInstalledLocalApp(app: {
     actions: app.actions || [],
     requires: sanitizeRequires(app.requires),
     singleton: !!app.singleton,
+    ...(app.html ? { html: app.html } : {}),
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)
@@ -602,6 +604,40 @@ export function clearNappletStorage(nappId: string) {
   if (nappId in store) {
     delete store[nappId]
     writeJson(NAPPLET_STORAGE_KEY, store)
+  }
+}
+
+// ── napplet config (NAP-CONFIG: shell-owned settings per napp — the schema
+// the napp registered, and the values the user set in the settings form) ──
+const NAPPLET_CONFIG_KEY = "nostrapps:napplet-config"
+type NappletConfigRecord = { schema?: any; version?: number; values?: Record<string, unknown> }
+
+function readNappletConfigs(): Record<string, NappletConfigRecord> {
+  return readJson(NAPPLET_CONFIG_KEY, {})
+}
+export function getNappletConfig(nappId: string): {
+  schema: any | null
+  version: number | undefined
+  values: Record<string, unknown>
+} {
+  const r = readNappletConfigs()[nappId]
+  return { schema: r?.schema ?? null, version: r?.version, values: r?.values ?? {} }
+}
+export function setNappletConfigSchema(nappId: string, schema: any, version?: number) {
+  const all = readNappletConfigs()
+  all[nappId] = { ...all[nappId], schema, ...(version === undefined ? {} : { version }) }
+  writeJson(NAPPLET_CONFIG_KEY, all)
+}
+export function setNappletConfigValues(nappId: string, values: Record<string, unknown>) {
+  const all = readNappletConfigs()
+  all[nappId] = { ...all[nappId], values }
+  writeJson(NAPPLET_CONFIG_KEY, all)
+}
+export function clearNappletConfig(nappId: string) {
+  const all = readNappletConfigs()
+  if (nappId in all) {
+    delete all[nappId]
+    writeJson(NAPPLET_CONFIG_KEY, all)
   }
 }
 

@@ -131,7 +131,7 @@ TypeScript types for everything above live in [`env.d.ts`](./env.d.ts). Referenc
 
 The host also pushes runtime signals to every napp via `postMessage`. bridge.js relays them:
 
-- **`napp-theme-change`**: sets `data-theme` (`"light"`/`"dark"`) on `<html>` and the launcher's `--surface`/`--text` tokens on `:root`, so napps using them track the theme automatically.
+- **`napp-theme-change`**: sets `data-theme` (`"light"`/`"dark"`) on `<html>` and the launcher's `--surface`/`--text` tokens on `:root`, so napps using them track the theme automatically. To read the colors programmatically, declare `theme` in `requires` and use `window.napplet.theme` (see below).
 
 ### Shared UI (opt-in)
 
@@ -159,7 +159,21 @@ if (window.napplet?.identity) {
 }
 ```
 
-Domains implemented: `identity`, `theme`, `storage`, `resource`, `relay`, `outbox`. Shapes follow [`@napplet/nap`](https://github.com/napplet/web); the exact surface is in [`env.d.ts`](./env.d.ts).
+The list is à la carte, and plain napps can use it too: `{ "requires": ["theme"] }` alone gets you `window.napplet.theme` (the launcher's colors and live change events) and nothing else.
+
+Domains implemented:
+
+- `identity`: account key, relays, profile, NIP-51 lists. Read-only, never prompts.
+- `theme`: launcher colors + change events.
+- `storage`: key-value store, shared + per-instance scopes.
+- `resource`: byte fetching through the shell (https/data/blob/`blossom:<sha256>`), works sealed.
+- `relay` / `outbox`: reads, and unsigned-template publishes the host signs behind a prompt. `outbox` adds NIP-65 routing.
+- `common`: nip19 encode/decode, profile lookup, follows; follow/unfollow/react/report publish behind a prompt.
+- `inc`: topic bus between open windows, nothing leaves the page.
+- `link`: open a URL in a new tab, behind a prompt.
+- `config`: the app registers a settings schema, the launcher renders the form (a "settings" button on its card), stores the values, and pushes changes live. `x-napplet-secret` fields are password inputs whose values exist only in the launcher.
+
+Shapes follow [`@napplet/nap`](https://github.com/napplet/web); the exact surface is in [`env.d.ts`](./env.d.ts).
 
 nsites get `window.napplet` alongside `window.napp` and can mix both. True napplets (kind 35129) are single-file apps loaded as a sealed `srcdoc` iframe, with no origin and no `window.nostr`. They publish unsigned templates through `relay`/`outbox` and the host signs behind a prompt.
 

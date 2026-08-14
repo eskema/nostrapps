@@ -43,10 +43,18 @@ import type { SubCloser } from "@nostr/tools/abstract-pool"
 import type { NostrEvent } from "@nostr/tools/core"
 import { matchFilter, type Filter } from "@nostr/tools/filter"
 import { isNip05, queryProfile } from "@nostr/tools/nip05"
-import { decode } from "@nostr/tools/nip19"
+import {
+  decode,
+  naddrEncode,
+  neventEncode,
+  noteEncode,
+  nprofileEncode,
+  npubEncode
+} from "@nostr/tools/nip19"
 import { verifyEvent } from "@nostr/tools/pure"
 import {
   getInstalledApp,
+  getNappletConfig,
   getPolicy,
   getStoredPolicy,
   nappletStorageGet,
@@ -54,8 +62,14 @@ import {
   nappletStorageRemove,
   nappletStorageSet,
   rememberEphemeralOrigin,
+  setNappletConfigSchema,
   updateOpen
 } from "../persistence.js"
+import {
+  effectiveConfigValues,
+  openNappConfigSettings,
+  validateConfigSchema
+} from "../napp-config.js"
 import type { NappPolicy } from "../types.js"
 import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
@@ -421,7 +435,18 @@ export function broadcastTheme() {
 
 // Capability domains the launcher implements (NAPPLET_OFFERED). Keep in sync
 // with DOMAIN_INFO in napp-permissions.ts and the bridge's factory set.
-const NAPPLET_OFFERED = ["identity", "theme", "storage", "resource", "relay", "outbox"]
+const NAPPLET_OFFERED = [
+  "identity",
+  "theme",
+  "storage",
+  "resource",
+  "relay",
+  "outbox",
+  "common",
+  "inc",
+  "link",
+  "config"
+]
 
 // The capability domains this napp is actually granted: declared (via
 // ["requires", "<domain>"] manifest tags or a metadata.json `requires` array)
@@ -455,11 +480,17 @@ function broadcastNappletThemeChanged() {
     if (!nappId || !nappletDomainsFor(nappId).includes("theme")) continue
     if (!win.iframe?.contentWindow) continue
     try {
-      const origin = new URL(win.iframe.src).origin
-      win.iframe.contentWindow.postMessage({ type: "theme.changed", theme }, origin)
+      win.iframe.contentWindow.postMessage(
+        { type: "theme.changed", theme },
+        iframeTargetOrigin(win.iframe)
+      )
     } catch {}
   }
 }
+
+// srcdoc napplets have no src (opaque origin) — pushes to them must target "*".
+const iframeTargetOrigin = (iframe: HTMLIFrameElement) =>
+  iframe.src ? new URL(iframe.src).origin : "*"
 
 // identity.changed: pushed when the launcher account connects/disconnects.
 onAccountChanged(pk => {
@@ -468,8 +499,10 @@ onAccountChanged(pk => {
     if (!nappId || !nappletDomainsFor(nappId).includes("identity")) continue
     if (!win.iframe?.contentWindow) continue
     try {
-      const origin = new URL(win.iframe.src).origin
-      win.iframe.contentWindow.postMessage({ type: "identity.changed", pubkey: pk || "" }, origin)
+      win.iframe.contentWindow.postMessage(
+        { type: "identity.changed", pubkey: pk || "" },
+        iframeTargetOrigin(win.iframe)
+      )
     } catch {}
   }
 })
@@ -622,6 +655,60 @@ async function dispatchNapplet(
       return publishNappletOutbox(nappId, data?.event, data?.options ?? {})
     case "outbox.resolveRelays":
       return { type: "outbox.resolveRelays.result", plan: await outboxResolvePlan(data?.target) }
+
+    // ── common (NAP-COMMON social actions: the shell owns nip19, profile
+    //    lookup and event construction; each write prompts like a publish).
+    //    Results carry `ok` per contract — ok:false is an answer, not an error.
+    case "common.encodeNip19":
+      return commonEncodeNip19(data?.input)
+    case "common.decodeNip19":
+      return commonDecodeNip19(data?.value)
+    case "common.getProfile":
+      return commonGetProfile(data?.target)
+    case "common.follows": {
+      if (!pk) return { type: "common.follows.result", ok: false, pubkeys: [], error: "no user connected" }
+      return { type: "common.follows.result", ok: true, pubkeys: (await loadFollowsList(pk)).items }
+    }
+    case "common.follow":
+      return commonFollowChange(nappId, data?.pubkeys, true)
+    case "common.unfollow":
+      return commonFollowChange(nappId, data?.pubkeys, false)
+    case "common.react":
+      return commonReact(nappId, data)
+    case "common.report":
+      return commonReport(nappId, data)
+
+    // ── link (open a URL in a new tab, behind a prompt) ──
+    case "link.open":
+      return linkOpen(nappId, data)
+
+    // ── config (shell-owned settings: the app registers a schema, the shell
+    //    renders/stores the form; get answers with a config.values message) ──
+    case "config.registerSchema": {
+      const bad = validateConfigSchema(data?.schema)
+      if (bad) {
+        return {
+          type: "config.registerSchema.result",
+          ok: false,
+          code: bad.code,
+          error: `${bad.code}: ${bad.error}`
+        }
+      }
+      const version = Number.isFinite(data?.version) ? Number(data.version) : undefined
+      const cur = getNappletConfig(nappId)
+      if (version !== undefined && cur.version !== undefined && version < cur.version) {
+        return {
+          type: "config.registerSchema.result",
+          ok: false,
+          code: "version-conflict",
+          error: `version-conflict: stored v${cur.version} is newer`
+        }
+      }
+      setNappletConfigSchema(nappId, data.schema, version)
+      return { type: "config.registerSchema.result", ok: true }
+    }
+    case "config.get":
+      return { type: "config.values", values: effectiveConfigValues(nappId) }
 
     default:
       throw new Error(`unsupported napplet call: ${type}`)
@@ -881,6 +968,270 @@ async function publishNappletEvent(
   }
 }
 
+// ── common (NAP-COMMON) ──
+
+function commonEncodeNip19(input: any): Record<string, unknown> {
+  const resultType = "common.encodeNip19.result"
+  try {
+    let value: string
+    switch (input?.type) {
+      case "npub":
+        value = npubEncode(String(input.hex))
+        break
+      case "note":
+        value = noteEncode(String(input.hex))
+        break
+      case "nprofile":
+        value = nprofileEncode({ pubkey: String(input.pubkey), relays: input.relays ?? [] })
+        break
+      case "nevent":
+        value = neventEncode({
+          id: String(input.eventId),
+          relays: input.relays ?? [],
+          ...(isHex64(input.author) ? { author: input.author } : {}),
+          ...(typeof input.kind === "number" ? { kind: input.kind } : {})
+        })
+        break
+      case "naddr":
+        value = naddrEncode({
+          identifier: String(input.identifier ?? ""),
+          pubkey: String(input.pubkey),
+          kind: Number(input.kind),
+          relays: input.relays ?? []
+        })
+        break
+      default:
+        return { type: resultType, ok: false, error: `unsupported type: ${input?.type}` }
+    }
+    return { type: resultType, ok: true, value, nip19Type: input.type }
+  } catch (err: any) {
+    return { type: resultType, ok: false, error: err?.message ?? String(err) }
+  }
+}
+
+// nsec deliberately stays out of the seam.
+function commonDecodeNip19(value: unknown): Record<string, unknown> {
+  const resultType = "common.decodeNip19.result"
+  try {
+    const d = decode(String(value ?? "").replace(/^nostr:/, ""))
+    switch (d.type) {
+      case "npub":
+        return { type: resultType, ok: true, nip19Type: "npub", hex: d.data, pubkey: d.data }
+      case "note":
+        return { type: resultType, ok: true, nip19Type: "note", hex: d.data }
+      case "nprofile":
+        return {
+          type: resultType,
+          ok: true,
+          nip19Type: "nprofile",
+          pubkey: d.data.pubkey,
+          relays: d.data.relays ?? []
+        }
+      case "nevent":
+        return {
+          type: resultType,
+          ok: true,
+          nip19Type: "nevent",
+          eventId: d.data.id,
+          relays: d.data.relays ?? [],
+          ...(d.data.author ? { author: d.data.author } : {}),
+          ...(typeof d.data.kind === "number" ? { kind: d.data.kind } : {})
+        }
+      case "naddr":
+        return {
+          type: resultType,
+          ok: true,
+          nip19Type: "naddr",
+          identifier: d.data.identifier,
+          pubkey: d.data.pubkey,
+          kind: d.data.kind,
+          relays: d.data.relays ?? []
+        }
+      default:
+        return { type: resultType, ok: false, error: `unsupported nip19 type: ${d.type}` }
+    }
+  } catch (err: any) {
+    return { type: resultType, ok: false, error: err?.message ?? String(err) }
+  }
+}
+
+// hex pubkey, npub or nprofile → hex, or "".
+function commonTargetPubkey(target: unknown): string {
+  const s = String(target ?? "").replace(/^nostr:/, "")
+  // HEX64 directly: the isHex64 guard would narrow s to `never` past a return.
+  if (HEX64.test(s)) return s
+  try {
+    const d = decode(s)
+    if (d.type === "npub") return d.data
+    if (d.type === "nprofile") return d.data.pubkey
+  } catch {}
+  return ""
+}
+
+async function commonGetProfile(target: unknown): Promise<Record<string, unknown>> {
+  const resultType = "common.getProfile.result"
+  const pk = commonTargetPubkey(target)
+  if (!pk) return { type: resultType, ok: false, pubkey: "", error: "invalid target" }
+  try {
+    const user = await loadNostrUser(pk)
+    const m = user?.metadata ?? null
+    const hasProfile = !!(m && Object.keys(m).length)
+    return {
+      type: resultType,
+      ok: true,
+      pubkey: pk,
+      profile: hasProfile ? { ...m, ...(m.display_name ? { displayName: m.display_name } : {}) } : null,
+      // gadgets caches parsed kind-0s, not raw events — reconstruct the shape
+      // callers read (content/created_at); id/sig are not recoverable.
+      ...(hasProfile
+        ? {
+            result: {
+              event: {
+                kind: 0,
+                pubkey: pk,
+                content: JSON.stringify(m),
+                created_at: user.lastUpdated || 0,
+                tags: [],
+                id: "",
+                sig: ""
+              }
+            }
+          }
+        : {})
+    }
+  } catch (err: any) {
+    return { type: resultType, ok: false, pubkey: pk, error: err?.message ?? String(err) }
+  }
+}
+
+// Sign-and-broadcast core shared by the common write actions. Same shape as
+// publishNappletEvent but with per-action approval keys and prompt copy.
+async function commonAction(
+  nappId: string,
+  action: string,
+  detail: string,
+  template: { kind: number; content: string; tags: string[][] }
+): Promise<Record<string, unknown>> {
+  const resultType = `${action}.result`
+  const signer = currentSigner()
+  if (!signer) return { type: resultType, ok: false, error: "no signer connected" }
+  if (!(await requireApproval(nappId, action, detail))) {
+    return { type: resultType, ok: false, error: "permission denied" }
+  }
+  try {
+    const signed = await signer.signEvent({
+      ...template,
+      created_at: Math.floor(Date.now() / 1000)
+    })
+    await Promise.allSettled(pool.publish(await nappletWriteRelays(getPubkey()), signed))
+    return { type: resultType, ok: true, event: signed, eventId: signed.id }
+  } catch (err: any) {
+    return { type: resultType, ok: false, error: err?.message ?? String(err) }
+  }
+}
+
+async function commonFollowChange(
+  nappId: string,
+  raw: unknown,
+  add: boolean
+): Promise<Record<string, unknown>> {
+  const resultType = add ? "common.follow.result" : "common.unfollow.result"
+  const pk = getPubkey()
+  if (!pk) return { type: resultType, ok: false, error: "no user connected" }
+  const targets = new Set<string>()
+  for (const t of Array.isArray(raw) ? raw : []) {
+    const hex = commonTargetPubkey(t)
+    if (hex) targets.add(hex)
+  }
+  if (!targets.size) return { type: resultType, ok: false, error: "no valid pubkeys" }
+
+  // Base the rewrite on the latest kind 3 we can see so petnames, content and
+  // unrelated tags survive. If relays hid the current list this can still
+  // clobber it — same view identity.getFollows serves, so at least consistent.
+  const current = await loadFollowsList(pk)
+  const base: string[][] = current.event?.tags ?? current.items.map(p => ["p", p])
+  const have = new Set(base.filter(t => t[0] === "p").map(t => t[1]))
+  const wanted = [...targets].filter(t => (add ? !have.has(t) : have.has(t)))
+  if (!wanted.length) return { type: resultType, ok: true } // already there
+  const tags = add
+    ? [...base, ...wanted.map(t => ["p", t])]
+    : base.filter(t => t[0] !== "p" || !targets.has(t[1]))
+  const detail = `${add ? "Follow" : "Unfollow"} ${wanted.length} profile${
+    wanted.length === 1 ? "" : "s"
+  } (rewrites your follow list).`
+  return commonAction(nappId, add ? "common.follow" : "common.unfollow", detail, {
+    kind: 3,
+    content: current.event?.content ?? "",
+    tags
+  })
+}
+
+async function commonReact(nappId: string, data: any): Promise<Record<string, unknown>> {
+  const resultType = "common.react.result"
+  const id = String(data?.targetEventId ?? "")
+  if (!isHex64(id)) return { type: resultType, ok: false, error: "invalid event id" }
+  const reaction = String(data?.reaction ?? "+") || "+"
+  // NIP-25 wants e + p (+ k) — find the target for author/kind; react with a
+  // bare e-tag when it's unreachable.
+  const [target] = await outboxQueryEvents([{ ids: [id] }], { limit: 1 })
+  const tags: string[][] = [["e", id]]
+  if (target) tags.push(["p", target.pubkey], ["k", String(target.kind)])
+  const shortcode = /^:(.+):$/.exec(reaction)?.[1]
+  if (shortcode && typeof data?.customEmojiHref === "string" && data.customEmojiHref) {
+    tags.push(["emoji", shortcode, data.customEmojiHref])
+  }
+  return commonAction(nappId, "common.react", `React ${reaction} to event ${id.slice(0, 8)}….`, {
+    kind: 7,
+    content: reaction,
+    tags
+  })
+}
+
+async function commonReport(nappId: string, data: any): Promise<Record<string, unknown>> {
+  const resultType = "common.report.result"
+  const t = data?.target
+  const reason = String(data?.reason ?? "other")
+  const tags: string[][] = []
+  if (t?.type === "event" && isHex64(String(t.id ?? ""))) {
+    tags.push(["e", String(t.id), reason])
+    if (isHex64(String(t.pubkey ?? ""))) tags.push(["p", String(t.pubkey)])
+  } else if (t?.type === "pubkey") {
+    const hex = commonTargetPubkey(t.pubkey)
+    if (!hex) return { type: resultType, ok: false, error: "invalid pubkey" }
+    tags.push(["p", hex, reason])
+  } else {
+    return { type: resultType, ok: false, error: "invalid target" }
+  }
+  return commonAction(nappId, "common.report", `Publish a NIP-56 ${reason} report.`, {
+    kind: 1984,
+    content: String(data?.text ?? ""),
+    tags
+  })
+}
+
+// ── link (NAP-LINK) ──
+
+async function linkOpen(nappId: string, data: any): Promise<Record<string, unknown>> {
+  const resultType = "link.open.result"
+  let url: URL
+  try {
+    url = new URL(String(data?.url ?? ""))
+  } catch {
+    return { type: resultType, error: "invalid-url" }
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { type: resultType, error: "unsupported-scheme" }
+  }
+  const label = typeof data?.options?.label === "string" ? ` — "${data.options.label}"` : ""
+  if (!(await requireApproval(nappId, "link.open", `Open ${url.href} in a new tab${label}.`))) {
+    return { type: resultType, status: "denied" }
+  }
+  // A remembered allow arrives with no user activation left; report a blocked
+  // popup as denied rather than pretending it opened.
+  const win = window.open(url.href, "_blank", "noopener,noreferrer")
+  return { type: resultType, status: win ? "opened" : "denied" }
+}
+
 // The user's read/write relays, or fallbacks — used for relay.query/subscribe
 // and relay.publish targets.
 async function nappletReadRelays(pk: string | null): Promise<string[]> {
@@ -1027,6 +1378,68 @@ export function closeNappletSubs(nappId: string) {
       nappletSubs.delete(key)
     }
   }
+  for (const [iframe, sub] of incSubs) if (sub.nappId === nappId) incSubs.delete(iframe)
+  for (const [iframe, id] of configSubs) if (id === nappId) configSubs.delete(iframe)
+}
+
+// ── config subscribers (per-iframe) ── the settings dialog saves, then this
+// pushes the fresh values to every open window of that napp.
+const configSubs = new Map<HTMLIFrameElement, string>() // iframe → nappId
+
+export function pushNappletConfig(nappId: string) {
+  const values = effectiveConfigValues(nappId)
+  for (const [iframe, id] of configSubs) {
+    if (!iframe.isConnected) {
+      configSubs.delete(iframe)
+      continue
+    }
+    if (id !== nappId || !nappletDomainsFor(nappId).includes("config")) continue
+    iframe.contentWindow?.postMessage(
+      { type: "config.values", values },
+      iframeTargetOrigin(iframe)
+    )
+  }
+}
+
+// ── inc (NAP-INC: in-session topic bus between open napplet windows; nothing
+// leaves the page) ── subscriptions live per-iframe; emit fans out to every
+// OTHER subscribed window whose napp still holds the inc grant. Dead iframes
+// are pruned lazily.
+const incSubs = new Map<HTMLIFrameElement, { nappId: string; topics: Set<string> }>()
+
+function incSubscribe(iframe: HTMLIFrameElement, nappId: string, topic: string) {
+  let sub = incSubs.get(iframe)
+  if (!sub) incSubs.set(iframe, (sub = { nappId, topics: new Set() }))
+  sub.topics.add(topic)
+}
+
+function incUnsubscribe(iframe: HTMLIFrameElement, topic: string) {
+  const sub = incSubs.get(iframe)
+  if (!sub) return
+  sub.topics.delete(topic)
+  if (sub.topics.size === 0) incSubs.delete(iframe)
+}
+
+function incEmit(sender: HTMLIFrameElement, senderNappId: string, data: any) {
+  const topic = String(data?.topic ?? "")
+  if (!topic) return
+  for (const [iframe, sub] of incSubs) {
+    if (!iframe.isConnected) {
+      incSubs.delete(iframe)
+      continue
+    }
+    if (iframe === sender || !sub.topics.has(topic)) continue
+    if (!nappletDomainsFor(sub.nappId).includes("inc")) continue
+    iframe.contentWindow?.postMessage(
+      {
+        type: "inc.event",
+        topic,
+        sender: senderNappId,
+        ...("payload" in (data ?? {}) ? { payload: data.payload } : {})
+      },
+      iframeTargetOrigin(iframe)
+    )
+  }
 }
 
 // Service one inbound napplet message. No handshake, no session: availability
@@ -1049,6 +1462,34 @@ function handleNapplet(
   if (data.type === "relay.close") return nappletRelayClose(nappId, data.subId, post)
   if (data.type === "outbox.subscribe") return void nappletOutboxSubscribe(nappId, data, post)
   if (data.type === "outbox.close") return nappletOutboxClose(nappId, data.subId, post)
+
+  // inc rides the bus, not dispatch: emit/unsubscribe are fire-and-forget.
+  if (data.type === "inc.emit") return incEmit(iframe, nappId, data)
+  if (data.type === "inc.subscribe") {
+    const topic = String((data as any).topic ?? "")
+    if (topic) incSubscribe(iframe, nappId, topic)
+    return post({ type: "inc.subscribe.result", id: data.id, ...(topic ? {} : { error: "missing topic" }) })
+  }
+  if (data.type === "inc.unsubscribe") return incUnsubscribe(iframe, String((data as any).topic ?? ""))
+
+  // config.subscribe answers with an immediate snapshot; openSettings is a UI
+  // request, answered only by a schemaError when there's nothing to render.
+  if (data.type === "config.subscribe") {
+    configSubs.set(iframe, nappId)
+    return post({ type: "config.values", values: effectiveConfigValues(nappId) })
+  }
+  if (data.type === "config.unsubscribe") return void configSubs.delete(iframe)
+  if (data.type === "config.openSettings") {
+    if (!getNappletConfig(nappId).schema) {
+      return post({ type: "config.schemaError", code: "no-schema", error: "no schema registered" })
+    }
+    const app = getInstalledApp(nappId)
+    void openNappConfigSettings(nappId, {
+      title: app?.petname || app?.title || nappId,
+      section: typeof (data as any).section === "string" ? (data as any).section : undefined
+    })
+    return
+  }
 
   dispatchNapplet(data.type, data, nappId)
     .then(result => post({ ...result, id: data.id }))

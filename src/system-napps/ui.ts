@@ -173,6 +173,15 @@ export function check(opts: CheckOpts = {}): HTMLInputElement {
   return c
 }
 
+// Same visual as check(), round — for one-of-N picks.
+export function radio(opts: CheckOpts & { name: string }): HTMLInputElement {
+  const r = check(opts)
+  r.type = "radio"
+  r.name = opts.name
+  r.classList.add("ui-radio")
+  return r
+}
+
 // Small uppercase letter-spaced caption (`.ui-overline`) — control captions,
 // metadata badges, counts.
 export function overline(text: string, cls?: string): HTMLSpanElement {

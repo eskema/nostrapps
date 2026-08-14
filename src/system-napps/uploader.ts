@@ -16,7 +16,9 @@ const DEFAULT_RELAYS = [
 
 import type { SystemCtx } from "../types.js"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
+import { NAPPLET_NAMED_KIND, computeAggregateHash, nappletMetaFromHtml } from "../nsite/napplet.js"
 import { isIgnoredPath } from "../nsite/ignore.js"
+import { slug } from "../nsite/local.js"
 
 export function mount(
   container: HTMLElement,
@@ -27,6 +29,11 @@ export function mount(
   let metadata: any = null
   let eventTemplate: any = null
   let publishing = false
+  let dirName: string | null = null // fallback napplet id when the html has no <meta name="id">
+  // Set when the caller already knows the flavor/id (a local napplet's publish
+  // button) — skips the html-marker guess entirely.
+  let forceNapplet = false
+  let forcedId: string | null = null
 
   container.innerHTML = `
     <div class="upload-panel">
@@ -90,15 +97,22 @@ export function mount(
 
     if (typeof initial.getDirectoryHandle === "function") {
       // FileSystemDirectoryHandle for dev~ apps
+      dirName = typeof initial.name === "string" ? initial.name : null
       await readDir(initial, "")
       buildEvent()
-    } else if (Array.isArray(initial)) {
-      // Pre-read files array for local~ apps. Already filtered on the way in by
+    } else if (Array.isArray(initial) || Array.isArray(initial?.files)) {
+      // Pre-read files array. Already filtered on the way in by
       // collectLocalFolder, but a caller assembling its own list shouldn't be
-      // able to slip junk past the publish path.
-      files = initial.filter(f => !isIgnoredPath(f.path))
-      skipped = initial.length - files.length
-      const metaEntry = initial.find(f => f.path === "metadata.json")
+      // able to slip junk past the publish path. The object form carries an
+      // explicit napplet flag + id (a local napplet's publish button).
+      const list: Array<{ path: string; file: File }> = Array.isArray(initial)
+        ? initial
+        : initial.files
+      forceNapplet = !Array.isArray(initial) && !!initial.napplet
+      forcedId = (!Array.isArray(initial) && initial.id) || null
+      files = list.filter(f => !isIgnoredPath(f.path))
+      skipped = list.length - files.length
+      const metaEntry = list.find(f => f.path === "metadata.json")
       if (metaEntry) {
         try {
           const blob = metaEntry.file instanceof Blob ? metaEntry.file : new Blob([metaEntry.file])
@@ -129,7 +143,21 @@ export function mount(
       return
     }
 
-    if (!metadata?.id) {
+    // A lone index.html publishes as a napplet (kind 35129, metadata read from
+    // the html) when the caller said so, or when the html carries a
+    // napplet/napplet-* meta as a default.
+    const single =
+      !metadata && files.length === 1 && files[0].path.replace(/^\//, "") === "index.html"
+    const nappletMeta = single ? nappletMetaFromHtml(await files[0].file.text()) : null
+    const isNapplet = single && (forceNapplet || !!nappletMeta?.napplet)
+    let dTag: string | null = metadata?.id || null
+    if (isNapplet) {
+      dTag = forcedId || nappletMeta!.id || slug(dirName || nappletMeta!.title || "") || null
+      if (!dTag) {
+        setStatus(`napplet needs <meta name="napplet-id" content="…"> in its index.html`)
+        return
+      }
+    } else if (!dTag) {
       setStatus(`metadata.json is missing the "id"`)
       return
     }
@@ -145,14 +173,20 @@ export function mount(
       `Uploading files…${skipped ? ` (skipped ${skipped} system file${skipped === 1 ? "" : "s"})` : ""}`
     )
     const tags = []
-    for (const f of files) {
-      // metadata.json ships as a real file alongside its derived tags: the
-      // serving worker reads /metadata.json from the installed files to
-      // decide things the event does not carry (e.g. `ui: "wrapper"` style
-      // injection), and local~ installs already treat it as part of the app.
+    // A napplet event carries only /index.html; metadata.json is authoring
+    // input. nsites ship metadata.json as a real file alongside its derived
+    // tags: the serving worker reads /metadata.json from the installed files.
+    const uploadList = isNapplet
+      ? files.filter(f => f.path.replace(/^\//, "") === "index.html")
+      : files
+    const okServers = new Set<string>()
+    for (const f of uploadList) {
       const results = await Promise.allSettled(
         serverList.map(s => new BlossomClient(s, signer as any).uploadFile(f.file))
       )
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") okServers.add(serverList[i])
+      })
       const ok = results.find(r => r.status === "fulfilled") as
         | PromiseFulfilledResult<any>
         | undefined
@@ -165,32 +199,41 @@ export function mount(
       }
       const bd = ok.value
       ctx.setStatus(`Uploaded ${f.path} (${bd.sha256.slice(0, 8)}…)`)
-      tags.push(["path", f.path, bd.sha256])
+      tags.push(["path", isNapplet ? "/index.html" : f.path, bd.sha256])
+    }
+
+    if (isNapplet) {
+      tags.push(["x", computeAggregateHash(tags), "aggregate"])
+      for (const s of okServers) tags.push(["server", s])
     }
 
     if (protectedCb.checked) tags.push(["-"])
 
-    if (metadata?.title || metadata?.name) tags.push(["title", metadata.title || metadata.name])
-    if (metadata?.description) tags.push(["description", metadata.description])
-    if (metadata?.icon) tags.push(["icon", metadata.icon])
-    if (Array.isArray(metadata?.actions)) {
+    // Napplet metadata comes from the html; nsite metadata from metadata.json.
+    const title = isNapplet ? nappletMeta!.title : metadata?.title || metadata?.name
+    const description = isNapplet ? nappletMeta!.description : metadata?.description
+    const icon = isNapplet ? nappletMeta!.icon : metadata?.icon
+    if (title) tags.push(["title", title])
+    if (description) tags.push(["description", description])
+    if (icon) tags.push(["icon", icon])
+    // Actions ride the napp bridge, which a napplet doesn't have.
+    if (!isNapplet && Array.isArray(metadata?.actions)) {
       for (const a of metadata.actions) tags.push(["action", a])
     }
-    // metadata.json's requires array is the authored source for the manifest's
-    // ["requires", "<domain>"] tags. `ui`, `network` and the NAP domains all
-    // ride the same list, so they project to tags with no special-casing.
-    const requires = new Set<string>()
-    if (Array.isArray(metadata?.requires)) {
+    // The authored requires list becomes the manifest's ["requires", "<domain>"]
+    // tags. `ui`, `network` and the NAP domains all ride the same list.
+    const requires = new Set<string>(isNapplet ? nappletMeta!.requires : [])
+    if (!isNapplet && Array.isArray(metadata?.requires)) {
       for (const r of metadata.requires) if (typeof r === "string" && r) requires.add(r)
     }
     // Back-compat: the retired `ui: "wrapper"` field becomes requires: ["ui"].
     if (metadata?.ui === "wrapper") requires.add("ui")
     for (const r of requires) tags.push(["requires", r])
 
-    tags.push(["d", metadata.id])
+    tags.push(["d", dTag])
 
     eventTemplate = {
-      kind: NSITE_NAMED_KIND,
+      kind: isNapplet ? NAPPLET_NAMED_KIND : NSITE_NAMED_KIND,
       created_at: Math.floor(Date.now() / 1000),
       tags,
       content: "",

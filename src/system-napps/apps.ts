@@ -9,8 +9,9 @@ import { loadNostrUser } from "@nostr/gadgets/metadata"
 import "nostr-web-components"
 
 import type { AppType, InstalledApp, SystemCtx } from "../types.js"
-import { classifyEvent, classifyInstalled } from "../persistence.js"
+import { classifyEvent, classifyInstalled, getNappletConfig } from "../persistence.js"
 import { unsupportedRequires } from "../napp-permissions.js"
+import { openNappConfigSettings } from "../napp-config.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
@@ -156,6 +157,9 @@ export function mount(
     const imgs = detailImages(req.event)
     if (imgs) detailOverlay.appendChild(imgs)
     const card = req.buildCard()
+    // The list card names unsupported requires in its badge; in detail the
+    // requires chips below carry that (red), so the line would be redundant.
+    card.querySelector(".apps-unsupported")?.remove()
     // Requires — lumped in with the action chips, detail view only (too noisy
     // in the list).
     const reqs = req.event ? requiresOf(req.event) : []
@@ -275,6 +279,17 @@ export function mount(
     perms.addEventListener("click", () => {
       ctx.editPermissions?.(app.nappId)
     })
+    // Present only once the app has registered a NAP-CONFIG schema.
+    const cfg = getNappletConfig(app.nappId).schema
+      ? button({
+          label: "settings",
+          variant: "outline",
+          onClick: () =>
+            void openNappConfigSettings(app.nappId, {
+              title: app.petname || app.title || app.nappId
+            })
+        })
+      : null
     const del = button({ label: "delete", variant: "danger" })
     del.addEventListener("click", async () => {
       ctx.setStatus?.(`Apps: delete requested for ${app.nappId}`)
@@ -302,7 +317,31 @@ export function mount(
         }, 3000)
       }
     })
-    return [perms, del]
+    // Local napplet (loaded via /folder): its index.html is stored in the
+    // record. The flavor was the user's choice at load time, so tell the
+    // uploader explicitly instead of having it re-guess from the html.
+    if (app.html) {
+      const pub = button({
+        label: "publish",
+        variant: "outline",
+        onClick: () =>
+          ctx.launchSystemNapp("uploader", {
+            params: {
+              napplet: true,
+              id: app.nappId.replace(/^napplet~local~/, ""),
+              files: [
+                {
+                  path: "index.html",
+                  file: new File([app.html], "index.html", { type: "text/html" })
+                }
+              ]
+            },
+            persistent: false
+          })
+      })
+      return cfg ? [pub, cfg, perms, del] : [pub, perms, del]
+    }
+    return cfg ? [cfg, perms, del] : [perms, del]
   }
 
   // The newest discovered manifest strictly newer than the one we installed, or
@@ -423,8 +462,7 @@ export function mount(
       authorLabel,
       createdAt,
       actions: app.actions,
-      unsupported:
-        unsupportedRequires(app.event ? requiresOf(app.event) : (app.requires ?? [])).length > 0,
+      unsupported: unsupportedRequires(app.event ? requiresOf(app.event) : (app.requires ?? [])),
       search,
       buttons,
       onAuthorClick: author
@@ -1031,8 +1069,8 @@ interface AppCardOpts {
   authorLabel?: string | null // plain text shown in place of author (e.g. "local")
   createdAt?: number | null
   actions: string[]
-  // True when the app declares `requires` domains this launcher can't provide.
-  unsupported?: boolean
+  // `requires` domains this launcher can't provide, named on the card badge.
+  unsupported?: string[]
   search: string
   buttons: HTMLElement[]
   menuTrigger?: HTMLElement | null
@@ -1116,10 +1154,10 @@ function renderAppCard(o: AppCardOpts): HTMLElement {
     card.appendChild(label)
   }
 
-  if (o.unsupported) {
+  if (o.unsupported?.length) {
     const warn = document.createElement("span")
     warn.className = "apps-unsupported"
-    warn.textContent = "requires unsupported features"
+    warn.textContent = `requires unsupported features: ${o.unsupported.join(", ")}`
     card.appendChild(warn)
   }
 
@@ -1323,7 +1361,7 @@ function renderCard(
     authorPubkey: evt.pubkey,
     createdAt: evt.created_at,
     actions: actionsOf(evt),
-    unsupported: unsupportedRequires(requiresOf(evt)).length > 0,
+    unsupported: unsupportedRequires(requiresOf(evt)),
     search: searchHaystack(evt),
     buttons,
     menuTrigger,
@@ -1547,6 +1585,7 @@ function matchesFilter(evt: any, filter: string) {
   if (!needle) return true
   return searchHaystack(evt).includes(needle)
 }
+
 
 // ─── app-info detail (shown in the overlay over the list) ──────────
 // Built from the clicked app: a rebuilt list-item card (with live actions),

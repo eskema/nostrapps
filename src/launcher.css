@@ -1440,6 +1440,14 @@ body.popover-open .napp-body iframe {
   opacity: 0.7;
 }
 
+/* Declared requirements the launcher can't provide — same look as the
+   apps-list badge, sitting right below the requires line. */
+.napp-perms-unsupported {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.75rem;
+}
+
 /* A grantable row: checkbox at the left, then title + description stacked. The
    whole row is a <label>, so clicking anywhere toggles the box. */
 .napp-perms-row {
@@ -1463,29 +1471,37 @@ body.popover-open .napp-body iframe {
   opacity: 0.7;
 }
 
-/* A declared-but-unsupported requirement: non-interactive, dimmed. The "✕"
-   sits in the checkbox column; an "unsupported" tag trails the domain name. */
-.napp-perms-row.is-unsupported {
-  cursor: default;
-}
-.napp-perms-mark {
-  margin-top: 0.15rem;
-  opacity: 0.5;
-  font-weight: 600;
-}
-.napp-perms-tag {
-  margin-left: 0.4rem;
-  opacity: 0.6;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 .napp-perms-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.6rem;
+}
+
+/* NAP-CONFIG settings form (shares the perms dialog shell). A row stacks
+   title / description / control; booleans put the check on the title line. */
+.napp-config-row {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+.napp-config-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.6rem;
+}
+.napp-config-head > span:only-child {
+  grid-column: 1 / -1;
+}
+.napp-config-section {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+.napp-config select.ui-input {
+  width: 100%;
 }
 
 /* Queue card: collapsible. Collapsed shows only the count; expanded reveals the
@@ -2096,9 +2112,11 @@ body.popover-open .napp-body iframe {
   word-break: break-all;
 }
 
-/* A required NAP domain the launcher can't provide — struck through in the
-   detail requires list to read as "missing", staying muted like its siblings. */
+/* A required NAP domain the launcher can't provide — red and struck through
+   in the detail requires list (the list card names it in the badge instead). */
 .apps-handler.is-unsupported {
+  color: var(--danger);
+  opacity: 1;
   text-decoration: line-through;
 }
 
@@ -2299,6 +2317,10 @@ body.popover-open .napp-body iframe {
     background-color 120ms ease,
     border-color 120ms ease;
 }
+.ui-radio {
+  border-radius: 999px;
+}
+
 .ui-check::after {
   content: "";
   width: 0.7rem;
