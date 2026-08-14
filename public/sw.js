@@ -189,8 +189,13 @@ function grantsFor(policy) {
 
 function htmlHeaders(mime, policy) {
   const headers = { "Content-Type": mime }
-  // Locked unless the user granted the `network` capability.
-  if (!grantsFor(policy).includes("network")) headers["Content-Security-Policy"] = LOCKED_CSP
+  // Locked unless the user granted the `network` capability. Network-granted
+  // napps still get http:// loads upgraded — one stale image URL would
+  // otherwise flag the whole page as insecure (CSP is per-document, so the
+  // launcher's own upgrade meta doesn't reach napp frames).
+  headers["Content-Security-Policy"] = grantsFor(policy).includes("network")
+    ? "upgrade-insecure-requests"
+    : LOCKED_CSP + "; upgrade-insecure-requests"
   return headers
 }
 

@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- avatars/icons come from arbitrary nostr events; upgrade http:// loads
+         so one stale picture URL can't flag the whole origin as insecure -->
+    <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" />
     <title>nostrapps</title>
     <link rel="stylesheet" href="/src/launcher.css" />
   </head>
