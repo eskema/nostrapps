@@ -8,6 +8,7 @@ import { bytesToHex } from "@noble/hashes/utils.js"
 import { verifyEvent } from "@nostr/tools/pure"
 import type { NostrEvent } from "@nostr/tools/core"
 import { fetchBlob } from "./fetch.js"
+import { healNapp } from "./heal.js"
 import { FALLBACK_RELAYS } from "../outbox.js"
 
 export const NAPPLET_SNAPSHOT_KIND = 5129
@@ -106,7 +107,7 @@ export async function resolveNapplet(
     : { kinds: [kind], authors: [pubkey], ...(dTag ? { "#d": [dTag] } : {}) }
   const manifest = latest(await pool.querySync(relays, filter, { maxWait: 6000 }))
   if (!manifest) throw new Error("napplet manifest not found")
-  return loadNappletFromManifest(manifest, onProgress)
+  return loadNappletFromManifest(manifest, onProgress, { healRelays: relays })
 }
 
 // The verify + fetch half, given the manifest event we already hold — used both
@@ -115,7 +116,10 @@ export async function resolveNapplet(
 // bytes (content-addressed: never trust a cached document, re-verify each load).
 export async function loadNappletFromManifest(
   manifest: NostrEvent,
-  onProgress: (m: string) => void = () => {}
+  onProgress: (m: string) => void = () => {},
+  // healRelays marks a fresh resolve (install/update): heal fires there, never
+  // on the RESTORE re-verify, which runs on every launch.
+  opts: { healRelays?: string[] } = {}
 ): Promise<ResolvedNapplet> {
   if (!verifyEvent(manifest)) throw new Error("napplet manifest signature is invalid")
 
@@ -145,6 +149,15 @@ export async function loadNappletFromManifest(
   onProgress("Fetching napplet /index.html…")
   const blob = await fetchBlob(servers, indexTag[2]) // verifies sha256(blob) === hash
   if (!blob) throw new Error(`Could not fetch napplet index.html (${indexTag[2]})`)
+
+  if (opts.healRelays?.length) {
+    healNapp({
+      manifest,
+      relays: opts.healRelays,
+      servers,
+      files: [{ sha: indexTag[2], body: blob, mime: "text/html" }]
+    })
+  }
 
   return {
     dTag: manifest.tags.find(t => t[0] === "d")?.[1] || "",

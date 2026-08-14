@@ -7,6 +7,7 @@ import { NostrEvent } from "@nostr/tools/pure"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
 import { NsiteResult } from "../types.js"
+import { healNapp } from "./heal.js"
 
 export const NSITE_NAMED_KIND = 35128
 
@@ -66,6 +67,7 @@ export async function fetchNsite(
   ].filter(Boolean)
 
   const files = []
+  const healFiles = []
   for (let i = 0; i < pathTags.length; i++) {
     const tag = pathTags[i]
     const path = tag[1].startsWith("/") ? tag[1] : `/${tag[1]}`
@@ -80,7 +82,10 @@ export async function fetchNsite(
         }`
       )
     files.push({ path, body: blob, mime })
+    healFiles.push({ sha, body: blob, mime })
   }
+
+  healNapp({ manifest, relays, servers, files: healFiles })
 
   const title = getTag(manifest, "title") || null
   const singleton = manifest.tags.some((t: string[]) => t[0] === "singleton")
