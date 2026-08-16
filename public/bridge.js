@@ -452,6 +452,12 @@
     return Math.round(parseInt(m[1], 10) * factor * 1e8)
   }
 
+  // Lazy loader for the signing companion (same-origin, see sw.js). Loaded
+  // once, only when a napp actually signs with a throwaway key — most napps
+  // never pay for it.
+  let nostrCryptoModule = null
+  const nostrCrypto = () => (nostrCryptoModule ||= import("/nostr-crypto.js"))
+
   const napp = {
     instance: window.name,
     action: (name, payload, options) =>
@@ -520,6 +526,21 @@
       loadEvents: ids => rpc("napp.loadEvents", ids),
       // verify an event's id + signature on the host (nostr-tools verifyEvent)
       verifyEvent: event => rpc("napp.verifyEvent", event),
+      // ── throwaway-key signing (no rpc — runs IN this frame) ──────────
+      // nostr-tools' signing, lazy-imported from the same-origin companion
+      // /nostr-crypto.js (generated from @nostr/tools/pure; see sw.js). The
+      // secret key never crosses the rpc boundary — the host only ever sees
+      // finished signed events. For ephemeral/anonymous identities, NOT the
+      // user's key. No permission prompt: the user's identity isn't involved.
+      generateKey: async () => {
+        const { generateSecretKey, getPublicKey, bytesToHex } = await nostrCrypto()
+        const sk = generateSecretKey()
+        return { sk: bytesToHex(sk), pk: getPublicKey(sk) }
+      },
+      signWithKey: async (event, sk) => {
+        const { finalizeEvent, hexToBytes } = await nostrCrypto()
+        return finalizeEvent(event, hexToBytes(sk))
+      },
       // ── files ──────────────────────────────────
       // Save bytes to the user's disk. Napp iframes have no `allow-downloads`,
       // so an <a download> here is silently ignored — hand the data over and

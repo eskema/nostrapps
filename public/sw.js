@@ -44,6 +44,9 @@ async function handleFetch(req, url) {
   if (path === "/sw.js") return fetch(req)
   if (path === "/bridge.js") return fetch(req)
   if (path === "/napplet-bridge.js") return fetch(req)
+  // Signing companion lazy-imported by bridge.js (napp.utils.signWithKey /
+  // generateKey) — generated from @nostr/tools/pure, served like bridge.js.
+  if (path === "/nostr-crypto.js") return fetch(req)
   // Launcher-owned shared stylesheet (opt-in via metadata `ui: "wrapper"`),
   // served from the launcher origin for every napp subdomain like bridge.js.
   // Its fonts are inlined as data URIs inside it (a separate /fonts/ request is

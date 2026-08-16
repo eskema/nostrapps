@@ -173,6 +173,15 @@ interface NappUtils {
   // Verify an event's id + signature on the host (nostr-tools verifyEvent).
   verifyEvent(event: NostrEvent): Promise<boolean>
 
+  // Throwaway-key signing — for ephemeral/anonymous identities, NOT the
+  // user's key. NO rpc: both run inside the napp's own frame (nostr-tools
+  // signing, lazy-imported from the /nostr-crypto.js companion), so the
+  // secret key never reaches the host — it only ever sees finished signed
+  // events (e.g. via publish). No permission prompt: the user's identity
+  // is never involved. generateKey returns a fresh secp256k1 keypair (hex).
+  generateKey(): Promise<{ sk: string; pk: string }>
+  signWithKey(event: EventTemplate, sk: string): Promise<NostrEvent>
+
   // Save bytes to the user's disk. Napp iframes deliberately omit the
   // `allow-downloads` sandbox token, so a napp cannot download on its own and
   // gets no error when it tries — this rpc is the only route out, and being an
