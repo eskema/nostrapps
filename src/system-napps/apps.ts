@@ -19,6 +19,9 @@ import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NAPPLET_NAMED_KIND } from "../nsite/napplet.js"
 import { NostrEvent } from "@nostr/tools"
+import { BlossomClient } from "@nostr/tools/nipb7"
+import { publishOutcomes } from "../utils.js"
+import { hasBytes } from "../nsite/heal.js"
 
 // Addressable app kinds shown in Discover: nsites (35128) + named napplets (35129).
 const DISCOVER_KINDS = [NSITE_NAMED_KIND, NAPPLET_NAMED_KIND]
@@ -94,14 +97,16 @@ export function mount(
 
   // ─── Discover tab state ───
   let filter = ""
-  let events: any[] = []
-  const eventIds = new Set<string>() // O(1) dedup of incoming events
+  // Newest manifest per napp address (computeNappId). Relays replace
+  // addressable events on write, but a stale version still arrives from any
+  // relay the newer publish didn't reach — the collapse happens here.
+  const manifests = new Map<string, any>()
   let pending: any[] = [] // events arrived since the last incremental flush
   // Restore a previously-saved custom relay list. emitDiscoverState persists it
   // under the session's `params`, which restore feeds back in via opts.params.
   // Empty / absent → fall back to the defaults. `disabled` is the subset the
   // user has toggled off — still listed in the editor, but not subscribed, and
-  // events seen only on disabled relays are hidden from the list.
+  // napps seen only on disabled relays are hidden from the list.
   let relays = sanitizeRelays(opts.params?.relays)
   if (!relays.length) relays = [...DEFAULT_RELAYS]
   const disabled = new Set<string>(
@@ -109,11 +114,13 @@ export function mount(
   )
   // One subscription per relay so a single relay can be toggled or removed
   // without restarting the others. `relayEose` tracks which finished their
-  // initial load; `eventRelays` maps event.id → the relays it was seen on,
-  // which drives both the per-relay counts and disabled-relay hiding.
+  // initial load; `nappRelays` maps napp address → relay → the newest
+  // created_at that relay served for it. Drives the per-relay counts,
+  // disabled-relay hiding, and staleness (relay timestamp < newest known =
+  // that relay is missing the latest version).
   const subs = new Map<string, SubCloser>()
   const relayEose = new Set<string>()
-  const eventRelays = new Map<string, Set<string>>()
+  const nappRelays = new Map<string, Map<string, number>>()
 
   container.innerHTML = `
     <div class="apps-panel">
@@ -181,8 +188,8 @@ export function mount(
       }
     }
     detailOverlay.appendChild(card)
-    detailOverlay.appendChild(detailInfo(req))
-    const files = detailFiles(req.event)
+    detailOverlay.appendChild(detailInfo(req, nappRelays.get(req.nappId), ctx, updateRelayCounts))
+    const files = detailFiles(req.event, ctx)
     if (files) detailOverlay.appendChild(files)
     // The card lives in the overlay (not the list), so load its icon here too.
     loadCardIcons(detailOverlay, [{ nappId: req.nappId, evt: req.event }])
@@ -351,13 +358,8 @@ export function mount(
   function latestUpdateFor(app: any): any | null {
     const base = app.event?.created_at
     if (!base) return null // local/dev/temp apps have no manifest → no updates
-    let best: any = null
-    for (const e of events) {
-      if (!DISCOVER_KINDS.includes(e.kind) || e.created_at <= base) continue
-      if (computeNappId(e) !== app.nappId) continue
-      if (!best || e.created_at > best.created_at) best = e
-    }
-    return best
+    const best = manifests.get(app.nappId)
+    return best && best.created_at > base ? best : null
   }
 
   // An "update" button for an installed app, pointed at the newer manifest `evt`.
@@ -572,8 +574,15 @@ export function mount(
       ".ui-item[data-relay]"
     ) as NodeListOf<HTMLElement>) {
       const count = row.querySelector(".apps-relay-count") as HTMLElement
-      count.textContent = String(relayCount(row.dataset.relay!))
+      count.textContent = relayCountLabel(row.dataset.relay!)
     }
+  }
+
+  // "12" when the relay is current, "12 · 3 stale" when it's missing newer
+  // versions of some napps.
+  function relayCountLabel(url: string): string {
+    const { total, stale } = relayCount(url)
+    return stale ? `${total} · ${stale} stale` : String(total)
   }
 
   function emitDiscoverState() {
@@ -687,7 +696,7 @@ export function mount(
     for (const card of cards) {
       const typeOk = typeFilter === "all" || card.dataset.type === typeFilter
       const searchOk = !needle || (card.dataset.search || "").includes(needle)
-      card.hidden = !typeOk || !searchOk || !seenOnEnabled(card.dataset.eventId)
+      card.hidden = !typeOk || !searchOk || !seenOnEnabled(card.dataset.addr)
     }
     refreshEmptyState()
   }
@@ -700,7 +709,7 @@ export function mount(
     _listEl.innerHTML = ""
     pending = [] // a full rebuild already covers everything buffered
 
-    const all = sortedManifests(events)
+    const all = sortedManifests([...manifests.values()])
     const frag = document.createDocumentFragment()
     for (const evt of all) {
       frag.appendChild(renderCard(evt, ctx, enabledRelays(), renderList, showDetail))
@@ -732,7 +741,7 @@ export function mount(
 
   function flushPending() {
     // _listEl may be detached when the discover tab isn't the active one — skip
-    // the DOM work; renderList() repaints from `events` when it's reopened.
+    // the DOM work; renderList() repaints from `manifests` when it's reopened.
     if (!_listEl || !_listEl.isConnected || pending.length === 0) return
     const batch = pending
     pending = []
@@ -740,6 +749,15 @@ export function mount(
     if (toRender.length === 0) return
     // Drop the placeholder before the merge so the ref walk only sees cards.
     _listEl.querySelector(".apps-empty")?.remove()
+
+    // A version superseding one whose card is already in the DOM replaces it —
+    // remove the stale same-address cards before the walk so `ref` never
+    // points at a removed node.
+    for (const evt of toRender) {
+      _listEl
+        .querySelector(`.apps-card[data-addr="${CSS.escape(computeNappId(evt))}"]`)
+        ?.remove()
+    }
 
     // Merge the sorted-desc batch into the sorted-desc list. Both are ordered
     // newest-first, so a single forward walk of the existing cards inserts each
@@ -763,23 +781,29 @@ export function mount(
 
   const enabledRelays = () => relays.filter(r => !disabled.has(r))
 
-  // An event stays visible only while at least one relay it was seen on is
-  // enabled. Events with no sighting record (shouldn't happen) stay visible.
-  function seenOnEnabled(id: string | undefined): boolean {
-    if (!id) return true
-    const seen = eventRelays.get(id)
+  // A napp stays visible only while at least one relay it was seen on is
+  // enabled. Napps with no sighting record (shouldn't happen) stay visible.
+  function seenOnEnabled(addr: string | undefined): boolean {
+    if (!addr) return true
+    const seen = nappRelays.get(addr)
     if (!seen) return true
-    for (const r of seen) if (!disabled.has(r)) return true
+    for (const r of seen.keys()) if (!disabled.has(r)) return true
     return false
   }
 
-  // Events seen on this relay — the count shown on its editor row. Derived from
-  // eventRelays (set membership) so re-subscribing after a toggle never double
-  // counts the re-sent events.
-  function relayCount(url: string): number {
-    let n = 0
-    for (const seen of eventRelays.values()) if (seen.has(url)) n++
-    return n
+  // Napps seen on this relay — the count shown on its editor row — plus how
+  // many of those the relay serves a stale version of. Derived from nappRelays
+  // so re-subscribing after a toggle never double counts the re-sent events.
+  function relayCount(url: string): { total: number; stale: number } {
+    let total = 0
+    let stale = 0
+    for (const [addr, seen] of nappRelays) {
+      const ts = seen.get(url)
+      if (ts === undefined) continue
+      total++
+      if (ts < (manifests.get(addr)?.created_at || 0)) stale++
+    }
+    return { total, stale }
   }
 
   function updateStatus() {
@@ -795,10 +819,11 @@ export function mount(
       return
     }
     const loading = active.some(r => subs.has(r) && !relayEose.has(r))
-    // Count only events visible under the enabled set — a disabled relay's
-    // events are hidden, so they shouldn't inflate the total.
-    const total = events.filter(e => seenOnEnabled(e.id)).length
-    _relaysStatusEl.textContent = `${total} event${total === 1 ? "" : "s"}${loading ? " — loading…" : ""}`
+    // Count only napps visible under the enabled set — a disabled relay's
+    // napps are hidden, so they shouldn't inflate the total.
+    let total = 0
+    for (const addr of manifests.keys()) if (seenOnEnabled(addr)) total++
+    _relaysStatusEl.textContent = `${total} napp${total === 1 ? "" : "s"}${loading ? " — loading…" : ""}`
   }
 
   function openRelaySub(url: string) {
@@ -810,12 +835,21 @@ export function mount(
       {
         label: "napps",
         onevent(event: any) {
-          let seen = eventRelays.get(event.id)
-          if (!seen) eventRelays.set(event.id, (seen = new Set()))
-          seen.add(url)
-          if (!eventIds.has(event.id)) {
-            eventIds.add(event.id)
-            events.push(event)
+          const addr = computeNappId(event)
+          let seen = nappRelays.get(addr)
+          if (!seen) nappRelays.set(addr, (seen = new Map()))
+          seen.set(url, Math.max(seen.get(url) || 0, event.created_at))
+          // Keep only the newest version per address (NIP-01 tie: lowest id).
+          // A superseded version still buffered is dropped before its card is
+          // ever built; one already rendered is replaced by flushPending.
+          const cur = manifests.get(addr)
+          if (
+            !cur ||
+            event.created_at > cur.created_at ||
+            (event.created_at === cur.created_at && event.id < cur.id)
+          ) {
+            if (cur) pending = pending.filter(e => e !== cur)
+            manifests.set(addr, event)
             pending.push(event)
           }
           // Even for an already-known event the flush matters: the new sighting
@@ -850,9 +884,8 @@ export function mount(
   // touch that relay's own subscription.
   function startDiscoverSubscription() {
     for (const url of [...subs.keys()]) closeRelaySub(url)
-    events = []
-    eventIds.clear()
-    eventRelays.clear()
+    manifests.clear()
+    nappRelays.clear()
     pending = []
     renderList()
     for (const url of enabledRelays()) openRelaySub(url)
@@ -894,15 +927,15 @@ export function mount(
     closeRelaySub(url)
     relays = relays.filter(r => r !== url)
     disabled.delete(url)
-    // Drop its sightings; events left with no source relay leave the list.
-    for (const [id, seen] of eventRelays) {
+    // Drop its sightings; napps left with no source relay leave the list.
+    for (const [addr, seen] of nappRelays) {
       seen.delete(url)
-      if (seen.size === 0) eventRelays.delete(id)
+      if (seen.size === 0) {
+        nappRelays.delete(addr)
+        manifests.delete(addr)
+      }
     }
-    events = events.filter(e => eventRelays.has(e.id))
-    pending = pending.filter(e => eventRelays.has(e.id))
-    eventIds.clear()
-    for (const e of events) eventIds.add(e.id)
+    pending = pending.filter(e => manifests.get(computeNappId(e)) === e)
     renderRelayRows()
     emitDiscoverState()
     renderList()
@@ -929,8 +962,8 @@ export function mount(
     if (!_relayListEl) return
     _relayListEl.replaceChildren()
     for (const url of relays) {
-      const count = overline(String(relayCount(url)), "apps-relay-count")
-      count.title = "events seen on this relay"
+      const count = overline(relayCountLabel(url), "apps-relay-count")
+      count.title = "napps seen on this relay (stale = missing the newest version)"
       const row = item(
         { label: url.replace(/^wss?:\/\//, ""), title: url },
         count,
@@ -1252,9 +1285,14 @@ function renderCard(
           ],
           content: ""
         })
-        const results = await Promise.allSettled(pool.publish(relays, signed))
-        const ok = results.filter(r => r.status === "fulfilled").length
-        ctx.setStatus?.(`Deletion event sent to ${ok}/${relays.length} relays`)
+        const outcomes = await publishOutcomes(relays, pool.publish(relays, signed))
+        const ok = outcomes.filter(o => o.ok).length
+        const missing = outcomes.filter(o => !o.ok).map(o => o.relay.replace(/^wss?:\/\//, ""))
+        ctx.setStatus?.(
+          missing.length
+            ? `Deletion event sent to ${ok}/${relays.length} relays — missing: ${missing.join(", ")}`
+            : `Deletion event sent to all ${relays.length} relays`
+        )
       } catch (err: any) {
         ctx.setStatus?.(`Deletion failed — ${err.message}`)
       }
@@ -1386,9 +1424,10 @@ function renderCard(
   // rendering means its DOM position doesn't affect where it shows.
   if (menuEl) card.appendChild(menuEl)
 
-  // Ties the card back to its manifest event so applyFilter can hide it when
-  // every relay it was seen on is disabled.
-  card.dataset.eventId = evt.id
+  // Ties the card back to its napp address so applyFilter can hide it when
+  // every relay it was seen on is disabled, and so a newer version's card
+  // replaces this one instead of stacking next to it.
+  card.dataset.addr = nappId
 
   return card
 }
@@ -1617,7 +1656,16 @@ function detailImages(event: any | null): HTMLElement | null {
 // Everything here is derived from the manifest event (the same event whether the
 // app was opened from Discover or Installed), so both tabs show identical info.
 // `id` is the only field without an event; the rest only render when present.
-function detailInfo(req: DetailReq): HTMLElement {
+// `sightings` (relay → newest created_at discovery saw there) marks relays
+// serving a stale version; without it the pool's record of this event is used.
+// Own napps with stale relays get a re-publish button; `onRepublished` lets
+// the relay editor refresh its stale badges afterwards.
+function detailInfo(
+  req: DetailReq,
+  sightings?: Map<string, number>,
+  ctx?: SystemCtx,
+  onRepublished?: () => void
+): HTMLElement {
   const section = document.createElement("div")
   section.className = "apps-detail-info"
 
@@ -1688,22 +1736,70 @@ function detailInfo(req: DetailReq): HTMLElement {
 
     if (btns.childElementCount) section.appendChild(btns)
 
-    // seen-on relays — a labelled <ul>, not chips.
-    if (seenOn.length) {
+    // seen-on relays — a labelled <ul>, not chips. Stale = the relay's newest
+    // sighting predates this manifest, so it's missing the latest version.
+    const relayRows: { url: string; stale: boolean }[] = sightings?.size
+      ? [...sightings].map(([url, ts]) => ({ url, stale: ts < event.created_at }))
+      : seenOn.map((url: string) => ({ url, stale: false }))
+    if (relayRows.length) {
       const row = document.createElement("div")
       row.className = "apps-detail-relays"
       const label = document.createElement("span")
       label.className = "apps-detail-label"
       label.textContent = "seen on:"
       const list = document.createElement("ul")
-      for (const r of seenOn) {
+      const setLi = (li: HTMLElement, url: string, stale: boolean) => {
+        li.textContent = url.replace(/^wss?:\/\//, "") + (stale ? " — stale" : "")
+        li.title = stale ? `${url} — serving an older version` : url
+        li.classList.toggle("is-stale", stale)
+      }
+      const lis = new Map<string, HTMLElement>()
+      for (const r of relayRows) {
         const li = document.createElement("li")
-        li.textContent = r.replace(/^wss?:\/\//, "")
-        li.title = r
+        setLi(li, r.url, r.stale)
+        lis.set(r.url, li)
         list.appendChild(li)
       }
       row.append(label, list)
       section.appendChild(row)
+
+      // Re-publish the manifest to the relays that fell behind — own napps
+      // only. The event is already signed, so this is a plain re-broadcast;
+      // successful relays lose their stale marker and the shared sightings
+      // map is corrected so the relay editor agrees.
+      let staleRelays = relayRows.filter(r => r.stale).map(r => r.url)
+      if (staleRelays.length && ctx?.account?.getPubkey() === event.pubkey) {
+        const btnLabel = (n: number) => `re-publish to ${n} stale relay${n === 1 ? "" : "s"}`
+        const b = button({
+          label: btnLabel(staleRelays.length),
+          variant: "warning",
+          class: "apps-detail-republish"
+        })
+        b.addEventListener("click", async () => {
+          b.disabled = true
+          b.textContent = "publishing…"
+          const outcomes = await publishOutcomes(staleRelays, pool.publish(staleRelays, event))
+          for (const o of outcomes) {
+            if (!o.ok) continue
+            sightings?.set(o.relay, event.created_at)
+            const li = lis.get(o.relay)
+            if (li) setLi(li, o.relay, false)
+          }
+          onRepublished?.()
+          staleRelays = outcomes.filter(o => !o.ok).map(o => o.relay)
+          if (staleRelays.length) {
+            ctx?.setStatus?.(
+              `Re-published, still missing: ${staleRelays.map(r => r.replace(/^wss?:\/\//, "")).join(", ")}`
+            )
+            b.disabled = false
+            b.textContent = btnLabel(staleRelays.length)
+          } else {
+            ctx?.setStatus?.(`Re-published to ${outcomes.length} relay${outcomes.length === 1 ? "" : "s"}`)
+            b.remove()
+          }
+        })
+        section.appendChild(b)
+      }
     }
 
     const cats: string[] = event.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1])
@@ -1733,7 +1829,7 @@ function detailInfo(req: DetailReq): HTMLElement {
 
 // Files <details> whose list is fetched (blossom round-trip) only on first
 // expand; null when the manifest has no path tags.
-function detailFiles(event: any | null): HTMLElement | null {
+function detailFiles(event: any | null, ctx?: SystemCtx): HTMLElement | null {
   const pathTags = (event?.tags || []).filter((t: any) => t[0] === "path" && t[1] && t[2])
   if (!pathTags.length) return null
   const block = details({ summary: `files (${pathTags.length})` })
@@ -1744,19 +1840,27 @@ function detailFiles(event: any | null): HTMLElement | null {
   block.addEventListener("toggle", () => {
     if (!block.open || loaded) return
     loaded = true
-    renderFiles(event, list)
+    renderFiles(event, list, ctx)
   })
   return block
 }
 
-async function renderFiles(evt: any, list: HTMLElement) {
+async function renderFiles(evt: any, list: HTMLElement, ctx?: SystemCtx) {
   const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
   const serverTagUrls = evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1])
   const blossomServers = (
     await loadBlossomServers(evt.pubkey).catch(() => ({ items: [] as string[] }))
   ).items
   const servers = [...new Set([...serverTagUrls, ...blossomServers])].map(normalizeServer)
+  const host = (u: string) => {
+    try {
+      return new URL(u).host
+    } catch {
+      return u
+    }
+  }
 
+  const lisBySha = new Map<string, HTMLElement[]>()
   for (const t of pathTags as string[][]) {
     const sha = t[2]
     const li = document.createElement("li")
@@ -1779,18 +1883,116 @@ async function renderFiles(evt: any, list: HTMLElement) {
         a.href = `${url}/${sha}`
         a.target = "_blank"
         a.rel = "noopener noreferrer"
-        try {
-          a.textContent = new URL(url).host
-        } catch {
-          a.textContent = url
-        }
+        a.textContent = host(url)
         span.appendChild(a)
       }
       linksBtn.replaceWith(span)
     })
     li.appendChild(linksBtn)
     list.appendChild(li)
+    lisBySha.set(sha, [...(lisBySha.get(sha) || []), li])
   }
+
+  if (!servers.length) return
+
+  // Availability probe (heal's ranged GET) — a links list that doesn't say
+  // who actually has the bytes is how blobs quietly rot.
+  const shas = [...lisBySha.keys()]
+  const have = new Map<string, Set<string>>(shas.map(s => [s, new Set<string>()]))
+  await Promise.allSettled(
+    servers.map(async server => {
+      for (const sha of shas) if (await hasBytes(server, sha)) have.get(sha)!.add(server)
+    })
+  )
+
+  // "missing on: …" (amber, recoverable) vs "missing everywhere" (red — no
+  // known server holds the bytes). Re-rendered after a re-seed run.
+  const marks: HTMLElement[] = []
+  const refreshMarks = () => {
+    for (const m of marks.splice(0)) m.remove()
+    for (const [sha, lis] of lisBySha) {
+      const got = have.get(sha)!
+      const missingOn = servers.filter(s => !got.has(s))
+      if (!missingOn.length) continue
+      for (const li of lis) {
+        const mark = document.createElement("span")
+        mark.className = got.size ? "apps-file-missing" : "apps-file-lost"
+        mark.textContent = got.size
+          ? ` — missing on: ${missingOn.map(host).join(", ")}`
+          : " — missing everywhere"
+        li.appendChild(mark)
+        marks.push(mark)
+      }
+    }
+  }
+  refreshMarks()
+
+  // Blobs missing somewhere but present elsewhere — re-seedable.
+  const seedable = () => {
+    let n = 0
+    for (const got of have.values()) if (got.size) n += servers.length - got.size
+    return n
+  }
+
+  // Re-seed: fetch each such blob from a server that has it (hash checked) and
+  // upload it where it's gone. Own napps only. The user's signer auths the
+  // uploads — this is an explicit click, unlike heal's background throwaway
+  // key, and allowlisting servers should accept it.
+  let toSeed = seedable()
+  if (!toSeed || ctx?.account?.getPubkey() !== evt.pubkey) return
+  const btnLabel = (n: number) => `re-seed ${n} missing blob${n === 1 ? "" : "s"}`
+  const b = button({ label: btnLabel(toSeed), variant: "warning", class: "apps-detail-reseed" })
+  b.addEventListener("click", async () => {
+    const signer = currentSigner()
+    if (!signer) {
+      ctx?.setStatus?.("Re-seed needs a signer connected")
+      return
+    }
+    b.disabled = true
+    b.textContent = "re-seeding…"
+    let failed = 0
+    for (const [sha, got] of have) {
+      if (!got.size) continue
+      const missingOn = servers.filter(s => !got.has(s))
+      if (!missingOn.length) continue
+      let blob: Blob
+      const src = [...got][0]
+      try {
+        const res = await fetch(`${src}/${sha}`, { signal: AbortSignal.timeout(30000) })
+        if (!res.ok) throw new Error(String(res.status))
+        const buf = await res.arrayBuffer()
+        const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", buf))]
+          .map(x => x.toString(16).padStart(2, "0"))
+          .join("")
+        if (digest !== sha) throw new Error("bytes don't match hash")
+        blob = new Blob([buf], { type: res.headers.get("content-type") || "" })
+      } catch {
+        failed += missingOn.length
+        continue
+      }
+      await Promise.allSettled(
+        missingOn.map(async server => {
+          try {
+            await new BlossomClient(server, signer as any).uploadBlob(blob, blob.type || undefined)
+            got.add(server)
+          } catch {
+            failed++
+          }
+        })
+      )
+    }
+    refreshMarks()
+    toSeed = seedable()
+    if (failed) {
+      ctx?.setStatus?.(`Re-seed: ${failed} upload${failed === 1 ? "" : "s"} refused`)
+      b.disabled = false
+      b.textContent = btnLabel(toSeed)
+    } else {
+      ctx?.setStatus?.("Re-seeded all missing blobs")
+      b.remove()
+    }
+  })
+  list.after(b)
 }
 
 function normalizeServer(s: string): string {

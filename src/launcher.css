@@ -2219,6 +2219,34 @@ body.popover-open .napp-body iframe {
   font-family: var(--font-mono);
 }
 
+.apps-detail-relays ul li + li::before {
+  content: ", ";
+  color: var(--text);
+}
+
+/* Relay serving an older version of this napp. */
+.apps-detail-relays ul li.is-stale {
+  color: #f59e0b;
+}
+
+.apps-detail-republish {
+  justify-self: start;
+}
+
+/* Blob availability marks in the files list: amber = some server still has
+   the bytes (re-seedable), red = no known server does. */
+.apps-file-missing {
+  color: #f59e0b;
+}
+
+.apps-file-lost {
+  color: var(--danger);
+}
+
+.apps-detail-reseed {
+  margin-top: 0.35rem;
+}
+
 .apps-detail-info {
   display: grid;
   align-content: start;
@@ -2969,4 +2997,27 @@ body.popover-open .napp-body iframe {
 /* Appearance from .btn .btn-primary; this keeps only its placement. */
 .upload-publish {
   align-self: flex-start;
+}
+
+/* Per-server (blobs) and per-relay (event) outcome rows. */
+.upload-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+  font-family: var(--font-mono);
+}
+
+.upload-results[hidden] {
+  display: none;
+}
+
+.upload-results li {
+  opacity: 0.65;
+}
+
+.upload-results li.is-fail {
+  color: var(--danger);
+  opacity: 1;
 }

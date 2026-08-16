@@ -67,7 +67,7 @@ async function heal({ manifest, relays, servers, files }: Parameters<typeof heal
   console.debug("[heal]", { id: manifest.id, republished, uploaded })
 }
 
-async function hasBytes(base: string, sha: string): Promise<boolean> {
+export async function hasBytes(base: string, sha: string): Promise<boolean> {
   try {
     const res = await fetch(`${base}/${sha}`, {
       headers: { Range: "bytes=0-0" },
