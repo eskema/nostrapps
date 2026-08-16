@@ -15,6 +15,7 @@ const DEFAULT_RELAYS = [
 ]
 
 import type { SystemCtx } from "../types.js"
+import { publishOutcomes } from "../utils.js"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NAPPLET_NAMED_KIND, computeAggregateHash, nappletMetaFromHtml } from "../nsite/napplet.js"
 import { isIgnoredPath } from "../nsite/ignore.js"
@@ -47,6 +48,7 @@ export function mount(
         <h3>Event Preview</h3>
         <pre class="upload-json"></pre>
         <button type="button" class="btn btn-primary upload-publish" disabled>Publish</button>
+        <ul class="upload-results" hidden></ul>
       </div>
     </div>
   `
@@ -57,6 +59,24 @@ export function mount(
   const previewEl = container.querySelector(".upload-preview") as HTMLElement
   const jsonEl = container.querySelector(".upload-json") as HTMLElement
   const publishBtn = container.querySelector(".upload-publish") as HTMLElement
+  const resultsEl = container.querySelector(".upload-results") as HTMLElement
+
+  // One row per server (blobs) and per relay (the event): which got
+  // everything, which failed and why — the n/m summaries alone don't say who
+  // is missing what.
+  function resultRow(kind: "server" | "relay", text: string, ok: boolean, title: string) {
+    const li = document.createElement("li")
+    li.dataset.kind = kind
+    if (!ok) li.classList.add("is-fail")
+    li.textContent = text
+    li.title = title
+    resultsEl.appendChild(li)
+    resultsEl.hidden = false
+  }
+  function clearRows(kind: "server" | "relay") {
+    for (const el of resultsEl.querySelectorAll(`[data-kind="${kind}"]`)) el.remove()
+    resultsEl.hidden = !resultsEl.childElementCount
+  }
 
   function setStatus(msg: string | undefined) {
     statusEl.textContent = msg || ""
@@ -126,6 +146,8 @@ export function mount(
   })()
 
   async function buildEvent() {
+    resultsEl.replaceChildren()
+    resultsEl.hidden = true
     if (files.length === 0) {
       setStatus("No files selected.")
       return
@@ -180,12 +202,30 @@ export function mount(
       ? files.filter(f => f.path.replace(/^\//, "") === "index.html")
       : files
     const okServers = new Set<string>()
+    // Per-server tallies, rendered as result rows — counts reflect attempts,
+    // so an aborted run still shows how far each server got.
+    const serverStats = new Map(serverList.map(s => [s, { ok: 0, fail: 0 }]))
+    const renderServerStats = () => {
+      clearRows("server")
+      for (const [server, st] of serverStats) {
+        resultRow(
+          "server",
+          `${server.replace(/^https?:\/\//, "")} — ${st.ok}/${st.ok + st.fail} blobs`,
+          st.fail === 0,
+          server
+        )
+      }
+    }
     for (const f of uploadList) {
       const results = await Promise.allSettled(
         serverList.map(s => new BlossomClient(s, signer as any).uploadFile(f.file))
       )
       results.forEach((r, i) => {
-        if (r.status === "fulfilled") okServers.add(serverList[i])
+        const st = serverStats.get(serverList[i])!
+        if (r.status === "fulfilled") {
+          okServers.add(serverList[i])
+          st.ok++
+        } else st.fail++
       })
       const ok = results.find(r => r.status === "fulfilled") as
         | PromiseFulfilledResult<any>
@@ -194,6 +234,7 @@ export function mount(
         const reasons = results
           .map(r => (r.status === "rejected" ? (r as PromiseRejectedResult).reason.message : ""))
           .join("; ")
+        renderServerStats()
         setStatus(`Upload failed for ${f.path}: ${reasons}`)
         return
       }
@@ -201,6 +242,7 @@ export function mount(
       ctx.setStatus(`Uploaded ${f.path} (${bd.sha256.slice(0, 8)}…)`)
       tags.push(["path", isNapplet ? "/index.html" : f.path, bd.sha256])
     }
+    renderServerStats()
 
     if (isNapplet) {
       tags.push(["x", computeAggregateHash(tags), "aggregate"])
@@ -253,6 +295,7 @@ export function mount(
     publishing = true
     publishBtn.disabled = true
     publishBtn.textContent = "signing…"
+    clearRows("relay")
     setStatus("Signing event…")
 
     try {
@@ -268,9 +311,21 @@ export function mount(
       ctx.setStatus("Publishing app event…")
       setStatus(`Publishing to ${relayList.length} relay(s)…`)
 
-      const results = await Promise.allSettled(pool.publish(relayList, signed))
-      const okCount = results.filter(r => r.status === "fulfilled").length
-      ctx.setStatus(`Published app event to ${okCount}/${relayList.length} relays`)
+      const outcomes = await publishOutcomes(relayList, pool.publish(relayList, signed))
+      const okCount = outcomes.filter(o => o.ok).length
+      const missing = outcomes.filter(o => !o.ok).map(o => o.relay.replace(/^wss?:\/\//, ""))
+      for (const o of outcomes)
+        resultRow(
+          "relay",
+          `${o.relay.replace(/^wss?:\/\//, "")} — ${o.ok ? "ok" : o.reason || "failed"}`,
+          o.ok,
+          o.relay
+        )
+      ctx.setStatus(
+        missing.length
+          ? `Published app event to ${okCount}/${relayList.length} relays — missing: ${missing.join(", ")}`
+          : `Published app event to all ${relayList.length} relays`
+      )
       setStatus(`Published to ${okCount}/${relayList.length} relays`)
       publishBtn.textContent = "published"
       setTimeout(() => {
