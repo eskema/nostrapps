@@ -152,6 +152,9 @@ interface NappUtils {
   loadBlossomServers(pubkey: string): Promise<ListResult<string>>
   loadEmojis(pubkey: string): Promise<ListResult<string>>
   loadFavoriteRelays(pubkey: string): Promise<ListResult<string>>
+  loadBlockedRelays(pubkey: string): Promise<ListResult<string>>
+  loadSearchRelays(pubkey: string): Promise<ListResult<string>>
+  loadDmRelays(pubkey: string): Promise<ListResult<string>>
   loadWikiAuthors(pubkey: string): Promise<ListResult<string>>
   loadWikiRelays(pubkey: string): Promise<ListResult<string>>
 

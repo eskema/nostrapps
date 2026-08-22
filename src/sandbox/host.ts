@@ -16,7 +16,7 @@ import type {
 import { isGated, requireApproval } from "../permissions.js"
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
-import { getStore } from "../store.js"
+import { getStore, safeQueryEvents } from "../store.js"
 import { createNappWindow } from "./napp-window.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
@@ -34,6 +34,7 @@ import {
   loadWikiAuthors,
   loadWikiRelays
 } from "@nostr/gadgets/lists"
+import { loadBlockedRelays, loadDmRelays, loadSearchRelays } from "../extra-lists.js"
 import { loadEmojiSets, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { outboxFilterRelayBatch } from "@nostr/gadgets/outbox"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
@@ -52,6 +53,7 @@ import {
   npubEncode
 } from "@nostr/tools/nip19"
 import { verifyEvent } from "@nostr/tools/pure"
+import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
 import {
   getInstalledApp,
   getNappletConfig,
@@ -3429,7 +3431,7 @@ async function startOutboxFeed(
         {
           __nostrapps: "napp-feed-callback",
           callbackId,
-          events: await store.queryEvents(filter),
+          events: await safeQueryEvents(filter),
           synced: synced.every(v => v)
         },
         "*"
@@ -3467,12 +3469,73 @@ async function startOutboxFeed(
       // Live streaming is opt-in now — a feed being open is the request.
       // (Idempotent: the manager skips authors/kinds already subscribed.)
       void goLive({ authors, kinds })
-      await outbox.sync(authors, kinds, { signal: controller.signal })
-      // The sync writes into the store from inside the gadgets package, past
-      // any ingest hook — re-apply stored deletions so a tombstoned event a
-      // lagging relay just re-delivered does not reach the next callback.
-      await sweepStoredDeletions()
+      try {
+        await outbox.sync(authors, kinds, { signal: controller.signal })
+        // The sync writes into the store from inside the gadgets package,
+        // past any ingest hook — re-apply stored deletions so a tombstoned
+        // event a lagging relay just re-delivered does not reach the next
+        // callback.
+        await sweepStoredDeletions()
+      } catch (err) {
+        // A failed sync must not skip the heal below — a flaky sync is one
+        // of the ways events go missing in the first place.
+        if (!controller.signal.aborted) console.warn("sync failed", err)
+      }
       notify()
+      // Outbox-bounds poisoning heal. gadgets' sync stamps EVERY requested
+      // kind as caught-up-to-now after any non-empty round — including kinds
+      // it fetched nothing for (outbox.ts sync(), the bounds-update loop).
+      // Once stamped, later syncs skip (2h window) or use since≈stamp-time,
+      // so a replaceable event older than the stamp that the local store
+      // doesn't hold becomes permanently unreachable: publishing a first
+      // kind 10007 was enough to lock a user's older 10002 out of the
+      // relays napp. Until fixed upstream, any replaceable/addressable kind
+      // still absent from the store after sync gets one direct boundless
+      // query on the author's write relays. Single-author feeds only — the
+      // per-author fan-out would turn following-feeds into a REQ storm.
+      if (authors.length === 1 && !controller.signal.aborted) {
+        const author = authors[0]
+        const missing: number[] = []
+        for (const kind of kinds) {
+          if (!isReplaceableKind(kind) && !isAddressableKind(kind)) continue
+          const have = await store.queryEvents({ authors: [author], kinds: [kind] }, 1)
+          if (have.length === 0) missing.push(kind)
+        }
+        if (missing.length) {
+          try {
+            // Write relays when resolvable, but never ONLY them: when the
+            // missing kind is the 10002 itself, the relay list may be
+            // exactly what we can't resolve — the indexers the launcher
+            // broadcasts 10002 to on publish are the reliable source then.
+            const relays = new Set<string>(FALLBACK_RELAYS)
+            try {
+              for (const r of (await loadRelayList(author)).items) {
+                if (r.write) relays.add(r.url)
+              }
+            } catch {}
+            if (missing.includes(10002)) {
+              relays.add("wss://purplepag.es")
+              relays.add("wss://indexer.coracle.social")
+              relays.add("wss://user.kindpag.es")
+              relays.add("wss://relay.nos.social")
+            }
+            const targets = [...relays].slice(0, 10)
+            const healed = await pool.querySync(
+              targets,
+              { kinds: missing, authors: [author], limit: missing.length * 4 },
+              { label: "bounds-heal", maxWait: 4000 }
+            )
+            console.debug(
+              ":: bounds-heal", author.slice(0, 8),
+              "missing", missing, "asked", targets, "got", healed.length, healed
+            )
+            for (const event of healed) await store.saveEvent(event)
+            if (healed.length) notify()
+          } catch (err) {
+            console.warn(":: bounds-heal failed", err)
+          }
+        }
+      }
       if (until && until < Math.round(Date.now() / 1000) - 5)
         await outbox.before(authors, kinds, until, { signal: controller.signal })
     } catch (err) {
@@ -3499,7 +3562,7 @@ async function startInboxFeed(
         {
           __nostrapps: "napp-feed-callback",
           callbackId,
-          events: await store.queryEvents(filter),
+          events: await safeQueryEvents(filter),
           synced
         },
         "*"
@@ -3604,12 +3667,12 @@ async function dispatch(
     }
     case "nostrdb.query": {
       const filter = sanitizeFilter(params.filters)
-      return filter ? store.queryEvents(filter) : []
+      return filter ? safeQueryEvents(filter) : []
     }
     case "nostrdb.count": {
       const filter = sanitizeFilter(params.filters)
       if (!filter) return 0
-      const events = await store.queryEvents(filter, 10_000)
+      const events = await safeQueryEvents(filter, 10_000)
       return events.length
     }
     case "nostrdb.event": {
@@ -3686,10 +3749,14 @@ async function dispatch(
     }
     case "napp.feeds.cancel":
       return cancelFeedRequest(instanceId, params?.callbackId)
+    case "napp.loadBlockedRelays":
+      return loadBlockedRelays(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadBlossomServers":
       return loadBlossomServers(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadBookmarks":
       return loadBookmarks(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadDmRelays":
+      return loadDmRelays(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadEmojis":
       return loadEmojis(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadFavoriteRelays":
@@ -3702,6 +3769,8 @@ async function dispatch(
       return loadPins(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadRelayList":
       return loadRelayList(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadSearchRelays":
+      return loadSearchRelays(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadWikiAuthors":
       return loadWikiAuthors(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadWikiRelays":

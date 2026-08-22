@@ -34,6 +34,9 @@ window.napp.utils.loadPins(pubkey)
 window.napp.utils.loadBlossomServers(pubkey)
 window.napp.utils.loadEmojis(pubkey)
 window.napp.utils.loadFavoriteRelays(pubkey)
+window.napp.utils.loadBlockedRelays(pubkey) // kind 10006
+window.napp.utils.loadSearchRelays(pubkey) // kind 10007
+window.napp.utils.loadDmRelays(pubkey) // kind 10050, NIP-17
 window.napp.utils.loadWikiAuthors(pubkey)
 window.napp.utils.loadWikiRelays(pubkey)
 

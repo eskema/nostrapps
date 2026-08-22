@@ -505,14 +505,17 @@
     // Signatures match the original library functions.
     utils: {
       // ── lists ──────────────────────────────────────
+      loadBlockedRelays: user => rpc("napp.loadBlockedRelays", user),
       loadBlossomServers: user => rpc("napp.loadBlossomServers", user),
       loadBookmarks: user => rpc("napp.loadBookmarks", user),
+      loadDmRelays: user => rpc("napp.loadDmRelays", user),
       loadEmojis: user => rpc("napp.loadEmojis", user),
       loadFavoriteRelays: user => rpc("napp.loadFavoriteRelays", user),
       loadFollowsList: user => rpc("napp.loadFollowsList", user),
       loadMuteList: user => rpc("napp.loadMuteList", user),
       loadPins: user => rpc("napp.loadPins", user),
       loadRelayList: user => rpc("napp.loadRelayList", user),
+      loadSearchRelays: user => rpc("napp.loadSearchRelays", user),
       loadWikiAuthors: user => rpc("napp.loadWikiAuthors", user),
       loadWikiRelays: user => rpc("napp.loadWikiRelays", user),
       // ── sets ───────────────────────────────────────
