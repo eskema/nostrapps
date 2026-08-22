@@ -13,7 +13,7 @@ import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
-import { button, details } from "./ui.js"
+import { button, check, details } from "./ui.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
@@ -198,10 +198,78 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   handlersEl.className = "perm-list"
   actionsDetails.appendChild(handlersEl)
 
-  // Sections live directly on the root panel (user · permissions · actions),
-  // inserted before the build/reset footer.
+  // ─── relays (auth policy) section ───────────────────────────────
+
+  const relaysDetails = details({ summary: "relays", class: "settings-relays" })
+  const relaysSummary = relaysDetails.querySelector("summary") as HTMLElement
+  const relaysEl = document.createElement("div")
+  relaysEl.className = "perm-list"
+  relaysDetails.appendChild(relaysEl)
+
+  // Sections live directly on the root panel (user · permissions · actions ·
+  // relays), inserted before the build/reset footer.
   panel.insertBefore(permDetails, buildRow)
   panel.insertBefore(actionsDetails, buildRow)
+  panel.insertBefore(relaysDetails, buildRow)
+
+  function renderRelays() {
+    relaysEl.innerHTML = ""
+    const decisions = ctx.relayAuth.decisions()
+    relaysSummary.textContent =
+      `relays (${decisions.length})` + (ctx.relayAuth.getAuto() ? " · auto" : "")
+
+    // The global switch: answer every relay auth challenge without asking.
+    // Off (the default) → per-relay confirmation toasts, remembered here below.
+    const autoRow = document.createElement("label")
+    autoRow.className = "relay-auth-auto-row"
+    const text = document.createElement("div")
+    text.className = "napp-perms-text"
+    const label = document.createElement("div")
+    label.className = "napp-perms-label"
+    label.textContent = "automatically authenticate with relays"
+    const desc = document.createElement("div")
+    desc.className = "napp-perms-desc"
+    desc.textContent = "answers every relay auth challenge without asking"
+    text.append(label, desc)
+    autoRow.append(
+      check({
+        checked: ctx.relayAuth.getAuto(),
+        onChange: on => ctx.relayAuth.setAuto(on) // notify → renderRelays
+      }),
+      text
+    )
+    relaysEl.appendChild(autoRow)
+
+    // Remembered per-relay decisions from the confirmation toasts.
+    if (decisions.length === 0) {
+      if (!ctx.relayAuth.getAuto()) {
+        const empty = document.createElement("div")
+        empty.className = "perm-empty"
+        empty.textContent = "No per-relay auth decisions stored yet."
+        relaysEl.appendChild(empty)
+      }
+      return
+    }
+    for (const { url, decision } of decisions) {
+      const row = document.createElement("div")
+      row.className = "perm-row"
+      const u = document.createElement("code")
+      u.className = "perm-method"
+      u.textContent = url
+      u.title = url
+      const d = document.createElement("span")
+      d.className = `perm-decision perm-${decision}`
+      d.textContent = decision
+      const f = button({
+        label: "forget",
+        variant: "outline",
+        class: "perm-forget",
+        onClick: () => ctx.relayAuth.forget(url) // notify → renderRelays
+      })
+      row.append(u, d, f)
+      relaysEl.appendChild(row)
+    }
+  }
 
   function renderDecisions() {
     decisionsEl.innerHTML = ""
@@ -291,11 +359,15 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   const unsubPerms = perms.subscribe(renderPerms)
   const unsubHandlers = handlers.subscribe(renderHandlerPrefs)
 
+  renderRelays()
+  const unsubRelays = ctx.relayAuth.subscribe(renderRelays)
+
   return {
     unmount() {
       unsubAccount()
       unsubPerms()
       unsubHandlers()
+      unsubRelays()
     }
   }
 }

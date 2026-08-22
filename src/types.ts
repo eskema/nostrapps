@@ -236,6 +236,15 @@ export interface SystemCtx {
     history(): Array<{ at: number; msg: string }>
     subscribe(fn: () => void): () => void
   }
+  // Relay auth policy (NIP-42): the global auto-auth switch plus the per-relay
+  // allow/deny decisions remembered from confirmation prompts.
+  relayAuth: {
+    getAuto(): boolean
+    setAuto(on: boolean): void
+    decisions(): Array<{ url: string; decision: string }>
+    forget(url: string): void
+    subscribe(fn: () => void): () => void
+  }
   connect(): Promise<void>
   connectBunker(uri: string): Promise<void>
   connectGoogle(): Promise<void>

@@ -73,7 +73,7 @@ import {
 import type { NappPolicy } from "../types.js"
 import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
-import { current as outboxCurrent, outbox, FALLBACK_RELAYS } from "../outbox.js"
+import { current as outboxCurrent, outbox, FALLBACK_RELAYS, goLive } from "../outbox.js"
 import { debounce } from "../utils.js"
 
 const BOOT_TIMEOUT_MS = 10_000
@@ -666,7 +666,8 @@ async function dispatchNapplet(
     case "common.getProfile":
       return commonGetProfile(data?.target)
     case "common.follows": {
-      if (!pk) return { type: "common.follows.result", ok: false, pubkeys: [], error: "no user connected" }
+      if (!pk)
+        return { type: "common.follows.result", ok: false, pubkeys: [], error: "no user connected" }
       return { type: "common.follows.result", ok: true, pubkeys: (await loadFollowsList(pk)).items }
     }
     case "common.follow":
@@ -808,7 +809,8 @@ async function outboxResolvePlan(
       missing.push(pk)
     }
   }
-  if (relays.size === 0) return { relays: [...FALLBACK_RELAYS], source: "fallback", missingAuthors: missing }
+  if (relays.size === 0)
+    return { relays: [...FALLBACK_RELAYS], source: "fallback", missingAuthors: missing }
   const plan: { relays: string[]; source: string; missingAuthors?: string[] } = {
     relays: [...relays],
     source: "nip65"
@@ -833,7 +835,13 @@ async function publishNappletOutbox(
   if (!signer) return { type: resultType, ok: false, error: "no signer connected" }
 
   const kind = Number(template.kind)
-  if (!(await requireApproval(nappId, "outbox.publish", `Sign and publish a kind ${kind} event on your behalf.`))) {
+  if (
+    !(await requireApproval(
+      nappId,
+      "outbox.publish",
+      `Sign and publish a kind ${kind} event on your behalf.`
+    ))
+  ) {
     return { type: resultType, ok: false, error: "permission denied" }
   }
 
@@ -846,9 +854,13 @@ async function publishNappletOutbox(
     })
 
     const targets = new Set<string>()
-    if (options?.toOutbox !== false) for (const u of await nappletWriteRelays(getPubkey())) targets.add(u)
-    if (Array.isArray(options?.relays)) for (const u of options.relays) if (typeof u === "string" && u) targets.add(u)
-    const inboxes: string[] = Array.isArray(options?.toInboxes) ? options.toInboxes.filter(isHex64) : []
+    if (options?.toOutbox !== false)
+      for (const u of await nappletWriteRelays(getPubkey())) targets.add(u)
+    if (Array.isArray(options?.relays))
+      for (const u of options.relays) if (typeof u === "string" && u) targets.add(u)
+    const inboxes: string[] = Array.isArray(options?.toInboxes)
+      ? options.toInboxes.filter(isHex64)
+      : []
     for (const pk of inboxes) {
       try {
         for (const i of (await loadRelayList(pk)).items) if (i.read) targets.add(i.url)
@@ -879,7 +891,11 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
   if (url.startsWith("blossom:")) {
     const sha = url.slice("blossom:".length).replace(/^sha256:/, "")
     if (!isHex64(sha)) {
-      return { type: "resource.bytes.error", error: "invalid-request", message: "expected blossom:<sha256>" }
+      return {
+        type: "resource.bytes.error",
+        error: "invalid-request",
+        message: "expected blossom:<sha256>"
+      }
     }
     try {
       const pk = getPubkey()
@@ -887,7 +903,11 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
       const servers = ["relay.nostrapps.com", ...new Set(userServers)].filter(Boolean) as string[]
       const blob = await fetchBlob(servers, sha)
       if (!blob) {
-        return { type: "resource.bytes.error", error: "not-found", message: `blossom blob ${sha} unreachable` }
+        return {
+          type: "resource.bytes.error",
+          error: "not-found",
+          message: `blossom blob ${sha} unreachable`
+        }
       }
       return {
         type: "resource.bytes.result",
@@ -895,7 +915,11 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
         mime: blob.type || "application/octet-stream"
       }
     } catch (err: any) {
-      return { type: "resource.bytes.error", error: "fetch-failed", message: err?.message ?? String(err) }
+      return {
+        type: "resource.bytes.error",
+        error: "fetch-failed",
+        message: err?.message ?? String(err)
+      }
     }
   }
   try {
@@ -918,7 +942,11 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
       mime: res.headers.get("content-type") || blob.type || "application/octet-stream"
     }
   } catch (err: any) {
-    return { type: "resource.bytes.error", error: "fetch-failed", message: err?.message ?? String(err) }
+    return {
+      type: "resource.bytes.error",
+      error: "fetch-failed",
+      message: err?.message ?? String(err)
+    }
   }
 }
 
@@ -1080,7 +1108,9 @@ async function commonGetProfile(target: unknown): Promise<Record<string, unknown
       type: resultType,
       ok: true,
       pubkey: pk,
-      profile: hasProfile ? { ...m, ...(m.display_name ? { displayName: m.display_name } : {}) } : null,
+      profile: hasProfile
+        ? { ...m, ...(m.display_name ? { displayName: m.display_name } : {}) }
+        : null,
       // gadgets caches parsed kind-0s, not raw events — reconstruct the shape
       // callers read (content/created_at); id/sig are not recoverable.
       ...(hasProfile
@@ -1259,11 +1289,7 @@ async function nappletWriteRelays(pk: string | null): Promise<string[]> {
 const nappletSubs = new Map<string, AbortController>()
 const nappletSubKey = (nappId: string, subId: string) => `${nappId}\u0000${subId}`
 
-async function nappletRelaySubscribe(
-  nappId: string,
-  data: any,
-  post: (msg: object) => void
-) {
+async function nappletRelaySubscribe(nappId: string, data: any, post: (msg: object) => void) {
   const subId = String(data?.subId ?? "")
   if (!subId) return
   const filters: any[] = Array.isArray(data?.filters) ? data.filters : []
@@ -1316,7 +1342,9 @@ async function nappletOutboxSubscribe(nappId: string, data: any, post: (msg: obj
     return
   }
   const opts = data?.options ?? {}
-  const hints = Array.isArray(opts?.relays) ? opts.relays.filter((u: any) => typeof u === "string" && u) : []
+  const hints = Array.isArray(opts?.relays)
+    ? opts.relays.filter((u: any) => typeof u === "string" && u)
+    : []
   const authors = [
     ...new Set([
       ...(Array.isArray(opts?.authors) ? opts.authors.filter(isHex64) : []),
@@ -1394,10 +1422,7 @@ export function pushNappletConfig(nappId: string) {
       continue
     }
     if (id !== nappId || !nappletDomainsFor(nappId).includes("config")) continue
-    iframe.contentWindow?.postMessage(
-      { type: "config.values", values },
-      iframeTargetOrigin(iframe)
-    )
+    iframe.contentWindow?.postMessage({ type: "config.values", values }, iframeTargetOrigin(iframe))
   }
 }
 
@@ -1468,9 +1493,14 @@ function handleNapplet(
   if (data.type === "inc.subscribe") {
     const topic = String((data as any).topic ?? "")
     if (topic) incSubscribe(iframe, nappId, topic)
-    return post({ type: "inc.subscribe.result", id: data.id, ...(topic ? {} : { error: "missing topic" }) })
+    return post({
+      type: "inc.subscribe.result",
+      id: data.id,
+      ...(topic ? {} : { error: "missing topic" })
+    })
   }
-  if (data.type === "inc.unsubscribe") return incUnsubscribe(iframe, String((data as any).topic ?? ""))
+  if (data.type === "inc.unsubscribe")
+    return incUnsubscribe(iframe, String((data as any).topic ?? ""))
 
   // config.subscribe answers with an immediate snapshot; openSettings is a UI
   // request, answered only by a schemaError when there's nothing to render.
@@ -3407,7 +3437,8 @@ async function startOutboxFeed(
   }, 800)
   notify()
 
-  const onSync = (pubkey: string) => {
+  const onSync = (pubkey?: string) => {
+    if (!pubkey) return
     const idx = authors.indexOf(pubkey)
     if (idx !== -1) {
       synced[idx] = true
@@ -3433,6 +3464,9 @@ async function startOutboxFeed(
   trackFeedRequest(instanceId, callbackId, { controller, cleanup })
   ;(async () => {
     try {
+      // Live streaming is opt-in now — a feed being open is the request.
+      // (Idempotent: the manager skips authors/kinds already subscribed.)
+      void goLive({ authors, kinds })
       await outbox.sync(authors, kinds, { signal: controller.signal })
       // The sync writes into the store from inside the gadgets package, past
       // any ingest hook — re-apply stored deletions so a tombstoned event a

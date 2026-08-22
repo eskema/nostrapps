@@ -76,10 +76,23 @@ import {
 } from "./system-napps/index.js"
 import { pool } from "@nostr/gadgets/global"
 import { EventTemplate } from "@nostr/tools"
+import * as relayAuth from "./relay-auth.js"
 
 pool.trackRelays = true
-pool.automaticallyAuth = (_url: string) =>
-  currentSigner() ? (evt: EventTemplate) => currentSigner()?.signEvent(evt) as any : null
+pool.automaticallyAuth = (url: string) => {
+  const signer = currentSigner()
+  if (!signer) return null
+  // A signer is handed back even when auto-auth is off: returning non-null is
+  // what routes challenges to us at all, and authorizeRelay() then decides per
+  // challenge — auto mode signs everything; otherwise a stored per-relay
+  // decision is honored or a confirmation toast is shown and remembered.
+  return async (evt: EventTemplate) => {
+    if (!(await relayAuth.authorizeRelay(url))) {
+      throw new Error(`auth not authorized for ${url}`)
+    }
+    return signer.signEvent(evt) as any
+  }
+}
 
 const stage = document.getElementById("stage")!
 const form = document.getElementById("launch-form")!
@@ -654,6 +667,13 @@ const systemCtx: SystemCtx = {
   },
   theme,
   logs,
+  relayAuth: {
+    getAuto: () => relayAuth.automaticallyAuthOn(),
+    setAuto: (on: boolean) => relayAuth.setAutomaticallyAuth(on),
+    decisions: () => relayAuth.listRelayDecisions(),
+    forget: (url: string) => relayAuth.forgetRelayDecision(url),
+    subscribe: (fn: () => void) => relayAuth.subscribe(fn)
+  },
   connect,
   connectBunker,
   connectGoogle,
