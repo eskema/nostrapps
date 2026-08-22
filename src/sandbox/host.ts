@@ -1845,7 +1845,8 @@ function mount(
           return
         }
         case "napp-link": {
-          if (typeof data.url === "string") window.open(data.url, "_blank")
+          // Same gate as the napplet link domain: validate, prompt, noopener.
+          void linkOpen(nappId, { url: data.url })
           return
         }
       }
@@ -2008,7 +2009,8 @@ export function mountWithLoading(
           return
         }
         case "napp-link": {
-          if (typeof data.url === "string") window.open(data.url, "_blank")
+          // Same gate as the napplet link domain: validate, prompt, noopener.
+          void linkOpen(nappId, { url: data.url })
           return
         }
       }
