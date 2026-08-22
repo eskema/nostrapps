@@ -1547,6 +1547,17 @@ body.popover-open .napp-body iframe {
   display: none;
 }
 
+/* Group actions: settle the open request + every queued one in its group. */
+.app-dialog-queue-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.app-dialog-queue-group > span {
+  flex: 1;
+  opacity: 0.7;
+}
+
 .app-dialog-queue-list {
   display: grid;
   gap: 0.2rem;
@@ -1598,10 +1609,11 @@ body.popover-open .napp-body iframe {
   opacity: 0.7;
 }
 
-/* ─── Relay auth toasts (relay-auth.ts) ────────────────────────────
-   A fixed stack at the bottom-right; each toast asks whether to answer one
-   relay's NIP-42 auth challenge and stays until answered. */
-.relay-auth-toasts {
+/* ─── Toasts (toast.ts) ─────────────────────────────────────────
+   Non-modal prompts: one fixed stack at the bottom-right. The list scrolls,
+   sized for ~3 cards; a group bar is pinned above it when 2+ toasts share a
+   group. */
+.toasts {
   position: fixed;
   right: 0.8rem;
   bottom: 3rem; /* above the spaces bar */
@@ -1611,7 +1623,8 @@ body.popover-open .napp-body iframe {
   max-width: min(22rem, calc(100vw - 1.6rem));
 }
 
-.relay-auth-toast {
+.toast,
+.toast-group {
   background: var(--surface);
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
   border-radius: 12px;
@@ -1622,13 +1635,13 @@ body.popover-open .napp-body iframe {
   color: var(--text);
 }
 
-.relay-auth-toast-text {
+.toast-text {
   display: grid;
   gap: 0.15rem;
   font-size: 0.82rem;
 }
 
-.relay-auth-toast-text code {
+.toast-text code {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   font-weight: 600;
@@ -1636,15 +1649,29 @@ body.popover-open .napp-body iframe {
   text-overflow: ellipsis;
 }
 
-.relay-auth-toast-hint {
+.toast-hint {
   opacity: 0.65;
   font-size: 0.75rem;
 }
 
-.relay-auth-toast-actions {
+.toast-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.4rem;
+}
+
+.toast-group {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.toasts-list {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 25rem; /* ~3 cards */
+  overflow-y: auto;
 }
 
 /* Settings → relays: the auto-auth switch row, same shape as a grantable
@@ -1962,6 +1989,10 @@ body.popover-open .napp-body iframe {
 .perm-method {
   font-family: var(--font-mono);
   font-size: 0.78rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .perm-decision {

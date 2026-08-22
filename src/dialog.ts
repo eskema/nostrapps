@@ -20,6 +20,9 @@ export interface DialogOptions<T> {
   // Returned when the dialog is dismissed via Esc or a backdrop click.
   dismissValue: T
   class?: string
+  // Requests sharing a group key can be settled together from the queue bar:
+  // its actions apply to the open dialog and every queued request in the group.
+  group?: { key: string; label: (n: number) => string; actions: DialogAction<T>[] }
 }
 
 // One reusable modal element, created lazily and reused across calls.
@@ -42,6 +45,9 @@ interface Pending<T> {
 // the open dialog can surface "N more queued" and offer to dismiss the backlog.
 const queue: Pending<any>[] = []
 let showing = false
+// The open request and its settle function (group actions reach it from the
+// queue bar).
+let current: { opts: DialogOptions<any>; finish: (value: any) => void } | null = null
 
 export function openDialog<T = string>(opts: DialogOptions<T>): Promise<T> {
   return new Promise<T>(resolve => {
@@ -111,6 +117,34 @@ function renderQueueBar() {
     dismissAllQueued()
   })
   head.append(count, dismiss)
+  // Group actions: settle the open request and every queued one in its group.
+  // Its own row, visible even when the panel is collapsed.
+  let groupRow: HTMLElement | null = null
+  const g = current?.opts.group
+  const members = g ? queue.filter(q => q.opts.group?.key === g.key) : []
+  if (g && members.length > 0) {
+    groupRow = document.createElement("div")
+    groupRow.className = "app-dialog-queue-group"
+    const label = document.createElement("span")
+    label.textContent = g.label(members.length + 1)
+    groupRow.appendChild(label)
+    for (const a of g.actions) {
+      groupRow.appendChild(
+        button({
+          label: a.label,
+          variant: a.variant,
+          onClick: () => {
+            for (const m of members) {
+              const i = queue.indexOf(m)
+              if (i >= 0) queue.splice(i, 1)
+              m.resolve(a.value)
+            }
+            current?.finish(a.value)
+          }
+        })
+      )
+    }
+  }
 
   const list = document.createElement("ul")
   list.className = "app-dialog-queue-list"
@@ -119,7 +153,7 @@ function renderQueueBar() {
     li.textContent = t
     list.appendChild(li)
   }
-  panel.replaceChildren(head, list)
+  panel.replaceChildren(...(groupRow ? [head, groupRow, list] : [head, list]))
 }
 
 function showOne<T>(opts: DialogOptions<T>): Promise<T> {
@@ -129,6 +163,7 @@ function showOne<T>(opts: DialogOptions<T>): Promise<T> {
     const finish = (value: T) => {
       if (settled) return
       settled = true
+      current = null
       el.removeEventListener("close", onClose)
       el.removeEventListener("mousedown", onMouseDown)
       el.removeEventListener("click", onClick)
@@ -194,6 +229,7 @@ function showOne<T>(opts: DialogOptions<T>): Promise<T> {
     el.addEventListener("close", onClose)
     el.addEventListener("mousedown", onMouseDown)
     el.addEventListener("click", onClick)
+    current = { opts, finish }
     renderQueueBar() // show the queue panel if requests are waiting behind this one
     el.showModal()
   })

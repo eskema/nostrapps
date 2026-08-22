@@ -12,7 +12,7 @@
 // waits for the user's choice — so nothing is signed until they say so.
 
 import { normalizeURL } from "@nostr/tools/utils"
-import { button } from "./system-napps/ui.js"
+import { openToast } from "./toast.js"
 
 const AUTO_KEY = "nostrapps:auto-auth"
 const DECISIONS_KEY = "nostrapps:relay-auth"
@@ -91,49 +91,26 @@ function notify() {
 }
 
 // ─── the confirmation toast ──────────────────────────────────────
-
-// One fixed stack at the bottom-right holding every pending prompt; relays
-// challenged at the same time stack instead of overwriting each other.
-let toastStack: HTMLDivElement | null = null
-
-function ensureToastStack(): HTMLDivElement {
-  if (!toastStack || !toastStack.isConnected) {
-    toastStack = document.createElement("div")
-    toastStack.className = "relay-auth-toasts"
-    document.body.appendChild(toastStack)
-  }
-  return toastStack
-}
+// Non-modal (a challenge isn't user-initiated), grouped so a burst of relays
+// challenging at once can be answered in one click.
 
 function askRelayAuth(url: string): Promise<boolean> {
-  return new Promise(resolve => {
-    const card = document.createElement("div")
-    card.className = "relay-auth-toast"
-
-    const text = document.createElement("div")
-    text.className = "relay-auth-toast-text"
-    const title = document.createElement("div")
-    title.textContent = "This relay asks for authentication."
-    const relay = document.createElement("code")
-    relay.textContent = url
-    const hint = document.createElement("div")
-    hint.className = "relay-auth-toast-hint"
-    hint.textContent = "Authorize auth? Your choice is remembered for this relay."
-    text.append(title, relay, hint)
-
-    const actions = document.createElement("div")
-    actions.className = "relay-auth-toast-actions"
-    const settle = (ok: boolean) => {
-      card.remove()
-      resolve(ok)
+  return openToast<boolean>({
+    title: "This relay asks for authentication.",
+    code: url,
+    hint: "Your choice is remembered for this relay.",
+    actions: [
+      { label: "deny", value: false, variant: "outline" },
+      { label: "allow", value: true, variant: "primary" }
+    ],
+    group: {
+      key: "relay-auth",
+      label: n => `${n} relays asking`,
+      actions: [
+        { label: "deny all", value: false, variant: "outline" },
+        { label: "allow all", value: true, variant: "primary" }
+      ]
     }
-    actions.append(
-      button({ label: "deny", variant: "outline", onClick: () => settle(false) }),
-      button({ label: "allow", variant: "primary", onClick: () => settle(true) })
-    )
-
-    card.append(text, actions)
-    ensureToastStack().appendChild(card)
   })
 }
 
