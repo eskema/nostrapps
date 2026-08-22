@@ -478,9 +478,9 @@ function sanitizeRequires(v: unknown): string[] {
 }
 
 // ─── Per-napp security policy ───────────────────────────────────
-// The default for any napp without a stored entry: fully locked. This is what
-// makes "everything locked until granted" true for already-installed apps too —
-// they have no entry, so they get this.
+// The default for a napplet without a stored entry: fully locked. Legacy
+// nsites/napps with no entry instead keep identity+network (see getPolicy) —
+// they predate the policy system and ran unrestricted.
 export const DEFAULT_LOCKED_POLICY: NappPolicy = { domains: [] }
 
 // The declarable `requires` vocabulary. NAP_DOMAINS are real NIP-5D capability
@@ -514,7 +514,13 @@ const POLICY_VERSION = 2
 
 export function getPolicy(nappId: string): NappPolicy {
   const p = readPolicies()[nappId]
-  if (!p || typeof p !== "object") return { domains: [] }
+  if (!p || typeof p !== "object") {
+    // No record at all: an install that predates the policy system. It ran
+    // unrestricted then — sealing it retroactively breaks it (CDN scripts,
+    // direct sockets, signer), so legacy nsites/napps keep what they had.
+    // Napplets are born under the policy system: absent means locked.
+    return nappId.startsWith("napplet~") ? { domains: [] } : { domains: ["identity", "network"] }
+  }
   const domains = expandGrants(p.domains)
   // Migrate the old {network:boolean} shape: a granted network boolean becomes
   // the "network" domain entry.

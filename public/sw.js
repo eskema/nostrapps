@@ -183,7 +183,10 @@ const LOCKED_CSP = [
 // as identity-granted. New records (v>=2) are honored exactly, so unchecking
 // identity or network in the permission screen takes effect.
 function grantsFor(policy) {
-  if (!policy) return []
+  // No record: this install predates the policy system — it ran unrestricted,
+  // so keep it that way. (The SW only ever serves nsites/napps; napplets are
+  // srcdoc and born under the policy system.)
+  if (!policy) return ["identity", "network"]
   const domains = Array.isArray(policy.domains) ? [...policy.domains] : []
   if (policy.network === true && !domains.includes("network")) domains.push("network")
   if ((policy.v || 0) < 2 && !domains.includes("identity")) domains.push("identity")

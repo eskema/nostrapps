@@ -153,8 +153,9 @@ export type MessageData =
 // resource/relay) are serviced by the host over the bridge; the launcher-local
 // values are enforced by the service worker: `network` relaxes the CSP (its
 // absence seals the napp to its own origin — see LOCKED_CSP in sw.js), and `ui`
-// injects the shared component kit (napp-ui.css). Absent = fully locked (see
-// DEFAULT_LOCKED_POLICY): every app starts sealed until the user opens something.
+// injects the shared component kit (napp-ui.css). A napplet with no stored
+// policy is fully locked; a legacy nsite/napp with none keeps identity+network
+// (it predates the policy system — see getPolicy).
 export type NappPolicy = {
   domains: string[]
 }
