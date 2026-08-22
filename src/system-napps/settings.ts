@@ -13,7 +13,7 @@ import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
-import { button, check, details } from "./ui.js"
+import { button, check, details, item, itemList } from "./ui.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
@@ -250,13 +250,10 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       }
       return
     }
+    // Design-system rows: the url truncates with an ellipsis instead of
+    // widening the panel.
+    const list = itemList()
     for (const { url, decision } of decisions) {
-      const row = document.createElement("div")
-      row.className = "perm-row"
-      const u = document.createElement("code")
-      u.className = "perm-method"
-      u.textContent = url
-      u.title = url
       const d = document.createElement("span")
       d.className = `perm-decision perm-${decision}`
       d.textContent = decision
@@ -266,9 +263,9 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
         class: "perm-forget",
         onClick: () => ctx.relayAuth.forget(url) // notify → renderRelays
       })
-      row.append(u, d, f)
-      relaysEl.appendChild(row)
+      list.appendChild(item({ label: url }, d, f))
     }
+    relaysEl.appendChild(list)
   }
 
   function renderDecisions() {
