@@ -138,7 +138,18 @@ interface FeedOpts {
 interface NappFeeds {
   profile(pubkey: string, kinds: number[], callback: FeedCallback, opts?: FeedOpts): FeedHandle
   following(source: string, kinds: number[], callback: FeedCallback, opts?: FeedOpts): FeedHandle
-  inbox(pubkey: string, kinds: number[], callback: FeedCallback, opts?: FeedOpts): FeedHandle
+  inbox(
+    pubkey: string | string[],
+    kinds: number[],
+    callback: FeedCallback,
+    opts?: FeedOpts
+  ): FeedHandle
+  outbox(
+    pubkeys: string | string[],
+    kinds: number[],
+    callback: FeedCallback,
+    opts?: FeedOpts
+  ): FeedHandle
 }
 
 // ── Data-loading utils ───────────────────────────────────────────────────

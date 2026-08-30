@@ -3603,7 +3603,7 @@ async function startOutboxFeed(
 async function startInboxFeed(
   instanceId: string,
   callbackId: string,
-  pubkey: string,
+  pubkeys: string[],
   filter: Filter
 ) {
   const controller = new AbortController()
@@ -3627,14 +3627,19 @@ async function startInboxFeed(
   notify()
 
   try {
-    const relayList = await loadRelayList(pubkey)
-    const relays = relayList.items.filter(relay => relay.read).map(relay => relay.url)
-    if (controller.signal.aborted || relays.length === 0) {
+    const relays = new Set<string>()
+    for (const pk of pubkeys) {
+      try {
+        for (const i of (await loadRelayList(pk)).items) if (i.read) relays.add(i.url)
+      } catch {}
+    }
+    if (controller.signal.aborted || relays.size === 0) {
       finishFeedRequest(instanceId, callbackId)
       return
     }
-    const closer = pool.subscribeMany(relays, filter, {
-      label: `inbox-${pubkey.substring(0, 6)}`,
+    const more = pubkeys.length > 1 ? `+${pubkeys.length - 1}` : ""
+    const closer = pool.subscribeMany([...relays], filter, {
+      label: `inbox-${pubkeys[0].substring(0, 6)}${more}`,
       abort: controller.signal,
       async onevent(event) {
         if (await tombstoned(event)) return
@@ -3793,14 +3798,29 @@ async function dispatch(
       return
     }
     case "napp.feeds.inbox": {
+      const pubkeys = Array.isArray(params.pubkey) ? params.pubkey : [params.pubkey]
       const filter: Filter = {
-        "#p": [params.pubkey],
+        "#p": pubkeys,
         kinds: params.kinds,
         limit: params.limit || 100
       }
       if (params.since) filter.since = params.since
       if (params.until) filter.until = params.until
-      startInboxFeed(instanceId!, params.callbackId, params.pubkey, filter)
+      startInboxFeed(instanceId!, params.callbackId, pubkeys, filter)
+      return
+    }
+    case "napp.feeds.outbox": {
+      const pubkeys = (Array.isArray(params.pubkeys) ? params.pubkeys : [params.pubkeys]).filter(
+        isHex64
+      )
+      const filter: Filter = {
+        authors: pubkeys,
+        kinds: params.kinds,
+        limit: params.limit || 100
+      }
+      if (params.since) filter.since = params.since
+      if (params.until) filter.until = params.until
+      startOutboxFeed(instanceId!, params.callbackId, pubkeys, params.kinds, params.until, filter)
       return
     }
     case "napp.feeds.cancel":

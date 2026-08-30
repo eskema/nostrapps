@@ -503,7 +503,9 @@
       following: (source, kinds, callback, { since, until, limit } = {}) =>
         feedRpc("napp.feeds.following", { source, kinds, since, until, limit }, callback),
       inbox: (pubkey, kinds, callback, { since, until, limit } = {}) =>
-        feedRpc("napp.feeds.inbox", { pubkey, kinds, since, until, limit }, callback)
+        feedRpc("napp.feeds.inbox", { pubkey, kinds, since, until, limit }, callback),
+      outbox: (pubkeys, kinds, callback, { since, until, limit } = {}) =>
+        feedRpc("napp.feeds.outbox", { pubkeys, kinds, since, until, limit }, callback)
     },
     // Sync, pure nostr helpers (bech32/TLV) — no rpc, no await.
     nip19: { decode: nip19Decode, npubEncode, noteEncode, neventEncode, naddrEncode },
