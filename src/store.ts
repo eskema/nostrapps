@@ -3,14 +3,162 @@ import { RedEventStore } from "@nostr/gadgets/redstore"
 import type { Filter } from "@nostr/tools/filter"
 import type { NostrEvent } from "@nostr/tools/core"
 
-let instance: RedEventStore | null
+// The redstore wasm is single-threaded: any panic inside it (a malformed
+// event hitting the binary codec, a bad author in a query) aborts with
+// "RuntimeError: unreachable" AND leaves its no_threads mutex locked, so
+// every later call fails with "cannot recursively acquire mutex". Nothing
+// recovers by itself — so getStore() hands out a stable Proxy facade
+// (OutboxManager and host.ts capture the store once) and the poisoned worker
+// behind it is torn down and respawned; see guardedCall/respawn below.
+let instance: RedEventStore
+let facade: RedEventStore | null = null
 
-export function getStore() {
-  if (!instance) {
-    instance = new RedEventStore(null)
-    setReplaceableStore(instance)
+type RawCall = (method: string, data: any) => Promise<any>
+// the current worker's unguarded bridge — quarantine retries go through this
+let rawCall: RawCall
+
+function spawn(): RedEventStore {
+  const s = new RedEventStore(null)
+  const raw = s.call.bind(s)
+  s.call = (method, data) => guardedCall(raw, method, data)
+  rawCall = raw
+  return s
+}
+
+export function getStore(): RedEventStore {
+  if (!facade) {
+    instance = spawn()
+    facade = new Proxy({} as RedEventStore, {
+      get(_, prop) {
+        const v = (instance as any)[prop]
+        return typeof v === "function" ? v.bind(instance) : v
+      },
+      set(_, prop, value) {
+        ;(instance as any)[prop] = value
+        return true
+      }
+    })
+    setReplaceableStore(facade)
   }
-  return instance
+  return facade
+}
+
+// bfcache keeps a navigated-away page's dedicated worker ALIVE (heartbeating,
+// holding the OPFS lock) — a zombie leader every live tab keeps forwarding
+// to, unfixable from those tabs. Release leadership when this page is
+// stashed; reopen if it comes back.
+window.addEventListener("pagehide", () => {
+  if (facade) instance.close().catch(() => {})
+})
+window.addEventListener("pageshow", e => {
+  if (facade && e.persisted) instance.init(true).catch(() => respawn())
+})
+
+// Worker rejections are strings ("worker: RuntimeError: unreachable"); the
+// save batcher wraps them in Error.
+function isWasmDeath(err: unknown): boolean {
+  const s = err instanceof Error ? err.message : String(err)
+  return /RuntimeError|unreachable|recursively acquire mutex/.test(s)
+}
+
+async function guardedCall(raw: RawCall, method: string, data: any): Promise<any> {
+  try {
+    return await raw(method, data)
+  } catch (err) {
+    if (!isWasmDeath(err)) throw err
+    const role = respawn()
+    // saveEvents is the one call whose payload we can salvage: retry it on
+    // the fresh worker, isolating the poisonous event — but only when that
+    // worker came up as the leader. If it's a follower, the panic lives in
+    // another tab's leader (ours runs no wasm) and probing through it would
+    // blame every event; that tab's own guard heals it. Everything else just
+    // rejects — the point is that the NEXT call works.
+    if (method === "saveEvents" && (await role) === "leader") return retrySaves(data)
+    throw err
+  }
+}
+
+type RespawnResult = "leader" | "follower" | false
+
+let respawning: Promise<RespawnResult> | null = null
+let respawnTimes: number[] = []
+let gaveUp = false
+
+async function respawn(): Promise<RespawnResult> {
+  if (respawning) return respawning
+  respawning = (async (): Promise<RespawnResult> => {
+    const now = Date.now()
+    respawnTimes = respawnTimes.filter(t => now - t < 60_000)
+    if (respawnTimes.length >= 3) {
+      if (!gaveUp)
+        console.error("[redstore] wasm died 3 times inside a minute — leaving the store down")
+      gaveUp = true
+      return false
+    }
+    respawnTimes.push(now)
+
+    // close() releases the OPFS handle JS-side even with a dead wasm and
+    // broadcasts so a follower tab can take over leadership; terminate
+    // regardless, racing a timeout in case the worker is fully hung.
+    const old = instance
+    try {
+      await Promise.race([old.close(), new Promise(r => setTimeout(r, 1000))])
+    } catch {}
+    try {
+      ;(old as any).worker?.terminate?.()
+    } catch {}
+
+    // small backoff so OPFS actually releases the file lock
+    await new Promise(r => setTimeout(r, 300 * respawnTimes.length))
+
+    const fresh = spawn()
+    let leader: boolean
+    try {
+      leader = await fresh.init()
+    } catch (err) {
+      try {
+        ;(fresh as any).worker?.terminate?.()
+      } catch {}
+      console.error("[redstore] respawn failed", err)
+      return false
+    }
+    instance = fresh
+    gaveUp = false
+    console.warn(`[redstore] store worker respawned (${leader ? "leader" : "follower"})`)
+    return leader ? "leader" : "follower"
+  })().finally(() => {
+    respawning = null
+  })
+  return respawning
+}
+
+const utf8Decoder = new TextDecoder()
+
+// A saveEvents batch died: something in it panics the wasm codec. Retry it
+// one event at a time on the respawned worker — clean events save, the
+// poisonous one is logged (that JSON is the upstream repro) and reported as
+// not-new. Each poison hit costs another respawn, so several killers in one
+// batch still drain, cap permitting.
+async function retrySaves(data: { lastAttempts: number[]; rawEvents: Uint8Array[] }) {
+  const results: boolean[] = []
+  for (let i = 0; i < data.rawEvents.length; i++) {
+    try {
+      const r = await rawCall("saveEvents", {
+        lastAttempts: [data.lastAttempts[i]],
+        rawEvents: [data.rawEvents[i]]
+      })
+      results.push(!!r?.[0])
+    } catch (err) {
+      if (!isWasmDeath(err)) {
+        results.push(false)
+        continue
+      }
+      console.error("[redstore-poison]", utf8Decoder.decode(data.rawEvents[i]))
+      results.push(false)
+      if ((await respawn()) !== "leader") throw err
+    }
+  }
+  return results
 }
 
 // redstore merge bug workaround. execute() in redstore's src/query.rs merges
@@ -52,14 +200,12 @@ export async function safeQueryEvents(filter: Filter, maxLimit?: number): Promis
 if (import.meta.hot) {
   import.meta.hot.dispose(async () => {
     const old = instance
-    instance = null
     if (!old) return
     try {
       await old.close()
     } catch {}
     try {
-      // @ts-ignore
-      old.worker?.terminate?.()
+      ;(old as any).worker?.terminate?.()
     } catch {}
   })
 }
