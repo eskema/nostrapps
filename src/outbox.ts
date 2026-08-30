@@ -4,6 +4,7 @@ import { loadFollowsList } from "@nostr/gadgets/lists"
 import { globalism } from "@nostr/gadgets/utils"
 import { NostrEvent } from "@nostr/tools/core"
 import { getStore } from "./store"
+import { isHex64 } from "./utils"
 
 export const FALLBACK_RELAYS = ["relay.damus.io", "relay.primal.net", "nos.lol"]
 const DEFAULT_KINDS = [1, 1111]
@@ -130,7 +131,9 @@ export async function startOutbox(pubkey: string) {
   let followings: string[] = []
   try {
     const result = await loadFollowsList(pubkey)
-    followings = result.items
+    // Dirty k3s happen: a malformed p-tag reaching the wasm as an author, or
+    // the relay-list loader's blank marker saves, panics the store.
+    followings = result.items.filter(isHex64)
   } catch (err) {
     console.warn("failed to load follows list", err)
   }

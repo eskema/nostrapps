@@ -81,7 +81,7 @@ import type { NappPolicy } from "../types.js"
 import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS, goLive } from "../outbox.js"
-import { debounce } from "../utils.js"
+import { debounce, HEX64, isHex64 } from "../utils.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -3672,12 +3672,14 @@ function resolvePubkey(user: string): string {
   return user
 }
 
-// A 64-char hex string (event id / pubkey). Anything reaching the redstore wasm
-// as an id/author MUST match this: a malformed value panics query_events, and
-// its no_threads mutex stays locked afterward, poisoning the shared store for
-// the whole session ("cannot recursively acquire mutex" on every later call).
-const HEX64 = /^[0-9a-f]{64}$/i
-const isHex64 = (s: unknown): s is string => typeof s === "string" && HEX64.test(s)
+// The metadata loader's EOSE fallback npub-encodes every pubkey it was asked
+// about; a malformed one throws inside the shared dataloader batch and takes
+// everyone else's pending requests down with it. Validate before it can.
+function safeLoadNostrUser(input: any) {
+  const pk = resolvePubkey(typeof input === "string" ? input : String(input?.pubkey ?? ""))
+  if (!isHex64(pk)) throw new Error("invalid pubkey")
+  return typeof input === "string" ? loadNostrUser(pk) : loadNostrUser({ ...input, pubkey: pk })
+}
 
 // Strip non-hex ids/authors from a napp-supplied filter before it hits the
 // store (handles a single filter or an array of them). A filter whose only
@@ -3761,6 +3763,7 @@ async function dispatch(
       return dispatchAction(callerNappId, params?.name ?? "", params?.payload, params?.options)
     }
     case "napp.feeds.profile": {
+      if (!isHex64(params.pubkey)) return
       const filter: Filter = {
         authors: [params.pubkey],
         kinds: params.kinds,
@@ -3779,26 +3782,24 @@ async function dispatch(
       return
     }
     case "napp.feeds.following": {
-      const authors = await loadFollowsList(params.source)
+      // k3 p-tags are relay-accepted garbage sometimes — never let them
+      // reach the wasm or the gadgets loaders (see utils isHex64).
+      const authors = (await loadFollowsList(params.source)).items.filter(isHex64)
       const filter: Filter = {
-        authors: authors.items,
+        authors,
         kinds: params.kinds,
         limit: params.limit || 100
       }
       if (params.since) filter.since = params.since
       if (params.until) filter.until = params.until
-      startOutboxFeed(
-        instanceId!,
-        params.callbackId,
-        authors.items,
-        params.kinds,
-        params.until,
-        filter
-      )
+      startOutboxFeed(instanceId!, params.callbackId, authors, params.kinds, params.until, filter)
       return
     }
     case "napp.feeds.inbox": {
-      const pubkeys = Array.isArray(params.pubkey) ? params.pubkey : [params.pubkey]
+      const pubkeys = (Array.isArray(params.pubkey) ? params.pubkey : [params.pubkey]).filter(
+        isHex64
+      )
+      if (pubkeys.length === 0) return
       const filter: Filter = {
         "#p": pubkeys,
         kinds: params.kinds,
@@ -3864,22 +3865,22 @@ async function dispatch(
         if (isNip05(params)) {
           const resolved = await queryProfile(params)
           if (resolved) {
-            return loadNostrUser({ pubkey: resolved.pubkey, relays: resolved.relays })
+            return safeLoadNostrUser({ pubkey: resolved.pubkey, relays: resolved.relays })
           }
         }
-        return loadNostrUser(params)
+        return safeLoadNostrUser(params)
       }
       if (params?.pubkey && isNip05(params.pubkey)) {
         const resolved = await queryProfile(params.pubkey)
         if (resolved) {
-          return loadNostrUser({
+          return safeLoadNostrUser({
             ...params,
             pubkey: resolved.pubkey,
             relays: [...(params.relays || []), ...(resolved.relays || [])]
           })
         }
       }
-      return loadNostrUser(params)
+      return safeLoadNostrUser(params)
     case "napp.searchUserLocal":
       return searchUserLocal(typeof params === "string" ? params : String(params?.term ?? ""))
     case "napp.searchUser":
