@@ -80,6 +80,22 @@ import * as relayAuth from "./relay-auth.js"
 import { buildUserIndex } from "./user-search.js"
 
 pool.trackRelays = true
+// gadgets' list fetchers (lists.ts) fill their relay set with
+// randomPick(hardcodedRelays), and every loader except kind 3 and 10002 is
+// built with an EMPTY hardcoded list — `serial++ % 0` is NaN, so the pick is
+// `undefined` and three of them get pushed per request. Those reach the pool
+// as the literal string "undefined" and each opens a doomed wss://undefined/
+// socket. Drop those before they become connections; this also catches any
+// other junk relay hint that reaches us.
+const relayAllowed = pool.allowConnectingToRelay
+pool.allowConnectingToRelay = (url, operation) => {
+  // Only the host is checked, and only for junk: subscribeMap does NOT
+  // normalize, and a legitimate fallback arrives here bare ("relay.damus.io"),
+  // so requiring a scheme would silently disable those.
+  const host = typeof url === "string" ? url.replace(/^wss?:\/\//, "").split(/[/?#]/)[0] : ""
+  if (!host || host === "undefined" || host === "null") return false
+  return relayAllowed ? relayAllowed(url, operation) : true
+}
 pool.automaticallyAuth = (url: string) => {
   const signer = currentSigner()
   if (!signer) return null
