@@ -44,14 +44,18 @@ export function getStore(): RedEventStore {
 }
 
 // bfcache keeps a navigated-away page's dedicated worker ALIVE (heartbeating,
-// holding the OPFS lock) — a zombie leader every live tab keeps forwarding
-// to, unfixable from those tabs. Release leadership when this page is
-// stashed; reopen if it comes back.
+// holding the OPFS lock) — a zombie leader that every live tab then forwards
+// to, and that those tabs cannot heal if its wasm dies. Hand leadership back
+// when this page is stashed. close() also closes the worker's
+// BroadcastChannel, so that worker is spent: a restored page gets a new one
+// (not through respawn(), whose cap is for actual wasm deaths).
 window.addEventListener("pagehide", () => {
   if (facade) instance.close().catch(() => {})
 })
 window.addEventListener("pageshow", e => {
-  if (facade && e.persisted) instance.init(true).catch(() => respawn())
+  if (!facade || !e.persisted) return
+  instance = spawn()
+  instance.init().catch(err => console.warn("[redstore] reopen after bfcache failed", err))
 })
 
 // Worker rejections are strings ("worker: RuntimeError: unreachable"); the
