@@ -3600,6 +3600,122 @@ async function startOutboxFeed(
   })()
 }
 
+// Stream-first feed delivery: the relay subscription feeds the napp directly
+// and store.saveEvent is a best-effort WRITE-BEHIND, so the store is not in
+// the delivery path at all. A poisoned store (see store.ts) then costs the
+// initial cache paint, not the live feed — the failure mode where one bad
+// event froze every feed in every napp. Same shape the napplet surface has
+// always used (nappletOutboxSubscribe).
+//
+// Used by napp.feeds.outbox and the multi-pubkey inbox path only. profile /
+// following / single-pubkey inbox stay on the store-requery delivery below:
+// the installed napps were written against "each callback carries the full
+// current result set" and may re-render wholesale.
+//
+// `open` resolves the feed's relays and opens the subscription — the two
+// callers differ only in that (outbox relays per author vs. recipients' read
+// relays).
+async function startStreamFeed(
+  instanceId: string,
+  callbackId: string,
+  filter: Filter,
+  open: (params: {
+    label: string
+    abort: AbortSignal
+    onevent: (event: NostrEvent) => void
+    oneose: () => void
+  }) => Promise<SubCloser | undefined>,
+  label: string
+) {
+  const controller = new AbortController()
+  trackFeedRequest(instanceId, callbackId, { controller })
+
+  const win = openWindows.get(instanceId)?.iframe?.contentWindow
+  let synced = false
+  let queue: NostrEvent[] = []
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+  const post = (events: NostrEvent[]) => {
+    if (controller.signal.aborted) return
+    win?.postMessage({ __nostrapps: "napp-feed-callback", callbackId, events, synced }, "*")
+  }
+  const flush = () => {
+    flushTimer = null
+    if (queue.length === 0) return
+    const events = queue
+    queue = []
+    post(events)
+  }
+  // A small tick, not requestAnimationFrame: rAF never fires while the
+  // launcher tab is hidden, which would stall a feed until it is looked at.
+  const schedule = () => {
+    if (flushTimer === null && !controller.signal.aborted) flushTimer = setTimeout(flush, 100)
+  }
+
+  // One cache paint so the napp still opens instantly on what we already
+  // have. The only store read in this function, and a failure is survivable.
+  try {
+    const cached = await safeQueryEvents(filter)
+    if (cached.length) post(cached)
+  } catch (err) {
+    console.warn("[feed] cache paint skipped — store unavailable", err)
+  }
+  if (controller.signal.aborted) return
+
+  let writeBehindFailed = false
+  const writeBehind = async (event: NostrEvent) => {
+    try {
+      if (await store.saveEvent(event)) await applyDeletionLocally(event)
+    } catch (err) {
+      // Never propagated: the napp already has this event.
+      if (!writeBehindFailed) {
+        writeBehindFailed = true
+        console.warn("[feed] write-behind save failed (further ones silent)", err)
+      }
+    }
+  }
+
+  const onevent = async (event: NostrEvent) => {
+    if (controller.signal.aborted) return
+    // A relay that ignores the filter must not reach the napp; the legacy
+    // path got this for free by re-querying the store.
+    if (!matchFilter(filter, event)) return
+    // Only addressable events can be tombstoned, and that check is a store
+    // read — so ordinary feed traffic never waits on the store here.
+    if (isAddressableKind(event.kind) && (await tombstoned(event))) return
+    queue.push(event)
+    schedule()
+    void writeBehind(event)
+  }
+
+  try {
+    const closer = await open({
+      label,
+      abort: controller.signal,
+      onevent,
+      oneose() {
+        synced = true
+        // Deliver the pending batch as synced, or tell the napp on its own.
+        if (queue.length) flush()
+        else post([])
+      }
+    })
+    if (controller.signal.aborted) {
+      closer?.close("feed cancelled")
+      return
+    }
+    if (!closer) {
+      finishFeedRequest(instanceId, callbackId)
+      return
+    }
+    const request = feedRequests.get(instanceId)?.get(callbackId)
+    if (request) request.closer = closer
+  } catch (err) {
+    if (!controller.signal.aborted) console.warn("failed to open feed", err)
+    finishFeedRequest(instanceId, callbackId)
+  }
+}
+
 async function startInboxFeed(
   instanceId: string,
   callbackId: string,
@@ -3807,13 +3923,34 @@ async function dispatch(
       }
       if (params.since) filter.since = params.since
       if (params.until) filter.until = params.until
-      startInboxFeed(instanceId!, params.callbackId, pubkeys, filter)
+      // Single pubkey keeps the legacy store-requery delivery — that is the
+      // shape the installed napps were written against.
+      if (pubkeys.length === 1) {
+        startInboxFeed(instanceId!, params.callbackId, pubkeys, filter)
+        return
+      }
+      startStreamFeed(
+        instanceId!,
+        params.callbackId,
+        filter,
+        async p => {
+          const relays = new Set<string>()
+          for (const pk of pubkeys) {
+            try {
+              for (const i of (await loadRelayList(pk)).items) if (i.read) relays.add(i.url)
+            } catch {}
+          }
+          return relays.size ? pool.subscribeMany([...relays], filter, p) : undefined
+        },
+        `inbox-${pubkeys[0].substring(0, 6)}+${pubkeys.length - 1}`
+      )
       return
     }
     case "napp.feeds.outbox": {
       const pubkeys = (Array.isArray(params.pubkeys) ? params.pubkeys : [params.pubkeys]).filter(
         isHex64
       )
+      if (pubkeys.length === 0) return
       const filter: Filter = {
         authors: pubkeys,
         kinds: params.kinds,
@@ -3821,7 +3958,23 @@ async function dispatch(
       }
       if (params.since) filter.since = params.since
       if (params.until) filter.until = params.until
-      startOutboxFeed(instanceId!, params.callbackId, pubkeys, params.kinds, params.until, filter)
+      startStreamFeed(
+        instanceId!,
+        params.callbackId,
+        filter,
+        async p => {
+          // outboxFilterRelayBatch assigns the authors per relay, so the
+          // base filter must not carry them (same as the napplet path).
+          const { authors: _drop, ...base } = filter
+          const maps = await outboxFilterRelayBatch(pubkeys, [base], {
+            fallbackRelays: [...FALLBACK_RELAYS]
+          })
+          return maps.length
+            ? pool.subscribeMap(maps, p)
+            : pool.subscribeMany([...FALLBACK_RELAYS], filter, p)
+        },
+        `outbox-${pubkeys[0].substring(0, 6)}${pubkeys.length > 1 ? `+${pubkeys.length - 1}` : ""}`
+      )
       return
     }
     case "napp.feeds.cancel":
