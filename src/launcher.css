@@ -1645,12 +1645,13 @@ body.popover-open .napp-body iframe {
   max-width: min(22rem, calc(100vw - 1.6rem));
 }
 
+/* No box-shadow: the list is a scroll container, which clips its children's
+   shadows into one square grey slab behind the cards. The border is the edge. */
 .toast,
 .toast-group {
   background: var(--surface);
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
   border-radius: 12px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
   padding: 0.6rem 0.7rem;
   display: grid;
   gap: 0.5rem;
@@ -2157,7 +2158,9 @@ body.popover-open .napp-body iframe {
 .apps-typeseg {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 0.4rem;
 }
 
 .apps-detail-overlay .apps-author {
@@ -2611,10 +2614,6 @@ body.popover-open .napp-body iframe {
   flex-direction: column;
   gap: 0.4rem;
   align-items: stretch;
-  position: sticky;
-  top: 0;
-  background: var(--surface);
-  z-index: 1;
   padding-bottom: 0.2rem;
   margin-bottom: 0.2rem;
 }
@@ -2623,6 +2622,7 @@ body.popover-open .napp-body iframe {
 .apps-search {
   flex: 1;
   min-width: 0;
+  margin-bottom: 0.4rem;
 }
 
 /* Relay editor: a .ui-details below the search whose summary doubles as the

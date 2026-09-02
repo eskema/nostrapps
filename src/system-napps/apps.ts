@@ -226,8 +226,17 @@ export function mount(
     discoverPane.hidden = tab !== "discover"
   }
 
-  installedTab.addEventListener("click", () => switchTab("installed"))
-  discoverTab.addEventListener("click", () => switchTab("discover"))
+  // The window body is the scroller. Clicking a section — the other one or the
+  // one already showing — starts it at the top.
+  const scrollTop = () => container.closest(".napp-body-system")?.scrollTo({ top: 0 })
+  installedTab.addEventListener("click", () => {
+    switchTab("installed")
+    scrollTop()
+  })
+  discoverTab.addEventListener("click", () => {
+    switchTab("discover")
+    scrollTop()
+  })
 
   // ─── Installed tab ─────────────────────────────────────────────
 
@@ -545,7 +554,7 @@ export function mount(
     `
     const searchEl = installedPane.querySelector(".apps-search") as HTMLInputElement
     _installedListEl = installedPane.querySelector(".apps-list") as HTMLElement
-    installedPane.querySelector(".apps-toolbar")?.appendChild(buildTypeSegments())
+    installedPane.querySelector(".apps-toolbar")?.prepend(buildTypeSegments())
     searchEl.value = installedFilter
     searchEl.addEventListener("input", () => {
       installedFilter = searchEl.value
@@ -987,7 +996,7 @@ export function mount(
 
     _listEl = discoverPane.querySelector(".apps-list") as HTMLElement
     const searchEl = discoverPane.querySelector(".apps-search") as HTMLInputElement
-    discoverPane.querySelector(".apps-toolbar")?.appendChild(buildTypeSegments())
+    discoverPane.querySelector(".apps-toolbar")?.prepend(buildTypeSegments())
 
     // System disclosure whose summary doubles as the status line (relays-napp
     // style): "relays (N)" + an overline badge with event count / loading.
