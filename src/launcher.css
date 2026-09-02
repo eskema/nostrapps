@@ -875,7 +875,7 @@ html[data-theme="dark"] .napp-window.focused {
   /* Truly maximized: fixed to the VIEWPORT (not the stage) so it covers the
      header, spaces bar, and every other window — on desktop and mobile alike.
      z-index above the pin tier (100000) and the suggestions dropdown (200000);
-     modal dialogs use the top layer so they still sit above. */
+     toasts (400000) and modal dialogs (top layer) still sit above. */
   position: fixed !important;
   inset: 0 !important;
   z-index: 300000 !important;
@@ -1632,7 +1632,7 @@ body.popover-open .napp-body iframe {
   position: fixed;
   right: 0.8rem;
   bottom: 3rem; /* above the spaces bar */
-  z-index: 1000;
+  z-index: 400000; /* above maximized windows (300000) */
   display: grid;
   gap: 0.5rem;
   max-width: min(22rem, calc(100vw - 1.6rem));
