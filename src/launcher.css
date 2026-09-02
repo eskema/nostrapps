@@ -198,7 +198,7 @@ h1 span {
   background: transparent;
   color: inherit;
   font-family: var(--font-serif);
-  font-size: 1rem;
+  font-size: 0.75em;
   font-weight: 700;
   white-space: nowrap;
   user-select: none;
@@ -2163,9 +2163,9 @@ body.popover-open .napp-body iframe {
   margin-bottom: 0.4rem;
 }
 
-/* The toolbar is dense — these tabs run smaller than the 16px system default. */
+/* The toolbar is dense — these tabs run a step below the system size. */
 .apps-typeseg .ui-tab {
-  font-size: 0.75rem;
+  font-size: 0.625em; /* 10px against the 16px toolbar */
 }
 
 .apps-detail-overlay .apps-author {
