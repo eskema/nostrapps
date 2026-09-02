@@ -191,6 +191,36 @@
   outline: none;
 }
 
+/* Tab — text only, dimmed; active gets an underline. Mirrors .ui-tab in
+   launcher.css (design system: tab). */
+.ui-tab {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-serif);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+  opacity: 0.4;
+  transition:
+    padding 0.2s ease-in-out,
+    opacity 0.2s ease-in-out;
+  border-bottom: 1px solid transparent;
+}
+
+.ui-tab:hover {
+  opacity: 1;
+}
+
+.ui-tab.active {
+  opacity: 1;
+  padding: 0 0.5rem;
+  border-bottom: 1px solid currentColor;
+}
+
 /* ─── Disclosure ───────────────────────────────────────────────────────
    A collapsible <details> with a serif-bold summary and a +/– marker. */
 .ui-details {

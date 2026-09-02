@@ -4,6 +4,7 @@
 // hand-rolling `document.createElement("button")` + bespoke CSS:
 //   • button({ variant, label, onClick, … })  → a `.btn .btn-<variant>`
 //   • chip({ label, active, icon, onClick, … }) → a `.btn .btn-chip` (selectable)
+//   • tab({ label, active, onClick, … })        → a `.ui-tab` text tab
 //   • icon(name)                                → an inline `<svg>` (currentColor)
 //   • details({ summary, open, … })             → a `.ui-details` disclosure
 //   • input({ type, placeholder, … })           → a `.ui-input` text field
@@ -105,6 +106,29 @@ export function chip(o: ChipOpts): HTMLButtonElement {
   label.className = "btn-chip-label"
   label.textContent = o.label
   b.appendChild(label)
+  return b
+}
+
+export interface TabOpts {
+  label: string
+  onClick?: (e: MouseEvent) => void
+  active?: boolean
+  title?: string
+  /** Extra classes for context (e.g. "spaces-tab" for the drag handler). */
+  class?: string
+}
+
+// A text tab: dimmed label, underline when active (spaces bar, apps type
+// filter). Its own primitive rather than a button variant — the flat,
+// borderless look fights the .btn backgrounds, which is why these used to be
+// hand-rolled. Toggle `.active` on the returned element to change selection.
+export function tab(o: TabOpts): HTMLButtonElement {
+  const b = document.createElement("button")
+  b.type = "button"
+  b.className = `ui-tab${o.active ? " active" : ""}${o.class ? ` ${o.class}` : ""}`
+  b.textContent = o.label
+  if (o.title) b.title = o.title
+  if (o.onClick) b.addEventListener("click", o.onClick)
   return b
 }
 

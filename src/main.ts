@@ -40,7 +40,7 @@ import {
   launchNapplet,
   reloadNappletWindows
 } from "./sandbox/host.js"
-import { button, chip, icon } from "./system-napps/ui.js"
+import { button, chip, icon, tab } from "./system-napps/ui.js"
 import { promptNappPolicy } from "./napp-permissions.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
@@ -1663,19 +1663,17 @@ function reorderWindows(instanceIds: string[]) {
 }
 
 function buildSpaceChip(s: { id: string; name: string }): HTMLButtonElement {
-  // Custom (not the .btn system): a text tab, dimmed, with an underline on the
-  // active one. Kept out of the design system so the tab look doesn't fight the
-  // button variants' background/border.
-  const el = document.createElement("button")
-  el.type = "button"
-  el.className = "spaces-tab" + (s.id === currentSpaceId ? " active" : "")
-  el.textContent = s.name
-  el.title = "Switch space — drag to reorder"
-  el.dataset.spaceId = s.id
-  el.addEventListener("click", () => {
-    if (spaceReorder.wasDragging()) return // just finished a drag, not a real click
-    if (s.id !== currentSpaceId) switchSpace(s.id).then(renderSpacesBar)
+  const el = tab({
+    label: s.name,
+    active: s.id === currentSpaceId,
+    title: "Switch space — drag to reorder",
+    class: "spaces-tab", // the drag handler selects on it
+    onClick: () => {
+      if (spaceReorder.wasDragging()) return // just finished a drag, not a real click
+      if (s.id !== currentSpaceId) switchSpace(s.id).then(renderSpacesBar)
+    }
   })
+  el.dataset.spaceId = s.id
   spaceReorder.attach(el)
   return el
 }

@@ -29,11 +29,11 @@ import {
   addControl,
   button,
   check,
-  chip,
   details,
   item,
   itemList,
   overline,
+  tab,
   type ButtonVariant
 } from "./ui.js"
 
@@ -76,16 +76,13 @@ export function mount(
       ["napp", "napps"],
       ["napplet", "napplets"]
     ]
-    const btns = opts.map(([val, label]) =>
-      chip({
+    const btns: HTMLButtonElement[] = opts.map(([val, label]) =>
+      tab({
         label,
         active: typeFilter === val,
         onClick: () => {
           typeFilter = val
-          btns.forEach((b, i) => {
-            b.classList.toggle("btn-primary", opts[i][0] === val)
-            b.classList.toggle("btn-ghost", opts[i][0] !== val)
-          })
+          btns.forEach((x, i) => x.classList.toggle("active", opts[i][0] === val))
           applyInstalledFilter()
           applyFilter()
         }

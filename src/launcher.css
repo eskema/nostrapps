@@ -187,10 +187,12 @@ h1 span {
   gap: 1rem;
 }
 
-/* Space tabs — text only, dimmed; the active one gets an underline and a bit of
-   horizontal padding. Custom (NOT the .btn system) so the tab look doesn't fight
-   button variants. Built in main.ts buildSpaceChip(). */
-.spaces-tab {
+/* ─── Design system: tab ──────────────────────────────────────────
+   Text only, dimmed; the active one gets an underline and a bit of horizontal
+   padding. Its own primitive rather than a .btn variant — the flat, borderless
+   look fights the button backgrounds. Built with tab() in system-napps/ui.ts;
+   mirrored in public/napp-ui.css. */
+.ui-tab {
   padding: 0;
   border: none;
   background: transparent;
@@ -200,8 +202,7 @@ h1 span {
   font-weight: 700;
   white-space: nowrap;
   user-select: none;
-  cursor: grab;
-  touch-action: none;
+  cursor: pointer;
   opacity: 0.4;
   transition:
     padding 0.2s ease-in-out,
@@ -209,14 +210,20 @@ h1 span {
   border-bottom: 1px solid transparent;
 }
 
-.spaces-tab:hover {
+.ui-tab:hover {
   opacity: 1;
 }
 
-.spaces-tab.active {
+.ui-tab.active {
   opacity: 1;
   padding: 0 0.5rem;
   border-bottom: 1px solid currentColor;
+}
+
+/* Space tabs are the draggable ones (main.ts spaceReorder). */
+.spaces-tab {
+  cursor: grab;
+  touch-action: none;
 }
 
 /* Dragging to reorder: above the sliding siblings and opaque so they don't show
@@ -2145,7 +2152,8 @@ body.popover-open .napp-body iframe {
   /* align-self: end; */
 }
 
-/* Segmented type filter in the toolbar (all · nsites · napps · napplets). */
+/* Segmented type filter in the toolbar (all · nsites · napps · napplets) —
+   .ui-tab rows, so only the layout lives here. */
 .apps-typeseg {
   display: flex;
   flex-wrap: wrap;
