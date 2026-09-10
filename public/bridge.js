@@ -493,6 +493,10 @@
     link: url => {
       window.parent.postMessage({ __nostrapps: "napp-link", url, instanceId: window.name }, "*")
     },
+    // Close this window (same as the header × — keeps state for restore).
+    close: () => {
+      window.parent.postMessage({ __nostrapps: "napp-close", instanceId: window.name }, "*")
+    },
     feeds: {
       profile: (pubkey, kinds, callback, { since, until, limit } = {}) =>
         feedRpc("napp.feeds.profile", { pubkey, kinds, since, until, limit }, callback),

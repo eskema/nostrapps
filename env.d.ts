@@ -250,6 +250,8 @@ interface Napp {
     fn?: ((name: string, payload: unknown) => Promise<unknown>) | null
   ): void
   action(name: string, payload?: unknown, opts?: { instance?: string }): Promise<unknown>
+  /** Close this window (same as the header × — keeps state for restore). */
+  close(): void
   feeds: NappFeeds
   utils: NappUtils
   /** Sync bech32/nip19 helpers. */

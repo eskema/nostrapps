@@ -147,6 +147,10 @@ export type MessageData =
       url: string
       instanceId: string
     }
+  | {
+      __nostrapps: "napp-close"
+      instanceId: string
+    }
 
 // Per-napp security policy: the single list of capabilities the user granted.
 // One vocabulary, two enforcement paths — NAP domains (identity/theme/storage/

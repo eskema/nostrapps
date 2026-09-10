@@ -1881,6 +1881,13 @@ function mount(
           void linkOpen(nappId, { url: data.url })
           return
         }
+        case "napp-close": {
+          // Self-close: same path as the header × (keeps state for restore).
+          // instanceId already demuxed by the window router — the closure id
+          // is the sender, so no spoofing another window.
+          openWindows.get(instanceId)?.close()
+          return
+        }
       }
     },
     onClose: () => {
@@ -2045,6 +2052,13 @@ export function mountWithLoading(
         case "napp-link": {
           // Same gate as the napplet link domain: validate, prompt, noopener.
           void linkOpen(nappId, { url: data.url })
+          return
+        }
+        case "napp-close": {
+          // Self-close: same path as the header × (keeps state for restore).
+          // instanceId already demuxed by the window router — the closure id
+          // is the sender, so no spoofing another window.
+          openWindows.get(instanceId)?.close()
           return
         }
       }
