@@ -55,6 +55,7 @@ export function createNappWindow({
   onDestroy,
   onStateChange,
   onReorder,
+  onReload,
   position,
   status,
   bodyElement,
@@ -78,6 +79,7 @@ export function createNappWindow({
   onDestroy?: (instanceId: string) => void
   onStateChange?: (state: NappWindowState) => void
   onReorder?: () => void
+  onReload?: () => void
   position?: Position
   status?: Status
   bodyElement?: HTMLElement
@@ -155,8 +157,10 @@ export function createNappWindow({
   if (!system && !bodyElement) {
     const nav = document.createElement("div")
     nav.className = "napp-nav"
-    const navCmd = (dir: "back" | "forward" | "reload") =>
+    const navCmd = (dir: "back" | "forward" | "reload") => {
+      if (dir === "reload") onReload?.()
       iframeRef.current?.contentWindow?.postMessage({ __nostrapps: "napp-nav", dir }, origin || "*")
+    }
     const navBtn = (iconName: string, title: string) => {
       const b = makeBtn("", title)
       b.append(icon(iconName))
@@ -385,6 +389,7 @@ export function createNappWindow({
   // Same channel as the header's reload button: bridge.js (inside the napp)
   // hears it and calls location.reload(). No iframe (system napp) → no-op.
   function reload() {
+    onReload?.()
     iframeRef.current?.contentWindow?.postMessage(
       { __nostrapps: "napp-nav", dir: "reload" },
       origin || "*"

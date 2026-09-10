@@ -56,6 +56,7 @@ import { verifyEvent } from "@nostr/tools/pure"
 import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
 import {
   getInstalledApp,
+  getLoadedActions,
   getNappletConfig,
   getPolicy,
   getStoredPolicy,
@@ -1666,6 +1667,29 @@ function settleDispatch(data: Extract<MessageData, { __nostrapps: "napp-dispatch
   else p.reject(new Error(data.error || "dispatch failed"))
 }
 
+// Re-dispatch every stored action for an instance (see
+// persist.appendLoadedAction). callIframe waits for the reloaded document's
+// napp-ready + fresh action registrations, so this runs fire-and-forget right
+// after triggering the reload.
+function replayStoredActions(instanceId: string) {
+  void (async () => {
+    try {
+      const actions = getLoadedActions(instanceId)
+      for (const action of actions) {
+        await callIframe(instanceId, action.name, action.payload)
+      }
+    } catch (err) {
+      console.warn("[sandbox] replayStoredActions failed", { instanceId, err })
+    }
+  })()
+}
+
+function resetAndReplay(instanceId: string, reason: string) {
+  if (!instanceId) return
+  resetInstanceRuntimeState(instanceId, reason)
+  replayStoredActions(instanceId)
+}
+
 // Re-run the install flow into the napp's existing origin without spawning
 // a new visible window. boot.html's install handler clears its files store
 // before writing, so this swaps the files atomically for in-place updates.
@@ -1691,8 +1715,10 @@ export function reloadNappletWindows(nappId: string, html: string): number {
   const doc = buildNappletDoc(html, nappletDomainsFor(nappId))
   for (const win of openWindows.values()) {
     if (win.root.dataset.nappId === nappId && win.iframe) {
-      resetInstanceRuntimeState(win.root.dataset.instanceId || "")
+      const instanceId = win.root.dataset.instanceId || ""
+      resetInstanceRuntimeState(instanceId, "Window reloaded before action registered")
       win.iframe.srcdoc = doc
+      replayStoredActions(instanceId)
       count++
     }
   }
@@ -1703,8 +1729,10 @@ export function reloadIframesByNappId(nappId: string): number {
   let count = 0
   for (const win of openWindows.values()) {
     if (win.root.dataset.nappId === nappId && win.iframe) {
-      resetInstanceRuntimeState(win.root.dataset.instanceId || "")
+      const instanceId = win.root.dataset.instanceId || ""
+      resetInstanceRuntimeState(instanceId, "Window reloaded before action registered")
       win.iframe.src = win.iframe.src
+      replayStoredActions(instanceId)
       count++
     }
   }
@@ -1862,7 +1890,8 @@ function mount(
       onDestroy?.(instanceId)
     },
     onStateChange,
-    onReorder
+    onReorder,
+    onReload: () => resetAndReplay(instanceId, "Window reloaded before action registered")
   })
   adoptWindow(win)
   flagFreshInPack(stageEl, win, !!position)
@@ -1947,7 +1976,8 @@ export function launchNapplet(
       onDestroy?.(instanceId)
     },
     onStateChange,
-    onReorder
+    onReorder,
+    onReload: () => resetAndReplay(instanceId, "Window reloaded before action registered")
   })
   adoptWindow(win)
   flagFreshInPack(stageEl, win, !!position)
@@ -3528,8 +3558,15 @@ async function startOutboxFeed(
               { label: "bounds-heal", maxWait: 4000 }
             )
             console.debug(
-              ":: bounds-heal", author.slice(0, 8),
-              "missing", missing, "asked", targets, "got", healed.length, healed
+              ":: bounds-heal",
+              author.slice(0, 8),
+              "missing",
+              missing,
+              "asked",
+              targets,
+              "got",
+              healed.length,
+              healed
             )
             for (const event of healed) await store.saveEvent(event)
             if (healed.length) notify()
