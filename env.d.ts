@@ -169,6 +169,12 @@ interface NappUtils {
   // Profile metadata
   loadNostrUser(request: NostrUserRequest | string): Promise<NostrUser>
 
+  // Local full-text profile search over the launcher's in-memory index
+  // (built from stored kind:0s at startup, augmented on every loadNostrUser).
+  searchUserLocal(term: string): Promise<NostrUser[]>
+  // Remote NIP-50 kind:0 search on the user's search relays (or defaults).
+  searchUser(term: string): Promise<NostrUser[]>
+
   // Event fetching
   loadEvent(code: string, relays?: string[], author?: string): Promise<NostrEvent | null>
   // Batched by-id fetch — one REQ over the id union; non-64-hex ids are dropped.

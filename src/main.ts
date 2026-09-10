@@ -77,6 +77,7 @@ import {
 import { pool } from "@nostr/gadgets/global"
 import { EventTemplate } from "@nostr/tools"
 import * as relayAuth from "./relay-auth.js"
+import { buildUserIndex } from "./user-search.js"
 
 pool.trackRelays = true
 pool.automaticallyAuth = (url: string) => {
@@ -1728,6 +1729,9 @@ async function init() {
     "Ready — try /apps, /upload, /settings, /logs, /folder, or enter a pubkey/npub/nsite host"
   )
   handlers.setActionDispatcher(runNappAction)
+  // Build the local profile search index in the background — searches just
+  // see a smaller index until it's done.
+  buildUserIndex().catch(err => console.warn("[search] user index build failed", err))
   await sweepEphemeralOrigins()
   // If the user is paired with a bunker, get the connection warm in the
   // background. First sign request will wait if it's still connecting.

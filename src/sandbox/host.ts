@@ -37,7 +37,11 @@ import {
 import { loadBlockedRelays, loadDmRelays, loadSearchRelays } from "../extra-lists.js"
 import { loadEmojiSets, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { outboxFilterRelayBatch } from "@nostr/gadgets/outbox"
-import { loadNostrUser } from "@nostr/gadgets/metadata"
+import {
+  loadNostrUserIndexed as loadNostrUser,
+  searchUser,
+  searchUserLocal
+} from "../user-search.js"
 import { loadRelayInfo } from "@nostr/gadgets/relays"
 import { pool } from "@nostr/gadgets/global"
 import type { SubCloser } from "@nostr/tools/abstract-pool"
@@ -3843,6 +3847,10 @@ async function dispatch(
         }
       }
       return loadNostrUser(params)
+    case "napp.searchUserLocal":
+      return searchUserLocal(typeof params === "string" ? params : String(params?.term ?? ""))
+    case "napp.searchUser":
+      return searchUser(typeof params === "string" ? params : String(params?.term ?? ""))
     case "napp.saveFile":
       return saveFileForNapp(params)
     case "napp.copyText":

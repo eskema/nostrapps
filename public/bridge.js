@@ -322,7 +322,7 @@
     }
     if (pad) {
       if (bits > 0) out.push((acc << (to - bits)) & maxv)
-    } else if (bits >= from || ((acc << (to - bits)) & maxv)) {
+    } else if (bits >= from || (acc << (to - bits)) & maxv) {
       return null
     }
     return out
@@ -377,7 +377,10 @@
     const tlv = parseTLV(bytes)
     if (type === "nprofile") {
       if (!tlv[0]) throw new Error("nprofile missing pubkey")
-      return { type, data: { pubkey: bytesToHex(tlv[0][0]), relays: (tlv[1] || []).map(utf8Decode) } }
+      return {
+        type,
+        data: { pubkey: bytesToHex(tlv[0][0]), relays: (tlv[1] || []).map(utf8Decode) }
+      }
     }
     if (type === "nevent") {
       if (!tlv[0]) throw new Error("nevent missing id")
@@ -526,6 +529,11 @@
       loadRelayInfo: url => rpc("napp.loadRelayInfo", url),
       // ── metadata ───────────────────────────────────
       loadNostrUser: request => rpc("napp.loadNostrUser", request),
+      // Local full-text search over profiles known to the launcher
+      // (in-memory index, built from stored kind:0s at startup).
+      searchUserLocal: term => rpc("napp.searchUserLocal", term),
+      // Remote NIP-50 search for kind:0 on the user's search relays.
+      searchUser: term => rpc("napp.searchUser", term),
       // ── event fetching ────────────────────────────
       loadEvent: (code, relays, author) => rpc("napp.loadEvent", { code, relays, author }),
       // batched by-id fetch (one REQ over the id union); invalid ids dropped
@@ -565,5 +573,4 @@
   }
 
   window.napp = napp
-
 })()

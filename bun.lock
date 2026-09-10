@@ -11,7 +11,8 @@
         "@fontsource-variable/source-serif-4": "^5.2.9",
         "@noble/hashes": "^2.2.0",
         "@nostr/gadgets": "npm:@jsr/nostr__gadgets@^0.20.14",
-        "@nostr/tools": "npm:@jsr/nostr__tools@^2.24.3",
+        "@nostr/tools": "npm:@jsr/nostr__tools@^2.25.2",
+        "flexsearch": "^0.8.212",
         "nostr-web-components": "^0.2.2",
         "typescript": "^6.0.3",
       },
@@ -90,7 +91,7 @@
 
     "@nostr/gadgets": ["@jsr/nostr__gadgets@0.20.14", "https://npm.jsr.io/~/11/@jsr/nostr__gadgets/0.20.14.tgz", { "dependencies": { "@jsr/fiatjaf__lru-cache": "^0.0.1", "@jsr/henrygd__semaphore": "^0.0.2", "@jsr/nostr__tools": "^2.23.12", "@noble/hashes": "2.0.1", "idb-keyval": "^6.2.1" } }, "sha512-MSulcDMmEiuGiWS+80HPkf1DG5Bx/xBpC5ts9BW+o92taszF/KDjCB6SLkh2AMZ3UFPhTQzOsVppfgiKXrZOrg=="],
 
-    "@nostr/tools": ["@jsr/nostr__tools@2.24.3", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.24.3.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-nhGP7FjGccDTKR+EqXCtEDT/PMhjtRaFB9xj/ryh3R3zx4gP/CG6B5dbmXcRtTr5mhGLA2RiSxDvJzf71hdDFw=="],
+    "@nostr/tools": ["@jsr/nostr__tools@2.25.2", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.25.2.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-Yhe1ppPZWWd52mSqdYDd+Zq9gm4e+B7CMQ62gGXPpkBvfCXXCiTUWlctEEVzam6TGZaeHXcgiYj+zzKW02bAig=="],
 
     "@rollup/rollup-android-arm-eabi": ["@rollup/rollup-android-arm-eabi@4.60.2", "", { "os": "android", "cpu": "arm" }, "sha512-dnlp69efPPg6Uaw2dVqzWRfAWRnYVb1XJ8CyyhIbZeaq4CA5/mLeZ1IEt9QqQxmbdvagjLIm2ZL8BxXv5lH4Yw=="],
 
@@ -152,6 +153,8 @@
 
     "esbuild": ["esbuild@0.21.5", "", { "optionalDependencies": { "@esbuild/aix-ppc64": "0.21.5", "@esbuild/android-arm": "0.21.5", "@esbuild/android-arm64": "0.21.5", "@esbuild/android-x64": "0.21.5", "@esbuild/darwin-arm64": "0.21.5", "@esbuild/darwin-x64": "0.21.5", "@esbuild/freebsd-arm64": "0.21.5", "@esbuild/freebsd-x64": "0.21.5", "@esbuild/linux-arm": "0.21.5", "@esbuild/linux-arm64": "0.21.5", "@esbuild/linux-ia32": "0.21.5", "@esbuild/linux-loong64": "0.21.5", "@esbuild/linux-mips64el": "0.21.5", "@esbuild/linux-ppc64": "0.21.5", "@esbuild/linux-riscv64": "0.21.5", "@esbuild/linux-s390x": "0.21.5", "@esbuild/linux-x64": "0.21.5", "@esbuild/netbsd-x64": "0.21.5", "@esbuild/openbsd-x64": "0.21.5", "@esbuild/sunos-x64": "0.21.5", "@esbuild/win32-arm64": "0.21.5", "@esbuild/win32-ia32": "0.21.5", "@esbuild/win32-x64": "0.21.5" }, "bin": "bin/esbuild" }, "sha512-mg3OPMV4hXywwpoDxu3Qda5xCKQi+vCTZq8S9J/EpkhB2HzKXq4SNFZE3+NK93JYxc8VMSep+lOUSC/RVKaBqw=="],
 
+    "flexsearch": ["flexsearch@0.8.212", "", {}, "sha512-wSyJr1GUWoOOIISRu+X2IXiOcVfg9qqBRyCPRUdLMIGJqPzMo+jMRlvE83t14v1j0dRMEaBbER/adQjp6Du2pw=="],
+
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "idb-keyval": ["idb-keyval@6.2.2", "", {}, "sha512-yjD9nARJ/jb1g+CvD0tlhUHOrJ9Sy0P8T9MF3YaLlHnSRpwPfpTX0XIvpmw3gAJUmEu3FiICLBDPXVwyEvrleg=="],
@@ -190,7 +193,7 @@
 
     "@noble/curves/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
 
-    "@nostr/gadgets/@jsr/nostr__tools": ["@jsr/nostr__tools@2.24.3", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.24.3.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-nhGP7FjGccDTKR+EqXCtEDT/PMhjtRaFB9xj/ryh3R3zx4gP/CG6B5dbmXcRtTr5mhGLA2RiSxDvJzf71hdDFw=="],
+    "@nostr/gadgets/@jsr/nostr__tools": ["@jsr/nostr__tools@2.25.2", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.25.2.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-Yhe1ppPZWWd52mSqdYDd+Zq9gm4e+B7CMQ62gGXPpkBvfCXXCiTUWlctEEVzam6TGZaeHXcgiYj+zzKW02bAig=="],
 
     "@nostr/gadgets/@noble/hashes": ["@noble/hashes@2.0.1", "", {}, "sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw=="],
 
