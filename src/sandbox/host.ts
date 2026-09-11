@@ -4233,6 +4233,9 @@ async function publishEventToRelays(event: NostrEvent, relays?: string[]): Promi
 
   // update cache for known replaceable kinds
   switch (event.kind) {
+    case 0:
+      loadNostrUser({ pubkey: event.pubkey, refreshStyle: event }).catch(() => {})
+      break
     case 3:
       loadFollowsList(event.pubkey, undefined, event).catch(() => {})
       break
