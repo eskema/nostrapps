@@ -1394,6 +1394,21 @@ body.popover-open .napp-body iframe {
   word-break: break-all;
 }
 
+/* The relays an event is about to be published to — a compact monospace list
+   with the wss:// scheme stripped (it adds noise, never signal). */
+.app-dialog-content .app-dialog-relay-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.15rem;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+.app-dialog-content .app-dialog-relay-list li {
+  word-break: break-all;
+}
+
 /* A horizontal row of action buttons, right-aligned (wraps when narrow). */
 .app-dialog-actions {
   display: flex;

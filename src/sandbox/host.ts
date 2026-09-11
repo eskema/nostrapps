@@ -13,7 +13,7 @@ import type {
   SystemCtx
 } from "../types.js"
 
-import { isGated, requireApproval } from "../permissions.js"
+import { isGated, requireApproval, type ApprovalDetail } from "../permissions.js"
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
 import { getStore, safeQueryEvents } from "../store.js"
@@ -3440,12 +3440,11 @@ async function handleRpc(
       throw new Error(`identity access not granted: ${method!}`)
     }
     if (isGated(method!)) {
-      const detail =
-        method === "napp.saveFile"
-          ? describeSaveFile(params)
-          : method === "napp.copyText"
-            ? describeCopyText(params)
-            : undefined
+      let detail: ApprovalDetail | undefined
+      if (method === "napp.saveFile") detail = describeSaveFile(params)
+      else if (method === "napp.copyText") detail = describeCopyText(params)
+      else if (method === "signEvent") detail = describeSignEvent(params)
+      else if (method === "napp.publish") detail = await describePublish(params)
       const allowed = await requireApproval(nappId, method!, detail)
       if (!allowed) throw new Error(`Permission denied: ${method!}`)
     }
@@ -3927,6 +3926,119 @@ export function describeCopyText(params: any): { text: string; code: string } {
   }
 }
 
+// A one-line summary of the event a napp wants to sign or publish — just the
+// kind, the start of the content, and the tag count (when non-zero), so the
+// approval prompt shows what is actually at stake instead of a bare method name.
+function getEventSummary(evt: any): { kind: string; preview: string; tagCount: number } {
+  const kind = Number(evt?.kind)
+  const raw = typeof evt?.content === "string" ? evt.content : ""
+  const oneLine = raw.replace(/\s+/g, " ").trim()
+  return {
+    kind: Number.isFinite(kind) ? String(kind) : "unknown",
+    preview: oneLine.length > 140 ? `${oneLine.slice(0, 140)}…` : oneLine,
+    tagCount: Array.isArray(evt?.tags) ? evt.tags.length : 0
+  }
+}
+
+// First line of an event approval: "Sign a kind <1> event with 2 tags."
+// The kind renders as an inline chip, matching the "Napp x wants to use y" line.
+function eventIntro(
+  verb: string,
+  summary: { kind: string; tagCount: number }
+): HTMLParagraphElement {
+  const p = document.createElement("p")
+  const kind = document.createElement("code")
+  kind.textContent = summary.kind
+  p.append(`${verb} a kind `, kind, ` event`)
+  if (summary.tagCount > 0)
+    p.append(` with ${summary.tagCount} tag${summary.tagCount === 1 ? "" : "s"}`)
+  p.append(".")
+  return p
+}
+
+// The event content out of the sentence flow, as a wrapping monospace block
+// (same chip look as the other approval payloads).
+function eventContentBlock(preview: string): HTMLElement | null {
+  if (!preview) return null
+  const c = document.createElement("code")
+  c.className = "app-dialog-detail-code"
+  c.textContent = preview
+  return c
+}
+
+function stripRelayScheme(url: string): string {
+  return url.replace(/^wss?:\/\//i, "").replace(/\/$/, "")
+}
+
+export function describeSignEvent(params: any): Node {
+  const summary = getEventSummary(params)
+  const wrap = document.createElement("div")
+  wrap.appendChild(eventIntro("Sign", summary))
+  const block = eventContentBlock(summary.preview)
+  if (block) wrap.appendChild(block)
+  return wrap
+}
+
+export async function describePublish(params: any): Promise<Node> {
+  const summary = getEventSummary(params?.event)
+  const targets = await resolvePublishTargetRelays(params?.event, params?.relays)
+  const wrap = document.createElement("div")
+  wrap.appendChild(eventIntro("Publish", summary))
+  const block = eventContentBlock(summary.preview)
+  if (block) wrap.appendChild(block)
+  if (targets.length === 0) {
+    const p = document.createElement("p")
+    p.textContent = "No relays to publish to were found."
+    wrap.appendChild(p)
+  } else {
+    const p = document.createElement("p")
+    p.textContent = `To ${targets.length} relay${targets.length === 1 ? "" : "s"}:`
+    wrap.appendChild(p)
+    const ul = document.createElement("ul")
+    ul.className = "app-dialog-relay-list"
+    for (const url of targets) {
+      const li = document.createElement("li")
+      li.textContent = stripRelayScheme(url)
+      ul.appendChild(li)
+    }
+    wrap.appendChild(ul)
+  }
+  return wrap
+}
+
+// Resolve the relays publishEventToRelays would publish to, so the approval
+// prompt can name them before anything is sent. Keep in sync with
+// publishEventToRelays below.
+async function resolvePublishTargetRelays(event: any, relays?: unknown): Promise<string[]> {
+  if (Array.isArray(relays)) return relays.filter(r => typeof r === "string" && r)
+  let targetRelays: string[] = []
+  try {
+    const list = await loadRelayList(event?.pubkey)
+    targetRelays = list.items.filter(item => item.write).map(item => item.url)
+  } catch {
+    targetRelays = []
+  }
+
+  if (event?.kind === 10002) {
+    targetRelays.push(
+      ...FALLBACK_RELAYS,
+      "wss://purplepag.es",
+      "wss://indexer.coracle.social",
+      "wss://user.kindpag.es",
+      "wss://relay.nos.social"
+    )
+  } else if (event?.kind === 3) {
+    targetRelays.push(
+      ...FALLBACK_RELAYS,
+      "wss://purplepag.es",
+      "wss://user.kindpag.es",
+      "wss://relay.nos.social"
+    )
+  }
+
+  return [...new Set(targetRelays)]
+}
+
 // The napp sandbox has no clipboard-write delegation, so navigator.clipboard
 // rejects inside the iframe with nothing the user ever sees. Napps hand the
 // text here instead: this document is not sandboxed, so the write works, and
@@ -4175,38 +4287,7 @@ async function publishEvent(event: NostrEvent, relays?: string[]): Promise<Publi
 }
 
 async function publishEventToRelays(event: NostrEvent, relays?: string[]): Promise<PublishResult> {
-  let targetRelays: string[]
-
-  if (relays) {
-    targetRelays = relays
-  } else {
-    const pubkey = event.pubkey
-    try {
-      const list = await loadRelayList(pubkey)
-      targetRelays = list.items.filter(item => item.write).map(item => item.url)
-    } catch {
-      targetRelays = []
-    }
-
-    if (event.kind === 10002) {
-      targetRelays.push(
-        ...FALLBACK_RELAYS,
-        "wss://purplepag.es",
-        "wss://indexer.coracle.social",
-        "wss://user.kindpag.es",
-        "wss://relay.nos.social"
-      )
-    } else if (event.kind === 3) {
-      targetRelays.push(
-        ...FALLBACK_RELAYS,
-        "wss://purplepag.es",
-        "wss://user.kindpag.es",
-        "wss://relay.nos.social"
-      )
-    }
-
-    targetRelays = [...new Set(targetRelays)]
-  }
+  const targetRelays = await resolvePublishTargetRelays(event, relays)
 
   if (targetRelays.length === 0) {
     return { relays: {}, published: 0, failed: 0 }

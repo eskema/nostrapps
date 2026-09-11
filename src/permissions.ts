@@ -14,7 +14,10 @@ const GATED_METHODS = new Set([
   // Writing to the user's clipboard. The sandbox has no `clipboard-write`
   // delegation, so like saveFile this rpc is the only route — the prompt can
   // show what is actually about to land on the clipboard.
-  "napp.copyText"
+  "napp.copyText",
+  // Publishing a finished (signed) event. The prompt shows the event summary
+  // and the relays it will be published to.
+  "napp.publish"
 ])
 
 export function isGated(method: string) {
@@ -84,10 +87,11 @@ export function subscribe(fn: () => void) {
   return () => subscribers.delete(fn)
 }
 
-// A detail can be a plain sentence, or a sentence plus a `code` payload — the
+// A detail can be a plain sentence, a sentence plus a `code` payload — the
 // payload renders as a wrapping code block, matching the <code> chips the rest
-// of the dialog uses (a url or key would otherwise overflow the card).
-export type ApprovalDetail = string | { text: string; code?: string }
+// of the dialog uses (a url or key would otherwise overflow the card) — or a
+// prebuilt node for richer layouts (event previews, relay lists).
+export type ApprovalDetail = string | { text: string; code?: string } | Node
 
 export async function requireApproval(nappId: string, method: string, detail?: ApprovalDetail) {
   const cached = getDecision(nappId, method)
@@ -122,14 +126,18 @@ function permissionBody(nappId: string, method: string, detail?: ApprovalDetail)
   // Some methods can say what they are actually about to do — a filename is a
   // far better basis for a decision than a method name.
   if (detail) {
-    const d = document.createElement("p")
-    d.textContent = typeof detail === "string" ? detail : detail.text
-    wrap.appendChild(d)
-    if (typeof detail !== "string" && detail.code) {
-      const c = document.createElement("code")
-      c.className = "app-dialog-detail-code"
-      c.textContent = detail.code
-      wrap.appendChild(c)
+    if (detail instanceof Node) {
+      wrap.appendChild(detail)
+    } else {
+      const d = document.createElement("p")
+      d.textContent = typeof detail === "string" ? detail : detail.text
+      wrap.appendChild(d)
+      if (typeof detail !== "string" && detail.code) {
+        const c = document.createElement("code")
+        c.className = "app-dialog-detail-code"
+        c.textContent = detail.code
+        wrap.appendChild(c)
+      }
     }
   }
   return wrap
