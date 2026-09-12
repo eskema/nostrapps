@@ -129,7 +129,6 @@ There is restriction of what actions are allowed, but these are some of the comm
 | `feed`               | list of pubkey strings              |                                       |
 | `relay`              | list of relay URLs                  |                                       |
 | `wiki-term`          | a "d"-tag NIP-54 normalized string  | the resolved `kind:30818` event       |
-| `reply`              | parent `event` being replied to     | the resulting `event` after published |
 
 Apps registering `"view"` (generic, no number) may receive either a nip19 code string or a resolved event object and must handle both. Apps registering a specific `"view:<kind-number>"` always receive a resolved event object.
 
