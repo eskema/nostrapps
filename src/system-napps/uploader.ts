@@ -14,6 +14,8 @@ const DEFAULT_RELAYS = [
   "wss://relay.nostrapps.com/internal"
 ]
 
+const DEFAULT_BLOSSOM_SERVERS = ["https://relay.nostrapps.com"]
+
 import type { SystemCtx } from "../types.js"
 import { publishOutcomes } from "../utils.js"
 import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
@@ -185,11 +187,8 @@ export function mount(
     }
 
     setStatus("Loading blossom servers…")
-    const serverList = (await loadBlossomServers(pubkey)).items ?? []
-    if (serverList.length === 0) {
-      setStatus("No blossom servers configured.")
-      return
-    }
+    const userServers = (await loadBlossomServers(pubkey)).items ?? []
+    const serverList = [...new Set([...DEFAULT_BLOSSOM_SERVERS, ...userServers])]
 
     setStatus(
       `Uploading files…${skipped ? ` (skipped ${skipped} system file${skipped === 1 ? "" : "s"})` : ""}`
