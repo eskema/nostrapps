@@ -2163,11 +2163,6 @@ body.popover-open .napp-body iframe {
   margin-bottom: 0.4rem;
 }
 
-/* The toolbar is dense — these tabs run a step below the system size. */
-.apps-typeseg .ui-tab {
-  font-size: 0.625em; /* 10px against the 16px toolbar */
-}
-
 .apps-detail-overlay .apps-author {
   margin-top: 2rem;
   padding: 0.5rem 0;
