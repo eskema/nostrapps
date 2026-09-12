@@ -51,6 +51,10 @@ window.napp.utils.loadRelayInfo(url)
 // Profile metadata
 window.napp.utils.loadNostrUser(request) // NostrUserRequest | string → NostrUser
 
+// User search (returns NostrUser[])
+window.napp.utils.searchUserLocal(term) // local full-text search over profiles known to the launcher
+window.napp.utils.searchUser(term) // remote NIP-50 kind:0 search on the user's search relays (or defaults)
+
 // Arbitrary event fetching
 window.napp.utils.loadEvent(code, relays?, author?)
 
@@ -121,14 +125,14 @@ The napp can omit the `handler` and opt into only handling actions via the `pops
 
 There is restriction of what actions are allowed, but these are some of the common ones:
 
-| Action               | Payload                             | Returns                               |
-| -------------------- | ----------------------------------- | ---------------------------------     |
-| `view`               | `nevent/naddr` **or** full event    |                                       |
-| `view:<kind-number>` | full event object (always resolved) |                                       |
-| `profile`            | `pubkey` as hex                     |                                       |
-| `feed`               | list of pubkey strings              |                                       |
-| `relay`              | list of relay URLs                  |                                       |
-| `wiki-term`          | a "d"-tag NIP-54 normalized string  | the resolved `kind:30818` event       |
+| Action               | Payload                             | Returns                         |
+| -------------------- | ----------------------------------- | ------------------------------- |
+| `view`               | `nevent/naddr` **or** full event    |                                 |
+| `view:<kind-number>` | full event object (always resolved) |                                 |
+| `profile`            | `pubkey` as hex                     |                                 |
+| `feed`               | list of pubkey strings              |                                 |
+| `relay`              | list of relay URLs                  |                                 |
+| `wiki-term`          | a "d"-tag NIP-54 normalized string  | the resolved `kind:30818` event |
 
 Apps registering `"view"` (generic, no number) may receive either a nip19 code string or a resolved event object and must handle both. Apps registering a specific `"view:<kind-number>"` always receive a resolved event object.
 
