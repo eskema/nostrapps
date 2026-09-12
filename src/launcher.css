@@ -119,7 +119,7 @@ h1 span {
 }
 
 /* Pack state is conveyed by the icon glyph (grid vs. corners), not by the
-   button's color — so no aria-pressed style here. Only hover changes it. */
+   button's color. Only hover changes it. */
 
 /* ─── Spaces bar (top horizontal chrome) ─────────────────────────
    Left: the current space's live windows (a taskbar). Right: the list of

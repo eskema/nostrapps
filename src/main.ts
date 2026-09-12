@@ -175,10 +175,13 @@ function maybeRepack() {
 }
 
 function applyPackMode() {
-  packToggleBtn?.setAttribute("aria-pressed", packModeOn ? "true" : "false")
   // Distinct glyph per state: a 4-quadrant grid when active, the pack-corners
   // hint when off (opacity alone wasn't a clear enough signal).
   packToggleBtn?.replaceChildren(icon(packModeOn ? "grid" : "pack"))
+  // The tooltip names the mode the click switches TO, not the current one.
+  const packLabel = packModeOn ? "free mode" : "grid mode"
+  packToggleBtn?.setAttribute("title", packLabel)
+  packToggleBtn?.setAttribute("aria-label", packLabel)
   // The drag handler (in napp-window.js) reads this class to decide
   // whether to render a drop placeholder during the drag.
   stage?.classList.toggle("pack-mode", packModeOn)
