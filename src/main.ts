@@ -38,7 +38,8 @@ import {
   applyNappPolicy,
   closeNappletSubs,
   launchNapplet,
-  reloadNappletWindows
+  reloadNappletWindows,
+  syncStageBottomSpacer
 } from "./sandbox/host.js"
 import { button, chip, icon, tab } from "./system-napps/ui.js"
 import { promptNappPolicy } from "./napp-permissions.js"
@@ -1355,6 +1356,9 @@ async function switchSpace(targetId: string) {
     await restoreAll()
   }
   applyPackMode()
+  // The spacer was sized around the space we just left — re-measure against the
+  // windows that are actually visible here.
+  syncStageBottomSpacer(stage)
   refreshSuggestions()
 }
 

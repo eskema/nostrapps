@@ -3057,10 +3057,23 @@ function measureMaxWindowBottom(_stage: HTMLElement): number {
   for (const win of openWindows.values()) {
     const r = win.root
     if (!r.isConnected || r.classList.contains("space-inactive")) continue
-    if (getComputedStyle(r).position === "static") continue // mobile flow layout
+    // Only stage-positioned windows extend the stage's scroll area: static is
+    // the mobile flow layout, fixed is a maximized window covering the viewport.
+    if (getComputedStyle(r).position !== "absolute") continue
     maxBottom = Math.max(maxBottom, r.offsetTop + r.offsetHeight)
   }
   return maxBottom
+}
+
+// Re-measure after windows settle in place. Without this the spacer only ever
+// moved DOWN (a drag past the fold, a repack): dragging that window back above
+// the fold, or closing it, left the spacer parked at the old low-water mark and
+// the stage still scrolled into empty space. Skipped while a pack is in flight —
+// bestFitPack already set the spacer from its target grid and the windows are
+// mid-transition, so offsetTop would read where they came from.
+export function syncStageBottomSpacer(stage: HTMLElement | null) {
+  if (!stage || packingClearTimer) return
+  setStageBottomSpacer(stage, measureMaxWindowBottom(stage))
 }
 
 // Make sure the window's header is reachable inside the stage's visible

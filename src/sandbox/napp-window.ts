@@ -5,7 +5,8 @@ import {
   bestFitPack,
   capturePackSnapshot,
   captureWindowGeom,
-  invalidatePackLayouts
+  invalidatePackLayouts,
+  syncStageBottomSpacer
 } from "./host.js"
 import { moveBefore } from "../dom.js"
 import { icon } from "../system-napps/ui.js"
@@ -250,7 +251,10 @@ export function createNappWindow({
 
   function teardown() {
     if (messageHandler) window.removeEventListener("message", messageHandler)
+    const stage = root.parentElement
     root.remove()
+    // The stage's scroll area was sized around this window — shrink it back.
+    syncStageBottomSpacer(stage)
   }
 
   function close() {
@@ -304,6 +308,9 @@ export function createNappWindow({
   // recompose it proportionally. Reads the live, un-floored pixels.
   const notifyState = () => {
     captureWindowGeom(root)
+    // Every commit lands here (drag, resize, snap, minimize, maximize, pack),
+    // so it's also where the stage's scrollable bottom gets back in sync.
+    syncStageBottomSpacer(root.parentElement)
     onStateChange?.(getState())
   }
 
