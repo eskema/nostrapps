@@ -39,6 +39,20 @@ window.napp.utils.loadSearchRelays(pubkey) // kind 10007
 window.napp.utils.loadDmRelays(pubkey) // kind 10050, NIP-17
 window.napp.utils.loadWikiAuthors(pubkey)
 window.napp.utils.loadWikiRelays(pubkey)
+window.napp.utils.loadFavoriteFollowSets(pubkey) // kind 10021
+window.napp.utils.loadFavoriteScrolls(pubkey) // kind 10027
+window.napp.utils.loadProfileBadges(pubkey) // kind 10008
+window.napp.utils.loadSimpleGroups(pubkey) // kind 10009
+window.napp.utils.loadGitAuthors(pubkey) // kind 10017
+window.napp.utils.loadGitRepositories(pubkey) // kind 10018
+window.napp.utils.loadMediaFollows(pubkey) // kind 10020
+window.napp.utils.loadFavoritePodcasts(pubkey) // kind 10054
+window.napp.utils.loadAuthoredPodcasts(pubkey) // kind 10064
+
+// Composite helpers resolving address-pointer items into their sets
+window.napp.utils.fetchFavoriteRelaysWithSets(pubkey)
+window.napp.utils.fetchEmojisWithSets(pubkey)
+window.napp.utils.fetchFavoriteFollowSetsWithSets(pubkey)
 
 // Addressable sets
 window.napp.utils.loadFollowSets(pubkey)
@@ -63,6 +77,11 @@ window.napp.utils.loadEvents(ids)
 
 // Verify an event's id + signature on the host (nostr-tools verifyEvent).
 window.napp.utils.verifyEvent(event)
+
+// Throwaway-key signing for ephemeral/anonymous identities (no rpc — runs in
+// the napp's own frame, secret key never reaches the host, no prompt)
+window.napp.utils.generateKey() // → { sk, pk } fresh secp256k1 keypair, hex
+window.napp.utils.signWithKey(event, sk)
 
 // Saving a file to disk (the sandbox blocks <a download>; prompts the user)
 window.napp.utils.saveFile(name, data, type?)

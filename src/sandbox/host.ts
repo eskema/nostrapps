@@ -23,14 +23,26 @@ import { createNappWindow } from "./napp-window.js"
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
 import { fetchBlob } from "../nsite/fetch.js"
 import {
+  fetchEmojisWithSets,
+  fetchFavoriteFollowSetsWithSets,
+  fetchFavoriteRelaysWithSets,
+  loadAuthoredPodcasts,
   loadBlossomServers,
   loadBookmarks,
   loadEmojis,
+  loadFavoriteFollowSets,
+  loadFavoritePodcasts,
   loadFavoriteRelays,
+  loadFavoriteScrolls,
   loadFollowsList,
+  loadGitAuthors,
+  loadGitRepositories,
+  loadMediaFollows,
   loadMuteList,
   loadPins,
+  loadProfileBadges,
   loadRelayList,
+  loadSimpleGroups,
   loadWikiAuthors,
   loadWikiRelays
 } from "@nostr/gadgets/lists"
@@ -4005,6 +4017,30 @@ async function dispatch(
       return loadWikiAuthors(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadWikiRelays":
       return loadWikiRelays(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadFavoriteFollowSets":
+      return loadFavoriteFollowSets(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadFavoriteScrolls":
+      return loadFavoriteScrolls(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadProfileBadges":
+      return loadProfileBadges(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadSimpleGroups":
+      return loadSimpleGroups(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadGitAuthors":
+      return loadGitAuthors(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadGitRepositories":
+      return loadGitRepositories(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadMediaFollows":
+      return loadMediaFollows(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadFavoritePodcasts":
+      return loadFavoritePodcasts(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.loadAuthoredPodcasts":
+      return loadAuthoredPodcasts(resolvePubkey(params), undefined, undefined, undefined)
+    case "napp.fetchFavoriteRelaysWithSets":
+      return fetchFavoriteRelaysWithSets(resolvePubkey(params))
+    case "napp.fetchEmojisWithSets":
+      return fetchEmojisWithSets(resolvePubkey(params))
+    case "napp.fetchFavoriteFollowSetsWithSets":
+      return fetchFavoriteFollowSetsWithSets(resolvePubkey(params))
     case "napp.loadEmojiSets":
       return loadEmojiSets(resolvePubkey(params))
     case "napp.loadFollowSets":
@@ -4506,14 +4542,41 @@ async function publishEventToRelays(event: NostrEvent, relays?: string[]): Promi
     case 10003:
       loadBookmarks(event.pubkey, undefined, event).catch(() => {})
       break
+    case 10008:
+      loadProfileBadges(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10009:
+      loadSimpleGroups(event.pubkey, undefined, event).catch(() => {})
+      break
     case 10012:
       loadFavoriteRelays(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10017:
+      loadGitAuthors(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10018:
+      loadGitRepositories(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10020:
+      loadMediaFollows(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10021:
+      loadFavoriteFollowSets(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10027:
+      loadFavoriteScrolls(event.pubkey, undefined, event).catch(() => {})
       break
     case 10030:
       loadEmojis(event.pubkey, undefined, event).catch(() => {})
       break
+    case 10054:
+      loadFavoritePodcasts(event.pubkey, undefined, event).catch(() => {})
+      break
     case 10063:
       loadBlossomServers(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10064:
+      loadAuthoredPodcasts(event.pubkey, undefined, event).catch(() => {})
       break
     case 10101:
       loadWikiAuthors(event.pubkey, undefined, event).catch(() => {})

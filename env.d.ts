@@ -68,6 +68,41 @@ interface ListResult<I> {
   items: I[]
 }
 
+// ── NIP-51 list item shapes (mirror @nostr/gadgets/lists) ─────────────────
+interface AddressPointer {
+  identifier: string
+  pubkey: string
+  kind: number
+  relays: string[]
+}
+
+interface EventPointer {
+  id: string
+  kind?: number
+  relays?: string[]
+  author?: string
+}
+
+interface Emoji {
+  shortcode: string
+  url: string
+}
+
+interface SimpleGroupItem {
+  groupId: string
+  relay: string
+  name?: string
+}
+
+interface ResolvedSet<I> {
+  pointer: AddressPointer
+  event: NostrEvent | null
+  items: I[]
+  title: string
+  image?: string
+  description?: string
+}
+
 // ── Addressable set helpers ──────────────────────────────────────────────
 interface SetResult<I> {
   event: NostrEvent | null
@@ -168,6 +203,20 @@ interface NappUtils {
   loadDmRelays(pubkey: string): Promise<ListResult<string>>
   loadWikiAuthors(pubkey: string): Promise<ListResult<string>>
   loadWikiRelays(pubkey: string): Promise<ListResult<string>>
+  loadFavoriteFollowSets(pubkey: string): Promise<ListResult<AddressPointer>> // kind 10021
+  loadFavoriteScrolls(pubkey: string): Promise<ListResult<EventPointer>> // kind 10027
+  loadProfileBadges(pubkey: string): Promise<ListResult<string | AddressPointer>> // kind 10008
+  loadSimpleGroups(pubkey: string): Promise<ListResult<SimpleGroupItem>> // kind 10009
+  loadGitAuthors(pubkey: string): Promise<ListResult<string>> // kind 10017
+  loadGitRepositories(pubkey: string): Promise<ListResult<string>> // kind 10018
+  loadMediaFollows(pubkey: string): Promise<ListResult<string>> // kind 10020
+  loadFavoritePodcasts(pubkey: string): Promise<ListResult<string>> // kind 10054
+  loadAuthoredPodcasts(pubkey: string): Promise<ListResult<string>> // kind 10064
+
+  // Composite helpers resolving address-pointer items into their sets
+  fetchFavoriteRelaysWithSets(pubkey: string): Promise<Array<string | ResolvedSet<string>>>
+  fetchEmojisWithSets(pubkey: string): Promise<Array<Emoji | ResolvedSet<Emoji>>>
+  fetchFavoriteFollowSetsWithSets(pubkey: string): Promise<Array<ResolvedSet<string>>>
 
   // Addressable sets
   loadFollowSets(pubkey: string): Promise<SetResult<string>>
