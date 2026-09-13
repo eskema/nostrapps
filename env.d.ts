@@ -52,6 +52,7 @@ interface NostrDB {
   query(filters: unknown): Promise<NostrEvent[]>
   count(filters: unknown): Promise<number>
   event(id: string): Promise<NostrEvent | undefined>
+  remove(ids: string[]): Promise<string[]>
   replaceable(kind: number, author: string, identifier?: string): Promise<NostrEvent | undefined>
   supports(): string[]
 }

@@ -189,6 +189,7 @@
     query: filters => rpc("nostrdb.query", { filters }),
     count: filters => rpc("nostrdb.count", { filters }),
     event: id => rpc("nostrdb.event", { id }),
+    remove: ids => rpc("nostrdb.remove", { ids }),
     replaceable: (kind, author, identifier) =>
       rpc("nostrdb.replaceable", { kind, author, identifier }),
     supports: async () => []

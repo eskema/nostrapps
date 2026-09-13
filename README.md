@@ -22,6 +22,7 @@ window.nostrdb.add(event)
 window.nostrdb.query(filters)
 window.nostrdb.count(filters)
 window.nostrdb.event(id)
+window.nostrdb.remove(ids) // string[]
 window.nostrdb.replaceable(kind, author, identifier?)
 window.nostrdb.supports() // returns []
 
@@ -72,7 +73,7 @@ window.napp.utils.searchUser(term) // remote NIP-50 kind:0 search on the user's 
 // Arbitrary event fetching
 window.napp.utils.loadEvent(code, relays?, author?)
 
-// Batched by-id fetching: one REQ over the id union; non-64-hex ids dropped.
+// Batched by-id fetching: one REQ over the id union
 window.napp.utils.loadEvents(ids)
 
 // Verify an event's id + signature on the host (nostr-tools verifyEvent).
