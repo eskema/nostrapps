@@ -79,6 +79,9 @@ export async function collectLocalFolder(
       singleton?: boolean
       actions: string[]
       requires?: string[]
+      modes?: unknown
+      initial_size?: unknown
+      initialSize?: unknown
     }
   }
 }

@@ -558,16 +558,19 @@ async function runNappAction(
   callerNappId: string,
   name: string,
   payload: unknown,
-  options?: { instance?: string }
+  options?: { instance?: string; auxiliary?: boolean }
 ) {
   if (typeof name !== "string" || !name) {
     throw new Error("napp.action: action name is required")
   }
 
+  const auxiliary = !!options?.auxiliary
+  let auxWin: NappWindow | null = null
+
   let instanceId = options?.instance
   if (!instanceId) {
     // no instance specified, will open a new window, often prompting the user first
-    const [candidates, openCandidates] = handlers.findHandlersForAction(name)
+    const [candidates, openCandidates] = handlers.findHandlersForAction(name, { auxiliary })
     try {
       const [nappId, existingInstanceId] =
         candidates.length + openCandidates.length === 1
@@ -578,6 +581,13 @@ async function runNappAction(
       // if not, open a new window here and get its id
       if (existingInstanceId) {
         instanceId = existingInstanceId
+      } else if (auxiliary) {
+        // Ephemeral floating window at the cursor, sized from the app's
+        // `initial_size` metadata. Never persisted; closed on response below.
+        auxWin = await launchAuxiliary(nappId)
+        syncDOM(auxWin)
+        auxWin.focus()
+        instanceId = auxWin.getState().instanceId
       } else {
         const win = await launch(stage, nappId, {
           ...makeLaunchOpts(),
@@ -600,15 +610,63 @@ async function runNappAction(
     }
   }
 
-  // actually call the instance
-  persist.appendLoadedAction(instanceId, name, payload)
-  const result = await callIframe(instanceId, name, payload)
+  try {
+    // actually call the instance (auxiliary windows are ephemeral — nothing
+    // to replay on restore, so don't record the action)
+    if (!auxWin) persist.appendLoadedAction(instanceId, name, payload)
+    const result = await callIframe(instanceId, name, payload)
 
-  if (result) {
-    setStatus(`Action "${name}" result: ${JSON.stringify(result)}`)
+    if (result) {
+      setStatus(`Action "${name}" result: ${JSON.stringify(result)}`)
+    }
+
+    return result
+  } finally {
+    // Auxiliary windows close as soon as the action answers (or fails).
+    auxWin?.close()
   }
+}
 
-  return result
+// Launch an ephemeral auxiliary window: cursor-anchored, sized from the
+// app's `initial_size` metadata, and never written to localStorage (the
+// transient flag skips singleton reuse + persistence in host.launch, and
+// these opts never call persist.updateOpen).
+async function launchAuxiliary(nappId: string): Promise<NappWindow> {
+  const size = persist.getInstalledApp(nappId)?.initialSize
+  const width = Math.max(240, Math.min(800, Math.round(size?.width ?? 360)))
+  const height = Math.max(200, Math.min(1200, Math.round(size?.height ?? 420)))
+  const pointer = getPointer()
+  const pad = 8
+  const left = Math.max(pad, Math.min(pointer.x, window.innerWidth - width - pad))
+  const top = Math.max(pad, Math.min(pointer.y, window.innerHeight - height - pad))
+  const position = { left, top, width, height }
+
+  if (nappId.startsWith("napplet~")) {
+    const win = await launchInstalledNapplet(
+      nappId,
+      { petname: friendlyNameFor(nappId), position },
+      makeEphemeralLaunchOpts()
+    )
+    if (!win) throw new Error(`napplet ${nappId} could not be launched — its manifest is gone`)
+    return win
+  }
+  return launch(stage, nappId, {
+    ...makeEphemeralLaunchOpts(),
+    petname: friendlyNameFor(nappId),
+    position,
+    transient: true
+  })
+}
+
+function makeEphemeralLaunchOpts() {
+  return {
+    onProgress: setStatus,
+    // Transient (e.g. the handler picker): don't persist it, but still
+    // re-pack on move/resize so pack mode keeps it constrained to the grid.
+    onStateChange: () => maybeRepack(),
+    onReorder: persistDomOrder,
+    onClose: () => refreshSuggestions()
+  }
 }
 
 async function replayLoadedActions(instanceId: string) {
@@ -1916,12 +1974,16 @@ async function launch(
   opts: LaunchOpts = {}
 ): Promise<NappWindow> {
   if (nappId.startsWith("napplet~")) {
-    const win = await launchInstalledNapplet(nappId, {
-      instanceId: opts.instanceId,
-      petname: opts.petname,
-      position: opts.position,
-      status: opts.status
-    })
+    const win = await launchInstalledNapplet(
+      nappId,
+      {
+        instanceId: opts.instanceId,
+        petname: opts.petname,
+        position: opts.position,
+        status: opts.status
+      },
+      opts.transient ? makeEphemeralLaunchOpts() : undefined
+    )
     if (!win) throw new Error(`napplet ${nappId} could not be launched — its manifest is gone`)
     return win
   }
@@ -1938,7 +2000,8 @@ async function launchInstalledNapplet(
     petname?: string | null
     position?: NappWindowState["position"]
     status?: NappWindowState["status"]
-  } = {}
+  } = {},
+  baseOpts?: LaunchOpts
 ): Promise<NappWindow | null> {
   const app = persist.getInstalledApp(nappId)
   if (!app?.event && !app?.html) {
@@ -1960,7 +2023,7 @@ async function launchInstalledNapplet(
   const resolved = app.event ? await loadNappletFromManifest(app.event, setStatus) : null
   const html = resolved?.html ?? app.html!
   return launchNapplet(stage, nappId, html, {
-    ...makeLaunchOpts(),
+    ...(baseOpts ?? makeLaunchOpts()),
     ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
     petname: opts.petname || resolved?.title || app.petname || nappId,
     ...(opts.position ? { position: opts.position } : {}),
@@ -2021,6 +2084,8 @@ async function installDevApp() {
       petname,
       actions: metadata.actions || [],
       requires: metadata.requires || [],
+      modes: metadata.modes,
+      initialSize: persist.initialSizeFromMeta(metadata),
       singleton: metadata.singleton
     })
     handlers.addApp(nappId, metadata.actions || [])
@@ -2077,6 +2142,8 @@ async function installDevAppFromUrl(rawUrl: string) {
       petname,
       actions: metadata.actions || [],
       requires: metadata.requires || [],
+      modes: metadata.modes,
+      initialSize: persist.initialSizeFromMeta(metadata),
       singleton: metadata.singleton
     })
     handlers.addApp(nappId, metadata.actions || [])
@@ -2239,6 +2306,8 @@ async function launchFromInput(raw: string): Promise<void> {
       petname: title || resolved.dTag || nappId,
       actions: capabilitiesFromEvent(manifest),
       requires: requiresFromEvent(manifest),
+      modes: persist.modesFromEventTags(manifest?.tags ?? []),
+      initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
       singleton
     })
     handlers.addApp(nappId, capabilitiesFromEvent(manifest))
@@ -2379,6 +2448,8 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       petname,
       actions: metadata?.actions || [],
       requires: metadata?.requires || [],
+      modes: metadata?.modes,
+      initialSize: persist.initialSizeFromMeta(metadata),
       singleton: metadata.singleton
     })
     handlers.addApp(nappId, metadata?.actions || [])
@@ -2476,6 +2547,8 @@ async function loadTempNappFromNaddr(naddr: string): Promise<string> {
     petname,
     actions: capabilitiesFromEvent(manifest),
     requires: requiresFromEvent(manifest),
+    modes: persist.modesFromEventTags(manifest?.tags ?? []),
+    initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
     singleton
   })
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))

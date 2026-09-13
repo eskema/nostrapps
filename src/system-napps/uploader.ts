@@ -271,6 +271,27 @@ export function mount(
     if (metadata?.ui === "wrapper") requires.add("ui")
     for (const r of requires) tags.push(["requires", r])
 
+    // Presentation modes ride as one ["mode", "<mode>"] tag per mode.
+    if (!isNapplet && Array.isArray(metadata?.modes)) {
+      for (const m of metadata.modes) {
+        if (
+          (m === "normal" || m === "auxiliary" || m === "headless") &&
+          !tags.some(t => t[0] === "mode" && t[1] === m)
+        ) {
+          tags.push(["mode", m])
+        }
+      }
+    }
+    // Preferred auxiliary-window size rides as ["initial_size", w, h].
+    if (!isNapplet) {
+      const iz = metadata?.initial_size ?? metadata?.initialSize
+      const w = Math.round(Number(iz?.width))
+      const h = Math.round(Number(iz?.height))
+      if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+        tags.push(["initial_size", String(Math.min(2000, w)), String(Math.min(2000, h))])
+      }
+    }
+
     tags.push(["d", dTag])
 
     eventTemplate = {

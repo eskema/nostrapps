@@ -197,6 +197,9 @@
 
   // Inter-app calling. Everything is an action.
   //   window.napp.action(name, payload, options?) - call a registered action handler
+  //     options: { instance?: string, auxiliary?: boolean } — auxiliary
+  //     restricts the dispatch to "auxiliary"-mode apps, opened in an
+  //     ephemeral floating window that closes itself on response.
   // Receiving apps register:
   //   window.napp.registerAction(pattern, handler) - handle incoming action dispatches
   //   window.napp.registerAction(pattern)

@@ -356,9 +356,14 @@ export function nappOriginFor(nappId: string): string {
 }
 
 export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchOpts = {}) {
-  const singleton = singletonForNappId(nappId)
+  const storedSingleton = singletonForNappId(nappId)
 
-  if (singleton === null) throw new Error(`failed to launch uninstalled app ${nappId}`)
+  if (storedSingleton === null) throw new Error(`failed to launch uninstalled app ${nappId}`)
+
+  // Transient (auxiliary) windows are always fresh ephemeral instances: no
+  // singleton reuse (which could surface a persisted window) and no
+  // persistence below.
+  const singleton = opts.transient ? false : storedSingleton
 
   if (singleton) {
     const existing = findOpenWindowByNappId(nappId)
@@ -373,13 +378,20 @@ export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchO
 
   const origin = nappOriginFor(nappId)
   const win = mount(stageEl, nappId, singleton, origin, currentSigner, opts)
-  const st = win.getState()
-  console.debug("[launch] trackOpened", {
-    nappId,
-    instanceId: st.instanceId,
-    petname: st.petname
-  })
-  updateOpen(st.instanceId, st)
+  if (!opts.transient) {
+    const st = win.getState()
+    console.debug("[launch] trackOpened", {
+      nappId,
+      instanceId: st.instanceId,
+      petname: st.petname
+    })
+    updateOpen(st.instanceId, st)
+  } else {
+    console.debug("[launch] trackOpened (transient, not persisted)", {
+      nappId,
+      instanceId: win.getState().instanceId
+    })
+  }
 
   return win
 }

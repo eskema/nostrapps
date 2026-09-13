@@ -1,6 +1,11 @@
 import * as persist from "./persistence.js"
 import { NappWindowState } from "./types.js"
 
+// napp.action() options: `instance` targets an existing window;
+// `auxiliary` restricts the dispatch to apps advertising the "auxiliary"
+// mode (their window is ephemeral — see runNappAction in main.ts).
+export type ActionOptions = { instance?: string; auxiliary?: boolean }
+
 // action name → nappIds that can handle it
 const actionMap = new Map<string, string[]>()
 
@@ -11,7 +16,7 @@ let actionDispatcher:
       callerNappId: string,
       name: string,
       payload: unknown,
-      options?: { instance?: string }
+      options?: ActionOptions
     ) => Promise<unknown>)
   | null = null
 
@@ -52,16 +57,34 @@ export function removeApp(nappId: string) {
   emit()
 }
 
-export function findHandlersForAction(action: string): [string[], NappWindowState[]] {
+export function findHandlersForAction(
+  action: string,
+  options?: ActionOptions
+): [string[], NappWindowState[]] {
   // Copy — actionMap.get returns the stored array by reference, and the view:
   // push below would otherwise mutate it (appending "view" handlers on every
   // call, so the candidate list grows by duplicates each dispatch).
-  const apps = [...(actionMap.get(action) || [])]
+  let apps = [...(actionMap.get(action) || [])]
 
   // special case
   if (action.startsWith("view:")) apps.push(...(actionMap.get("view") || []))
 
-  const openCandidates = persist.readOpen().filter(w => apps.includes(w.nappId))
+  // Mode-gated dispatch: auxiliary calls only consider apps advertising
+  // "auxiliary"; normal calls only consider apps advertising "normal" (absent
+  // modes imply ["normal"] — see modesOfApp). An app listing both appears in
+  // both; headless-only apps are reachable solely via an explicit instance.
+  const wantAuxiliary = !!options?.auxiliary
+  apps = apps.filter(nappId =>
+    persist
+      .modesOfApp(persist.getInstalledApp(nappId))
+      .includes(wantAuxiliary ? "auxiliary" : "normal")
+  )
+
+  // An auxiliary dispatch always opens a fresh ephemeral window that closes
+  // itself on response — never route it into an already-open window.
+  const openCandidates = options?.auxiliary
+    ? []
+    : persist.readOpen().filter(w => apps.includes(w.nappId))
   return [apps, openCandidates]
 }
 
@@ -71,7 +94,7 @@ export function setActionDispatcher(
         callerNappId: string,
         name: string,
         payload: unknown,
-        options?: { instance?: string }
+        options?: ActionOptions
       ) => Promise<unknown>)
     | null
 ) {
@@ -82,7 +105,7 @@ export function dispatchAction(
   callerNappId: string,
   name: string,
   payload: unknown,
-  options?: { instance?: string }
+  options?: ActionOptions
 ) {
   if (!actionDispatcher) {
     throw new Error("napp.action dispatch is not configured")

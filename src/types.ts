@@ -168,6 +168,16 @@ export type NappPolicy = {
 // self-contained kind-35129 app. The three flavors the launcher runs.
 export type AppType = "nsite" | "napp" | "napplet"
 
+// How an app presents itself. "normal" = a regular window; "auxiliary" =
+// eligible for ephemeral floating-menu dispatch via napp.action(...,
+// {auxiliary: true}); "headless" = no UI (reserved). Absent means ["normal"].
+export type NappMode = "normal" | "auxiliary" | "headless"
+
+export type NappInitialSize = {
+  width: number
+  height: number
+}
+
 export type InstalledApp = {
   nappId: string
   icon: string
@@ -175,6 +185,13 @@ export type InstalledApp = {
   petname: string
   singleton: boolean
   actions: string[]
+  // "modes" the app advertises (["mode", "<mode>"] manifest tags, or a
+  // `modes` array in metadata.json). Absent/empty implies ["normal"].
+  modes?: NappMode[]
+  // Preferred size for the ephemeral floating window used in auxiliary
+  // dispatch (["initial_size", "<width>", "<height>"] manifest tags, or an
+  // `initial_size` {width, height} object in metadata.json).
+  initialSize?: NappInitialSize
   // NIP-5D capability domains this app declared (["requires", "<domain>"]
   // manifest tags, or a `requires` array in metadata.json). Declaring any is
   // what marks the app as a napplet; relay installs carry the manifest event
@@ -306,6 +323,9 @@ export type LaunchOpts = {
   params?: any
   position?: Position
   status?: Status
+  // Ephemeral (e.g. auxiliary dispatch): skip singleton reuse and never touch
+  // persistence — the window lives and dies with this session.
+  transient?: boolean
   onProgress?: (msg: string) => void
   onStateChange?: (state: NappWindowState) => void
   onReorder?: () => void

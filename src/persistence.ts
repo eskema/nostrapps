@@ -1,5 +1,14 @@
 import { NostrEvent } from "@nostr/tools"
-import { AppType, InstalledApp, NappPolicy, NappWindowState, SpaceData, SpacesState } from "./types"
+import {
+  AppType,
+  InstalledApp,
+  NappInitialSize,
+  NappMode,
+  NappPolicy,
+  NappWindowState,
+  SpaceData,
+  SpacesState
+} from "./types"
 
 const INSTALLED_KEY = "nostrapps:installed"
 const SPACES_KEY = "nostrapps:spaces"
@@ -440,6 +449,8 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string) {
     petname: petname || existing?.petname || title || nappId,
     singleton: event.tags.some(t => t[0] === "singleton"),
     actions: event.tags.filter(t => t[0] === "action" && t[1]).map(t => t[1]),
+    modes: modesFromEventTags(event.tags),
+    initialSize: initialSizeFromEventTags(event.tags),
     event
   }
   writeInstalled(all)
@@ -453,6 +464,8 @@ export function storeInstalledLocalApp(app: {
   singleton?: boolean
   actions?: string[]
   requires?: string[]
+  modes?: unknown
+  initialSize?: unknown
   html?: string | null
 }) {
   if (!app?.nappId) return
@@ -465,6 +478,8 @@ export function storeInstalledLocalApp(app: {
     actions: app.actions || [],
     requires: sanitizeRequires(app.requires),
     singleton: !!app.singleton,
+    modes: sanitizeModes(app.modes),
+    initialSize: sanitizeInitialSize(app.initialSize),
     ...(app.html ? { html: app.html } : {}),
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
@@ -475,6 +490,70 @@ export function storeInstalledLocalApp(app: {
 function sanitizeRequires(v: unknown): string[] {
   if (!Array.isArray(v)) return []
   return v.filter(s => typeof s === "string" && s && s.length <= 64).slice(0, 32)
+}
+
+// App presentation modes — untrusted napp input, from metadata.json `modes`
+// or ["mode", "<mode>"] manifest tags. Anything outside the vocabulary is
+// dropped; an empty result means the default (see modesOfApp).
+const NAPP_MODES: NappMode[] = ["normal", "auxiliary", "headless"]
+
+export function sanitizeModes(v: unknown): NappMode[] {
+  if (!Array.isArray(v)) return []
+  const out: NappMode[] = []
+  for (const m of v) {
+    if (
+      typeof m === "string" &&
+      (NAPP_MODES as string[]).includes(m) &&
+      !out.includes(m as NappMode)
+    ) {
+      out.push(m as NappMode)
+    }
+  }
+  return out
+}
+
+// Effective modes for an app: what it advertised, or ["normal"] when the
+// field is absent/empty.
+export function modesOfApp(app: { modes?: NappMode[] } | undefined | null): NappMode[] {
+  const modes = sanitizeModes(app?.modes)
+  return modes.length ? modes : ["normal"]
+}
+
+// ["mode", "<mode>"] per-mode tags (["modes", ...] accepted too).
+export function modesFromEventTags(tags: string[][]): NappMode[] {
+  const out: unknown[] = []
+  for (const t of tags ?? []) {
+    if (t[0] === "mode" && typeof t[1] === "string" && t[1]) out.push(t[1])
+    else if (t[0] === "modes") for (const v of t.slice(1)) out.push(v)
+  }
+  return sanitizeModes(out)
+}
+
+// Preferred floating-window size — untrusted napp input. metadata.json
+// `initial_size` ({width, height}) or an ["initial_size", "<w>", "<h>"]
+// manifest tag (["initial-size", …] accepted too). Null when absent/invalid.
+export function sanitizeInitialSize(v: unknown): NappInitialSize | undefined {
+  if (!v || typeof v !== "object") return undefined
+  const w = Number((v as any).width)
+  const h = Number((v as any).height)
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return undefined
+  return { width: Math.min(2000, Math.round(w)), height: Math.min(2000, Math.round(h)) }
+}
+
+export function initialSizeFromEventTags(tags: string[][]): NappInitialSize | undefined {
+  for (const t of tags ?? []) {
+    if ((t[0] === "initial_size" || t[0] === "initial-size") && t[1] != null && t[2] != null) {
+      const size = sanitizeInitialSize({ width: Number(t[1]), height: Number(t[2]) })
+      if (size) return size
+    }
+  }
+  return undefined
+}
+
+// metadata.json carries `initial_size` (snake_case); accept camelCase too.
+export function initialSizeFromMeta(meta: any): NappInitialSize | undefined {
+  if (!meta || typeof meta !== "object") return undefined
+  return sanitizeInitialSize(meta.initial_size ?? meta.initialSize)
 }
 
 // ─── Per-napp security policy ───────────────────────────────────
@@ -777,6 +856,8 @@ export interface DevAppData {
   singleton: boolean
   actions: string[]
   requires?: string[]
+  modes?: NappMode[]
+  initialSize?: NappInitialSize
   installedAt: number
 }
 
@@ -790,6 +871,8 @@ export function storeDevApp(app: {
   singleton?: boolean
   actions?: string[]
   requires?: string[]
+  modes?: unknown
+  initialSize?: unknown
 }) {
   if (!app?.nappId) return
   devApps.set(app.nappId, {
@@ -799,6 +882,8 @@ export function storeDevApp(app: {
     singleton: !!app.singleton,
     actions: app.actions || [],
     requires: sanitizeRequires(app.requires),
+    modes: sanitizeModes(app.modes),
+    initialSize: sanitizeInitialSize(app.initialSize),
     installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000)
   })
 }

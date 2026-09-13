@@ -310,7 +310,11 @@ interface Napp {
     pattern: string,
     fn?: ((name: string, payload: unknown) => Promise<unknown>) | null
   ): void
-  action(name: string, payload?: unknown, opts?: { instance?: string }): Promise<unknown>
+  action(
+    name: string,
+    payload?: unknown,
+    opts?: { instance?: string; auxiliary?: boolean }
+  ): Promise<unknown>
   /** Close this window (same as the header × — keeps state for restore). */
   close(): void
   feeds: NappFeeds
