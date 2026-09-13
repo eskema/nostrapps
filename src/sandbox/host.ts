@@ -3809,10 +3809,8 @@ function safeLoadNostrUser(input: any) {
   return typeof input === "string" ? loadNostrUser(pk) : loadNostrUser({ ...input, pubkey: pk })
 }
 
-// Strip non-hex ids/authors from a napp-supplied filter before it hits the
-// store (handles a single filter or an array of them). A filter whose only
-// id/author constraint is emptied by this is dropped, so it can't silently
-// widen into a match-everything query.
+// A filter whose only id/author constraint is emptied by this is dropped, so
+// it can't silently widen into a match-everything query.
 function sanitizeFilter(filter: any): any | null {
   if (Array.isArray(filter)) {
     const arr = filter.map(sanitizeFilter).filter(Boolean)
@@ -3829,6 +3827,42 @@ function sanitizeFilter(filter: any): any | null {
     if (g.authors.length === 0) return null
   }
   return g
+}
+
+// The store takes a single Filter object, but napps may pass one filter or an
+// array of them (OR semantics). Normalize to a flat list of clean filters.
+function normalizeFilters(input: any): Filter[] {
+  const out: Filter[] = []
+  const push = (f: any) => {
+    const s = sanitizeFilter(f)
+    if (!s) return
+    if (Array.isArray(s)) {
+      for (const inner of s) if (inner) out.push(inner)
+    } else out.push(s)
+  }
+  if (Array.isArray(input)) {
+    for (const f of input) push(f)
+  } else {
+    push(input)
+  }
+  return out
+}
+
+// Union of several single-filter query results: dedupe by id, newest first,
+// capped at the largest requested limit (single-filter callers see no change).
+function mergeQueryResults(lists: NostrEvent[][], filters: Filter[]): NostrEvent[] {
+  const seen = new Set<string>()
+  const merged: NostrEvent[] = []
+  for (const list of lists) {
+    for (const e of list) {
+      if (seen.has(e.id)) continue
+      seen.add(e.id)
+      merged.push(e)
+    }
+  }
+  merged.sort((a, b) => b.created_at - a.created_at)
+  const cap = Math.max(...filters.map(f => f.limit ?? 2500))
+  return merged.slice(0, cap)
 }
 
 async function dispatch(
@@ -3857,14 +3891,23 @@ async function dispatch(
       return saved
     }
     case "nostrdb.query": {
-      const filter = sanitizeFilter(params.filters)
-      return filter ? safeQueryEvents(filter) : []
+      const filters = normalizeFilters(params.filters)
+      if (filters.length === 0) return []
+      if (filters.length === 1) return safeQueryEvents(filters[0])
+      const lists = await Promise.all(filters.map(f => safeQueryEvents(f)))
+      return mergeQueryResults(lists, filters)
     }
     case "nostrdb.count": {
-      const filter = sanitizeFilter(params.filters)
-      if (!filter) return 0
-      const events = await safeQueryEvents(filter, 10_000)
-      return events.length
+      const filters = normalizeFilters(params.filters)
+      if (filters.length === 0) return 0
+      if (filters.length === 1) {
+        const events = await safeQueryEvents(filters[0], 10_000)
+        return events.length
+      }
+      const lists = await Promise.all(filters.map(f => safeQueryEvents(f, 10_000)))
+      const seen = new Set<string>()
+      for (const list of lists) for (const e of list) seen.add(e.id)
+      return seen.size
     }
     case "nostrdb.event": {
       if (!isHex64(params.id)) return undefined
