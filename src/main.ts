@@ -1111,6 +1111,21 @@ input!.addEventListener("keydown", (e: KeyboardEvent) => {
   if (e.key === "Escape") hideSuggestions()
 })
 
+// Ctrl+K / Cmd+K toggles top input, standard launcher palette shortcut.
+window.addEventListener("keydown", (e: KeyboardEvent) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault()
+    if (document.activeElement === input && !suggestions.hidden) {
+      hideSuggestions()
+      input!.blur()
+    } else {
+      input!.focus()
+      input!.select()
+      showSuggestions()
+    }
+  }
+})
+
 function refreshSuggestions() {
   if (!suggestions.hidden) renderSuggestions()
   notifyAppsChanged()
