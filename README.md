@@ -4,7 +4,7 @@ Nostrapps is a small browser launcher for Nostr apps. Each app is a static site 
 
 ## Sharing a space
 
-The link button on the spaces bar copies a link to the current space. Before it does, each app is checked to be reachable: its manifest is republished to the author's write relays and the nostrapps relays (those become the naddr's hints), and its files are probed on the blossom servers and re-uploaded where missing.
+The link button on the spaces bar opens the share screen for the current space: its windows and the actions each will carry (untick or edit them), then, on create, a check that each app is reachable — its manifest republished to the author's write relays and the nostrapps relays (those become the naddr's hints), its files probed on the blossom servers and re-uploaded where missing — and the link to copy.
 
 ```
 https://<launcher>/#space=my-space&app=naddr1…&action=profile~npub1…&app=naddr1…

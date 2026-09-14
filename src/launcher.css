@@ -1680,58 +1680,44 @@ body.popover-open .napp-body iframe {
 /* ─── Floating popover (openPopover in popover.ts) ─────────────────
    A non-modal card anchored at a point (e.g. the cursor); light-dismisses on
    click-outside / Esc. Position is set inline; reset the UA popover centering. */
-/* ─── Share popover (shareCurrentSpace) ─────────────────────────
-   One line per app whose state text updates in place while its check runs,
-   then the link and its copy button. */
-.share-panel {
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.25rem;
-  min-width: 18rem;
-  font-family: var(--font-serif);
-}
-.share-title {
-  font-weight: 600;
-}
-.share-apps {
-  display: grid;
-  gap: 0.25rem;
-}
-.share-app {
+/* ─── Share screen (share-dialog.ts), the consent screen's twin ────
+   A tick before each app's head, a state line under it while its check runs,
+   its actions as tick + name + editable payload rows, then the link. */
+.share-head {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.5rem;
-  align-items: baseline;
+  gap: 0.6rem;
+  align-items: center;
+  cursor: pointer;
 }
-.share-app-name {
-  font-weight: 600;
-  white-space: nowrap;
-}
-.share-app-state {
+.share-state {
   opacity: 0.7;
 }
-.share-app-state.muted {
-  opacity: 0.5;
-}
-.share-app-state.danger {
+.share-state.danger {
   opacity: 1;
   color: var(--danger);
 }
-.share-notes {
+.share-actions {
   display: grid;
-  gap: 0.2rem;
-  color: var(--danger);
+  gap: 0.3rem;
 }
-.share-result {
+.share-action {
   display: grid;
-  gap: 0.4rem;
-  justify-items: start;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.5rem;
+  align-items: center;
 }
-.share-notes[hidden],
-.share-result[hidden] {
-  display: none;
+.share-action .ui-input {
+  min-width: 0;
+  width: 100%;
 }
-/* The link itself: wraps anywhere (no spaces to break on), selects in one go. */
+.share-action .ui-input.invalid {
+  outline: 1px solid var(--danger);
+}
+.share-action-note {
+  opacity: 0.6;
+}
+/* The link: wraps anywhere (no spaces to break on), selects in one go. */
 .share-url {
   font-family: var(--font-mono);
   overflow-wrap: anywhere;

@@ -57,6 +57,7 @@ import {
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite, manifestRelays, blobServers, manifestPaths } from "./nsite/fetch.js"
 import { ensureReplicated } from "./nsite/heal.js"
+import { openShareDialog, type ShareWindow } from "./share-dialog.js"
 import { resolveNapplet, isNappletKind, loadNappletFromManifest } from "./nsite/napplet.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
 import {
@@ -1892,7 +1893,6 @@ let spacesSaveBtn: HTMLButtonElement
 let spacesResetBtn: HTMLButtonElement
 let spacesKeepBtn: HTMLButtonElement
 let spacesTrashBtn: HTMLButtonElement
-let spacesShareBtn: HTMLButtonElement
 
 function buildSpacesBarSkeleton() {
   // Start: the current space's name. Double-click to rename it.
@@ -1916,10 +1916,13 @@ function buildSpacesBarSkeleton() {
   spacesResetBtn = iconButton("reset", "Reset to saved layout", resetCurrentSpace)
   spacesKeepBtn = iconButton("check", "Keep this space (installs its apps)", keepCurrentSpace)
   spacesTrashBtn = iconButton("trash", "Delete this space", destroyCurrentSpace)
-  spacesShareBtn = iconButton("link", "Share this space as a link", () =>
-    shareCurrentSpace(spacesShareBtn)
+  controls.append(
+    spacesSaveBtn,
+    spacesResetBtn,
+    spacesKeepBtn,
+    spacesTrashBtn,
+    iconButton("link", "Share this space as a link", shareCurrentSpace)
   )
-  controls.append(spacesSaveBtn, spacesResetBtn, spacesKeepBtn, spacesTrashBtn, spacesShareBtn)
 
   // The current space's live windows (taskbar).
   spacesWinListEl = document.createElement("div")
@@ -2161,7 +2164,7 @@ function buildSpaceChip(s: { id: string; name: string }): HTMLButtonElement {
   reset: () => resetCurrentSpace(),
   destroy: () => destroyCurrentSpace(),
   keep: () => keepCurrentSpace(),
-  share: () => shareCurrentSpace(spacesShareBtn),
+  share: () => shareCurrentSpace(),
   rename: (id: string, name: string) => (persist.renameSpace(id, name), renderSpacesBar()),
   remove: (id: string) => (persist.deleteSpace(id), renderSpacesBar())
 }
@@ -3229,157 +3232,49 @@ async function keepCurrentSpace() {
   setStatus(`Kept space "${name}"`)
 }
 
-// Share: the current space as a link, in a popover that narrates the check —
-// one line per app, updated in place as checkReachable runs — and then shows
-// the link with a copy button (a click, so the clipboard write is a user
-// gesture wherever it runs). Windows in visual reading order (the receiver
-// lays them out from link order alone), each with the last payload it got per
-// action. Windows with no address (system, dev, local) are listed as skipped.
+// Share: the current space as a link. The share screen (share-dialog.ts, the
+// consent screen's twin) lists every window in visual reading order — the
+// receiver lays them out from link order alone — with the last payload it got
+// per action, lets the user untick and edit, runs checkReachable per app, and
+// shows the link. Windows with no address (system, dev, local) are listed as
+// such and can't be included.
 const SHARE_HINTS_MAX = 4
 
-async function shareCurrentSpace(anchor?: HTMLElement) {
+async function shareCurrentSpace() {
   const name = persist.listSpaces().find(s => s.id === currentSpaceId)?.name || "space"
   const row = (w: NappWindowState) => Math.round((w.position?.top ?? 0) / 60)
   const windows = persist
     .readOpen()
     .filter(w => !w.system)
     .sort((a, b) => row(a) - row(b) || (a.position?.left ?? 0) - (b.position?.left ?? 0))
-
-  const panel = buildSharePanel(name)
-  const at = anchor ? anchor.getBoundingClientRect() : null
-  const pointer = getPointer()
-  void openPopover<null>({
-    x: at ? at.left : pointer.x,
-    y: at ? at.bottom + 4 : pointer.y,
-    class: "share-popover",
-    build: () => panel.root,
-    dismissValue: null
-  })
-
-  const notes: string[] = []
-  const link: ShareLink = { name, windows: [] }
-  // One check (and one line) per app, however many windows it has.
-  const inputs = new Map<string, string | null>()
-  for (const w of windows) {
-    let input = inputs.get(w.nappId)
-    if (input === undefined) {
-      const line = panel.app(w.petname)
-      const app = shareableFor(w.nappId)
-      if (!app) {
-        line.set("no address, skipped", "muted")
-        input = null
-      } else {
-        const r = await checkReachable(app, msg => line.set(msg))
-        if (r.missing) line.set(`${r.missing} missing on every server`, "danger")
-        else {
-          const parts = ["ok"]
-          if (r.uploaded) parts.push(`${r.uploaded} blob${r.uploaded === 1 ? "" : "s"} re-uploaded`)
-          parts.push(
-            r.hints ? `${r.hints} relay hint${r.hints === 1 ? "" : "s"}` : "no relay hints"
-          )
-          line.set(parts.join(", "))
-        }
-        input = r.input
-      }
-      inputs.set(w.nappId, input)
-    }
-    if (input === null) continue
-    const last = new Map<string, unknown>()
-    for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
-    const actions: LinkAction[] = []
-    for (const [n, p] of last) {
-      const payload = encodePayload(n, p)
-      if (payload == null) notes.push(`${w.petname}: the ${n} payload can't go in a link`)
-      else actions.push({ name: n, payload })
-    }
-    link.windows.push({ input, actions })
-  }
-  if (!link.windows.length) {
-    panel.finish(null, [
-      windows.length ? "Nothing shareable in this space" : "Nothing open in this space"
-    ])
+  if (!windows.length) {
+    setStatus("Nothing open in this space")
     return
   }
-  if (panel.hasMissing()) {
-    notes.push("Whoever opens the link won't get the apps with missing files.")
-  }
-  panel.finish(buildShareLink(link, `${location.origin}${location.pathname}`), notes)
-  setStatus(`Share link ready for "${name}"`)
-}
-
-// The share popover's content: a title, one line per app (set() updates its
-// state text in place), notes, then the link with its copy button.
-function buildSharePanel(name: string) {
-  const root = document.createElement("div")
-  root.className = "share-panel"
-  const title = document.createElement("div")
-  title.className = "share-title"
-  title.textContent = `Share "${name}"`
-  const apps = document.createElement("div")
-  apps.className = "share-apps"
-  const notes = document.createElement("div")
-  notes.className = "share-notes"
-  notes.hidden = true
-  const result = document.createElement("div")
-  result.className = "share-result"
-  result.hidden = true
-  root.append(title, apps, notes, result)
-  let missing = false
-  return {
-    root,
-    hasMissing: () => missing,
-    app(label: string) {
-      const line = document.createElement("div")
-      line.className = "share-app"
-      const nameEl = document.createElement("span")
-      nameEl.className = "share-app-name"
-      nameEl.textContent = label
-      const state = document.createElement("span")
-      state.className = "share-app-state"
-      state.textContent = "checking…"
-      line.append(nameEl, state)
-      apps.appendChild(line)
-      return {
-        set(msg: string, tone?: "muted" | "danger") {
-          state.textContent = msg
-          state.classList.toggle("danger", tone === "danger")
-          state.classList.toggle("muted", tone === "muted")
-          if (tone === "danger") missing = true
-        }
-      }
-    },
-    finish(url: string | null, noteList: string[]) {
-      if (noteList.length) {
-        notes.replaceChildren(
-          ...noteList.map(n => {
-            const p = document.createElement("div")
-            p.textContent = n
-            return p
-          })
-        )
-        notes.hidden = false
-      }
-      if (!url) return
-      const urlEl = document.createElement("div")
-      urlEl.className = "share-url"
-      urlEl.textContent = url
-      const copy = button({
-        label: "copy link",
-        variant: "primary",
-        onClick: async () => {
-          try {
-            await navigator.clipboard.writeText(url)
-            copy.textContent = "copied!"
-            setTimeout(() => (copy.textContent = "copy link"), 1500)
-          } catch {
-            copy.textContent = "select the link and copy"
-          }
-        }
-      })
-      result.append(urlEl, copy)
-      result.hidden = false
+  const shareWindows: ShareWindow[] = windows.map(w => {
+    const installed = persist.getInstalledApp(w.nappId)
+    const iconTag = sharedTemps
+      .get(w.nappId)
+      ?.fetched.manifest?.tags.find(t => t[0] === "icon")?.[1]
+    const last = new Map<string, unknown>()
+    for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
+    return {
+      key: w.nappId,
+      title: w.petname,
+      icon: installed ? installedIconSrc(installed) : directIconSrc(iconTag),
+      type: persist.classifyNappId(w.nappId),
+      shareable: !!shareableFor(w.nappId),
+      actions: [...last].map(([n, p]) => ({ name: n, payload: encodePayload(n, p) }))
     }
-  }
+  })
+  await openShareDialog({
+    name,
+    windows: shareWindows,
+    check: (key, onProgress) => checkReachable(shareableFor(key)!, onProgress),
+    buildLink: ws =>
+      buildShareLink({ name, windows: ws }, `${location.origin}${location.pathname}`),
+    encode: encodePayload
+  })
 }
 
 type Shareable = { manifest: NostrEvent; dTag: string; files(): Promise<NsiteFile[]> }
