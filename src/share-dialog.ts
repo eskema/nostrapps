@@ -62,13 +62,15 @@ export function openShareDialog(opts: {
       lead.textContent = "share"
       const name = input({ value: opts.name, spellcheck: false })
       title.append(lead, name)
-      // The link lands right under the title, above the list, once it exists
-      // — never out of sight below a long list.
-      const url = document.createElement("textarea")
+      // The link box sits right under the title, above the list — never out of
+      // sight below a long one. It opens the moment the link is asked for, a
+      // line tall, and grows the half line the link needs once it's there.
+      const url = document.createElement("div")
       url.className = "ui-input share-url"
-      url.rows = 3
-      url.readOnly = true
       url.hidden = true
+      const urlText = document.createElement("span")
+      urlText.className = "share-url-text"
+      url.appendChild(urlText)
       wrap.append(title, url)
 
       type ActionRow = {
@@ -179,6 +181,8 @@ export function openShareDialog(opts: {
         name.readOnly = true
         name.tabIndex = -1
         const problems: string[] = []
+        urlText.textContent = "creating link…"
+        url.hidden = false
 
         // The link carries exactly what's ticked: the rest goes, the rest
         // freezes into plain text where it stands (.share-created).
@@ -254,8 +258,8 @@ export function openShareDialog(opts: {
             )
           }))
         )
-        url.value = link
-        url.hidden = false
+        await swapText(urlText, link)
+        url.classList.add("ready")
         cancel.textContent = "Close"
         const copy = button({
           label: "copy link",
@@ -275,6 +279,18 @@ export function openShareDialog(opts: {
 
       return wrap
     }
+  })
+}
+
+// Fade the text out, change it, fade it back in.
+function swapText(el: HTMLElement, text: string): Promise<void> {
+  return new Promise(resolve => {
+    el.classList.add("out")
+    setTimeout(() => {
+      el.textContent = text
+      el.classList.remove("out")
+      setTimeout(resolve, 250)
+    }, 250)
   })
 }
 

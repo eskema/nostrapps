@@ -1889,18 +1889,31 @@ body.popover-open .napp-body iframe {
 .share-status[hidden] {
   display: none;
 }
-/* The link, in a box a few lines tall that scrolls, or pull it taller. It
-   arrives by opening up: the box grows from a line and the text surfaces
-   from the box's own color. */
+/* The link box: a line tall as it opens (padding unfolding, text surfacing
+   from the box's own color) saying the link is on its way; the link fades in
+   and the box grows the half line it needs, slowly. Pull it taller. */
 .share-url {
   width: 100%;
   box-sizing: border-box;
+  height: calc(1.4em + 1rem);
   padding: 0.5rem 0.6rem;
+  overflow: auto;
   resize: vertical;
+  user-select: all;
   font-size: inherit;
   line-height: 1.4;
   word-break: break-all;
+  transition: height 600ms ease;
   animation: share-url-in 400ms ease both;
+}
+.share-url.ready {
+  height: calc(1.4em * 1.5 + 1rem);
+}
+.share-url-text {
+  transition: opacity 250ms ease;
+}
+.share-url-text.out {
+  opacity: 0;
 }
 @keyframes share-url-in {
   from {
