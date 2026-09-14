@@ -88,7 +88,7 @@ export function openShareDialog(opts: {
       }
       const rows: Row[] = opts.windows.map(w => {
         const el = document.createElement("div")
-        el.className = "napp-perms-app napp-perms-shared share-app"
+        el.className = "napp-perms-app share-app"
         const head = document.createElement("label")
         head.className = "share-head"
         const include = check({ checked: w.shareable })

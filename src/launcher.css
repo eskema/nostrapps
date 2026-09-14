@@ -1578,20 +1578,6 @@ body.popover-open .napp-body iframe {
   border-radius: 0 0 12px 12px;
 }
 
-/* "Name" + field, on the consent and share screens. */
-.napp-perms-name-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.6rem;
-  align-items: center;
-}
-.napp-perms-name-row .ui-input {
-  min-width: 0;
-  width: 100%;
-  box-sizing: border-box;
-  font-size: inherit;
-}
-
 /* One app's section of a permission screen (the single-app screen has one). */
 .napp-perms-app {
   display: grid;
@@ -1599,24 +1585,6 @@ body.popover-open .napp-body iframe {
 }
 
 /* The share-link screen stacks a section per app. */
-.napp-perms-shared {
-  padding-top: 0.6rem;
-  border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-}
-
-/* What a link sends an app, one "<name> → <payload>" per row; payloads have no
-   spaces to break on, so wrap anywhere. Actions the app doesn't handle are
-   struck out and won't be sent. */
-.napp-perms-link-actions {
-  display: grid;
-  gap: 0.2rem;
-  overflow-wrap: anywhere;
-}
-.napp-perms-link-action.unsupported {
-  text-decoration: line-through;
-  opacity: 0.6;
-}
-
 /* NAP-CONFIG settings form (shares the perms dialog shell). A row stacks
    title / description / control; booleans put the check on the title line. */
 .napp-config-row {
@@ -1743,8 +1711,8 @@ body.popover-open .napp-body iframe {
   margin-right: 0;
   opacity: 0;
 }
-/* The list screens (consent, share) show icons at the launcher input's size. */
-.napp-perms-shared .napp-perms-icon {
+/* The list screens (open, share) show icons at the launcher input's size. */
+.share-app .napp-perms-icon {
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 4px;
@@ -1823,7 +1791,8 @@ body.popover-open .napp-body iframe {
   opacity: 0.4;
   pointer-events: none;
 }
-.share-created .share-actions {
+.share-created .share-actions,
+.share-actions.frozen {
   padding-left: 0;
 }
 .share-action {
@@ -1831,8 +1800,16 @@ body.popover-open .napp-body iframe {
   gap: 0.25rem;
   transition: font-size 250ms ease;
 }
-.share-created .share-action {
+.share-created .share-action,
+.share-action.frozen {
   font-size: 0.875em;
+}
+/* On the open screen: an action the app doesn't handle, shown and not sent. */
+.share-action.unsupported {
+  opacity: 0.6;
+}
+.share-action.unsupported .share-action-name {
+  text-decoration: line-through;
 }
 .share-action-head {
   display: grid;
@@ -1864,7 +1841,8 @@ body.popover-open .napp-body iframe {
     opacity 250ms ease;
 }
 /* Frozen: the block reads as text where it stands. */
-.share-created .share-payload {
+.share-created .share-payload,
+.share-payload.frozen {
   background: transparent;
   padding: 0;
   opacity: 0.85;

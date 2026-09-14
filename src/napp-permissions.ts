@@ -109,13 +109,14 @@ export interface SharedAppPrompt {
   actions: Array<{ name: string; payload: string; supported: boolean }>
 }
 
-// The share-link screen: the space's name (editable — one the user already
-// has is refused, since a kept space would sit beside its namesake), every app
-// the link opens with the actions it will receive, then one set of capability
-// rows over everything the new apps declare — one grant for all of them
-// (they're temporary; a per-app checklist is more screen than the moment
-// deserves). Resolves to the name and that grant, or null if cancelled.
-// Nothing to grant when every app is installed already.
+// The share-link screen, built from the share screen's parts so the two read
+// alike: "open <name>" (editable — one the user already has is refused, since
+// a kept space would sit beside its namesake), every app the link opens with
+// the actions it will receive, then one set of capability rows over
+// everything the new apps declare — one grant for all of them (they're
+// temporary; a per-app checklist is more screen than the moment deserves).
+// Resolves to the name and that grant, or null if cancelled. Nothing to grant
+// when every app is installed already.
 export function promptSharedSpace(opts: {
   name: string
   // Names of the spaces the user has, which the new one can't take.
@@ -132,22 +133,26 @@ export function promptSharedSpace(opts: {
       const wrap = document.createElement("div")
       wrap.className = "napp-perms"
 
-      const title = document.createElement("div")
-      title.className = "napp-perms-name"
-      title.textContent = "Open shared space?"
-      const intro = document.createElement("p")
-      intro.className = "napp-perms-reqs"
-      const n = opts.apps.length
-      intro.textContent = `${n} app${n === 1 ? "" : "s"} from a link. Nothing is installed until you keep the space.`
-      const name = nameRow(opts.name)
-      wrap.append(title, intro, name.el, name.note)
+      const title = document.createElement("label")
+      title.className = "share-title-row"
+      const lead = document.createElement("span")
+      lead.className = "share-title-lead"
+      lead.textContent = "open"
+      const name = input({ value: opts.name, spellcheck: false })
+      title.append(lead, name)
+      const note = document.createElement("p")
+      note.className = "napp-perms-unsupported"
+      note.hidden = true
+      wrap.append(title, note)
 
       for (const app of opts.apps) {
         const el = document.createElement("div")
-        el.className = "napp-perms-app napp-perms-shared"
+        el.className = "napp-perms-app share-app"
         const type = app.installed ? [app.type, "installed"].filter(Boolean).join(" · ") : app.type
-        el.appendChild(sectionHead({ ...app, type }))
-        if (app.actions.length) el.appendChild(actionsList(app.actions))
+        const head = sectionHead({ ...app, type })
+        head.querySelector(".napp-perms-name")?.classList.add("ui-title")
+        el.appendChild(head)
+        if (app.actions.length) el.appendChild(frozenActions(app.actions))
         wrap.appendChild(el)
       }
 
@@ -156,21 +161,21 @@ export function promptSharedSpace(opts: {
         const caption = document.createElement("p")
         caption.className = "napp-perms-reqs"
         caption.textContent =
-          fresh.length === 1
+          (fresh.length === 1
             ? "Permissions for the new app"
-            : "Permissions, the same for every new app"
+            : "Permissions, the same for every new app") +
+          " — nothing is installed until you keep the space."
         section = policySection({ title: "", declaredDomains: declared, type: "napp" }, caption)
-        section.el.classList.add("napp-perms-shared")
         wrap.appendChild(section.el)
       }
 
       wrap.appendChild(
         actionRow(resolve, "Open", () => {
-          const chosen = name.input.value.trim() || opts.name
+          const chosen = name.value.trim() || opts.name
           if (taken.has(chosen.toLowerCase())) {
-            name.note.textContent = `You already have a space named "${chosen}" — pick another name.`
-            name.note.hidden = false
-            name.input.focus()
+            note.textContent = `You already have a space named "${chosen}" — pick another name.`
+            note.hidden = false
+            name.focus()
             return undefined
           }
           return { name: chosen, policy: section?.read() ?? { domains: [] } }
@@ -179,25 +184,6 @@ export function promptSharedSpace(opts: {
       return wrap
     }
   })
-}
-
-// "Name" + a text field, with a note line for what's wrong with it (hidden
-// until it is). The consent screen's space name, and the share screen's.
-export function nameRow(value: string): {
-  el: HTMLElement
-  input: HTMLInputElement
-  note: HTMLElement
-} {
-  const el = document.createElement("label")
-  el.className = "napp-perms-name-row"
-  const label = document.createElement("span")
-  label.textContent = "Name"
-  const field = input({ value, spellcheck: false })
-  el.append(label, field)
-  const note = document.createElement("p")
-  note.className = "napp-perms-unsupported"
-  note.hidden = true
-  return { el, input: field, note }
 }
 
 interface PolicySection {
@@ -335,17 +321,27 @@ export function sectionHead(opts: {
   return head
 }
 
-// The actions a share link sends an app, one per row: "<name> → <payload>".
-// Ones the app doesn't handle are shown crossed out and won't be sent.
-function actionsList(
+// The actions a link sends an app, the way the share screen shows them once
+// frozen: name over payload. Ones the app doesn't handle are struck through
+// and won't be sent.
+function frozenActions(
   actions: Array<{ name: string; payload: string; supported: boolean }>
 ): HTMLElement {
   const list = document.createElement("div")
-  list.className = "napp-perms-link-actions"
+  list.className = "share-actions frozen"
   for (const a of actions) {
     const row = document.createElement("div")
-    row.className = "napp-perms-link-action" + (a.supported ? "" : " unsupported")
-    row.textContent = a.payload ? `${a.name} → ${a.payload}` : a.name
+    row.className = "share-action frozen" + (a.supported ? "" : " unsupported")
+    const name = document.createElement("div")
+    name.className = "share-action-name"
+    name.textContent = a.name
+    row.appendChild(name)
+    if (a.payload) {
+      const text = document.createElement("div")
+      text.className = "ui-input share-payload frozen"
+      text.textContent = a.payload
+      row.appendChild(text)
+    }
     if (!a.supported) row.title = "This app doesn't handle that action"
     list.appendChild(row)
   }
