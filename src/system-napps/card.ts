@@ -10,6 +10,11 @@ import type { AppType } from "../types.js"
 
 export const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
 
+// Author display names by pubkey, filled as profiles land (apps.ts, in
+// loadAuthorNames): a card built afterwards shows the name at once, instead
+// of the short npub its <nostr-name> would flash first.
+export const authorDisplayNames = new Map<string, string>()
+
 export interface AppCardOpts {
   nappId: string
   title: string
@@ -104,9 +109,10 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
     const name = document.createElement("nostr-name")
     name.className = "apps-author-name"
     name.setAttribute("pubkey", o.authorPubkey)
-    // The short npub at once: the element only fills its text in later, and
-    // an empty line would jump when it did.
-    name.textContent = bareNostrUser(o.authorPubkey).shortName
+    // Text at once — the name if it's known, else the short npub: the element
+    // only fills its own in later, and an empty line would jump when it did.
+    name.textContent =
+      authorDisplayNames.get(o.authorPubkey) ?? bareNostrUser(o.authorPubkey).shortName
     author.append(pic, name)
     card.appendChild(author)
   } else {

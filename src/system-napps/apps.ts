@@ -14,7 +14,14 @@ import { unsupportedRequires } from "../napp-permissions.js"
 import { openNappConfigSettings } from "../napp-config.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
 import { resolveCardIcon } from "../nsite/icon.js"
-import { code, detailField, PLACEHOLDER_SRC, renderAppCard, type AppCardOpts } from "./card.js"
+import {
+  authorDisplayNames,
+  code,
+  detailField,
+  PLACEHOLDER_SRC,
+  renderAppCard,
+  type AppCardOpts
+} from "./card.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
@@ -487,20 +494,48 @@ export function mount(
     return ctx.apps.list().sort((a, b) => dev(b) - dev(a) || at(b) - at(a))
   }
 
+  // The cards are kept and reconciled, never rebuilt as a whole: a card is
+  // built for an app new to the list, rebuilt only where the app's record
+  // changed (its signature below), dropped when the app is gone, and the list
+  // is put in order by moving only what's out of place. So an install, an
+  // update landing, or a discovery pass finding one touches the cards it
+  // concerns and nothing else — no icons re-fetched, no names re-resolved.
+  // Filtering is a visibility toggle (applyInstalledFilter), as on Discover.
+  const installedCards = new Map<string, { el: HTMLElement; sig: string }>()
+  // The installed set as a whole — membership and versions — for spotting a
+  // change worth a pass over the lists.
+  const installedSetSig = () =>
+    installedApps()
+      .map(a => `${a.nappId}:${a.event?.id ?? ""}`)
+      .join(",")
+  function installedCardSig(app: InstalledApp): string {
+    return [
+      app.petname,
+      app.title,
+      app.icon,
+      app.event?.id,
+      app.installedAt,
+      app.singleton,
+      app.actions?.join(","),
+      app.requires?.join(","),
+      latestUpdateFor(app)?.id
+    ].join("\n")
+  }
+
   function renderInstalledList() {
     const listEl = _installedListEl
     if (!listEl) return
-    listEl.innerHTML = ""
     const apps = installedApps()
-    _installedSig = apps.map(a => a.nappId).join(",")
-    // Build every card once; filtering is a visibility toggle (applyInstalledFilter),
-    // mirroring the Discover tab — so the two tabs behave identically.
-    const frag = document.createDocumentFragment()
+    _installedSig = installedSetSig()
+    const seen = new Set<string>()
+    const order: HTMLElement[] = []
     for (const app of apps) {
-      const opts = installedOpts(app)
-
-      frag.appendChild(
-        renderAppCard({
+      seen.add(app.nappId)
+      const sig = installedCardSig(app)
+      let card = installedCards.get(app.nappId)
+      if (!card || card.sig !== sig) {
+        const opts = installedOpts(app)
+        const el = renderAppCard({
           ...opts,
           onOpen: () =>
             showDetail({
@@ -512,11 +547,27 @@ export function mount(
               nappId: app.nappId
             })
         })
-      )
+        if (card) card.el.replaceWith(el)
+        card = { el, sig }
+        installedCards.set(app.nappId, card)
+      }
+      order.push(card.el)
     }
-    listEl.appendChild(frag)
+    for (const [nappId, card] of installedCards) {
+      if (seen.has(nappId)) continue
+      card.el.remove()
+      installedCards.delete(nappId)
+    }
+    // In order, moving only what's out of place; the empty-state message, if
+    // any, is left behind the cards.
+    let cursor = listEl.firstElementChild
+    for (const el of order) {
+      if (el === cursor) cursor = cursor.nextElementSibling
+      else listEl.insertBefore(el, cursor)
+    }
     applyInstalledFilter()
-    // Load icons from blossom for the published apps (those with a manifest).
+    // Load icons from blossom for the published apps (those with a manifest);
+    // a card that already has its icon is skipped.
     loadCardIcons(
       listEl,
       apps.filter(a => a.event).map(a => ({ nappId: a.nappId, evt: a.event }))
@@ -562,6 +613,7 @@ export function mount(
     `
     const searchEl = installedPane.querySelector(".apps-search") as HTMLInputElement
     _installedListEl = installedPane.querySelector(".apps-list") as HTMLElement
+    installedCards.clear() // a new list element — the old cards went with the old one
     installedPane.querySelector(".apps-toolbar")?.prepend(buildTypeSegments())
     searchEl.value = installedFilter
     searchEl.addEventListener("input", () => {
@@ -574,6 +626,8 @@ export function mount(
   // ─── Discover tab ──────────────────────────────────────────────
 
   let _listEl: HTMLElement | null = null
+  // The discover cards, by napp address — kept and reconciled, see renderList.
+  const discoverCards = new Map<string, { el: HTMLElement; sig: string }>()
   let _relayListEl: HTMLElement | null = null
   // The relay panel's <summary> doubles as the status line: a title with the
   // enabled-relay count plus an overline badge with the event count / loading
@@ -712,31 +766,66 @@ export function mount(
     refreshEmptyState()
   }
 
-  // Full rebuild. Used for initial paint and relay changes — anything that
-  // replaces the whole event set. Streaming arrivals go through flushPending()
-  // (append) and filter changes through applyFilter() (show/hide).
+  // The list is reconciled against `manifests`, never rebuilt: a card is
+  // built for a napp new to the list, rebuilt only where what it shows changed
+  // (a newer version, installed or not, an update available, ours or not — its
+  // signature), dropped when the napp is gone, and the list is put in order,
+  // newest first, by moving only what's out of place. Streaming arrivals,
+  // installs, relay removals and the installed set changing all come through
+  // here and touch only the cards they concern — no icons re-fetched, no names
+  // re-resolved. Filtering is a visibility toggle (applyFilter).
   function renderList() {
-    if (!_listEl) return
-    _listEl.innerHTML = ""
-    pending = [] // a full rebuild already covers everything buffered
+    if (!_listEl || !_listEl.isConnected) return
+    pending = [] // a pass covers everything buffered
 
     const all = sortedManifests([...manifests.values()])
-    const frag = document.createDocumentFragment()
+    const installedEvents = ctx.apps.events?.() ?? []
+    const installedById = new Map(installedEvents.map((e: any) => [computeNappId(e), e]))
+    const me = ctx.account?.getPubkey()
+    const seen = new Set<string>()
+    const order: HTMLElement[] = []
+    const fresh: any[] = []
     for (const evt of all) {
-      frag.appendChild(renderCard(evt, ctx, enabledRelays(), renderList, showDetail))
+      const addr = computeNappId(evt)
+      seen.add(addr)
+      const installed = ctx.isInstalled?.(addr) ?? false
+      const mine = installedById.get(addr)
+      const sig = [
+        evt.id,
+        installed,
+        installed && mine && mine.created_at < evt.created_at,
+        me === evt.pubkey
+      ].join(" ")
+      let card = discoverCards.get(addr)
+      if (!card || card.sig !== sig) {
+        const el = renderCard(evt, ctx, enabledRelays(), renderList, showDetail)
+        if (card) card.el.replaceWith(el)
+        card = { el, sig }
+        discoverCards.set(addr, card)
+        fresh.push(evt)
+      }
+      order.push(card.el)
     }
-    _listEl.appendChild(frag)
-    loadIcons(all)
+    for (const [addr, card] of discoverCards) {
+      if (seen.has(addr)) continue
+      card.el.remove()
+      discoverCards.delete(addr)
+    }
+    // In order, moving only what's out of place; the empty-state message, if
+    // any, is left behind the cards (applyFilter sorts it out).
+    let cursor = _listEl.firstElementChild
+    for (const el of order) {
+      if (el === cursor) cursor = cursor.nextElementSibling
+      else _listEl.insertBefore(el, cursor)
+    }
+    loadIcons(fresh)
     loadAuthorNames(_listEl, applyFilter)
     // applyFilter is the one place that decides visibility (type + search +
-    // relay) — deciding it inline here too is how the type filter got skipped
-    // on repaints. Same synchronous frame, so nothing flashes.
+    // relay). Same synchronous frame, so nothing flashes.
     applyFilter()
   }
 
-  // Incremental append. Builds cards only for the buffered batch and appends
-  // them in one fragment, leaving existing cards untouched — O(batch) per frame
-  // instead of rebuilding the whole list on every event.
+  // Streaming arrivals are buffered and folded in once per frame.
   let flushScheduled = false
   function scheduleFlush() {
     if (flushScheduled) return
@@ -751,41 +840,8 @@ export function mount(
   }
 
   function flushPending() {
-    // _listEl may be detached when the discover tab isn't the active one — skip
-    // the DOM work; renderList() repaints from `manifests` when it's reopened.
-    if (!_listEl || !_listEl.isConnected || pending.length === 0) return
-    const batch = pending
-    pending = []
-    const toRender = sortedManifests(batch)
-    if (toRender.length === 0) return
-    // Drop the placeholder before the merge so the ref walk only sees cards.
-    _listEl.querySelector(".apps-empty")?.remove()
-
-    // A version superseding one whose card is already in the DOM replaces it —
-    // remove the stale same-address cards before the walk so `ref` never
-    // points at a removed node.
-    for (const evt of toRender) {
-      _listEl.querySelector(`.apps-card[data-addr="${CSS.escape(computeNappId(evt))}"]`)?.remove()
-    }
-
-    // Merge the sorted-desc batch into the sorted-desc list. Both are ordered
-    // newest-first, so a single forward walk of the existing cards inserts each
-    // new card in its created_at slot — O(batch + N) and order stays correct
-    // even for late arrivals, instead of dumping the batch at the end. New
-    // cards are inserted hidden: the applyFilter() that follows every flush
-    // (scheduleFlush, same frame) is the one place visibility is decided.
-    let ref = _listEl.firstElementChild
-    for (const evt of toRender) {
-      const card = renderCard(evt, ctx, enabledRelays(), renderList, showDetail)
-      card.hidden = true
-      while (ref && Number((ref as HTMLElement).dataset.createdAt || 0) >= evt.created_at) {
-        ref = ref.nextElementSibling
-      }
-      _listEl.insertBefore(card, ref)
-    }
-    loadIcons(toRender)
-    loadAuthorNames(_listEl, applyFilter)
-    refreshEmptyState()
+    if (!_listEl || pending.length === 0) return
+    renderList() // new arrivals get their cards, superseded versions their replacements
   }
 
   const enabledRelays = () => relays.filter(r => !disabled.has(r))
@@ -998,6 +1054,7 @@ export function mount(
     `
 
     _listEl = discoverPane.querySelector(".apps-list") as HTMLElement
+    discoverCards.clear()
     const searchEl = discoverPane.querySelector(".apps-search") as HTMLInputElement
     discoverPane.querySelector(".apps-toolbar")?.prepend(buildTypeSegments())
 
@@ -1075,18 +1132,16 @@ export function mount(
   // open the discover tab, which starts discovery lazily (see switchTab).
   if (ctx.apps.list().some(a => a.event?.created_at)) ensureDiscovery()
   const unsub = ctx.apps.subscribe(() => {
-    if (!installedBuilt) return
-    // Only rebuild when the set of installed apps actually changed — otherwise
-    // an unrelated apps-changed signal (fired on window moves) would collapse
-    // any <details> the user just opened. Keeps the (possibly hidden) installed
-    // pane fresh regardless of which tab is active.
-    if (
-      installedApps()
-        .map(a => a.nappId)
-        .join(",") === _installedSig
-    )
-      return
-    renderInstalledList()
+    // Only when the installed set actually changed (an install, a removal, an
+    // update) — an unrelated apps-changed signal (fired on window moves) would
+    // otherwise collapse any <details> the user just opened. Both lists are
+    // reconciled, whichever tab is showing: the discover cards read the
+    // installed / update-available state too.
+    const sig = installedSetSig()
+    if (sig === _installedSig) return
+    if (installedBuilt) renderInstalledList()
+    else _installedSig = sig
+    renderList()
   })
 
   return {
@@ -1417,6 +1472,7 @@ function loadAuthorNames(listEl: HTMLElement | null, refilter: () => void) {
     loadNostrUser(pk)
       .then(u => {
         authorNamesInFlight.delete(pk)
+        authorDisplayNames.set(pk, u.shortName)
         const name = [u.metadata?.name, u.metadata?.display_name, u.metadata?.nip05, u.shortName]
           .filter(Boolean)
           .join(" ")
