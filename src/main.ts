@@ -35,6 +35,7 @@ import {
   spaceOfLiveSystem,
   findOpenWindowByNappId,
   loadEvent,
+  resolveViewPayload,
   applyNappPolicy,
   closeNappletSubs,
   launchNapplet,
@@ -706,7 +707,7 @@ async function pickHandler(
   openCandidates: NappWindowState[]
 ): Promise<[nappId: string, instanceId: string | undefined]> {
   if (actionName.startsWith("view:") && typeof payload === "string") {
-    const event = await loadEvent({ code: payload })
+    const event = await resolveViewPayload(payload)
     if (event) payload = event
     else throw new Error(`Stopped routing of ${actionName}->${payload}: couldn't find event`)
   }

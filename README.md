@@ -198,7 +198,7 @@ There is restriction of what actions are allowed, but these are some of the comm
 | `relay`              | list of relay URLs                  |                                 |
 | `wiki-term`          | a "d"-tag NIP-54 normalized string  | the resolved `kind:30818` event |
 
-Apps registering `"view"` (generic, no number) may receive either a nip19 code string or a resolved event object and must handle both. Apps registering a specific `"view:<kind-number>"` always receive a resolved event object.
+Apps registering `"view"` (generic, no number) may receive either a nip19 code string or a resolved event object and must handle both. Apps registering a specific `"view:<kind-number>"` always receive a resolved event object. The sender may pass the event object, an `nevent`/`naddr`, or the event as a JSON string; the launcher resolves it.
 
 Optionally `{ instance: "<instanceId>" }` as the third argument to route the action directly to a specific running instance instead of launching a new one.
 

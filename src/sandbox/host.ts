@@ -1633,14 +1633,31 @@ export function findOpenWindowByNappId(nappId: string): NappWindow | null {
 // has run.
 const pendingDispatches = new Map<string, { resolve(v: unknown): void; reject(e: Error): void }>()
 
+// A string payload for a view:<kind> action is a nip19 code to resolve — or,
+// leniently, the event itself as JSON (a napp handing over what it had stored).
+// Null when neither yields an event.
+export async function resolveViewPayload(payload: string): Promise<unknown | null> {
+  const s = payload.trim()
+  if (s.startsWith("{")) {
+    try {
+      const e = JSON.parse(s)
+      if (e && typeof e.id === "string" && typeof e.kind === "number" && Array.isArray(e.tags)) {
+        return e
+      }
+    } catch {}
+    return null
+  }
+  return loadEvent({ code: s })
+}
+
 export async function callIframe(
   instanceId: string,
   actionName: string,
   actionPayload: unknown
 ): Promise<unknown> {
-  // resolve nevent/naddr payload for view:* actions
+  // resolve nevent/naddr (or JSON) payload for view:* actions
   if (actionName.startsWith("view:") && typeof actionPayload === "string") {
-    const event = await loadEvent({ code: actionPayload })
+    const event = await resolveViewPayload(actionPayload)
     if (event) actionPayload = event
     else {
       console.warn(
