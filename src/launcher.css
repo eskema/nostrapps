@@ -1914,13 +1914,17 @@ body.popover-open .napp-body iframe {
   font-size: 0.875em;
   line-height: 1.4;
   word-break: break-all;
-  transition: height 600ms ease;
-  /* backwards, not both: once it has opened, the height is the rule's own
-     again, free to transition to .ready */
+  transition:
+    height 600ms ease,
+    margin-bottom 600ms ease;
+  /* backwards, not both: once it has opened, the height and margin are the
+     rule's own again, free to transition to .ready */
   animation: share-url-in 400ms ease backwards;
 }
+/* The link's there: taller, and more room before the list. */
 .share-url.ready {
   height: calc(1.4em * 2.3 + 1rem);
+  margin-bottom: 0.9rem;
 }
 .share-url-text {
   transition: opacity 250ms ease;
