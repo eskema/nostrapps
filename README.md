@@ -14,7 +14,7 @@ Everything sits after `#`, so the host never sees it. `space` is a slug (`a-z`, 
 
 Opening a link shows one screen with the apps, the actions it will run, and one set of permissions for the new apps, then opens them in an ephemeral space: nothing is installed, and a reload discards it (like `/dev`). Apps you already have run as your installed copy. **Keep** installs the rest and makes it a normal space.
 
-A window's actions come from whatever sent it one — another napp, a link, or you: type an action and its payload in the launcher input, `profile npub1…`, and the handler opens with it (or an open handler window takes it). The payload reads like a link's.
+A window's actions come from whatever sent it one — another napp, a link, the napp itself when it pushes where it navigated as history state (see [Registering action handlers](#registering-action-handlers)), or you: type an action and its payload in the launcher input, `profile npub1…`, and the handler opens with it (or an open handler window takes it). The payload reads like a link's.
 
 ## For developers
 
@@ -186,6 +186,8 @@ window.napp.registerAction(pattern, handler?)
 `pattern` is an exact match, with one special case: `"view"` matches all `"view:<any-number>"` actions.
 
 The napp can omit the `handler` and opt into only handling actions via the `popstate` event. The host pushes history entries with `state: { action: { name, payload } }` — listen for `popstate` and read `event.state.action`. This lets actions participate in browser back/forward navigation.
+
+The same shape works the other way. When the napp navigates on its own — to another profile, say — push where it went: `history.pushState({ action: { name: "profile", payload: pubkey } }, "")`. The launcher takes it as the window's current `profile` action, so it comes back on restore and goes into a share link; back and forward report the entry landed on. Use `replaceState` when the step shouldn't be a back stop.
 
 There is restriction of what actions are allowed, but these are some of the common ones:
 

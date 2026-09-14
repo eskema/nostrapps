@@ -79,6 +79,10 @@
 
   // The NIP-5D window.napplet surface lives in its own file (napplet-bridge.js),
   // injected alongside this one; bridge.js owns only the napp surface below.
+  // Set while the dispatch below pushes its own history entry, so the report
+  // hook further down doesn't echo it back to the launcher.
+  let fromHost = false
+
   window.addEventListener("message", event => {
     const data = event.data
     if (!data) return
@@ -115,8 +119,13 @@
 
         // regardless of whether we have a callback registered or not, always call popstate
         const state = { action: { name: data.name, payload: data.payload } }
-        history.pushState(state, "", location.href)
-        window.dispatchEvent(new PopStateEvent("popstate", { state }))
+        fromHost = true
+        try {
+          history.pushState(state, "", location.href)
+          window.dispatchEvent(new PopStateEvent("popstate", { state }))
+        } finally {
+          fromHost = false
+        }
 
         return
       }
@@ -144,6 +153,37 @@
       }
     }
   })
+
+  // A napp that navigates on its own can push where it went as a history state
+  // of the shape the dispatch above pushes — { action: { name, payload } } —
+  // and the launcher takes it as the window's current action for that name:
+  // restored with the space, carried by a share link. Back/forward report the
+  // entry landed on; the dispatch's own push is skipped (fromHost).
+  const reportActionState = state => {
+    if (fromHost) return
+    const a = state && state.action
+    if (!a || typeof a.name !== "string" || !a.name) return
+    try {
+      window.parent.postMessage(
+        {
+          __nostrapps: "napp-action-state",
+          instanceId: window.name,
+          name: a.name,
+          payload: a.payload
+        },
+        "*"
+      )
+    } catch {} // a payload that can't be cloned stays the napp's own business
+  }
+  for (const method of ["pushState", "replaceState"]) {
+    const original = history[method].bind(history)
+    history[method] = function (state, ...rest) {
+      const result = original(state, ...rest)
+      reportActionState(state)
+      return result
+    }
+  }
+  window.addEventListener("popstate", e => reportActionState(e.state))
 
   const nostrShim = {
     getPublicKey: () => rpc("getPublicKey"),

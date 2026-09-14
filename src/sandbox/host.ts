@@ -73,6 +73,7 @@ import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
 import {
   getInstalledApp,
   getLoadedActions,
+  setLoadedAction,
   getNappletConfig,
   getPolicy,
   getStoredPolicy,
@@ -1916,6 +1917,20 @@ function mount(
           addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
           return
         }
+        case "napp-action-state": {
+          // The napp navigated on its own and pushed where it went as history
+          // state (bridge.js): the window's current action for that name from
+          // now on — restored with the space, carried by a share link. Bounded,
+          // since it's persisted and the napp picks the payload.
+          if (typeof data.name === "string" && data.name && data.name.length <= 64) {
+            let size = 0
+            try {
+              size = JSON.stringify(data.payload ?? null).length
+            } catch {}
+            if (size > 0 && size <= 8192) setLoadedAction(instanceId, data.name, data.payload)
+          }
+          return
+        }
         case "rpc": {
           handleRpc(data, iframe, signer, nappId)
           return
@@ -2087,6 +2102,20 @@ export function mountWithLoading(
         }
         case "napp-action-registered": {
           addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
+          return
+        }
+        case "napp-action-state": {
+          // The napp navigated on its own and pushed where it went as history
+          // state (bridge.js): the window's current action for that name from
+          // now on — restored with the space, carried by a share link. Bounded,
+          // since it's persisted and the napp picks the payload.
+          if (typeof data.name === "string" && data.name && data.name.length <= 64) {
+            let size = 0
+            try {
+              size = JSON.stringify(data.payload ?? null).length
+            } catch {}
+            if (size > 0 && size <= 8192) setLoadedAction(instanceId, data.name, data.payload)
+          }
           return
         }
         case "rpc": {

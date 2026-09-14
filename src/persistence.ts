@@ -518,15 +518,18 @@ export function findSpaceOfSystemNapp(systemId: string): string | null {
   return fallback
 }
 
-export function appendLoadedAction(instanceId: string, name: string, payload: unknown) {
-  const withAction = (entry: NappWindowState): NappWindowState => {
-    const current = Array.isArray(entry.loadedActions) ? entry.loadedActions : []
-    return { ...entry, loadedActions: [...current, { name, payload }] }
-  }
+type LoadedAction = { name: string; payload: unknown }
+
+// Rewrite a window's loaded actions wherever it lives — any space, or ephemeral.
+function editLoadedActions(instanceId: string, edit: (list: LoadedAction[]) => LoadedAction[]) {
+  const withEdit = (entry: NappWindowState): NappWindowState => ({
+    ...entry,
+    loadedActions: edit(Array.isArray(entry.loadedActions) ? entry.loadedActions : [])
+  })
   for (const arr of devOpenBySpace.values()) {
     const i = arr.findIndex(n => n.instanceId === instanceId)
     if (i >= 0) {
-      arr[i] = withAction(arr[i])
+      arr[i] = withEdit(arr[i])
       return
     }
   }
@@ -534,11 +537,22 @@ export function appendLoadedAction(instanceId: string, name: string, payload: un
   for (const sp of allSpaces(spaces)) {
     const i = sp.open.findIndex(n => n.instanceId === instanceId)
     if (i >= 0) {
-      sp.open[i] = withAction(sp.open[i])
+      sp.open[i] = withEdit(sp.open[i])
       if (!isEphemeralSpace(sp.id)) writeJson(SPACES_KEY, spaces)
       return
     }
   }
+}
+
+// An action dispatched to the window: appended, replayed in order on restore.
+export function appendLoadedAction(instanceId: string, name: string, payload: unknown) {
+  editLoadedActions(instanceId, list => [...list, { name, payload }])
+}
+
+// Where the napp took itself (its own history state): the latest of that
+// action wins and goes last, so a restore ends where the napp was.
+export function setLoadedAction(instanceId: string, name: string, payload: unknown) {
+  editLoadedActions(instanceId, list => [...list.filter(a => a.name !== name), { name, payload }])
 }
 
 export function findSessionByPetname(petname: string): NappWindowState | null {

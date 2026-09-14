@@ -102,6 +102,15 @@ export type MessageData =
       pattern: string
     }
   | {
+      // The napp navigated on its own and pushed where it went as history
+      // state `{ action: { name, payload } }` (see bridge.js) — the window's
+      // current action for that name from then on.
+      __nostrapps: "napp-action-state"
+      instanceId: string
+      name: string
+      payload: unknown
+    }
+  | {
       __nostrapps: "napp-dispatch-action"
       requestId: string
       idx: number | undefined
