@@ -6,7 +6,7 @@
 // click, so the clipboard write is a user gesture wherever it runs.
 import { openDialog } from "./dialog.js"
 import { sectionHead } from "./napp-permissions.js"
-import { button, check, input } from "./system-napps/ui.js"
+import { button, check } from "./system-napps/ui.js"
 import type { LinkAction } from "./share-link.js"
 
 export interface ShareWindow {
@@ -55,7 +55,7 @@ export function openShareDialog(opts: {
       type Row = {
         w: ShareWindow
         include: HTMLInputElement
-        actions: Array<{ name: string; tick: HTMLInputElement; field: HTMLInputElement | null }>
+        actions: Array<{ name: string; tick: HTMLInputElement; field: HTMLTextAreaElement | null }>
         state: HTMLElement
       }
       const rows: Row[] = opts.windows.map(w => {
@@ -76,23 +76,33 @@ export function openShareDialog(opts: {
 
         const list = document.createElement("div")
         list.className = "share-actions"
+        // An action: tick + name on one line, the payload below it in a
+        // textarea that grows or resizes for the long ones (nevents, lists).
         const actions = w.actions.map(a => {
           const row = document.createElement("div")
           row.className = "share-action"
+          const head = document.createElement("label")
+          head.className = "share-action-head"
           const tick = check({ checked: a.payload != null && w.shareable })
           const name = document.createElement("span")
           name.className = "share-action-name"
           name.textContent = a.name
-          let field: HTMLInputElement | null = null
+          head.append(tick, name)
+          row.appendChild(head)
+          let field: HTMLTextAreaElement | null = null
           if (a.payload == null) {
             tick.disabled = true
             const note = document.createElement("span")
             note.className = "share-action-note"
             note.textContent = "can't go in a link"
-            row.append(tick, name, note)
+            head.appendChild(note)
           } else {
-            field = input({ value: a.payload, spellcheck: false })
-            row.append(tick, name, field)
+            field = document.createElement("textarea")
+            field.className = "ui-input share-payload"
+            field.value = a.payload
+            field.rows = 2
+            field.spellcheck = false
+            row.appendChild(field)
           }
           list.appendChild(row)
           return { name: a.name, tick, field }

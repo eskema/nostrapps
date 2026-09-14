@@ -1697,21 +1697,34 @@ body.popover-open .napp-body iframe {
   opacity: 1;
   color: var(--danger);
 }
+/* Actions sit indented under their app; each is a tick + name line with the
+   payload below it, in a textarea the user can pull taller. */
 .share-actions {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.4rem;
+  padding-left: 1.6rem;
 }
 .share-action {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  gap: 0.25rem;
+}
+.share-action-head {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  justify-content: start;
   gap: 0.5rem;
   align-items: center;
+  cursor: pointer;
 }
-.share-action .ui-input {
-  min-width: 0;
+.share-payload {
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  resize: vertical;
+  font-size: inherit;
+  line-height: 1.3;
 }
-.share-action .ui-input.invalid {
+.share-payload.invalid {
   outline: 1px solid var(--danger);
 }
 .share-action-note {
