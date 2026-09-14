@@ -5,7 +5,7 @@
 // line per app, updated in place), then the link appears with a copy button — a
 // click, so the clipboard write is a user gesture wherever it runs.
 import { openDialog } from "./dialog.js"
-import { sectionHead } from "./napp-permissions.js"
+import { nameRow, sectionHead } from "./napp-permissions.js"
 import { button, check } from "./system-napps/ui.js"
 import type { LinkAction } from "./share-link.js"
 
@@ -32,7 +32,7 @@ export function openShareDialog(opts: {
   name: string
   windows: ShareWindow[]
   check(key: string, onProgress: (msg: string) => void): Promise<ShareCheck>
-  buildLink(windows: Array<{ input: string; actions: LinkAction[] }>): string
+  buildLink(name: string, windows: Array<{ input: string; actions: LinkAction[] }>): string
   // An edited payload, made link-safe (null: it can't be).
   encode(name: string, payload: string): string | null
 }): Promise<void> {
@@ -45,12 +45,13 @@ export function openShareDialog(opts: {
 
       const title = document.createElement("div")
       title.className = "napp-perms-name"
-      title.textContent = `Share "${opts.name}"`
+      title.textContent = "Share this space"
       const intro = document.createElement("p")
       intro.className = "napp-perms-reqs"
       const n = opts.windows.length
-      intro.textContent = `${n} window${n === 1 ? "" : "s"}. Untick what shouldn't go in the link; payloads can be edited.`
-      wrap.append(title, intro)
+      intro.textContent = `${n} window${n === 1 ? "" : "s"}. Untick what shouldn't go in the link; the name and payloads can be edited.`
+      const name = nameRow(opts.name)
+      wrap.append(title, intro, name.el)
 
       type Row = {
         w: ShareWindow
@@ -129,6 +130,7 @@ export function openShareDialog(opts: {
         if (!included.length) return
         // Freeze the choices: the check is about exactly these.
         create.disabled = true
+        name.input.disabled = true
         for (const r of rows) {
           r.include.disabled = true
           for (const a of r.actions) {
@@ -160,6 +162,7 @@ export function openShareDialog(opts: {
           }
         }
         const link = opts.buildLink(
+          name.input.value.trim() || opts.name,
           included.map(r => {
             const actions: LinkAction[] = []
             for (const a of r.actions) {

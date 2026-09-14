@@ -3074,6 +3074,7 @@ async function importShareLink(hash: string) {
     requiresFromEvent(e.installed ? e.installed.event : e.fetched!.manifest)
   const granted = await promptSharedSpace({
     name: link.name,
+    taken: persist.listSpaces().map(s => s.name),
     apps: entries.map(e => {
       const iconTag = e.fetched?.manifest?.tags.find(t => t[0] === "icon")?.[1]
       return {
@@ -3101,10 +3102,10 @@ async function importShareLink(hash: string) {
   for (const e of entries) {
     if (!e.fetched) continue
     const ui = declaredOf(e).includes("ui")
-    persist.setPolicy(e.nappId, { domains: granted.domains.filter(d => d !== "ui" || ui) })
+    persist.setPolicy(e.nappId, { domains: granted.policy.domains.filter(d => d !== "ui" || ui) })
   }
 
-  const spaceId = persist.createEphemeralSpace(link.name)
+  const spaceId = persist.createEphemeralSpace(granted.name)
   await switchSpace(spaceId)
   renderSpacesBar()
 
@@ -3271,8 +3272,8 @@ async function shareCurrentSpace() {
     name,
     windows: shareWindows,
     check: (key, onProgress) => checkReachable(shareableFor(key)!, onProgress),
-    buildLink: ws =>
-      buildShareLink({ name, windows: ws }, `${location.origin}${location.pathname}`),
+    buildLink: (n, ws) =>
+      buildShareLink({ name: n, windows: ws }, `${location.origin}${location.pathname}`),
     encode: encodePayload
   })
 }

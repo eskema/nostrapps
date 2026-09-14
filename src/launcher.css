@@ -1562,6 +1562,20 @@ body.popover-open .napp-body iframe {
   margin-top: 0.6rem;
 }
 
+/* "Name" + field, on the consent and share screens. */
+.napp-perms-name-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  align-items: center;
+}
+.napp-perms-name-row .ui-input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: inherit;
+}
+
 /* One app's section of a permission screen (the single-app screen has one). */
 .napp-perms-app {
   display: grid;

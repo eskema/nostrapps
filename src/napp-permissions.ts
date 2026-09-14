@@ -5,7 +5,7 @@
 // A share link opens several apps at once; promptSharedSpace lists them on one
 // screen with a single set of grants for every app the link runs.
 import { openDialog } from "./dialog.js"
-import { check, button, radio } from "./system-napps/ui.js"
+import { check, button, input, radio } from "./system-napps/ui.js"
 import type { NappPolicy } from "./types.js"
 
 // Title + short description per grantable capability. Keys are the requires
@@ -109,18 +109,23 @@ export interface SharedAppPrompt {
   actions: Array<{ name: string; payload: string; supported: boolean }>
 }
 
-// The share-link screen: every app the link opens with the actions it will
-// receive, then one set of capability rows over everything the new apps
-// declare — one grant for all of them (they're temporary; a per-app checklist
-// is more screen than the moment deserves). Resolves to that grant, or null
-// if cancelled. Nothing to grant when every app is installed already.
+// The share-link screen: the space's name (editable — one the user already
+// has is refused, since a kept space would sit beside its namesake), every app
+// the link opens with the actions it will receive, then one set of capability
+// rows over everything the new apps declare — one grant for all of them
+// (they're temporary; a per-app checklist is more screen than the moment
+// deserves). Resolves to the name and that grant, or null if cancelled.
+// Nothing to grant when every app is installed already.
 export function promptSharedSpace(opts: {
   name: string
+  // Names of the spaces the user has, which the new one can't take.
+  taken: string[]
   apps: SharedAppPrompt[]
-}): Promise<NappPolicy | null> {
+}): Promise<{ name: string; policy: NappPolicy } | null> {
   const fresh = opts.apps.filter(a => !a.installed)
   const declared = [...new Set(fresh.flatMap(a => a.declaredDomains))]
-  return openDialog<NappPolicy | null>({
+  const taken = new Set(opts.taken.map(n => n.trim().toLowerCase()))
+  return openDialog<{ name: string; policy: NappPolicy } | null>({
     dismissValue: null,
     class: "napp-perms-dialog",
     build: resolve => {
@@ -129,12 +134,13 @@ export function promptSharedSpace(opts: {
 
       const title = document.createElement("div")
       title.className = "napp-perms-name"
-      title.textContent = `Open shared space "${opts.name}"?`
+      title.textContent = "Open shared space?"
       const intro = document.createElement("p")
       intro.className = "napp-perms-reqs"
       const n = opts.apps.length
       intro.textContent = `${n} app${n === 1 ? "" : "s"} from a link. Nothing is installed until you keep the space.`
-      wrap.append(title, intro)
+      const name = nameRow(opts.name)
+      wrap.append(title, intro, name.el, name.note)
 
       for (const app of opts.apps) {
         const el = document.createElement("div")
@@ -158,10 +164,40 @@ export function promptSharedSpace(opts: {
         wrap.appendChild(section.el)
       }
 
-      wrap.appendChild(actionRow(resolve, "Open", () => section?.read() ?? { domains: [] }))
+      wrap.appendChild(
+        actionRow(resolve, "Open", () => {
+          const chosen = name.input.value.trim() || opts.name
+          if (taken.has(chosen.toLowerCase())) {
+            name.note.textContent = `You already have a space named "${chosen}" — pick another name.`
+            name.note.hidden = false
+            name.input.focus()
+            return undefined
+          }
+          return { name: chosen, policy: section?.read() ?? { domains: [] } }
+        })
+      )
       return wrap
     }
   })
+}
+
+// "Name" + a text field, with a note line for what's wrong with it (hidden
+// until it is). The consent screen's space name, and the share screen's.
+export function nameRow(value: string): {
+  el: HTMLElement
+  input: HTMLInputElement
+  note: HTMLElement
+} {
+  const el = document.createElement("label")
+  el.className = "napp-perms-name-row"
+  const label = document.createElement("span")
+  label.textContent = "Name"
+  const field = input({ value, spellcheck: false })
+  el.append(label, field)
+  const note = document.createElement("p")
+  note.className = "napp-perms-unsupported"
+  note.hidden = true
+  return { el, input: field, note }
 }
 
 interface PolicySection {
@@ -315,13 +351,21 @@ function actionsList(
   return list
 }
 
-// Cancel / confirm pair; `value` computes what the confirm resolves with.
-function actionRow<T>(resolve: (v: T | null) => void, label: string, value: () => T) {
+// Cancel / confirm pair; `value` computes what the confirm resolves with —
+// or returns undefined to keep the screen open (something to fix first).
+function actionRow<T>(resolve: (v: T | null) => void, label: string, value: () => T | undefined) {
   const actions = document.createElement("div")
   actions.className = "napp-perms-actions"
   actions.append(
     button({ label: "Cancel", variant: "outline", onClick: () => resolve(null) }),
-    button({ label, variant: "primary", onClick: () => resolve(value()) })
+    button({
+      label,
+      variant: "primary",
+      onClick: () => {
+        const v = value()
+        if (v !== undefined) resolve(v)
+      }
+    })
   )
   return actions
 }
