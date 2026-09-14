@@ -18,7 +18,7 @@ import { code, detailField, PLACEHOLDER_SRC, renderAppCard, type AppCardOpts } f
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
-import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
+import { NAPP_RELAYS, NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NAPPLET_NAMED_KIND } from "../nsite/napplet.js"
 import { NostrEvent } from "@nostr/tools"
 import { BlossomClient } from "@nostr/tools/nipb7"
@@ -40,11 +40,7 @@ import {
   type ButtonVariant
 } from "./ui.js"
 
-const DEFAULT_RELAYS = [
-  "wss://relay.nostrapps.com/",
-  "wss://relay.nostrapps.com/personal",
-  "wss://relay.nostrapps.com/internal"
-]
+const DEFAULT_RELAYS = NAPP_RELAYS
 
 export function mount(
   container: HTMLElement,

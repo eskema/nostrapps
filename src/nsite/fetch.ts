@@ -11,6 +11,15 @@ import { healNapp } from "./heal.js"
 
 export const NSITE_NAMED_KIND = 35128
 
+// Where manifests are looked for when a link or hostname carries no relay
+// hints: the author's write relays plus these, the relays the Apps napp
+// discovers on. An naddr without hints must still resolve.
+export const NAPP_RELAYS = [
+  "wss://relay.nostrapps.com/",
+  "wss://relay.nostrapps.com/personal",
+  "wss://relay.nostrapps.com/internal"
+]
+
 const COLLECT_TIMEOUT_MS = 10000
 
 export async function fetchNsite(
@@ -28,13 +37,19 @@ export async function fetchNsite(
   onProgress("Querying relays…")
 
   // 2. Resolve which relays to query for the manifest. Prefer the explicit
-  // hints (e.g. the relays the Apps store found this event on) and only fall
-  // back to the author's kind-10002 relay list when none were given —
-  // otherwise install fans out to every one of the author's relays.
+  // hints (e.g. the relays the Apps napp found this event on) — only without
+  // them fan out to the author's kind-10002 write relays and the napp relays.
   let relays = [...relayHints]
   if (relays.length === 0) {
-    const relayList = await loadRelayList(pubkey)
-    relays = relayList.items.filter(r => r.write).map((r: { url: string }) => r.url)
+    let relayList = await loadRelayList(pubkey)
+    // gadgets remembers a no-answer for two days and serves it back instantly
+    // as an empty list: reset it and ask once more before going without.
+    if (relayList.items.length === 0) {
+      await loadRelayList(pubkey, [], null)
+      relayList = await loadRelayList(pubkey)
+    }
+    const write = relayList.items.filter(r => r.write).map((r: { url: string }) => r.url)
+    relays = [...new Set([...write, ...NAPP_RELAYS])]
   }
   const reqs = relays.map((url: string) => ({ url, filter }))
 
