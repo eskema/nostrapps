@@ -7,7 +7,7 @@ Nostrapps is a small browser launcher for Nostr apps. Each app is a static site 
 The link button on the spaces bar copies a link to the current space. Before it does, each app is checked to be reachable: its manifest is republished to the author's write relays and the nostrapps relays (those become the naddr's hints), and its files are probed on the blossom servers and re-uploaded where missing.
 
 ```
-https://at.nostrapps.com/#space=fiatjafs-corner&app=naddr1…&action=profile~npub1…&app=naddr1…
+https://<launcher>/#space=my-space&app=naddr1…&action=profile~npub1…&app=naddr1…
 ```
 
 Everything sits after `#`, so the host never sees it. `space` is a slug (`a-z`, `0-9`, `-`). Each `app` is an naddr or nsite host and starts a window; each `action` goes to the app before it, as `<name>~<payload>`. Payloads are plain strings: `profile` takes an npub or hex, `feed` and `relay` take comma-separated lists, `view` takes an nevent or naddr. Link order is the layout — an equal grid, reading order.
