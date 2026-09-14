@@ -32,7 +32,9 @@ export async function fetchNsite(
   if (!pubkey) throw new Error("fetchNsite: no pubkey")
 
   // 1. build filter from input
-  const filter: Filter = { kinds: [NSITE_NAMED_KIND], "#d": [dTag] }
+  // By author, not just by d tag: every author publishes to the napp relays,
+  // and two "profile" napps by two authors are two different apps.
+  const filter: Filter = { kinds: [NSITE_NAMED_KIND], authors: [pubkey], "#d": [dTag] }
 
   onProgress("Querying relays…")
 
@@ -46,7 +48,9 @@ export async function fetchNsite(
   const events = await collect(reqs)
 
   // 4. find manifest
-  const manifest = latest(events)
+  // Relays are trusted with the filter but not blindly: the one asked for is
+  // the one launched.
+  const manifest = latest(events.filter(e => e.pubkey === pubkey))
   if (!manifest) throw new Error(`napp "${dTag}" not found`)
 
   // 5. have manifest — download files
@@ -104,9 +108,14 @@ export async function blobServers(manifest: NostrEvent, pubkey: string): Promise
     .filter((t: string[]) => t[0] === "server" && t[1])
     .map((t: string[]) => t[1])
   const userServers = (await loadBlossomServers(pubkey)).items ?? []
-  return ["relay.nostrapps.com", ...new Set(userServers), ...new Set(manifestServers)].filter(
-    Boolean
-  )
+  // One entry per server whichever way it was written (scheme, trailing slash).
+  const seen = new Set<string>()
+  return ["relay.nostrapps.com", ...userServers, ...manifestServers].filter(s => {
+    const key = s.replace(/^https?:\/\//, "").replace(/\/$/, "")
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 // The manifest's files: ["path", path, sha, mime?] tags, paths made absolute.
