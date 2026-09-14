@@ -1565,12 +1565,21 @@ body.popover-open .napp-body iframe {
   opacity: 0.7;
 }
 
+/* Sticks to the bottom of a screen taller than the dialog: its own surface
+   over what scrolls beneath, reaching into the card's bottom padding so at
+   rest it sits where it always did, with the card's corners. */
 .napp-perms-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.6rem;
+  position: sticky;
+  bottom: 0;
+  padding: 0.6rem 0 1.5rem;
+  margin-bottom: -1.5rem;
+  background: var(--surface);
+  border-radius: 0 0 12px 12px;
 }
 
 /* "Name" + field, on the consent and share screens. */
