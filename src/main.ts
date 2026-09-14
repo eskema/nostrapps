@@ -2925,13 +2925,13 @@ function reportShareLinkError(err: any) {
   setStatus(`Share link error: ${err.message}`)
 }
 
-function tempNappIdFor(input: string): string {
-  const suffix = input
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/[^a-z0-9._~-]/g, "-")
-  return `temp~${suffix}`
+// The temp id mirrors the real one (`<pubkey16>~<d>`) behind a temp~ prefix.
+// Not the link input: nappOriginFor cuts the id to the 63-char DNS label, and
+// an naddr can put kind and author first, so two apps by one author would
+// truncate to the same origin — and two boot iframes would then answer that
+// origin's file requests with different apps' files.
+function tempNappIdFor(target: { pubkey: string; dTag: string }): string {
+  return `temp~${target.pubkey.slice(0, 16)}~${target.dTag}`
 }
 
 // The match handlers.findHandlersForAction makes: exact, or "view" for any view:<kind>.
@@ -3031,7 +3031,7 @@ async function importShareLink(hash: string) {
       })
       continue
     }
-    const tempId = tempNappIdFor(w.input)
+    const tempId = tempNappIdFor(target)
     try {
       // The same app twice in a link is fetched once.
       const fetched =
