@@ -255,8 +255,9 @@ function policySection(
   }
 }
 
-// Icon + name, with the type as plain inline text ("<name> · <type>").
-function sectionHead(opts: {
+// Icon + name, with the type as plain inline text ("<name> · <type>"). Shared
+// with the share screen, the consent screen's twin.
+export function sectionHead(opts: {
   title: string
   icon?: string
   iconBlob?: Blob

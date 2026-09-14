@@ -105,7 +105,7 @@ export async function ensureReplicated(opts: {
   onProgress?: (msg: string) => void
 }): Promise<{ relays: string[]; uploaded: number; missing: string[] }> {
   const { manifest, servers, files, onProgress = () => {} } = opts
-  onProgress("Publishing manifest…")
+  onProgress("publishing manifest…")
   const results = await Promise.allSettled(
     pool.publish(opts.relays, manifest, { onauth: onRelayAuth })
   )
@@ -118,7 +118,7 @@ export async function ensureReplicated(opts: {
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
 
   // Probe everything first, so one auth can cover all that's missing.
-  onProgress(`Checking ${plural(shas.length, "file")} on ${plural(bases.length, "server")}…`)
+  onProgress(`checking ${plural(shas.length, "file")} on ${plural(bases.length, "server")}…`)
   const needs = new Map<string, string[]>() // base → shas it lacks that we can give
   await Promise.allSettled(
     bases.map(async base => {
@@ -132,7 +132,7 @@ export async function ensureReplicated(opts: {
   let uploaded = 0
   if (needs.size) {
     const want = [...new Set([...needs.values()].flat())]
-    onProgress(`Uploading ${plural(want.length, "missing file")}…`)
+    onProgress(`uploading ${plural(want.length, "missing file")}…`)
     const auth = await uploadAuth(want, bases)
     await Promise.allSettled(
       [...needs].map(async ([base, lacking]) => {

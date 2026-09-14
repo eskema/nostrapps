@@ -1892,6 +1892,7 @@ let spacesSaveBtn: HTMLButtonElement
 let spacesResetBtn: HTMLButtonElement
 let spacesKeepBtn: HTMLButtonElement
 let spacesTrashBtn: HTMLButtonElement
+let spacesShareBtn: HTMLButtonElement
 
 function buildSpacesBarSkeleton() {
   // Start: the current space's name. Double-click to rename it.
@@ -1915,13 +1916,10 @@ function buildSpacesBarSkeleton() {
   spacesResetBtn = iconButton("reset", "Reset to saved layout", resetCurrentSpace)
   spacesKeepBtn = iconButton("check", "Keep this space (installs its apps)", keepCurrentSpace)
   spacesTrashBtn = iconButton("trash", "Delete this space", destroyCurrentSpace)
-  controls.append(
-    spacesSaveBtn,
-    spacesResetBtn,
-    spacesKeepBtn,
-    spacesTrashBtn,
-    iconButton("link", "Copy a link to this space", shareCurrentSpace)
+  spacesShareBtn = iconButton("link", "Share this space as a link", () =>
+    shareCurrentSpace(spacesShareBtn)
   )
+  controls.append(spacesSaveBtn, spacesResetBtn, spacesKeepBtn, spacesTrashBtn, spacesShareBtn)
 
   // The current space's live windows (taskbar).
   spacesWinListEl = document.createElement("div")
@@ -2163,7 +2161,7 @@ function buildSpaceChip(s: { id: string; name: string }): HTMLButtonElement {
   reset: () => resetCurrentSpace(),
   destroy: () => destroyCurrentSpace(),
   keep: () => keepCurrentSpace(),
-  share: () => shareCurrentSpace(),
+  share: () => shareCurrentSpace(spacesShareBtn),
   rename: (id: string, name: string) => (persist.renameSpace(id, name), renderSpacesBar()),
   remove: (id: string) => (persist.deleteSpace(id), renderSpacesBar())
 }
@@ -3231,78 +3229,156 @@ async function keepCurrentSpace() {
   setStatus(`Kept space "${name}"`)
 }
 
-// Share: the current space as a link — windows in visual reading order (the
-// receiver lays them out from link order alone), each with the last payload it
-// got per action. Every app is first checked to be reachable (checkReachable):
-// its manifest republished, the relays holding it become the naddr's hints,
-// its blobs probed on the blossom servers and re-uploaded where missing.
-// Windows with no address (system, dev, local) are skipped.
+// Share: the current space as a link, in a popover that narrates the check —
+// one line per app, updated in place as checkReachable runs — and then shows
+// the link with a copy button (a click, so the clipboard write is a user
+// gesture wherever it runs). Windows in visual reading order (the receiver
+// lays them out from link order alone), each with the last payload it got per
+// action. Windows with no address (system, dev, local) are listed as skipped.
 const SHARE_HINTS_MAX = 4
 
-async function shareCurrentSpace() {
+async function shareCurrentSpace(anchor?: HTMLElement) {
   const name = persist.listSpaces().find(s => s.id === currentSpaceId)?.name || "space"
   const row = (w: NappWindowState) => Math.round((w.position?.top ?? 0) / 60)
   const windows = persist
     .readOpen()
     .filter(w => !w.system)
     .sort((a, b) => row(a) - row(b) || (a.position?.left ?? 0) - (b.position?.left ?? 0))
-  const skipped: string[] = []
-  const missing: string[] = []
-  let uploaded = 0
-  // One check per app, however many windows it has.
-  const inputs = new Map<string, string>()
+
+  const panel = buildSharePanel(name)
+  const at = anchor ? anchor.getBoundingClientRect() : null
+  const pointer = getPointer()
+  void openPopover<null>({
+    x: at ? at.left : pointer.x,
+    y: at ? at.bottom + 4 : pointer.y,
+    class: "share-popover",
+    build: () => panel.root,
+    dismissValue: null
+  })
+
+  const notes: string[] = []
   const link: ShareLink = { name, windows: [] }
+  // One check (and one line) per app, however many windows it has.
+  const inputs = new Map<string, string | null>()
   for (const w of windows) {
     let input = inputs.get(w.nappId)
     if (input === undefined) {
+      const line = panel.app(w.petname)
       const app = shareableFor(w.nappId)
       if (!app) {
-        skipped.push(w.petname)
-        continue
+        line.set("no address, skipped", "muted")
+        input = null
+      } else {
+        const r = await checkReachable(app, msg => line.set(msg))
+        if (r.missing) line.set(`${r.missing} missing on every server`, "danger")
+        else {
+          const parts = ["ok"]
+          if (r.uploaded) parts.push(`${r.uploaded} blob${r.uploaded === 1 ? "" : "s"} re-uploaded`)
+          parts.push(
+            r.hints ? `${r.hints} relay hint${r.hints === 1 ? "" : "s"}` : "no relay hints"
+          )
+          line.set(parts.join(", "))
+        }
+        input = r.input
       }
-      const r = await checkReachable(app, w.petname)
-      uploaded += r.uploaded
-      if (r.missing) missing.push(`${w.petname} (${r.missing})`)
-      input = r.input
       inputs.set(w.nappId, input)
     }
+    if (input === null) continue
     const last = new Map<string, unknown>()
     for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
     const actions: LinkAction[] = []
     for (const [n, p] of last) {
       const payload = encodePayload(n, p)
-      if (payload == null) skipped.push(`${w.petname} ${n}`)
+      if (payload == null) notes.push(`${w.petname}: the ${n} payload can't go in a link`)
       else actions.push({ name: n, payload })
     }
     link.windows.push({ input, actions })
   }
   if (!link.windows.length) {
-    setStatus("Nothing shareable in this space")
+    panel.finish(null, [
+      windows.length ? "Nothing shareable in this space" : "Nothing open in this space"
+    ])
     return
   }
-  // A link is a promise that its apps can be fetched. Say so before copying
-  // one that can't keep it.
-  if (missing.length) {
-    const ok = window.confirm(
-      `Some files can't be fetched from any server:\n\n${missing.join("\n")}\n\n` +
-        "Whoever opens the link won't get those apps. Copy it anyway?"
-    )
-    if (!ok) {
-      setStatus("Share cancelled")
-      return
-    }
+  if (panel.hasMissing()) {
+    notes.push("Whoever opens the link won't get the apps with missing files.")
   }
-  const url = buildShareLink(link, `${location.origin}${location.pathname}`)
-  const notes = [
-    uploaded ? `${uploaded} blob${uploaded === 1 ? "" : "s"} re-uploaded` : "",
-    missing.length ? `missing on every server: ${missing.join(", ")}` : "",
-    skipped.length ? `skipped ${skipped.join(", ")}` : ""
-  ].filter(Boolean)
-  try {
-    await navigator.clipboard.writeText(url)
-    setStatus(`Link copied${notes.length ? ` — ${notes.join("; ")}` : ""}`)
-  } catch {
-    window.prompt("Copy this link", url)
+  panel.finish(buildShareLink(link, `${location.origin}${location.pathname}`), notes)
+  setStatus(`Share link ready for "${name}"`)
+}
+
+// The share popover's content: a title, one line per app (set() updates its
+// state text in place), notes, then the link with its copy button.
+function buildSharePanel(name: string) {
+  const root = document.createElement("div")
+  root.className = "share-panel"
+  const title = document.createElement("div")
+  title.className = "share-title"
+  title.textContent = `Share "${name}"`
+  const apps = document.createElement("div")
+  apps.className = "share-apps"
+  const notes = document.createElement("div")
+  notes.className = "share-notes"
+  notes.hidden = true
+  const result = document.createElement("div")
+  result.className = "share-result"
+  result.hidden = true
+  root.append(title, apps, notes, result)
+  let missing = false
+  return {
+    root,
+    hasMissing: () => missing,
+    app(label: string) {
+      const line = document.createElement("div")
+      line.className = "share-app"
+      const nameEl = document.createElement("span")
+      nameEl.className = "share-app-name"
+      nameEl.textContent = label
+      const state = document.createElement("span")
+      state.className = "share-app-state"
+      state.textContent = "checking…"
+      line.append(nameEl, state)
+      apps.appendChild(line)
+      return {
+        set(msg: string, tone?: "muted" | "danger") {
+          state.textContent = msg
+          state.classList.toggle("danger", tone === "danger")
+          state.classList.toggle("muted", tone === "muted")
+          if (tone === "danger") missing = true
+        }
+      }
+    },
+    finish(url: string | null, noteList: string[]) {
+      if (noteList.length) {
+        notes.replaceChildren(
+          ...noteList.map(n => {
+            const p = document.createElement("div")
+            p.textContent = n
+            return p
+          })
+        )
+        notes.hidden = false
+      }
+      if (!url) return
+      const urlEl = document.createElement("div")
+      urlEl.className = "share-url"
+      urlEl.textContent = url
+      const copy = button({
+        label: "copy link",
+        variant: "primary",
+        onClick: async () => {
+          try {
+            await navigator.clipboard.writeText(url)
+            copy.textContent = "copied!"
+            setTimeout(() => (copy.textContent = "copy link"), 1500)
+          } catch {
+            copy.textContent = "select the link and copy"
+          }
+        }
+      })
+      result.append(urlEl, copy)
+      result.hidden = false
+    }
   }
 }
 
@@ -3329,13 +3405,13 @@ function shareableFor(nappId: string): Shareable | null {
 // check that errors out yields an naddr without hints.
 async function checkReachable(
   app: Shareable,
-  label: string
-): Promise<{ input: string; uploaded: number; missing: string }> {
+  onProgress: (msg: string) => void
+): Promise<{ input: string; uploaded: number; missing: string; hints: number }> {
   const { manifest, dTag } = app
   const naddr = (relays: string[]) =>
     naddrEncode({ pubkey: manifest.pubkey, kind: manifest.kind, identifier: dTag, relays })
   try {
-    setStatus(`Checking ${label} is reachable…`)
+    onProgress("finding relays…")
     // Where it was seen this session, the author's write relays, the napp relays.
     const seen = Array.from(pool.seenOn.get(manifest.id) || []).map((r: any) => r.url as string)
     const relays = [...new Set([...seen, ...(await manifestRelays(manifest.pubkey))])]
@@ -3344,7 +3420,7 @@ async function checkReachable(
     try {
       files = await app.files()
     } catch (err) {
-      console.warn("[share] can't read the files of", label, err) // probe-only, then
+      console.warn("[share] can't read the app's files", err) // probe-only, then
     }
     const byPath = new Map(manifestPaths(manifest).map(p => [p.path, p]))
     const r = await ensureReplicated({
@@ -3355,16 +3431,18 @@ async function checkReachable(
         const p = byPath.get(f.path.startsWith("/") ? f.path : `/${f.path}`)
         return p ? [{ sha: p.sha, body: f.body, mime: f.mime || p.mime }] : []
       }),
-      onProgress: msg => setStatus(`${label}: ${msg}`)
+      onProgress
     })
     const n = r.missing.length
+    const hints = r.relays.slice(0, SHARE_HINTS_MAX)
     return {
-      input: naddr(r.relays.slice(0, SHARE_HINTS_MAX)),
+      input: naddr(hints),
       uploaded: r.uploaded,
-      missing: n ? `${n} file${n === 1 ? "" : "s"}` : ""
+      missing: n ? `${n} file${n === 1 ? "" : "s"}` : "",
+      hints: hints.length
     }
   } catch (err: any) {
-    setStatus(`Couldn't check ${label}: ${err.message}`)
-    return { input: naddr([]), uploaded: 0, missing: "" }
+    onProgress(`check failed: ${err.message}`)
+    return { input: naddr([]), uploaded: 0, missing: "", hints: 0 }
   }
 }
