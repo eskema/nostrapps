@@ -151,12 +151,16 @@ export function openShareDialog(opts: {
         return { w, el, include, state, actions }
       })
 
-      // The list ends with a rule: the last item carries it.
-      const markLast = () => {
+      // The title carries the rule above the list, the last item the one
+      // below it; the first item's own rule would double the title's.
+      const markEnds = () => {
         const live = rows.filter(r => r.el.isConnected)
-        for (const r of live) r.el.classList.toggle("share-app-last", r === live[live.length - 1])
+        for (const r of live) {
+          r.el.classList.toggle("share-app-first", r === live[0])
+          r.el.classList.toggle("share-app-last", r === live[live.length - 1])
+        }
       }
-      markLast()
+      markEnds()
 
       // What went wrong, app by app — only shown when something did.
       const status = document.createElement("div")
@@ -207,7 +211,7 @@ export function openShareDialog(opts: {
             setEditable(a.field!, false)
           }
         }
-        markLast()
+        markEnds()
         wrap.classList.add("share-created")
 
         // One check over every app; a window shows its app's state.

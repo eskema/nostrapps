@@ -1729,6 +1729,8 @@ body.popover-open .napp-body iframe {
   grid-template-columns: auto 1fr;
   align-items: center;
   font-weight: 600;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
 .share-title-lead {
   overflow: hidden;
@@ -1875,6 +1877,10 @@ body.popover-open .napp-body iframe {
 .share-action-note {
   opacity: 0.6;
 }
+/* The title's rule stands for the first item's. */
+.share-app-first {
+  border-top: none;
+}
 /* The list ends with a rule, carried by its last item, with room after it. */
 .share-app-last {
   padding-bottom: 0.6rem;
@@ -1889,19 +1895,17 @@ body.popover-open .napp-body iframe {
 .share-status[hidden] {
   display: none;
 }
-/* The link box, between the title and the list, with its own rule on top. It
-   grows out from between the lines — unfolding (scaleY) and pushing its
-   top padding and bottom margin open, the text surfacing from the box's own
-   color — a line tall,
+/* The link box, between the title's rule and the list. It grows out from
+   under the rule — unfolding (scaleY) and pushing its margins open, the text
+   surfacing from the box's own color — a line tall,
    saying the link is on its way; the link fades in and the box grows to the
    lines it needs, slowly. Pull it taller. */
 .share-url {
   width: 100%;
   box-sizing: border-box;
   height: calc(1.4em + 1rem);
-  margin-bottom: 0.6rem;
+  margin: 0.6rem 0;
   padding: 0.5rem 0.6rem;
-  border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   overflow: auto;
   resize: vertical;
   user-select: all;
@@ -1924,14 +1928,12 @@ body.popover-open .napp-body iframe {
 @keyframes share-url-in {
   from {
     transform: scaleY(0);
-    margin-bottom: 0;
-    padding-top: 0;
+    margin: 0;
     color: color-mix(in srgb, var(--text) 5%, var(--surface));
   }
   to {
     transform: scaleY(1);
-    margin-bottom: 0.6rem;
-    padding-top: 0.5rem;
+    margin: 0.6rem 0;
     color: var(--text);
   }
 }
