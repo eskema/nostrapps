@@ -1889,25 +1889,30 @@ body.popover-open .napp-body iframe {
 .share-status[hidden] {
   display: none;
 }
-/* The link box: a line tall as it opens (padding unfolding, text surfacing
-   from the box's own color) saying the link is on its way; the link fades in
-   and the box grows the half line it needs, slowly. Pull it taller. */
+/* The link box, between the title and the list, with its own rule on top. It
+   grows out from between the lines — unfolding (scaleY) and pushing its
+   margin open, the text surfacing from the box's own color — a line tall,
+   saying the link is on its way; the link fades in and the box grows to the
+   lines it needs, slowly. Pull it taller. */
 .share-url {
   width: 100%;
   box-sizing: border-box;
   height: calc(1.4em + 1rem);
+  margin-top: 0.6rem;
   padding: 0.5rem 0.6rem;
+  border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   overflow: auto;
   resize: vertical;
   user-select: all;
   font-size: inherit;
   line-height: 1.4;
   word-break: break-all;
+  transform-origin: top;
   transition: height 600ms ease;
   animation: share-url-in 400ms ease both;
 }
 .share-url.ready {
-  height: calc(1.4em * 1.5 + 1rem);
+  height: calc(1.4em * 2.3 + 1rem);
 }
 .share-url-text {
   transition: opacity 250ms ease;
@@ -1917,13 +1922,13 @@ body.popover-open .napp-body iframe {
 }
 @keyframes share-url-in {
   from {
-    padding-top: 0;
-    padding-bottom: 0;
+    transform: scaleY(0);
+    margin-top: 0;
     color: color-mix(in srgb, var(--text) 5%, var(--surface));
   }
   to {
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
+    transform: scaleY(1);
+    margin-top: 0.6rem;
     color: var(--text);
   }
 }
