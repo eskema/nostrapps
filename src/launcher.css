@@ -1885,6 +1885,9 @@ body.popover-open .napp-body iframe {
   padding-bottom: 0.6rem;
   border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
+.share-app .napp-perms-name {
+  text-transform: uppercase;
+}
 .share-status {
   display: grid;
   gap: 0.2rem;
@@ -1908,7 +1911,7 @@ body.popover-open .napp-body iframe {
   overflow: auto;
   resize: vertical;
   user-select: all;
-  font-size: inherit;
+  font-size: 0.875em;
   line-height: 1.4;
   word-break: break-all;
   transition: height 600ms ease;
