@@ -1712,19 +1712,16 @@ body.popover-open .napp-body iframe {
    ticks shrink to nothing and everything slides left, the indent folds, the
    fields turn into plain text where they stand, "space as" folds away and
    the name reads as the title. */
-/* The spacing lives on the words, not in a grid gap, so it folds away with
-   "space as". Created, the name alone goes bold like the current space's name
-   on the launcher. */
+/* "share <name>": the word's spacing is its own margin, so it folds away with
+   the word. Created, the name alone stands, bold like the current space's
+   name on the launcher. */
 .share-title-row {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: auto 1fr;
   align-items: center;
   font-weight: 600;
 }
-.share-title-row > span:first-child {
-  margin-right: 0.4rem;
-}
-.share-title-extra {
+.share-title-lead {
   overflow: hidden;
   white-space: nowrap;
   max-width: 6rem;
@@ -1734,10 +1731,16 @@ body.popover-open .napp-body iframe {
     margin-right 250ms ease,
     opacity 250ms ease;
 }
-.share-created .share-title-extra {
+.share-created .share-title-lead {
   max-width: 0;
   margin-right: 0;
   opacity: 0;
+}
+/* The list screens (consent, share) show icons at the launcher input's size. */
+.napp-perms-shared .napp-perms-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 4px;
 }
 .share-title-row .ui-input {
   min-width: 0;
@@ -1802,7 +1805,14 @@ body.popover-open .napp-body iframe {
   display: grid;
   gap: 0.4rem;
   padding-left: 1.6rem;
-  transition: padding-left 250ms ease;
+  transition:
+    padding-left 250ms ease,
+    opacity 250ms ease;
+}
+/* Its window is out: grayed, untouchable. */
+.share-actions.share-off {
+  opacity: 0.4;
+  pointer-events: none;
 }
 .share-created .share-actions {
   padding-left: 0;

@@ -55,15 +55,13 @@ export function openShareDialog(opts: {
 
       const title = document.createElement("label")
       title.className = "share-title-row"
+      // "share <name>" — "share" folds away once the name is settled, and the
+      // field turns into the title's bold text where it stands.
       const lead = document.createElement("span")
+      lead.className = "share-title-lead"
       lead.textContent = "share"
-      // "space as" folds away once the name is settled, and the field turns
-      // into the title's bold text where it stands.
-      const extra = document.createElement("span")
-      extra.className = "share-title-extra"
-      extra.textContent = "space as"
       const name = input({ value: opts.name, spellcheck: false })
-      title.append(lead, extra, name)
+      title.append(lead, name)
       // The link lands right under the title, above the list, once it exists.
       const url = document.createElement("textarea")
       url.className = "ui-input share-url share-in"
@@ -140,6 +138,16 @@ export function openShareDialog(opts: {
           return { name: a.name, row, tick, field }
         })
         if (actions.length) el.appendChild(list)
+        // A window that's out takes its actions with it: grayed, untouchable.
+        const setOn = (on: boolean) => {
+          list.classList.toggle("share-off", !on)
+          for (const a of actions) {
+            a.tick.disabled = !on || !a.field
+            if (a.field) a.field.disabled = !on
+          }
+        }
+        setOn(w.shareable)
+        include.addEventListener("change", () => setOn(include.checked))
         wrap.appendChild(el)
         return { w, el, include, state, actions }
       })
@@ -195,6 +203,7 @@ export function openShareDialog(opts: {
             a.field!.value = payload // what the link gets (an npub for a hex key, …)
             a.field!.readOnly = true
             a.field!.tabIndex = -1
+            fitToText(a.field!)
           }
         }
         markLast()
@@ -268,4 +277,17 @@ export function openShareDialog(opts: {
       return wrap
     }
   })
+}
+
+// A frozen payload field is as tall as its text: drop whatever height a
+// resize left on it, let the engine size it to content where it can, and
+// elsewhere measure once the padding has gone (see the transition).
+function fitToText(field: HTMLTextAreaElement) {
+  field.style.height = ""
+  field.style.width = ""
+  field.rows = 1
+  if (CSS.supports("field-sizing", "content")) return
+  setTimeout(() => {
+    field.style.height = `${field.scrollHeight}px`
+  }, 300)
 }
