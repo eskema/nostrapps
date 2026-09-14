@@ -53,15 +53,19 @@ export function openShareDialog(opts: {
       const title = document.createElement("label")
       title.className = "share-title-row"
       const lead = document.createElement("span")
-      lead.textContent = "share space as"
+      lead.textContent = "share"
+      // "space as" folds away once the name is settled, and the field turns
+      // into the title's bold text where it stands.
+      const extra = document.createElement("span")
+      extra.className = "share-title-extra"
+      extra.textContent = "space as"
       const name = input({ value: opts.name, spellcheck: false })
-      title.append(lead, name)
+      title.append(lead, extra, name)
       wrap.appendChild(title)
 
       type ActionRow = {
         name: string
         row: HTMLElement
-        nameEl: HTMLElement
         tick: HTMLInputElement
         field: HTMLTextAreaElement | null
       }
@@ -119,7 +123,7 @@ export function openShareDialog(opts: {
             row.appendChild(field)
           }
           list.appendChild(row)
-          return { name: a.name, row, nameEl, tick, field }
+          return { name: a.name, row, tick, field }
         })
         if (actions.length) el.appendChild(list)
         wrap.appendChild(el)
@@ -128,10 +132,10 @@ export function openShareDialog(opts: {
 
       // What went wrong, app by app — only shown when something did.
       const status = document.createElement("div")
-      status.className = "share-status"
+      status.className = "share-status share-in"
       status.hidden = true
       const url = document.createElement("textarea")
-      url.className = "ui-input share-url"
+      url.className = "ui-input share-url share-in"
       url.rows = 3
       url.readOnly = true
       url.hidden = true
@@ -149,15 +153,14 @@ export function openShareDialog(opts: {
         if (!included.length) return
         create.disabled = true
         const chosen = name.value.trim() || opts.name
-        // The name is settled: the title says it, bold, no field.
-        const settled = document.createElement("div")
-        settled.className = "napp-perms-name"
-        settled.textContent = `share ${chosen}`
-        title.replaceWith(settled)
+        // The name is settled: the field reads as the title now (.share-created).
+        name.value = chosen
+        name.readOnly = true
+        name.tabIndex = -1
         const problems: string[] = []
 
         // The link carries exactly what's ticked: the rest goes, the rest
-        // freezes into plain text.
+        // freezes into plain text where it stands (.share-created).
         for (const r of rows) {
           if (!included.includes(r)) {
             r.el.remove()
@@ -173,11 +176,9 @@ export function openShareDialog(opts: {
               a.row.remove()
               continue
             }
-            const text = document.createElement("div")
-            text.className = "share-action-text"
-            text.textContent = payload
-            a.row.replaceChildren(a.nameEl, text)
             a.field!.value = payload // what the link gets (an npub for a hex key, …)
+            a.field!.readOnly = true
+            a.field!.tabIndex = -1
           }
         }
         wrap.classList.add("share-created")

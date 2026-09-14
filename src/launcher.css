@@ -5,6 +5,7 @@
     system-ui,
     -apple-system,
     sans-serif;
+  --font-sans: "Source Sans 3 Variable", system-ui, -apple-system, sans-serif;
   --font-serif: "Source Serif 4 Variable", Georgia, ui-serif, serif;
   --font-mono: "Source Code Pro Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --surface: #ffffff;
@@ -1515,10 +1516,17 @@ body.popover-open .napp-body iframe {
   gap: 0.4rem;
 }
 
-/* The type: a small uppercase badge (ui-overline) pushed to the line's end. */
+/* The type, in light sans at the line's end (the launcher's status-line
+   voice). On the share screen it becomes the app's check state. */
 .napp-perms-type {
   margin-left: auto;
   white-space: nowrap;
+  font-family: var(--font-sans);
+  font-weight: 300;
+  opacity: 0.6;
+  transition:
+    color 250ms ease,
+    opacity 250ms ease;
 }
 
 .napp-perms-reqs {
@@ -1698,32 +1706,74 @@ body.popover-open .napp-body iframe {
    A non-modal card anchored at a point (e.g. the cursor); light-dismisses on
    click-outside / Esc. Position is set inline; reset the UA popover centering. */
 /* ─── Share screen (share-dialog.ts), the consent screen's twin ────
-   "share space as <name>", a tick before each app's head with its check state
-   at the line's end, its actions as tick + name + editable payload rows. Once
-   the link is created (.share-created) the ticks go, payloads freeze into
-   plain text, anything wrong lands in one status, and the link sits in a
-   two-line box. */
+   "share space as <name>", a tick before each app's head with the type (then
+   the check state) at the line's end, its actions as tick + name + editable
+   payload rows. Create link morphs the screen in place (.share-created): the
+   ticks shrink to nothing and everything slides left, the indent folds, the
+   fields turn into plain text where they stand, "space as" folds away and
+   the name reads as the title. */
 .share-title-row {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.6rem;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.4rem;
   align-items: center;
   font-weight: 600;
+}
+.share-title-extra {
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 6rem;
+  transition:
+    max-width 250ms ease,
+    opacity 250ms ease;
+}
+.share-created .share-title-extra {
+  max-width: 0;
+  opacity: 0;
 }
 .share-title-row .ui-input {
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
   font: inherit;
+  transition:
+    background 250ms ease,
+    padding 250ms ease;
 }
+.share-created .share-title-row .ui-input {
+  background: transparent;
+  padding: 0;
+  cursor: default;
+}
+/* The tick's column is its width plus the gap after it; created, it's gone. */
 .share-head {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.6rem;
+  grid-template-columns: 1.6rem 1fr;
   align-items: center;
   cursor: pointer;
+  transition: grid-template-columns 250ms ease;
 }
-/* The type badge doubles as the check state: checking…, all good, error. */
+.share-created .share-head {
+  grid-template-columns: 0rem 1fr;
+  cursor: default;
+}
+.share-head .ui-check,
+.share-action-head .ui-check {
+  overflow: hidden;
+  transition:
+    width 250ms ease,
+    opacity 250ms ease,
+    border-width 250ms ease;
+}
+.share-created .ui-check {
+  width: 0;
+  border-width: 0;
+  opacity: 0;
+}
+.share-created .ui-check::after {
+  transform: scale(0);
+}
+/* The type doubles as the check state: checking…, all good, error. */
 .share-state.checking {
   opacity: 1;
   color: var(--warn);
@@ -1742,18 +1792,33 @@ body.popover-open .napp-body iframe {
   display: grid;
   gap: 0.4rem;
   padding-left: 1.6rem;
+  transition: padding-left 250ms ease;
+}
+.share-created .share-actions {
+  padding-left: 0;
 }
 .share-action {
   display: grid;
   gap: 0.25rem;
+  transition: font-size 250ms ease;
+}
+.share-created .share-action {
+  font-size: 0.875em;
 }
 .share-action-head {
   display: grid;
-  grid-template-columns: auto auto auto;
+  grid-template-columns: 1.5rem auto auto;
   justify-content: start;
-  gap: 0.5rem;
   align-items: center;
   cursor: pointer;
+  transition: grid-template-columns 250ms ease;
+}
+.share-created .share-action-head {
+  grid-template-columns: 0rem auto auto;
+  cursor: default;
+}
+.share-action-name {
+  margin-right: 0.5rem;
 }
 .share-payload {
   width: 100%;
@@ -1762,29 +1827,22 @@ body.popover-open .napp-body iframe {
   resize: vertical;
   font-size: inherit;
   line-height: 1.3;
+  transition:
+    background 250ms ease,
+    padding 250ms ease,
+    opacity 250ms ease;
+}
+/* Frozen: the field reads as text, sized to it where the engine can. */
+.share-created .share-payload {
+  background: transparent;
+  padding: 0;
+  resize: none;
+  opacity: 0.85;
+  cursor: default;
+  field-sizing: content;
 }
 .share-action-note {
   opacity: 0.6;
-}
-/* Created: no more ticks nor indent, actions read as name over payload in a
-   smaller mono. */
-.share-created .ui-check {
-  display: none;
-}
-.share-created .share-head {
-  grid-template-columns: 1fr;
-  cursor: default;
-}
-.share-created .share-actions {
-  padding-left: 0;
-}
-.share-created .share-action {
-  font-size: 0.875em;
-}
-.share-action-text {
-  font-family: var(--font-mono);
-  overflow-wrap: anywhere;
-  opacity: 0.85;
 }
 .share-status {
   display: grid;
@@ -1804,6 +1862,27 @@ body.popover-open .napp-body iframe {
   font-size: inherit;
   line-height: 1.4;
   word-break: break-all;
+}
+/* What appears once the link exists eases in. */
+.share-in {
+  animation: share-in 300ms ease both;
+}
+@keyframes share-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .napp-perms-dialog *,
+  .napp-perms-dialog *::after {
+    transition: none !important;
+    animation: none !important;
+  }
 }
 
 .app-popover {
