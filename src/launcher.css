@@ -1514,16 +1514,17 @@ body.popover-open .napp-body iframe {
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
+  /* Whole width whether or not an icon took the first column, so the type
+     at its end really is at the line's end. */
+  grid-column-end: -1;
+  min-width: 0;
 }
 
-/* The type, in light sans at the line's end (the launcher's status-line
-   voice). On the share screen it becomes the app's check state. */
+/* The type: the kit's overline, pushed to the line's end. On the share
+   screen it becomes the app's check state. */
 .napp-perms-type {
   margin-left: auto;
   white-space: nowrap;
-  font-family: var(--font-sans);
-  font-weight: 300;
-  opacity: 0.6;
   transition:
     color 250ms ease,
     opacity 250ms ease;
@@ -1712,23 +1713,30 @@ body.popover-open .napp-body iframe {
    ticks shrink to nothing and everything slides left, the indent folds, the
    fields turn into plain text where they stand, "space as" folds away and
    the name reads as the title. */
+/* Bold like the current space's name on the launcher. The spacing lives on
+   the words, not in a grid gap, so it folds away with "space as". */
 .share-title-row {
   display: grid;
   grid-template-columns: auto auto 1fr;
-  gap: 0.4rem;
   align-items: center;
-  font-weight: 600;
+  font-weight: 800;
+}
+.share-title-row > span:first-child {
+  margin-right: 0.4rem;
 }
 .share-title-extra {
   overflow: hidden;
   white-space: nowrap;
   max-width: 6rem;
+  margin-right: 0.4rem;
   transition:
     max-width 250ms ease,
+    margin-right 250ms ease,
     opacity 250ms ease;
 }
 .share-created .share-title-extra {
   max-width: 0;
+  margin-right: 0;
   opacity: 0;
 }
 .share-title-row .ui-input {
@@ -1844,6 +1852,11 @@ body.popover-open .napp-body iframe {
 .share-action-note {
   opacity: 0.6;
 }
+/* A line under the app list, with room after it. */
+.share-sep {
+  border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  margin: 0.4rem 0 0.6rem;
+}
 .share-status {
   display: grid;
   gap: 0.2rem;
@@ -1852,13 +1865,12 @@ body.popover-open .napp-body iframe {
 .share-status[hidden] {
   display: none;
 }
-/* The link, in a box a few lines tall that scrolls. */
+/* The link, in a box a few lines tall that scrolls, or pull it taller. */
 .share-url {
   width: 100%;
   box-sizing: border-box;
-  margin-top: 0.25rem;
   padding: 0.5rem 0.6rem;
-  resize: none;
+  resize: vertical;
   font-size: inherit;
   line-height: 1.4;
   word-break: break-all;

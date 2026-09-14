@@ -291,7 +291,7 @@ function policySection(
   }
 }
 
-// Icon + name, with the type in light sans at the line's end.
+// Icon + name, with the type as the kit's overline at the line's end.
 // Shared with the share screen, the consent screen's twin, where the badge
 // doubles as the app's check state.
 export function sectionHead(opts: {
@@ -327,7 +327,7 @@ export function sectionHead(opts: {
   name.textContent = opts.title
   if (opts.type && !opts.chooseType) {
     const t = document.createElement("span")
-    t.className = "napp-perms-type"
+    t.className = "napp-perms-type ui-overline"
     t.textContent = opts.type
     name.appendChild(t)
   }

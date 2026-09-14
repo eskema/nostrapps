@@ -130,6 +130,10 @@ export function openShareDialog(opts: {
         return { w, el, include, state, actions }
       })
 
+      const sep = document.createElement("div")
+      sep.className = "share-sep"
+      wrap.appendChild(sep)
+
       // What went wrong, app by app — only shown when something did.
       const status = document.createElement("div")
       status.className = "share-status share-in"
