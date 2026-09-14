@@ -10,6 +10,7 @@
   --surface: #ffffff;
   --text: #111111;
   --danger: #d64545;
+  --good: #2f9e44;
   /* ── design-system tokens ── */
   --btn-radius: 4px;
   --btn-pad-y: 0.35rem;
@@ -21,6 +22,7 @@
     --surface: #333;
     --text: #ececec;
     --danger: #ff6b6b;
+    --good: #69db7c;
     color-scheme: dark;
   }
 }
@@ -35,6 +37,7 @@
   --surface: #333;
   --text: #ececec;
   --danger: #ff6b6b;
+  --good: #69db7c;
   color-scheme: dark;
 }
 
@@ -1695,19 +1698,40 @@ body.popover-open .napp-body iframe {
    A non-modal card anchored at a point (e.g. the cursor); light-dismisses on
    click-outside / Esc. Position is set inline; reset the UA popover centering. */
 /* ─── Share screen (share-dialog.ts), the consent screen's twin ────
-   A tick before each app's head, a state line under it while its check runs,
-   its actions as tick + name + editable payload rows, then the link. */
-.share-head {
+   "share space as <name>", a tick before each app's head with its check state
+   at the line's end, its actions as tick + name + editable payload rows. Once
+   the link is created (.share-created) the ticks go, payloads freeze into
+   plain text, anything wrong lands in one status, and the link sits in a
+   two-line box. */
+.share-title-row {
   display: grid;
   grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  align-items: center;
+  font-weight: 600;
+}
+.share-title-row .ui-input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+.share-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   gap: 0.6rem;
   align-items: center;
   cursor: pointer;
 }
 .share-state {
+  white-space: nowrap;
   opacity: 0.7;
 }
-.share-state.danger {
+.share-state.good {
+  opacity: 1;
+  color: var(--good);
+}
+.share-state.bad {
   opacity: 1;
   color: var(--danger);
 }
@@ -1738,20 +1762,42 @@ body.popover-open .napp-body iframe {
   font-size: inherit;
   line-height: 1.3;
 }
-.share-payload.invalid {
-  outline: 1px solid var(--danger);
-}
 .share-action-note {
   opacity: 0.6;
 }
-/* The link: wraps anywhere (no spaces to break on), selects in one go. */
-.share-url {
+/* Created: no more ticks, the head's state takes the line's end, actions
+   read as name over payload in a smaller mono. */
+.share-created .ui-check {
+  display: none;
+}
+.share-created .share-head {
+  grid-template-columns: 1fr auto;
+  cursor: default;
+}
+.share-created .share-action {
+  font-size: 0.875em;
+}
+.share-action-text {
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
-  user-select: all;
-  padding: 0.3rem 0.5rem;
-  border-radius: 6px;
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  opacity: 0.85;
+}
+.share-status {
+  display: grid;
+  gap: 0.2rem;
+  color: var(--danger);
+}
+.share-status[hidden] {
+  display: none;
+}
+/* The link, in a box two lines tall that scrolls. */
+.share-url {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font-size: inherit;
+  line-height: 1.3;
+  word-break: break-all;
 }
 
 .app-popover {

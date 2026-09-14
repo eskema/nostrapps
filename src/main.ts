@@ -56,8 +56,8 @@ import {
 } from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite, manifestRelays, blobServers, manifestPaths } from "./nsite/fetch.js"
-import { ensureReplicated } from "./nsite/heal.js"
-import { openShareDialog, type ShareWindow } from "./share-dialog.js"
+import { ensureReplicatedAll, type ReplicationTarget } from "./nsite/heal.js"
+import { openShareDialog, type ShareCheck, type ShareWindow } from "./share-dialog.js"
 import { resolveNapplet, isNappletKind, loadNappletFromManifest } from "./nsite/napplet.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
 import {
@@ -3236,9 +3236,9 @@ async function keepCurrentSpace() {
 // Share: the current space as a link. The share screen (share-dialog.ts, the
 // consent screen's twin) lists every window in visual reading order — the
 // receiver lays them out from link order alone — with the last payload it got
-// per action, lets the user untick and edit, runs checkReachable per app, and
-// shows the link. Windows with no address (system, dev, local) are listed as
-// such and can't be included.
+// per action, lets the user rename, untick and edit, runs one reachability
+// check over every app (checkReachable), and shows the link. Windows with no
+// address (system, dev, local) are listed as such and can't be included.
 const SHARE_HINTS_MAX = 4
 
 async function shareCurrentSpace() {
@@ -3271,7 +3271,14 @@ async function shareCurrentSpace() {
   await openShareDialog({
     name,
     windows: shareWindows,
-    check: (key, onProgress) => checkReachable(shareableFor(key)!, onProgress),
+    check: (keys, onProgress) =>
+      checkReachable(
+        keys.flatMap(k => {
+          const app = shareableFor(k)
+          return app ? [[k, app] as const] : []
+        }),
+        onProgress
+      ),
     buildLink: (n, ws) =>
       buildShareLink({ name: n, windows: ws }, `${location.origin}${location.pathname}`),
     encode: encodePayload
@@ -3296,49 +3303,84 @@ function shareableFor(nappId: string): Shareable | null {
   }
 }
 
-// Republish the manifest, probe and re-upload the blobs, and write the naddr
-// with the relays that hold the manifest as hints. Never fails the share: a
-// check that errors out yields an naddr without hints.
+// One check over every app the link carries: each manifest republished and
+// its blobs probed, one upload auth for everything missing (one signing
+// prompt), and per app the naddr with the relays holding its manifest as
+// hints. Never fails the share: an app whose check errors out gets an naddr
+// without hints, and says so.
 async function checkReachable(
-  app: Shareable,
-  onProgress: (msg: string) => void
-): Promise<{ input: string; uploaded: number; missing: string; hints: number }> {
-  const { manifest, dTag } = app
-  const naddr = (relays: string[]) =>
-    naddrEncode({ pubkey: manifest.pubkey, kind: manifest.kind, identifier: dTag, relays })
-  try {
-    onProgress("finding relays…")
-    // Where it was seen this session, the author's write relays, the napp relays.
-    const seen = Array.from(pool.seenOn.get(manifest.id) || []).map((r: any) => r.url as string)
-    const relays = [...new Set([...seen, ...(await manifestRelays(manifest.pubkey))])]
-    const servers = await blobServers(manifest, manifest.pubkey)
-    let files: NsiteFile[] = []
-    try {
-      files = await app.files()
-    } catch (err) {
-      console.warn("[share] can't read the app's files", err) // probe-only, then
-    }
-    const byPath = new Map(manifestPaths(manifest).map(p => [p.path, p]))
-    const r = await ensureReplicated({
-      manifest,
-      relays,
-      servers,
-      files: files.flatMap(f => {
-        const p = byPath.get(f.path.startsWith("/") ? f.path : `/${f.path}`)
-        return p ? [{ sha: p.sha, body: f.body, mime: f.mime || p.mime }] : []
-      }),
-      onProgress
+  apps: Array<readonly [string, Shareable]>,
+  onProgress: (key: string, msg: string) => void
+): Promise<Map<string, ShareCheck>> {
+  const naddrFor = (app: Shareable, relays: string[]) =>
+    naddrEncode({
+      pubkey: app.manifest.pubkey,
+      kind: app.manifest.kind,
+      identifier: app.dTag,
+      relays
     })
-    const n = r.missing.length
-    const hints = r.relays.slice(0, SHARE_HINTS_MAX)
-    return {
-      input: naddr(hints),
-      uploaded: r.uploaded,
-      missing: n ? `${n} file${n === 1 ? "" : "s"}` : "",
-      hints: hints.length
-    }
-  } catch (err: any) {
-    onProgress(`check failed: ${err.message}`)
-    return { input: naddr([]), uploaded: 0, missing: "", hints: 0 }
+  const out = new Map<string, ShareCheck>()
+  const failed = (key: string, app: Shareable, err: any) => {
+    const error = `check failed: ${err?.message ?? String(err)}`
+    onProgress(key, error)
+    out.set(key, { input: naddrFor(app, []), uploaded: 0, missing: "", hints: 0, error })
   }
+
+  // Every app's relays, servers and bytes, gathered at once.
+  const ready: Array<{ key: string; app: Shareable; target: ReplicationTarget }> = []
+  await Promise.all(
+    apps.map(async ([key, app]) => {
+      const { manifest } = app
+      try {
+        onProgress(key, "finding relays…")
+        // Where it was seen this session, the author's write relays, the napp relays.
+        const seen = Array.from(pool.seenOn.get(manifest.id) || []).map((r: any) => r.url as string)
+        const relays = [...new Set([...seen, ...(await manifestRelays(manifest.pubkey))])]
+        const servers = await blobServers(manifest, manifest.pubkey)
+        let files: NsiteFile[] = []
+        try {
+          files = await app.files()
+        } catch (err) {
+          console.warn("[share] can't read the app's files", err) // probe-only, then
+        }
+        const byPath = new Map(manifestPaths(manifest).map(p => [p.path, p]))
+        ready.push({
+          key,
+          app,
+          target: {
+            manifest,
+            relays,
+            servers,
+            files: files.flatMap(f => {
+              const p = byPath.get(f.path.startsWith("/") ? f.path : `/${f.path}`)
+              return p ? [{ sha: p.sha, body: f.body, mime: f.mime || p.mime }] : []
+            }),
+            onProgress: msg => onProgress(key, msg)
+          }
+        })
+      } catch (err) {
+        failed(key, app, err)
+      }
+    })
+  )
+  // Keep the caller's order, so the one signing prompt lists apps as shown.
+  ready.sort((a, b) => apps.findIndex(x => x[0] === a.key) - apps.findIndex(x => x[0] === b.key))
+
+  try {
+    const results = await ensureReplicatedAll(ready.map(r => r.target))
+    ready.forEach((r, i) => {
+      const res = results[i]
+      const hints = res.relays.slice(0, SHARE_HINTS_MAX)
+      const n = res.missing.length
+      out.set(r.key, {
+        input: naddrFor(r.app, hints),
+        uploaded: res.uploaded,
+        missing: n ? `${n} file${n === 1 ? "" : "s"}` : "",
+        hints: hints.length
+      })
+    })
+  } catch (err) {
+    for (const r of ready) failed(r.key, r.app, err)
+  }
+  return out
 }

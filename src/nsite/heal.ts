@@ -91,75 +91,122 @@ export async function hasBytes(base: string, sha: string): Promise<boolean> {
 }
 
 // Share-time replication check, for any author: the moment a link is about to
-// promise that a napp can be fetched, so an explicit user action — unlike the
-// install-time heal above, other authors' content is fair game. Publishes the
-// manifest to every candidate relay (idempotent) and returns the ones holding
-// it, in the order given — the link's hints; probes every blob on the servers
-// and re-uploads what's missing where the bytes are at hand. `missing` lists
-// the shas no server has after that.
-export async function ensureReplicated(opts: {
+// promise that its napps can be fetched, so an explicit user action — unlike
+// the install-time heal above, other authors' content is fair game. For every
+// target at once: the manifest published to each candidate relay (idempotent;
+// the ones holding it become the link's hints), every blob probed on the
+// servers. Then one upload auth over everything missing anywhere — one signing
+// prompt for the whole link — and the re-uploads, each proved by a ranged GET
+// afterwards. A result's `missing` lists the shas no server has after that.
+export type ReplicationTarget = {
   manifest: NostrEvent
   relays: string[]
   servers: string[]
   files: Array<{ sha: string; body: Blob; mime?: string }>
   onProgress?: (msg: string) => void
-}): Promise<{ relays: string[]; uploaded: number; missing: string[] }> {
-  const { manifest, servers, files, onProgress = () => {} } = opts
-  onProgress("publishing manifest…")
-  const results = await Promise.allSettled(
-    pool.publish(opts.relays, manifest, { onauth: onRelayAuth })
-  )
-  const relays = opts.relays.filter((_, i) => results[i].status === "fulfilled")
+}
+export type ReplicationResult = { relays: string[]; uploaded: number; missing: string[] }
 
-  const shas = manifest.tags.filter(t => t[0] === "path" && t[2]).map(t => t[2])
-  const bySha = new Map(files.map(f => [f.sha, f]))
-  const bases = servers.map(s => (s.startsWith("http") ? s : `https://${s}`).replace(/\/$/, ""))
-  const present = new Map<string, number>() // sha → servers that have it
+export async function ensureReplicatedAll(
+  targets: ReplicationTarget[]
+): Promise<ReplicationResult[]> {
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
+  type Plan = {
+    t: ReplicationTarget
+    relays: string[]
+    shas: string[]
+    bySha: Map<string, { sha: string; body: Blob; mime?: string }>
+    present: Map<string, number> // sha → servers that have it
+    needs: Map<string, string[]> // server base → shas it lacks that we can give
+    uploaded: number
+  }
 
-  // Probe everything first, so one auth can cover all that's missing.
-  onProgress(`checking ${plural(shas.length, "file")} on ${plural(bases.length, "server")}…`)
-  const needs = new Map<string, string[]>() // base → shas it lacks that we can give
-  await Promise.allSettled(
-    bases.map(async base => {
-      for (const sha of shas) {
-        if (await hasBytes(base, sha)) present.set(sha, (present.get(sha) ?? 0) + 1)
-        else if (bySha.has(sha)) needs.set(base, [...(needs.get(base) ?? []), sha])
+  // Phase one, every target together: manifests out, blobs probed.
+  const plans = await Promise.all(
+    targets.map(async (t): Promise<Plan> => {
+      const onProgress = t.onProgress ?? (() => {})
+      const shas = t.manifest.tags.filter(x => x[0] === "path" && x[2]).map(x => x[2])
+      const plan: Plan = {
+        t,
+        relays: [],
+        shas,
+        bySha: new Map(t.files.map(f => [f.sha, f])),
+        present: new Map(),
+        needs: new Map(),
+        uploaded: 0
       }
+      try {
+        onProgress("publishing manifest…")
+        const results = await Promise.allSettled(
+          pool.publish(t.relays, t.manifest, { onauth: onRelayAuth })
+        )
+        plan.relays = t.relays.filter((_, i) => results[i].status === "fulfilled")
+        const bases = t.servers.map(s =>
+          (s.startsWith("http") ? s : `https://${s}`).replace(/\/$/, "")
+        )
+        onProgress(`checking ${plural(shas.length, "file")} on ${plural(bases.length, "server")}…`)
+        await Promise.allSettled(
+          bases.map(async base => {
+            for (const sha of shas) {
+              if (await hasBytes(base, sha)) plan.present.set(sha, (plan.present.get(sha) ?? 0) + 1)
+              else if (plan.bySha.has(sha))
+                plan.needs.set(base, [...(plan.needs.get(base) ?? []), sha])
+            }
+          })
+        )
+      } catch (err) {
+        console.debug("[heal] share check failed", { id: t.manifest.id, err: String(err) })
+      }
+      return plan
     })
   )
 
-  let uploaded = 0
-  if (needs.size) {
-    const want = [...new Set([...needs.values()].flat())]
-    onProgress(`uploading ${plural(want.length, "missing file")}…`)
-    const auth = await uploadAuth(want, bases)
+  // Phase two: one auth for everything missing anywhere, then the uploads.
+  const want = [...new Set(plans.flatMap(p => [...p.needs.values()].flat()))]
+  if (want.length) {
+    const servers = [...new Set(plans.flatMap(p => [...p.needs.keys()]))]
+    for (const p of plans) {
+      const n = new Set([...p.needs.values()].flat()).size
+      if (n) p.t.onProgress?.(`uploading ${plural(n, "missing file")}…`)
+    }
+    const auth = await uploadAuth(want, servers)
     await Promise.allSettled(
-      [...needs].map(async ([base, lacking]) => {
-        for (const sha of lacking) {
-          const f = bySha.get(sha)!
-          const blob = f.body.type === f.mime ? f.body : new Blob([f.body], { type: f.mime || "" })
-          try {
-            const r = await uploadBlob(base, blob, { auth, signal: AbortSignal.timeout(30_000) })
-            // Stored under another hash, or accepted against a stale index row
-            // without the bytes (a server that lost a file still answers for
-            // it — see hasBytes): only a ranged GET afterwards proves it took.
-            if (r?.sha256 === sha && (await hasBytes(base, sha))) {
-              uploaded++
-              present.set(sha, (present.get(sha) ?? 0) + 1)
-            } else {
-              console.debug("[heal] upload didn't take", { base, sha, got: r?.sha256 })
+      plans.flatMap(p =>
+        [...p.needs].map(async ([base, lacking]) => {
+          for (const sha of lacking) {
+            const f = p.bySha.get(sha)!
+            const blob =
+              f.body.type === f.mime ? f.body : new Blob([f.body], { type: f.mime || "" })
+            try {
+              const r = await uploadBlob(base, blob, { auth, signal: AbortSignal.timeout(30_000) })
+              // Stored under another hash, or accepted against a stale index row
+              // without the bytes (a server that lost a file still answers for
+              // it — see hasBytes): only a ranged GET afterwards proves it took.
+              if (r?.sha256 === sha && (await hasBytes(base, sha))) {
+                p.uploaded++
+                p.present.set(sha, (p.present.get(sha) ?? 0) + 1)
+              } else {
+                console.debug("[heal] upload didn't take", { base, sha, got: r?.sha256 })
+              }
+            } catch (err) {
+              console.debug("[heal] upload refused", { base, sha, err: String(err) })
             }
-          } catch (err) {
-            console.debug("[heal] upload refused", { base, sha, err: String(err) })
           }
-        }
-      })
+        })
+      )
     )
   }
-  const missing = shas.filter(sha => !present.get(sha))
-  console.debug("[heal] share check", { id: manifest.id, relays, uploaded, missing })
-  return { relays, uploaded, missing }
+
+  return plans.map(p => {
+    const missing = p.shas.filter(sha => !p.present.get(sha))
+    console.debug("[heal] share check", {
+      id: p.t.manifest.id,
+      relays: p.relays,
+      uploaded: p.uploaded,
+      missing
+    })
+    return { relays: p.relays, uploaded: p.uploaded, missing }
+  })
 }
 
 // One upload auth for the whole run (an x tag per blob, a server tag per

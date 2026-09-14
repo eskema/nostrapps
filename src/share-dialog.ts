@@ -1,12 +1,15 @@
 // The share screen — the consent screen's twin (same shell, same app sections)
-// for the other direction: what a link will carry. Every window of the space is
-// a section with a tick to include it and its actions below, each with a tick
-// and an editable payload. "Create link" runs the reachability check (one state
-// line per app, updated in place), then the link appears with a copy button — a
-// click, so the clipboard write is a user gesture wherever it runs.
+// for the other direction: what a link will carry. "share space as <name>",
+// then every window of the space as a section with a tick to include it and
+// its actions below, each with a tick and an editable payload. Create link
+// drops what's unticked, freezes the rest into plain text, runs one
+// reachability check over every app (a state per app on its title line, the
+// details of anything wrong in one status below), then shows the link in a
+// two-line box with a copy button — a click, so the clipboard write is a user
+// gesture wherever it runs.
 import { openDialog } from "./dialog.js"
-import { nameRow, sectionHead } from "./napp-permissions.js"
-import { button, check } from "./system-napps/ui.js"
+import { sectionHead } from "./napp-permissions.js"
+import { button, check, input } from "./system-napps/ui.js"
 import type { LinkAction } from "./share-link.js"
 
 export interface ShareWindow {
@@ -26,12 +29,18 @@ export interface ShareCheck {
   uploaded: number
   missing: string
   hints: number
+  // The check itself failed (relays unreachable, …): the naddr has no hints.
+  error?: string
 }
 
 export function openShareDialog(opts: {
   name: string
   windows: ShareWindow[]
-  check(key: string, onProgress: (msg: string) => void): Promise<ShareCheck>
+  // One check for all the apps at once (one signing prompt for the uploads).
+  check(
+    keys: string[],
+    onProgress: (key: string, msg: string) => void
+  ): Promise<Map<string, ShareCheck>>
   buildLink(name: string, windows: Array<{ input: string; actions: LinkAction[] }>): string
   // An edited payload, made link-safe (null: it can't be).
   encode(name: string, payload: string): string | null
@@ -43,21 +52,27 @@ export function openShareDialog(opts: {
       const wrap = document.createElement("div")
       wrap.className = "napp-perms"
 
-      const title = document.createElement("div")
-      title.className = "napp-perms-name"
-      title.textContent = "Share this space"
-      const intro = document.createElement("p")
-      intro.className = "napp-perms-reqs"
-      const n = opts.windows.length
-      intro.textContent = `${n} window${n === 1 ? "" : "s"}. Untick what shouldn't go in the link; the name and payloads can be edited.`
-      const name = nameRow(opts.name)
-      wrap.append(title, intro, name.el)
+      const title = document.createElement("label")
+      title.className = "share-title-row"
+      const lead = document.createElement("span")
+      lead.textContent = "share space as"
+      const name = input({ value: opts.name, spellcheck: false })
+      title.append(lead, name)
+      wrap.appendChild(title)
 
+      type ActionRow = {
+        name: string
+        row: HTMLElement
+        nameEl: HTMLElement
+        tick: HTMLInputElement
+        field: HTMLTextAreaElement | null
+      }
       type Row = {
         w: ShareWindow
+        el: HTMLElement
         include: HTMLInputElement
-        actions: Array<{ name: string; tick: HTMLInputElement; field: HTMLTextAreaElement | null }>
         state: HTMLElement
+        actions: ActionRow[]
       }
       const rows: Row[] = opts.windows.map(w => {
         const el = document.createElement("div")
@@ -66,37 +81,35 @@ export function openShareDialog(opts: {
         head.className = "share-head"
         const include = check({ checked: w.shareable })
         if (!w.shareable) include.disabled = true
-        head.append(include, sectionHead(w))
-        el.appendChild(head)
-
-        const state = document.createElement("div")
+        const state = document.createElement("span")
         state.className = "share-state"
-        if (!w.shareable) state.textContent = "no address to share"
-        else state.hidden = true
-        el.appendChild(state)
+        if (w.shareable) state.hidden = true
+        else state.textContent = "no address to share"
+        head.append(include, sectionHead(w), state)
+        el.appendChild(head)
 
         const list = document.createElement("div")
         list.className = "share-actions"
         // An action: tick + name on one line, the payload below it in a
         // textarea that grows or resizes for the long ones (nevents, lists).
-        const actions = w.actions.map(a => {
+        const actions = w.actions.map((a): ActionRow => {
           const row = document.createElement("div")
           row.className = "share-action"
-          const head = document.createElement("label")
-          head.className = "share-action-head"
+          const actionHead = document.createElement("label")
+          actionHead.className = "share-action-head"
           const tick = check({ checked: a.payload != null && w.shareable })
-          const name = document.createElement("span")
-          name.className = "share-action-name"
-          name.textContent = a.name
-          head.append(tick, name)
-          row.appendChild(head)
+          const nameEl = document.createElement("span")
+          nameEl.className = "share-action-name"
+          nameEl.textContent = a.name
+          actionHead.append(tick, nameEl)
+          row.appendChild(actionHead)
           let field: HTMLTextAreaElement | null = null
           if (a.payload == null) {
             tick.disabled = true
             const note = document.createElement("span")
             note.className = "share-action-note"
             note.textContent = "can't go in a link"
-            head.appendChild(note)
+            actionHead.appendChild(note)
           } else {
             field = document.createElement("textarea")
             field.className = "ui-input share-payload"
@@ -106,17 +119,23 @@ export function openShareDialog(opts: {
             row.appendChild(field)
           }
           list.appendChild(row)
-          return { name: a.name, tick, field }
+          return { name: a.name, row, nameEl, tick, field }
         })
         if (actions.length) el.appendChild(list)
         wrap.appendChild(el)
-        return { w, include, actions, state }
+        return { w, el, include, state, actions }
       })
 
-      const url = document.createElement("div")
-      url.className = "share-url"
+      // What went wrong, app by app — only shown when something did.
+      const status = document.createElement("div")
+      status.className = "share-status"
+      status.hidden = true
+      const url = document.createElement("textarea")
+      url.className = "ui-input share-url"
+      url.rows = 2
+      url.readOnly = true
       url.hidden = true
-      wrap.appendChild(url)
+      wrap.append(status, url)
 
       const buttons = document.createElement("div")
       buttons.className = "napp-perms-actions"
@@ -128,54 +147,84 @@ export function openShareDialog(opts: {
       async function run() {
         const included = rows.filter(r => r.include.checked && r.w.shareable)
         if (!included.length) return
-        // Freeze the choices: the check is about exactly these.
         create.disabled = true
-        name.input.disabled = true
+        name.disabled = true
+        const problems: string[] = []
+
+        // The link carries exactly what's ticked: the rest goes, the rest
+        // freezes into plain text.
         for (const r of rows) {
-          r.include.disabled = true
+          if (!included.includes(r)) {
+            r.el.remove()
+            continue
+          }
           for (const a of r.actions) {
-            a.tick.disabled = true
-            if (a.field) a.field.disabled = true
+            const payload =
+              a.tick.checked && a.field ? opts.encode(a.name, a.field.value.trim()) : null
+            if (payload == null) {
+              if (a.tick.checked && a.field) {
+                problems.push(`${r.w.title}: the ${a.name} payload isn't link-safe, left out`)
+              }
+              a.row.remove()
+              continue
+            }
+            const text = document.createElement("div")
+            text.className = "share-action-text"
+            text.textContent = payload
+            a.row.replaceChildren(a.nameEl, text)
+            a.field!.value = payload // what the link gets (an npub for a hex key, …)
           }
         }
-        // One check per app; every window of it shows the same state.
-        const checks = new Map<string, ShareCheck>()
+        wrap.classList.add("share-created")
+
+        // One check over every app; a window shows its app's state.
+        const keys = [...new Set(included.map(r => r.w.key))]
+        const byKey = (key: string) => included.filter(r => r.w.key === key)
         for (const r of included) {
           r.state.hidden = false
-          r.state.classList.remove("danger")
-          let c = checks.get(r.w.key)
-          if (!c) {
-            c = await opts.check(r.w.key, msg => (r.state.textContent = msg))
-            checks.set(r.w.key, c)
+          r.state.textContent = "checking…"
+        }
+        const checks = await opts.check(keys, (key, msg) => {
+          for (const r of byKey(key)) r.state.textContent = msg
+        })
+        for (const key of keys) {
+          const c = checks.get(key)
+          const fine = c && !c.error && !c.missing
+          for (const r of byKey(key)) {
+            r.state.textContent = fine ? "all good" : "error"
+            r.state.classList.toggle("good", !!fine)
+            r.state.classList.toggle("bad", !fine)
           }
-          if (c.missing) {
-            r.state.textContent = `${c.missing} missing on every server — whoever opens the link won't get this app`
-            r.state.classList.add("danger")
-          } else {
-            const parts = ["ok"]
-            if (c.uploaded)
-              parts.push(`${c.uploaded} blob${c.uploaded === 1 ? "" : "s"} re-uploaded`)
-            parts.push(
-              c.hints ? `${c.hints} relay hint${c.hints === 1 ? "" : "s"}` : "no relay hints"
+          const title = byKey(key)[0]?.w.title ?? key
+          if (!c) problems.push(`${title}: not checked`)
+          else if (c.error) problems.push(`${title}: ${c.error}`)
+          else if (c.missing) {
+            problems.push(
+              `${title}: ${c.missing} missing on every server — whoever opens the link won't get it`
             )
-            r.state.textContent = parts.join(", ")
           }
         }
+        if (problems.length) {
+          status.replaceChildren(
+            ...problems.map(p => {
+              const line = document.createElement("div")
+              line.textContent = p
+              return line
+            })
+          )
+          status.hidden = false
+        }
+
         const link = opts.buildLink(
-          name.input.value.trim() || opts.name,
-          included.map(r => {
-            const actions: LinkAction[] = []
-            for (const a of r.actions) {
-              if (!a.tick.checked || !a.field) continue
-              const payload = opts.encode(a.name, a.field.value.trim())
-              // Not link-safe as edited: shown, and left out.
-              a.field.classList.toggle("invalid", payload == null)
-              if (payload != null) actions.push({ name: a.name, payload })
-            }
-            return { input: checks.get(r.w.key)!.input, actions }
-          })
+          name.value.trim() || opts.name,
+          included.map(r => ({
+            input: checks.get(r.w.key)?.input ?? "",
+            actions: r.actions.flatMap(a =>
+              a.row.isConnected && a.field ? [{ name: a.name, payload: a.field.value }] : []
+            )
+          }))
         )
-        url.textContent = link
+        url.value = link
         url.hidden = false
         cancel.textContent = "Close"
         const copy = button({
