@@ -3280,6 +3280,18 @@ async function shareCurrentSpace() {
     setStatus("Nothing shareable in this space")
     return
   }
+  // A link is a promise that its apps can be fetched. Say so before copying
+  // one that can't keep it.
+  if (missing.length) {
+    const ok = window.confirm(
+      `Some files can't be fetched from any server:\n\n${missing.join("\n")}\n\n` +
+        "Whoever opens the link won't get those apps. Copy it anyway?"
+    )
+    if (!ok) {
+      setStatus("Share cancelled")
+      return
+    }
+  }
   const url = buildShareLink(link, `${location.origin}${location.pathname}`)
   const notes = [
     uploaded ? `${uploaded} blob${uploaded === 1 ? "" : "s"} re-uploaded` : "",

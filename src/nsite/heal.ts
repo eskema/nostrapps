@@ -11,10 +11,11 @@
 // means we attempt the upload — content-addressed servers dedupe, so a
 // redundant PUT is harmless.
 import { pool } from "@nostr/gadgets/global"
-import { BlossomClient } from "@nostr/tools/nipb7"
+import { BlossomClient, createUploadAuth, uploadBlob } from "@nostr/tools/nipb7"
 import type { NostrEvent } from "@nostr/tools/core"
 import { generateSecretKey, finalizeEvent } from "@nostr/tools/pure"
 import { getPubkey } from "../account.js"
+import { currentSigner } from "../signers/index.js"
 import { onRelayAuth } from "../relay-auth.js"
 
 // Upload auths are signed with a throwaway session key, never the user's
@@ -112,33 +113,66 @@ export async function ensureReplicated(opts: {
 
   const shas = manifest.tags.filter(t => t[0] === "path" && t[2]).map(t => t[2])
   const bySha = new Map(files.map(f => [f.sha, f]))
+  const bases = servers.map(s => (s.startsWith("http") ? s : `https://${s}`).replace(/\/$/, ""))
   const present = new Map<string, number>() // sha → servers that have it
-  let uploaded = 0
-  onProgress(
-    `Checking ${shas.length} file${shas.length === 1 ? "" : "s"} on ${servers.length} server${servers.length === 1 ? "" : "s"}…`
-  )
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
+
+  // Probe everything first, so one auth can cover all that's missing.
+  onProgress(`Checking ${plural(shas.length, "file")} on ${plural(bases.length, "server")}…`)
+  const needs = new Map<string, string[]>() // base → shas it lacks that we can give
   await Promise.allSettled(
-    servers.map(async server => {
-      const client = new BlossomClient(server, healSigner as any)
-      const base = (server.startsWith("http") ? server : `https://${server}`).replace(/\/$/, "")
+    bases.map(async base => {
       for (const sha of shas) {
-        if (await hasBytes(base, sha)) {
-          present.set(sha, (present.get(sha) ?? 0) + 1)
-          continue
-        }
-        const f = bySha.get(sha)
-        if (!f) continue
-        try {
-          await client.uploadBlob(f.body, f.mime)
-          uploaded++
-          present.set(sha, (present.get(sha) ?? 0) + 1)
-        } catch (err) {
-          console.debug("[heal] upload refused", { server, sha, err: String(err) })
-        }
+        if (await hasBytes(base, sha)) present.set(sha, (present.get(sha) ?? 0) + 1)
+        else if (bySha.has(sha)) needs.set(base, [...(needs.get(base) ?? []), sha])
       }
     })
   )
+
+  let uploaded = 0
+  if (needs.size) {
+    const want = [...new Set([...needs.values()].flat())]
+    onProgress(`Uploading ${plural(want.length, "missing file")}…`)
+    const auth = await uploadAuth(want, bases)
+    await Promise.allSettled(
+      [...needs].map(async ([base, lacking]) => {
+        for (const sha of lacking) {
+          const f = bySha.get(sha)!
+          const blob = f.body.type === f.mime ? f.body : new Blob([f.body], { type: f.mime || "" })
+          try {
+            const r = await uploadBlob(base, blob, { auth, signal: AbortSignal.timeout(30_000) })
+            // Stored under another hash, or accepted against a stale index row
+            // without the bytes (a server that lost a file still answers for
+            // it — see hasBytes): only a ranged GET afterwards proves it took.
+            if (r?.sha256 === sha && (await hasBytes(base, sha))) {
+              uploaded++
+              present.set(sha, (present.get(sha) ?? 0) + 1)
+            } else {
+              console.debug("[heal] upload didn't take", { base, sha, got: r?.sha256 })
+            }
+          } catch (err) {
+            console.debug("[heal] upload refused", { base, sha, err: String(err) })
+          }
+        }
+      })
+    )
+  }
   const missing = shas.filter(sha => !present.get(sha))
   console.debug("[heal] share check", { id: manifest.id, relays, uploaded, missing })
   return { relays, uploaded, missing }
+}
+
+// One upload auth for the whole run (an x tag per blob, a server tag per
+// target), signed by the user's own signer when an account is connected —
+// share is explicit, so its prompt is expected, and allowlisting servers take
+// it — else, or if that signing fails, by the throwaway key.
+async function uploadAuth(shas: string[], servers: string[]) {
+  if (getPubkey()) {
+    try {
+      return await createUploadAuth(d => currentSigner().signEvent(d), shas, { servers })
+    } catch (err) {
+      console.debug("[heal] user signer unavailable for the upload auth", String(err))
+    }
+  }
+  return createUploadAuth(d => healSigner.signEvent(d), shas, { servers })
 }
