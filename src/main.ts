@@ -3252,22 +3252,30 @@ async function shareCurrentSpace() {
     setStatus("Nothing open in this space")
     return
   }
-  const shareWindows: ShareWindow[] = windows.map(w => {
-    const installed = persist.getInstalledApp(w.nappId)
-    const iconTag = sharedTemps
-      .get(w.nappId)
-      ?.fetched.manifest?.tags.find(t => t[0] === "icon")?.[1]
-    const last = new Map<string, unknown>()
-    for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
-    return {
-      key: w.nappId,
-      title: w.petname,
-      icon: installed ? installedIconSrc(installed) : directIconSrc(iconTag),
-      type: persist.classifyNappId(w.nappId),
-      shareable: !!shareableFor(w.nappId),
-      actions: [...last].map(([n, p]) => ({ name: n, payload: encodePayload(n, p) }))
-    }
-  })
+  // Icons the way the Apps card gets them — an installed app's probed (and
+  // cached) blossom src, waited on briefly so the screen opens promptly; a
+  // temp app's from the bytes it was fetched with.
+  const shareWindows: ShareWindow[] = await Promise.all(
+    windows.map(async (w): Promise<ShareWindow> => {
+      const installed = persist.getInstalledApp(w.nappId)
+      const temp = sharedTemps.get(w.nappId)?.fetched
+      const iconTag = temp?.manifest?.tags.find(t => t[0] === "icon")?.[1]
+      const icon = installed
+        ? await withTimeout(iconSrcFor(installed, true), 1500, "icon").catch(() => null)
+        : null
+      const last = new Map<string, unknown>()
+      for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
+      return {
+        key: w.nappId,
+        title: w.petname,
+        icon: icon ?? undefined,
+        iconBlob: temp ? iconBlobFrom(iconTag, temp.files, temp.manifest) : undefined,
+        type: persist.classifyNappId(w.nappId),
+        shareable: !!shareableFor(w.nappId),
+        actions: [...last].map(([n, p]) => ({ name: n, payload: encodePayload(n, p) }))
+      }
+    })
+  )
   await openShareDialog({
     name,
     windows: shareWindows,

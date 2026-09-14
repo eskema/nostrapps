@@ -17,7 +17,10 @@ export interface ShareWindow {
   // The app — one check covers every window of it.
   key: string
   title: string
+  // A src that loads from the launcher page (the Apps card's), or the bytes
+  // for an app whose origin isn't serving yet.
   icon?: string
+  iconBlob?: Blob
   type?: string
   // No address to share (dev, local): listed unticked and disabled.
   shareable: boolean
@@ -91,7 +94,12 @@ export function openShareDialog(opts: {
         if (!w.shareable) include.disabled = true
         // The type badge at the line's end is the state slot: the check
         // writes over it.
-        const headEl = sectionHead({ title: w.title, icon: w.icon, type: w.type || "app" })
+        const headEl = sectionHead({
+          title: w.title,
+          icon: w.icon,
+          iconBlob: w.iconBlob,
+          type: w.type || "app"
+        })
         const state = headEl.querySelector<HTMLElement>(".napp-perms-type")!
         state.classList.add("share-state")
         if (!w.shareable) state.textContent = "no address"
