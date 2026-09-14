@@ -245,6 +245,17 @@ h1 span {
   user-select: none;
 }
 
+/* Ephemeral (shared-link) spaces: italic — nothing in them persists. */
+.spaces-tab.ephemeral,
+.spaces-current-name.ephemeral {
+  font-style: italic;
+}
+
+/* .btn sets display, which would beat the UA [hidden] rule. */
+.spaces-controls .btn[hidden] {
+  display: none;
+}
+
 /* While a space tab is pressed or dragged (pointer-based), force the grabbing
    cursor everywhere and stop accidental text selection. Added on pointerdown so
    the cursor responds to the press immediately, before the drag threshold. */
@@ -1549,6 +1560,31 @@ body.popover-open .napp-body iframe {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.6rem;
+}
+
+/* One app's section of a permission screen (the single-app screen has one). */
+.napp-perms-app {
+  display: grid;
+  gap: 0.5rem;
+}
+
+/* The share-link screen stacks a section per app. */
+.napp-perms-shared {
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
+/* What a link sends an app, one "<name> → <payload>" per row; payloads have no
+   spaces to break on, so wrap anywhere. Actions the app doesn't handle are
+   struck out and won't be sent. */
+.napp-perms-link-actions {
+  display: grid;
+  gap: 0.2rem;
+  overflow-wrap: anywhere;
+}
+.napp-perms-link-action.unsupported {
+  text-decoration: line-through;
+  opacity: 0.6;
 }
 
 /* NAP-CONFIG settings form (shares the perms dialog shell). A row stacks

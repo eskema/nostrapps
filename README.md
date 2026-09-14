@@ -2,6 +2,18 @@
 
 Nostrapps is a small browser launcher for Nostr apps. Each app is a static site published as an [nsite](https://nips.nostr.com/5A), or just a folder you point at locally. The launcher fetches it once, caches it, and runs it in its own sandboxed window with a set of utilities for seamless Nostr integration.
 
+## Sharing a space
+
+The link button on the spaces bar copies a link to the current space:
+
+```
+https://at.nostrapps.com/#space=fiatjafs-corner&app=naddr1…&action=profile~npub1…&app=naddr1…
+```
+
+Everything sits after `#`, so the host never sees it. `space` is a slug (`a-z`, `0-9`, `-`). Each `app` is an naddr or nsite host and starts a window; each `action` goes to the app before it, as `<name>~<payload>`. Payloads are plain strings: `profile` takes an npub or hex, `feed` and `relay` take comma-separated lists, `view` takes an nevent or naddr. Link order is the layout — an equal grid, reading order.
+
+Opening a link shows one screen with the apps, their permissions and the actions it will run, then opens them in an ephemeral space: nothing is installed, and a reload discards it (like `/dev`). Apps you already have run as your installed copy. **Keep** installs the rest and makes it a normal space.
+
 ## For developers
 
 The idea is that each napp is a very small, specialized app. It should do one (or few) things and do them well. It should call `window.napp.registerAction()` in order to receive the parameters it will use (for example, an app that displays any information related to a profile should call that to register the `"profile"` action) and it should call `window.napp.action()` for anything it doesn't handle internally (for example, an app that displays a list of notes but doesn't handle threads or an expanded view of such notes should call out to other apps with the `view:1` action).

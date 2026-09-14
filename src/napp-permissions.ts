@@ -2,6 +2,8 @@
 // from an app card. It turns the app's `requires` declarations into the single
 // granted `domains` list — nothing is serviced or reachable until it's ticked.
 // The capability rows use the design-system item list (the relays-napp look).
+// A share link opens several apps at once; promptSharedSpace stacks one section
+// per app on the same screen, so the whole link is answered once.
 import { openDialog } from "./dialog.js"
 import { check, button, radio } from "./system-napps/ui.js"
 import type { NappPolicy } from "./types.js"
@@ -78,8 +80,96 @@ export interface PolicyPromptOpts {
 export function promptNappPolicy(
   opts: PolicyPromptOpts
 ): Promise<(NappPolicy & { type?: string }) | null> {
-  const cur = opts.current
   const edit = opts.mode === "edit"
+  return openDialog<(NappPolicy & { type?: string }) | null>({
+    dismissValue: null,
+    class: "napp-perms-dialog",
+    build: resolve => {
+      const wrap = document.createElement("div")
+      wrap.className = "napp-perms"
+      const section = policySection(opts)
+      wrap.append(
+        section.el,
+        actionRow(resolve, edit ? "Save" : "Open", () => section.read())
+      )
+      return wrap
+    }
+  })
+}
+
+export interface SharedAppPrompt {
+  // What the returned grant is keyed by (the temp id of a not-yet-installed app).
+  key: string
+  title: string
+  icon?: string
+  iconBlob?: Blob
+  type?: string
+  // Already installed: listed for the record, nothing to grant.
+  installed: boolean
+  declaredDomains: string[]
+  // What the link will send this app, and whether the app handles that action.
+  actions: Array<{ name: string; payload: string; supported: boolean }>
+}
+
+// The share-link screen: every app the link opens, each with the actions it
+// will receive and (for apps not installed yet) its capability rows. Resolves
+// to the grants keyed by `key`, or null if cancelled.
+export function promptSharedSpace(opts: {
+  name: string
+  apps: SharedAppPrompt[]
+}): Promise<Map<string, NappPolicy> | null> {
+  return openDialog<Map<string, NappPolicy> | null>({
+    dismissValue: null,
+    class: "napp-perms-dialog",
+    build: resolve => {
+      const wrap = document.createElement("div")
+      wrap.className = "napp-perms"
+
+      const title = document.createElement("div")
+      title.className = "napp-perms-name"
+      title.textContent = `Open shared space "${opts.name}"?`
+      const intro = document.createElement("p")
+      intro.className = "napp-perms-reqs"
+      const n = opts.apps.length
+      intro.textContent = `${n} app${n === 1 ? "" : "s"} from a link. Nothing is installed until you keep the space.`
+      wrap.append(title, intro)
+
+      const sections = new Map<string, PolicySection>()
+      for (const app of opts.apps) {
+        let el: HTMLElement
+        if (app.installed) {
+          el = document.createElement("div")
+          el.className = "napp-perms-app"
+          el.appendChild(
+            sectionHead({ ...app, type: app.type ? `${app.type} · installed` : "installed" })
+          )
+        } else {
+          const section = policySection({ ...app, declaredDomains: app.declaredDomains })
+          sections.set(app.key, section)
+          el = section.el
+        }
+        el.classList.add("napp-perms-shared")
+        if (app.actions.length) el.appendChild(actionsList(app.actions))
+        wrap.appendChild(el)
+      }
+
+      wrap.appendChild(
+        actionRow(resolve, "Open", () => new Map([...sections].map(([k, s]) => [k, s.read()])))
+      )
+      return wrap
+    }
+  })
+}
+
+interface PolicySection {
+  el: HTMLElement
+  read(): NappPolicy & { type?: string }
+}
+
+// One app's part of a permission screen: head, requires summary, and the
+// grantable rows. `read()` collects the grant as ticked.
+function policySection(opts: PolicyPromptOpts): PolicySection {
+  const cur = opts.current
   // Declared caps we implement (order-stable), minus network (its own row) and
   // ui (auto-granted). network is always offered so any app can be un-sealed.
   const declaredCaps = CAP_ORDER.filter(d => opts.declaredDomains.includes(d))
@@ -95,113 +185,137 @@ export function promptNappPolicy(
   const rowsFor = () =>
     type === "napplet" ? declaredCaps : [...new Set(["identity", ...declaredCaps, "network"])]
 
-  return openDialog<(NappPolicy & { type?: string }) | null>({
-    dismissValue: null,
-    class: "napp-perms-dialog",
-    build: resolve => {
-      const wrap = document.createElement("div")
-      wrap.className = "napp-perms"
+  const el = document.createElement("div")
+  el.className = "napp-perms-app"
+  el.appendChild(sectionHead(opts))
 
-      const head = document.createElement("div")
-      head.className = "napp-perms-head"
-      const iconSrc = opts.iconBlob ? URL.createObjectURL(opts.iconBlob) : opts.icon
-      if (iconSrc) {
-        const img = document.createElement("img")
-        img.className = "napp-perms-icon"
-        img.alt = ""
-        // Revoke once the bitmap is decoded (it survives the revoke). There's no
-        // placeholder to fall back to, so an icon that won't load drops out and
-        // leaves the name on its own rather than showing a broken-image glyph.
-        const release = () => {
-          if (opts.iconBlob) URL.revokeObjectURL(iconSrc)
+  // Ambiguous load: a one-of-two pick in the same row language as the
+  // capability rows below, radio at the left.
+  if (opts.chooseType) {
+    const pick = (t: "nsite" | "napplet", desc: string) => {
+      const r = radio({
+        name: "napp-type",
+        checked: type === t,
+        onChange: () => {
+          type = t
+          renderBody()
         }
-        img.addEventListener("load", release)
-        img.addEventListener("error", () => {
-          release()
-          img.remove()
-        })
-        img.src = iconSrc
-        head.appendChild(img)
-      }
-      const name = document.createElement("div")
-      name.className = "napp-perms-name"
-      name.textContent = opts.title
-      if (opts.type && !opts.chooseType) {
-        const t = document.createElement("span")
-        t.className = "napp-perms-type"
-        t.textContent = opts.type
-        name.appendChild(t)
-      }
-      head.appendChild(name)
-      wrap.appendChild(head)
-
-      // Ambiguous load: a one-of-two pick in the same row language as the
-      // capability rows below, radio at the left.
-      if (opts.chooseType) {
-        const pick = (t: "nsite" | "napplet", desc: string) => {
-          const r = radio({
-            name: "napp-type",
-            checked: type === t,
-            onChange: () => {
-              type = t
-              renderBody()
-            }
-          })
-          wrap.appendChild(permRow(r, t, desc))
-        }
-        pick("nsite", "a website at its own origin")
-        pick("napplet", "a sealed single-file app")
-      }
-
-      // Explicit, compact summary of what the app declares it needs.
-      const reqs = document.createElement("p")
-      reqs.className = "napp-perms-reqs"
-      const declared = [...new Set(opts.declaredDomains.filter(Boolean))]
-      reqs.textContent = `Requires: ${declared.length ? declared.join(", ") : "nothing"}`
-      wrap.appendChild(reqs)
-      // Declared requirements this launcher can't provide — named up top, same
-      // as the apps-list badge; they never appear as checklist rows.
-      if (unsupported.length) {
-        const warn = document.createElement("p")
-        warn.className = "napp-perms-unsupported"
-        warn.textContent = `requires unsupported features: ${unsupported.join(", ")}`
-        wrap.appendChild(warn)
-      }
-
-      // Capability rows, rebuilt when the type is flipped. Checkbox first,
-      // then the title with its short description below.
-      const body = document.createElement("div")
-      const boxes = new Map<string, HTMLInputElement>()
-      function renderBody() {
-        boxes.clear()
-        body.replaceChildren()
-        for (const d of rowsFor()) {
-          const box = check({ checked: cur ? cur.domains.includes(d) : true })
-          boxes.set(d, box)
-          body.appendChild(permRow(box, CAP_INFO[d].title, CAP_INFO[d].desc))
-        }
-      }
-      renderBody()
-      wrap.appendChild(body)
-
-      const actions = document.createElement("div")
-      actions.className = "napp-perms-actions"
-      actions.append(
-        button({ label: "Cancel", variant: "outline", onClick: () => resolve(null) }),
-        button({
-          label: edit ? "Save" : "Open",
-          variant: "primary",
-          onClick: () => {
-            const domains = [...boxes].filter(([, b]) => b.checked).map(([d]) => d)
-            if (declaredUi) domains.push("ui") // auto-granted, no toggle
-            resolve(opts.chooseType ? { domains, type } : { domains })
-          }
-        })
-      )
-      wrap.appendChild(actions)
-      return wrap
+      })
+      el.appendChild(permRow(r, t, desc))
     }
-  })
+    pick("nsite", "a website at its own origin")
+    pick("napplet", "a sealed single-file app")
+  }
+
+  // Explicit, compact summary of what the app declares it needs.
+  const reqs = document.createElement("p")
+  reqs.className = "napp-perms-reqs"
+  const declared = [...new Set(opts.declaredDomains.filter(Boolean))]
+  reqs.textContent = `Requires: ${declared.length ? declared.join(", ") : "nothing"}`
+  el.appendChild(reqs)
+  // Declared requirements this launcher can't provide — named up top, same
+  // as the apps-list badge; they never appear as checklist rows.
+  if (unsupported.length) {
+    const warn = document.createElement("p")
+    warn.className = "napp-perms-unsupported"
+    warn.textContent = `requires unsupported features: ${unsupported.join(", ")}`
+    el.appendChild(warn)
+  }
+
+  // Capability rows, rebuilt when the type is flipped. Checkbox first,
+  // then the title with its short description below.
+  const body = document.createElement("div")
+  const boxes = new Map<string, HTMLInputElement>()
+  function renderBody() {
+    boxes.clear()
+    body.replaceChildren()
+    for (const d of rowsFor()) {
+      const box = check({ checked: cur ? cur.domains.includes(d) : true })
+      boxes.set(d, box)
+      body.appendChild(permRow(box, CAP_INFO[d].title, CAP_INFO[d].desc))
+    }
+  }
+  renderBody()
+  el.appendChild(body)
+
+  return {
+    el,
+    read() {
+      const domains = [...boxes].filter(([, b]) => b.checked).map(([d]) => d)
+      if (declaredUi) domains.push("ui") // auto-granted, no toggle
+      return opts.chooseType ? { domains, type } : { domains }
+    }
+  }
+}
+
+// Icon + name, with the type as plain inline text ("<name> · <type>").
+function sectionHead(opts: {
+  title: string
+  icon?: string
+  iconBlob?: Blob
+  type?: string
+  chooseType?: boolean
+}): HTMLElement {
+  const head = document.createElement("div")
+  head.className = "napp-perms-head"
+  const iconSrc = opts.iconBlob ? URL.createObjectURL(opts.iconBlob) : opts.icon
+  if (iconSrc) {
+    const img = document.createElement("img")
+    img.className = "napp-perms-icon"
+    img.alt = ""
+    // Revoke once the bitmap is decoded (it survives the revoke). There's no
+    // placeholder to fall back to, so an icon that won't load drops out and
+    // leaves the name on its own rather than showing a broken-image glyph.
+    const release = () => {
+      if (opts.iconBlob) URL.revokeObjectURL(iconSrc)
+    }
+    img.addEventListener("load", release)
+    img.addEventListener("error", () => {
+      release()
+      img.remove()
+    })
+    img.src = iconSrc
+    head.appendChild(img)
+  }
+  const name = document.createElement("div")
+  name.className = "napp-perms-name"
+  name.textContent = opts.title
+  if (opts.type && !opts.chooseType) {
+    const t = document.createElement("span")
+    t.className = "napp-perms-type"
+    t.textContent = opts.type
+    name.appendChild(t)
+  }
+  head.appendChild(name)
+  return head
+}
+
+// The actions a share link sends an app, one per row: "<name> → <payload>".
+// Ones the app doesn't handle are shown crossed out and won't be sent.
+function actionsList(
+  actions: Array<{ name: string; payload: string; supported: boolean }>
+): HTMLElement {
+  const list = document.createElement("div")
+  list.className = "napp-perms-link-actions"
+  for (const a of actions) {
+    const row = document.createElement("div")
+    row.className = "napp-perms-link-action" + (a.supported ? "" : " unsupported")
+    row.textContent = a.payload ? `${a.name} → ${a.payload}` : a.name
+    if (!a.supported) row.title = "This app doesn't handle that action"
+    list.appendChild(row)
+  }
+  return list
+}
+
+// Cancel / confirm pair; `value` computes what the confirm resolves with.
+function actionRow<T>(resolve: (v: T | null) => void, label: string, value: () => T) {
+  const actions = document.createElement("div")
+  actions.className = "napp-perms-actions"
+  actions.append(
+    button({ label: "Cancel", variant: "outline", onClick: () => resolve(null) }),
+    button({ label, variant: "primary", onClick: () => resolve(value()) })
+  )
+  return actions
 }
 
 // A grantable row: checkbox at the left, then the title with its description

@@ -39,10 +39,19 @@ import {
   closeNappletSubs,
   launchNapplet,
   reloadNappletWindows,
-  syncStageBottomSpacer
+  syncStageBottomSpacer,
+  getStageBounds
 } from "./sandbox/host.js"
 import { button, chip, icon, tab } from "./system-napps/ui.js"
-import { promptNappPolicy } from "./napp-permissions.js"
+import { promptNappPolicy, promptSharedSpace } from "./napp-permissions.js"
+import {
+  buildShareLink,
+  decodePayload,
+  encodePayload,
+  parseShareLink,
+  type LinkAction,
+  type ShareLink
+} from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
 import { resolveNapplet, isNappletKind, loadNappletFromManifest } from "./nsite/napplet.js"
@@ -73,7 +82,8 @@ import type {
   SystemCtx,
   NappWindow,
   LaunchOpts,
-  InstalledApp
+  InstalledApp,
+  Position
 } from "./types.js"
 import {
   registry as systemRegistry,
@@ -86,6 +96,7 @@ import {
 import { pool } from "@nostr/gadgets/global"
 import { bareNostrUser, loadNostrUser } from "@nostr/gadgets/metadata"
 import { EventTemplate } from "@nostr/tools"
+import { naddrEncode } from "@nostr/tools/nip19"
 import * as relayAuth from "./relay-auth.js"
 import { buildUserIndex } from "./user-search.js"
 
@@ -1802,18 +1813,31 @@ async function resetCurrentSpace() {
   renderSpacesBar()
 }
 
-// Delete the current space and load whichever space becomes current.
+// Delete the current space and load whichever space becomes current. An
+// ephemeral (shared-link) space is discarded: its temp apps are destroyed so
+// their origins are wiped now rather than on the next boot.
 async function destroyCurrentSpace() {
   const spaces = persist.listSpaces()
-  if (spaces.length <= 1) {
+  const ephemeral = persist.isEphemeralSpace(currentSpaceId)
+  if (!ephemeral && spaces.length <= 1) {
     setStatus("Can't delete the only space")
     return
   }
   const name = spaces.find(s => s.id === currentSpaceId)?.name || "this space"
   const ok = window.confirm(
-    `Delete space "${name}"?\n\n` + "Its windows and saved layout will be permanently removed."
+    ephemeral
+      ? `Discard shared space "${name}"?\n\n` +
+          "Its apps were never installed; their windows close."
+      : `Delete space "${name}"?\n\n` + "Its windows and saved layout will be permanently removed."
   )
   if (!ok) return
+  if (ephemeral) {
+    for (const w of persist.readOpen()) {
+      if (!sharedTemps.has(w.nappId)) continue
+      destroyByNappId(w.nappId)
+      sharedTemps.delete(w.nappId)
+    }
+  }
   // This space's windows are genuinely gone — close them.
   teardownSpaceWindows(currentSpaceId)
   materializedSpaces.delete(currentSpaceId)
@@ -1857,6 +1881,12 @@ let spacesBarBuilt = false
 let spacesNameEl: HTMLDivElement
 let spacesWinListEl: HTMLDivElement
 let spacesTabListEl: HTMLDivElement
+// Controls that depend on the kind of the current space: save/reset for a real
+// one, keep for an ephemeral one. renderSpacesBar toggles them.
+let spacesSaveBtn: HTMLButtonElement
+let spacesResetBtn: HTMLButtonElement
+let spacesKeepBtn: HTMLButtonElement
+let spacesTrashBtn: HTMLButtonElement
 
 function buildSpacesBarSkeleton() {
   // Start: the current space's name. Double-click to rename it.
@@ -1872,14 +1902,20 @@ function buildSpacesBarSkeleton() {
     }
   })
 
-  // Controls for the CURRENT space (save / reset / destroy) — handlers read
-  // currentSpaceId at call time, so building them once is fine.
+  // Controls for the CURRENT space (save / reset / keep / destroy / share) —
+  // handlers read currentSpaceId at call time, so building them once is fine.
   const controls = document.createElement("div")
   controls.className = "spaces-controls"
+  spacesSaveBtn = iconButton("save", "Save this space's layout", saveCurrentSpace)
+  spacesResetBtn = iconButton("reset", "Reset to saved layout", resetCurrentSpace)
+  spacesKeepBtn = iconButton("check", "Keep this space (installs its apps)", keepCurrentSpace)
+  spacesTrashBtn = iconButton("trash", "Delete this space", destroyCurrentSpace)
   controls.append(
-    iconButton("save", "Save this space's layout", saveCurrentSpace),
-    iconButton("reset", "Reset to saved layout", resetCurrentSpace),
-    iconButton("trash", "Delete this space", destroyCurrentSpace)
+    spacesSaveBtn,
+    spacesResetBtn,
+    spacesKeepBtn,
+    spacesTrashBtn,
+    iconButton("link", "Copy a link to this space", shareCurrentSpace)
   )
 
   // The current space's live windows (taskbar).
@@ -1905,7 +1941,14 @@ function renderSpacesBar() {
   if (!spacesBarBuilt) buildSpacesBarSkeleton()
   const spaces = persist.listSpaces()
 
-  spacesNameEl.textContent = spaces.find(s => s.id === currentSpaceId)?.name || "space"
+  const cur = spaces.find(s => s.id === currentSpaceId)
+  const ephemeral = !!cur?.ephemeral
+  spacesNameEl.textContent = cur?.name || "space"
+  spacesNameEl.classList.toggle("ephemeral", ephemeral)
+  spacesSaveBtn.hidden = ephemeral
+  spacesResetBtn.hidden = ephemeral
+  spacesKeepBtn.hidden = !ephemeral
+  spacesTrashBtn.title = ephemeral ? "Discard this shared space" : "Delete this space"
 
   // Window taskbar — rebuilt each render. Click → focus; drag → reorder (which
   // reorders the stage / mobile stack, see reorderWindows).
@@ -1942,6 +1985,7 @@ function renderSpacesBar() {
       tab = buildSpaceChip(s)
     }
     tab.classList.toggle("active", s.id === currentSpaceId)
+    tab.classList.toggle("ephemeral", !!s.ephemeral) // cleared once the space is kept
     // Only move the node when its position is actually wrong — re-inserting a
     // node cancels its in-flight transition, which would defeat the .active
     // padding animation on a plain switch (where the order doesn't change).
@@ -2113,6 +2157,8 @@ function buildSpaceChip(s: { id: string; name: string }): HTMLButtonElement {
   save: () => saveCurrentSpace(),
   reset: () => resetCurrentSpace(),
   destroy: () => destroyCurrentSpace(),
+  keep: () => keepCurrentSpace(),
+  share: () => shareCurrentSpace(),
   rename: (id: string, name: string) => (persist.renameSpace(id, name), renderSpacesBar()),
   remove: (id: string) => (persist.deleteSpace(id), renderSpacesBar())
 }
@@ -2185,12 +2231,13 @@ async function init() {
   // paced behind the rest of the boot and the user's input, see the queue
   // by prewarmSuggestions.
   prewarmSuggestions()
-  processQueryStringNapps().catch(err => {
-    console.error("[url-napps] error:", err)
-    setStatus(`URL napps error: ${err.message}`)
-  })
+  importShareLink(location.hash).catch(reportShareLinkError)
 }
 init()
+// A link opened in an already-running launcher only changes the hash.
+window.addEventListener("hashchange", () => {
+  importShareLink(location.hash).catch(reportShareLinkError)
+})
 
 // nsite/napp/napplet, for the summary screen.
 function manifestAppType(event: { kind: number; tags: string[][] } | null | undefined): string {
@@ -2241,13 +2288,23 @@ async function install(raw: string): Promise<string> {
     return installNapplet({ ...resolved, kind: resolved.kind })
   }
 
-  const { nappId, files, title, manifest } = await fetchNsite(resolved, setStatus)
+  const fetched = await fetchNsite(resolved, setStatus)
   console.debug("[install] nsite fetched", {
-    nappId,
-    title,
-    fileCount: files.length,
-    hasManifest: !!manifest
+    nappId: fetched.nappId,
+    title: fetched.title,
+    fileCount: fetched.files.length,
+    hasManifest: !!fetched.manifest
   })
+  return installFetched(fetched, raw)
+}
+
+// The install proper, from fetched files: the first-run permission screen (a
+// stored policy skips it), the boot into the napp's origin, the manifest
+// record. Keep runs it on the files a shared space already fetched.
+async function installFetched(
+  { nappId, files, title, manifest }: NsiteResult,
+  raw: string
+): Promise<string> {
   const dTag = manifest?.tags.find((t: any) => t[0] === "d")?.[1]
   const petname = title || dTag || raw
   console.debug("[install] installing napp with opts", { nappId, petname })
@@ -2841,82 +2898,371 @@ function syncDOM(win: NappWindow) {
   maybeRepack()
 }
 
-async function processQueryStringNapps() {
-  const params = new URLSearchParams(location.search)
-  let instanceId: string | undefined
-  for (const [key, value] of params) {
-    if (key === "app") {
-      try {
-        instanceId = await loadTempNappFromNaddr(value)
-      } catch (err: any) {
-        console.error(`[url-napps] failed to load ${value.slice}:`, err)
-        setStatus(`Failed to load napp from URL: ${err.message}`)
-        continue
-      }
-    } else if (key === "action" && instanceId) {
-      try {
-        const spl = value.split("->")
-        const name = spl[0]
-        const payload = spl.slice(1).join("->")
-        await callIframe(instanceId, name, payload)
-      } catch (err: any) {
-        console.error(`[url-napps] action ${value} failed for ${instanceId}:`, err)
-        setStatus(`Action ${value} failed: ${err.message}`)
-      }
-    }
-  }
+// ─── shared spaces (share links) ────────────────────────────────
+// A link (see share-link.ts) opens its apps in an ephemeral space: apps the
+// user has run as their installed copy, the rest as temp~ apps that leave
+// nothing behind. Keep installs those for real and promotes the space; Discard
+// or a reload drops everything.
+
+// What each temp window came from — the fetched files, installed under their
+// real id by Keep, and the link input Share writes back out.
+const sharedTemps = new Map<string, { input: string; fetched: NsiteResult }>()
+// Cap per link action: an app that never registers the handler would otherwise
+// hang the import (callIframe waits for the registration).
+const LINK_ACTION_MS = 15_000
+// Windows opened into the grid keep the height they were given (user-sized
+// holds off the default height cap).
+const GRID_STATUS = {
+  minimized: false,
+  maximized: false,
+  pinned: false,
+  userSized: true,
+  zIndex: 0
 }
 
-async function loadTempNappFromNaddr(naddr: string): Promise<string> {
-  const resolved = resolveInput(naddr)
-  const { files, title, manifest, singleton } = await fetchNsite(resolved, setStatus)
+function reportShareLinkError(err: any) {
+  console.error("[share-link] error:", err)
+  setStatus(`Share link error: ${err.message}`)
+}
 
-  const suffix = naddr
+function tempNappIdFor(input: string): string {
+  const suffix = input
     .trim()
     .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/[^a-z0-9._~-]/g, "-")
-  const nappId = `temp~${suffix}`
-  const petname = title || resolved.dTag || nappId
-  const origin = nappOriginFor(nappId)
-  const label = title || nappId
+  return `temp~${suffix}`
+}
 
-  const iconTag = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
-  if (
-    !(await resolvePolicyForLaunch(nappId, {
-      title: label,
-      icon: directIconSrc(iconTag),
-      iconBlob: iconBlobFrom(iconTag, files, manifest),
-      type: manifestAppType(manifest),
-      declaredDomains: requiresFromEvent(manifest)
-    }))
-  ) {
-    throw new Error("Cancelled")
+// The match handlers.findHandlersForAction makes: exact, or "view" for any view:<kind>.
+function handlesAction(declared: string[], name: string): boolean {
+  return declared.includes(name) || (name.startsWith("view:") && declared.includes("view"))
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${what} timed out`)), ms)
+    p.then(
+      v => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      err => {
+        clearTimeout(t)
+        reject(err)
+      }
+    )
+  })
+}
+
+// An equal grid for n windows in reading order: ceil(√n) columns, the last row
+// sharing its width between what's left. Same pixel convention as tileWindows.
+function gridCells(n: number): Position[] {
+  const b = getStageBounds(stage)
+  const width = b.width > 0 ? b.width : 960
+  const height = b.height > 0 ? b.height : 600
+  const cols = Math.ceil(Math.sqrt(n))
+  const rows = Math.ceil(n / cols)
+  const cellH = height / rows
+  const gap = 8
+  const cells: Position[] = []
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / cols)
+    const inRow = r === rows - 1 ? n - r * cols : cols
+    const c = i - r * cols
+    const cellW = width / inRow
+    const x0 = Math.round(b.padL + c * cellW)
+    const x1 = Math.round(b.padL + (c + 1) * cellW)
+    const y0 = Math.round(b.padT + r * cellH)
+    const y1 = Math.round(b.padT + (r + 1) * cellH)
+    cells.push({
+      left: x0 + gap / 2,
+      top: y0 + gap / 2,
+      width: Math.max(0, x1 - x0 - gap),
+      height: Math.max(0, y1 - y0 - gap)
+    })
+  }
+  return cells
+}
+
+type LinkEntry = {
+  input: string
+  actions: LinkAction[]
+  title: string
+  // The installed id, or the temp id the app will run under.
+  nappId: string
+  installed?: InstalledApp
+  fetched?: NsiteResult
+  // Actions the app handles (its manifest's action tags).
+  declared: string[]
+}
+
+async function importShareLink(hash: string) {
+  const link = parseShareLink(hash)
+  if (!link) return
+  // Out of the address bar right away: a reload lands on the user's own spaces,
+  // and a cancelled import leaves nothing behind.
+  history.replaceState(null, "", location.pathname + location.search)
+  setStatus(`Opening shared space "${link.name}"…`)
+
+  // Resolve (and fetch) every app first, so the consent screen is one screen.
+  const entries: LinkEntry[] = []
+  for (const w of link.windows) {
+    let target
+    try {
+      target = resolveInput(w.input)
+    } catch (err: any) {
+      setStatus(`Skipping ${w.input}: ${err.message}`)
+      continue
+    }
+    if (target.kind && isNappletKind(target.kind)) {
+      setStatus(`Skipping ${w.input}: napplets can't be shared yet`)
+      continue
+    }
+    const installed = persist.getInstalledApp(`${target.pubkey.slice(0, 16)}~${target.dTag}`)
+    if (installed) {
+      entries.push({
+        input: w.input,
+        actions: w.actions,
+        title: installed.petname || installed.title || installed.nappId,
+        nappId: installed.nappId,
+        installed,
+        declared: installed.actions
+      })
+      continue
+    }
+    const tempId = tempNappIdFor(w.input)
+    try {
+      // The same app twice in a link is fetched once.
+      const fetched =
+        entries.find(e => e.nappId === tempId)?.fetched ?? (await fetchNsite(target, setStatus))
+      entries.push({
+        input: w.input,
+        actions: w.actions,
+        title: fetched.title || target.dTag,
+        nappId: tempId,
+        fetched,
+        declared: capabilitiesFromEvent(fetched.manifest)
+      })
+    } catch (err: any) {
+      setStatus(`Couldn't fetch ${w.input}: ${err.message}`)
+    }
+  }
+  if (!entries.length) {
+    setStatus("Nothing in that link could be opened")
+    return
   }
 
-  setTempFiles(nappId, files)
-  setStatus(`Booting temp ${label}…`)
-  await bootDevApp(origin, nappId, setStatus, label)
-
-  persist.storeDevApp({
-    nappId,
-    title: title || null,
-    icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1] || null,
-    petname,
-    actions: capabilitiesFromEvent(manifest),
-    requires: requiresFromEvent(manifest),
-    modes: persist.modesFromEventTags(manifest?.tags ?? []),
-    initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
-    singleton
+  const granted = await promptSharedSpace({
+    name: link.name,
+    apps: entries.map(e => {
+      const iconTag = e.fetched?.manifest?.tags.find(t => t[0] === "icon")?.[1]
+      return {
+        key: e.nappId,
+        title: e.title,
+        icon: e.installed ? installedIconSrc(e.installed) : directIconSrc(iconTag),
+        iconBlob: e.fetched
+          ? iconBlobFrom(iconTag, e.fetched.files, e.fetched.manifest)
+          : undefined,
+        type: e.installed
+          ? persist.classifyInstalled(e.installed)
+          : manifestAppType(e.fetched!.manifest),
+        installed: !!e.installed,
+        declaredDomains: requiresFromEvent(e.installed ? e.installed.event : e.fetched!.manifest),
+        actions: e.actions.map(a => ({ ...a, supported: handlesAction(e.declared, a.name) }))
+      }
+    })
   })
-  handlers.addApp(nappId, capabilitiesFromEvent(manifest))
+  if (!granted) {
+    setStatus("Shared space cancelled")
+    return
+  }
+  // The grants from that screen are the temp apps' policies — the first-run
+  // gate install() runs, answered once for all of them.
+  for (const [key, policy] of granted) persist.setPolicy(key, policy)
 
-  const win = await launch(stage, nappId, {
-    ...makeLaunchOpts(),
-    petname
-  })
-  syncDOM(win)
-  win.focus()
+  const spaceId = persist.createEphemeralSpace(link.name)
+  await switchSpace(spaceId)
+  renderSpacesBar()
 
-  return win.getState().instanceId
+  const cells = gridCells(entries.length)
+  const opened: Array<{ instanceId: string; entry: LinkEntry }> = []
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]
+    try {
+      const win = e.fetched
+        ? await launchSharedTemp(e.nappId, e.input, e.fetched, e.title, cells[i])
+        : await launch(stage, e.nappId, {
+            ...makeLaunchOpts(),
+            petname: e.title,
+            position: cells[i],
+            status: GRID_STATUS
+          })
+      syncDOM(win)
+      const state = win.getState()
+      // A launch alone doesn't persist a window (its first state change does);
+      // the entry is needed now, for the actions to be recorded on it.
+      persist.updateOpen(state.instanceId, state)
+      opened.push({ instanceId: state.instanceId, entry: e })
+    } catch (err: any) {
+      setStatus(`Couldn't open ${e.title}: ${err.message}`)
+    }
+  }
+  // Actions in link order, through the dispatcher so they're recorded on the
+  // window (replayed when its iframe reloads, carried over by Keep).
+  for (const { instanceId, entry } of opened) {
+    for (const a of entry.actions) {
+      if (!handlesAction(entry.declared, a.name)) continue
+      try {
+        await withTimeout(
+          runNappAction("link", a.name, decodePayload(a.name, a.payload), { instance: instanceId }),
+          LINK_ACTION_MS,
+          `${a.name} on ${entry.title}`
+        )
+      } catch (err: any) {
+        setStatus(`${a.name} failed for ${entry.title}: ${err.message}`)
+      }
+    }
+  }
+  setStatus(`Opened shared space "${link.name}" — keep it to install its apps`)
+}
+
+// A temp~ app for a shared space: booted like a /dev app (its origin is swept
+// on the next boot), its files kept for Keep. The policy is already stored.
+async function launchSharedTemp(
+  nappId: string,
+  input: string,
+  fetched: NsiteResult,
+  petname: string,
+  position: Position
+): Promise<NappWindow> {
+  if (!sharedTemps.has(nappId)) {
+    const { files, title, manifest, singleton } = fetched
+    setTempFiles(nappId, files)
+    setStatus(`Booting ${petname}…`)
+    await bootDevApp(nappOriginFor(nappId), nappId, setStatus, petname)
+    persist.storeDevApp({
+      nappId,
+      title: title || null,
+      icon: manifest?.tags.find(t => t[0] === "icon")?.[1] || null,
+      petname,
+      actions: capabilitiesFromEvent(manifest),
+      requires: requiresFromEvent(manifest),
+      modes: persist.modesFromEventTags(manifest?.tags ?? []),
+      initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
+      singleton
+    })
+    handlers.addApp(nappId, capabilitiesFromEvent(manifest))
+    sharedTemps.set(nappId, { input, fetched })
+  }
+  return launch(stage, nappId, { ...makeLaunchOpts(), petname, position, status: GRID_STATUS })
+}
+
+// Keep: install the space's temp apps for real, put each window back under
+// its real origin with the same layout and actions, then promote the space.
+async function keepCurrentSpace() {
+  const spaceId = currentSpaceId
+  if (!persist.isEphemeralSpace(spaceId)) return
+  const name = persist.listSpaces().find(s => s.id === spaceId)?.name || "space"
+  const byTemp = new Map<string, NappWindowState[]>()
+  for (const w of persist.readOpen()) {
+    if (w.system || !sharedTemps.has(w.nappId)) continue
+    byTemp.set(w.nappId, [...(byTemp.get(w.nappId) ?? []), w])
+  }
+  for (const [tempId, wins] of byTemp) {
+    const src = sharedTemps.get(tempId)!
+    const realId = src.fetched.nappId
+    try {
+      // The grant answered on the link's screen is the real app's policy too.
+      if (!persist.hasPolicy(realId)) persist.setPolicy(realId, persist.getPolicy(tempId))
+      await installFetched(src.fetched, src.input)
+      const restore = wins.map(w => ({
+        petname: w.petname,
+        position: w.position,
+        status: w.status,
+        actions: persist.getLoadedActions(w.instanceId)
+      }))
+      // Destroying the temp windows wipes their origin (onDestroy); the real
+      // app takes their place and gets its actions again.
+      destroyByNappId(tempId)
+      sharedTemps.delete(tempId)
+      for (const { actions, ...r } of restore) {
+        const win = await launch(stage, realId, { ...makeLaunchOpts(), ...r })
+        syncDOM(win)
+        const state = win.getState()
+        persist.updateOpen(state.instanceId, state)
+        for (const a of actions) {
+          await withTimeout(
+            runNappAction("link", a.name, a.payload, { instance: state.instanceId }),
+            LINK_ACTION_MS,
+            `${a.name} on ${r.petname}`
+          )
+        }
+      }
+    } catch (err: any) {
+      setStatus(`Couldn't keep ${wins[0].petname}: ${err.message}`)
+      return
+    }
+  }
+  persist.promoteSpace(spaceId)
+  renderSpacesBar()
+  setStatus(`Kept space "${name}"`)
+}
+
+// Share: the current space as a link — windows in visual reading order (the
+// receiver lays them out from link order alone), each with the last payload it
+// got per action. Windows with no address (system, dev, local) are skipped.
+async function shareCurrentSpace() {
+  const name = persist.listSpaces().find(s => s.id === currentSpaceId)?.name || "space"
+  const row = (w: NappWindowState) => Math.round((w.position?.top ?? 0) / 60)
+  const windows = persist
+    .readOpen()
+    .filter(w => !w.system)
+    .sort((a, b) => row(a) - row(b) || (a.position?.left ?? 0) - (b.position?.left ?? 0))
+  const skipped: string[] = []
+  const link: ShareLink = { name, windows: [] }
+  for (const w of windows) {
+    const input = shareInputFor(w.nappId)
+    if (!input) {
+      skipped.push(w.petname)
+      continue
+    }
+    const last = new Map<string, unknown>()
+    for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
+    const actions: LinkAction[] = []
+    for (const [n, p] of last) {
+      const payload = encodePayload(n, p)
+      if (payload == null) skipped.push(`${w.petname} ${n}`)
+      else actions.push({ name: n, payload })
+    }
+    link.windows.push({ input, actions })
+  }
+  if (!link.windows.length) {
+    setStatus("Nothing shareable in this space")
+    return
+  }
+  const url = buildShareLink(link, `${location.origin}${location.pathname}`)
+  try {
+    await navigator.clipboard.writeText(url)
+    setStatus(`Link copied${skipped.length ? ` — skipped ${skipped.join(", ")}` : ""}`)
+  } catch {
+    window.prompt("Copy this link", url)
+  }
+}
+
+// The link input for a window's app: what a temp app was opened from, or the
+// installed manifest's naddr. Null for apps with no address (dev, local, napplets).
+function shareInputFor(nappId: string): string | null {
+  const temp = sharedTemps.get(nappId)
+  if (temp) return temp.input
+  const event = persist.getInstalledApp(nappId)?.event
+  if (!event || event.kind !== 35128) return null
+  const dTag = event.tags.find(t => t[0] === "d")?.[1]
+  if (!dTag) return null
+  // Relay hints from wherever the manifest was seen — a few at most, each adds
+  // a good chunk to the naddr.
+  const relays = Array.from(pool.seenOn.get(event.id) || [])
+    .map((r: any) => r.url)
+    .slice(0, 3)
+  return naddrEncode({ pubkey: event.pubkey, kind: event.kind, identifier: dTag, relays })
 }
