@@ -619,7 +619,7 @@ button {
   overflow-y: auto;
 }
 
-#suggestions:empty::after {
+#suggestions.sugg-none::after {
   content: "No saved entries yet";
   display: block;
   padding: 0.5rem 0.6rem;
@@ -629,12 +629,18 @@ button {
 
 .suggestion {
   display: flex;
-  align-items: center;
+  align-items: baseline; /* the trailing author line and label sit on the title's baseline */
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.4rem 0.6rem;
   font-size: 0.85rem;
   cursor: pointer;
+}
+
+/* Filtering toggles rows hidden; the flex display above would override the
+   UA's [hidden] rule without this. */
+.suggestion[hidden] {
+  display: none;
 }
 
 .suggestion:hover,
@@ -649,6 +655,7 @@ button {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  line-height: 1.25rem; /* the icon's height: text centers on it, and rows stay one height */
 }
 
 .sugg-napp,
@@ -673,6 +680,30 @@ button {
   /* opacity: 0.95; */
 }
 
+/* App rows read like the Apps card: the icon next to the title, and "<type>
+   from <author>" trailing the row — serif for the type, mono and dimmer for
+   the name. */
+.sugg-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  align-self: center;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.sugg-author {
+  flex-shrink: 0;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sugg-author-name {
+  font-family: var(--font-mono);
+  opacity: 0.6;
+}
+
 .suggestion .source {
   font-size: 0.7rem;
   opacity: 0.5;
@@ -681,18 +712,25 @@ button {
   flex-shrink: 0;
 }
 
-/* Space badge on every open-window row — the input is a global, cross-space
-   switcher. The current space's badge is de-emphasized (no border, dimmer). */
+/* Space badge trailing every open-window row — the input is a global,
+   cross-space switcher. The current space's badge is de-emphasized (no border,
+   dimmer). */
 .sugg-space {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
+  /* inline-block, not inline-flex: its baseline is then its text's, so the
+     badge sits on the row's baseline instead of hanging off its icon. */
+  display: inline-block;
+  flex-shrink: 0;
+  line-height: 1.2;
   padding: 0.05rem 0.35rem;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   border-radius: var(--btn-radius);
   font-family: var(--font-serif);
   font-weight: 700;
   opacity: 0.75;
+}
+
+.sugg-space .ui-icon {
+  margin-right: 0.2rem;
 }
 
 .sugg-space-current {
@@ -981,7 +1019,10 @@ html[data-theme="dark"] .napp-window.focused {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   letter-spacing: 0.05em;
-  width: 100%;
+  /* Hug the text (the grid start-aligns it) so the rest of the column stays
+     header: double-click there maximizes, double-click the text renames.
+     max-width keeps the ellipsis when the title outgrows the column. */
+  max-width: 100%;
 }
 
 .napp-title[data-instance]::after {
@@ -996,6 +1037,9 @@ html[data-theme="dark"] .napp-window.focused {
 }
 
 .napp-title.editing {
+  /* The title hugs its text, so an emptied field would collapse to nothing —
+     keep enough box to see the caret. */
+  min-width: 4ch;
   background: color-mix(in srgb, currentColor 12%, transparent);
   padding: 0 0.25rem;
   border-radius: 3px;
@@ -2070,7 +2114,8 @@ body.popover-open .napp-body iframe {
   border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 }
 
-.apps-detail-overlay .apps-card {
+.apps-detail-overlay .apps-card,
+.upload-head .apps-card {
   display: grid;
   grid-template-areas:
     "img img img"
@@ -2107,18 +2152,43 @@ body.popover-open .napp-body iframe {
   display: none;
 }
 
+/* The icon's plate is the card's own pseudo-element, in the same cell as the
+   image, so it's there before any icon is and the image can fade in over it
+   (.loaded is set by the card on the img's load). The img paints on top. */
+.apps-card::before {
+  content: "";
+  grid-area: icon;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
 .apps-card-icon {
   box-sizing: border-box;
   width: 48px;
   height: 48px;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
   grid-area: icon;
   border-radius: 8px;
   padding: 4px;
-  /* border: 4px solid color-mix(in srgb, var(--text) 5%, transparent); */
+  opacity: 0;
+  transition: opacity 0.4s ease;
 }
 
-.apps-detail-overlay .apps-card-icon {
+.apps-card-icon.loaded {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apps-card-icon {
+    transition: none;
+  }
+}
+
+.apps-detail-overlay .apps-card::before,
+.upload-head .apps-card::before,
+.apps-detail-overlay .apps-card-icon,
+.upload-head .apps-card-icon {
   width: 96px;
   height: 96px;
 }
@@ -2137,7 +2207,8 @@ body.popover-open .napp-body iframe {
   /* width: 100%; */
 }
 
-.apps-detail-overlay .apps-title {
+.apps-detail-overlay .apps-title,
+.upload-head .apps-title {
   font-size: 3rem;
 }
 
@@ -2163,7 +2234,8 @@ body.popover-open .napp-body iframe {
   margin-bottom: 0.4rem;
 }
 
-.apps-detail-overlay .apps-author {
+.apps-detail-overlay .apps-author,
+.upload-head .apps-author {
   margin-top: 2rem;
   padding: 0.5rem 0;
   border-top: 1px dotted color-mix(in srgb, var(--text) 100%, transparent);
@@ -2200,6 +2272,14 @@ body.popover-open .napp-body iframe {
   font-weight: 600;
   font-family: var(--font-mono);
   opacity: 0.6;
+  /* One line, held from the start: the name lands later and the row must not
+     grow when it does, nor wrap. */
+  min-width: 0;
+  min-height: 1.2em;
+  min-height: 1lh;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .apps-author-name:hover {
@@ -2993,111 +3073,73 @@ body.popover-open .napp-body iframe {
 }
 
 /* ─── uploader ─────────────────────────────────────────────────── */
+/* Everything on show is design-system furniture: .ui-details sections whose
+   summary carries a count badge, .ui-items rows with a .ui-check and a remove
+   (the store's relay-editor shape, used here for both the blossom servers and
+   the relays), .ui-add to add one, .btn for the rest. Only the panel grid, the
+   head, and the outcome-row colouring live here. */
 .upload-panel {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 0.6rem;
+  align-content: start;
+  min-width: 0;
 }
 
-.upload-toolbar {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
+/* What's being published, previewed with the Apps window's own card at detail
+   size (the shared .apps-detail-overlay rules above) — publish button in the
+   card's own button area — followed by the napp id in the Apps spelling and the
+   one publish option. */
+.upload-head {
+  display: grid;
+  gap: 0.15rem;
 }
 
-.upload-pick-folder {
-  padding: 0.35rem 0.7rem;
-  font-size: 0.85rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.upload-pick-folder:hover {
-  background: var(--text);
-  color: var(--surface);
-}
-
-.upload-relays-toggle {
-  flex-shrink: 0;
-  padding: 0.3rem 0.65rem;
-  font-size: 0.95rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.upload-relays-toggle:hover {
-  background: color-mix(in srgb, currentColor 10%, transparent);
-}
-
-.upload-relays {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.5rem;
-  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  border-radius: 6px;
-}
-
-.upload-relays[hidden] {
+.upload-head[hidden] {
   display: none;
 }
 
-.upload-relays-label {
-  font-size: 0.72rem;
-  opacity: 0.7;
+/* It opens the panel, so it needs no rule above it to separate it from anything. */
+.upload-head .apps-card {
+  border-top: none;
+  padding-top: 0;
 }
 
-.upload-relays-input {
-  width: 100%;
-  box-sizing: border-box;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  resize: vertical;
+/* Set off from the id above it; the head's own gap is metadata-tight. */
+.upload-head .upload-protected {
+  margin-top: 0.6rem;
 }
 
-.upload-relays-input:focus {
-  outline: none;
-  border-color: color-mix(in srgb, currentColor 50%, transparent);
+/* The panel's own gap spaces the sections; the disclosure's margin would add to it. */
+.upload-panel .ui-details {
+  margin: 0;
 }
 
-.upload-relays-actions {
-  display: flex;
-  justify-content: flex-end;
+/* Section summary: title + an overline badge (count, size, state). */
+.upload-sum {
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: start;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+/* Unchecked target, and a file the manifest won't carry (a napplet publishes
+   only its index.html). */
+.upload-panel .ui-item.disabled .ui-item-label,
+.upload-panel .ui-item.disabled .ui-overline {
+  opacity: 0.4;
+}
+
+.upload-section-actions {
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: end;
   gap: 0.3rem;
 }
 
-.upload-status {
-  font-size: 0.75rem;
-  opacity: 0.65;
-}
-
-.upload-status[hidden] {
-  display: none;
-}
-
-.upload-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.upload-preview h3 {
-  margin: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
+/* A raw event dump, not UI text — small enough that a whole manifest's tags
+   read as one block. */
 .upload-json {
   margin: 0;
   padding: 0.5rem;
@@ -3107,35 +3149,37 @@ body.popover-open .napp-body iframe {
   white-space: pre-wrap;
   word-break: break-word;
   background: color-mix(in srgb, currentColor 5%, transparent);
-  border-radius: 6px;
-  max-height: 200px;
+  border-radius: var(--btn-radius);
+  max-height: 16rem;
   overflow-y: auto;
 }
 
-/* Appearance from .btn .btn-primary; this keeps only its placement. */
-.upload-publish {
-  align-self: flex-start;
+.upload-protected {
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: start;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Only a hard failure — nothing to publish, or a run that broke. */
+.upload-error {
+  color: var(--danger);
+}
+
+.upload-error:empty {
+  display: none;
 }
 
 /* Per-server (blobs) and per-relay (event) outcome rows. */
-.upload-results {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 0.25rem;
-  font-family: var(--font-mono);
-}
-
 .upload-results[hidden] {
   display: none;
 }
 
-.upload-results li {
-  opacity: 0.65;
-}
-
-.upload-results li.is-fail {
+.upload-results .ui-item.is-fail .ui-item-label,
+.upload-results .ui-item.is-fail .ui-overline {
   color: var(--danger);
   opacity: 1;
 }

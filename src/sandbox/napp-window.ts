@@ -9,6 +9,7 @@ import {
   syncStageBottomSpacer
 } from "./host.js"
 import { moveBefore } from "../dom.js"
+import { getWindowSize, rememberWindowSize } from "../persistence.js"
 import { icon } from "../system-napps/ui.js"
 
 let zIndexCounter = 1
@@ -191,22 +192,26 @@ export function createNappWindow({
   root.append(header, body)
   for (const dir of RESIZE_DIRS) root.appendChild(resizeHandles[dir])
 
+  // A restored window carries its own geometry. A fresh one falls back to the
+  // size this napp was last resized to, and only then to the default.
+  const remembered = position ? null : getWindowSize(nappId)
   const start = position ?? nextPosition()
   root.style.left = `${start.left ?? 40}px`
   root.style.top = `${start.top ?? 40}px`
-  root.style.width = `${start.width ?? 640}px`
-  // Persisted height wins. Otherwise: system napps stay auto so their DOM
-  // content drives the size; iframe napps fall back to 420 since cross-origin
-  // iframes don't expose intrinsic dimensions.
-  if (start.height) {
-    root.style.height = `${start.height}px`
+  root.style.width = `${remembered?.width ?? start.width ?? 640}px`
+  // Persisted height wins, then the remembered one. Otherwise: system napps
+  // stay auto so their DOM content drives the size; iframe napps fall back to
+  // 420 since cross-origin iframes don't expose intrinsic dimensions.
+  const startHeight = start.height ?? remembered?.height
+  if (startHeight) {
+    root.style.height = `${startHeight}px`
   } else if (!system) {
     root.style.height = `420px`
   }
 
   if (status?.minimized) root.classList.add("minimized")
   if (status?.maximized) root.classList.add("maximized")
-  if (status?.userSized) root.classList.add("user-sized")
+  if (status?.userSized || remembered) root.classList.add("user-sized")
   if (status?.pinned) {
     root.classList.add("pinned")
     btnPin.textContent = "●"
@@ -470,6 +475,23 @@ function makeBtn(label: string, title: string) {
 function nextPosition(): Position {
   positionOffset = (positionOffset + 28) % 240
   return { left: 40 + positionOffset, top: 40 + positionOffset, width: 640 }
+}
+
+// The user sized this window by hand — a resize drag, or a snap to an edge.
+// Drops the 420px starter cap so the window can grow freely, and remembers the
+// size for the napp so its next window opens here instead of at the default.
+// Reads the inline styles, which hold what the gesture just committed (a
+// minimized window only changed width and keeps its pre-collapse height).
+// Pack and tile also set .user-sized, but only to hold off the cap while they
+// auto-lay-out — those sizes are the layout's, not the user's, so they don't
+// come through here.
+function markUserSized(root: HTMLElement) {
+  root.classList.add("user-sized")
+  rememberWindowSize(
+    root.dataset.nappId || "",
+    parseFloat(root.style.width),
+    parseFloat(root.style.height)
+  )
 }
 
 function bringToFront(el: HTMLElement) {
@@ -994,9 +1016,8 @@ function setupDrag(
           root.style.top = `${layout.top + padT + stage.scrollTop}px`
           root.style.width = `${layout.width}px`
           root.style.height = `${layout.height}px`
-          // A snap is a deliberate sizing — drop the 420px starter cap so
-          // the window can fully fill its half/quadrant.
-          root.classList.add("user-sized")
+          // A snap is a deliberate sizing — same as a resize drag.
+          markUserSized(root)
         }
       }
     } else if (cachedStageRect) {
@@ -1211,9 +1232,7 @@ function setupResize(
       handle.releasePointerCapture(e.pointerId)
     }
     document.body.classList.remove("napp-resizing")
-    // User has manually sized this window — drop the 420px starter cap so
-    // they can freely grow it. Persisted via state on the next notify.
-    root.classList.add("user-sized")
+    markUserSized(root)
     if (packPlaceholder) {
       packPlaceholder.remove()
       packPlaceholder = null

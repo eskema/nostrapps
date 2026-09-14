@@ -13,6 +13,8 @@ import { classifyEvent, classifyInstalled, getNappletConfig } from "../persisten
 import { unsupportedRequires } from "../napp-permissions.js"
 import { openNappConfigSettings } from "../napp-config.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
+import { resolveCardIcon } from "../nsite/icon.js"
+import { code, detailField, PLACEHOLDER_SRC, renderAppCard, type AppCardOpts } from "./card.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
@@ -20,7 +22,8 @@ import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NAPPLET_NAMED_KIND } from "../nsite/napplet.js"
 import { NostrEvent } from "@nostr/tools"
 import { BlossomClient } from "@nostr/tools/nipb7"
-import { publishOutcomes } from "../utils.js"
+import { normalizeServer, publishOutcomes } from "../utils.js"
+import { onRelayAuth } from "../relay-auth.js"
 import { hasBytes } from "../nsite/heal.js"
 
 // Addressable app kinds shown in Discover: nsites (35128) + named napplets (35129).
@@ -36,8 +39,6 @@ import {
   tab,
   type ButtonVariant
 } from "./ui.js"
-
-const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
 
 const DEFAULT_RELAYS = [
   "wss://relay.nostrapps.com/",
@@ -479,11 +480,22 @@ export function mount(
     }
   }
 
+  // List order: newest install first, with dev apps pinned above everything —
+  // those are the ones being worked on. installedAt is stamped on every install
+  // and survives updates, so the order is stable for a given set (which is what
+  // _installedSig relies on). Apps installed before it was stamped fall back to
+  // their manifest date, which at least keeps them in a meaningful order.
+  function installedApps(): InstalledApp[] {
+    const dev = (a: InstalledApp) => (a.nappId.startsWith("dev~") ? 1 : 0)
+    const at = (a: InstalledApp) => a.installedAt || a.event?.created_at || 0
+    return ctx.apps.list().sort((a, b) => dev(b) - dev(a) || at(b) - at(a))
+  }
+
   function renderInstalledList() {
     const listEl = _installedListEl
     if (!listEl) return
     listEl.innerHTML = ""
-    const apps = ctx.apps.list()
+    const apps = installedApps()
     _installedSig = apps.map(a => a.nappId).join(",")
     // Build every card once; filtering is a visibility toggle (applyInstalledFilter),
     // mirroring the Discover tab — so the two tabs behave identically.
@@ -597,7 +609,6 @@ export function mount(
     opts.onStateChange?.({ params: { relays: [...relays], disabled: [...disabled] } })
   }
 
-
   // Resolve and assign icon URLs for a set of events. Queries each unique
   // author's blossom servers once, then points every matching card icon at it.
   // Cache per-author blossom lists so each is fetched once per render.
@@ -611,10 +622,6 @@ export function mount(
       blossomCache.set(pubkey, p)
     }
     return p
-  }
-  const normalizeServer = (s: string) => {
-    const u = s.endsWith("/") ? s.slice(0, -1) : s
-    return u.startsWith("http") ? u : `https://${u}`
   }
 
   // Load card icons from blossom for any list (discover or installed). Each item
@@ -666,7 +673,9 @@ export function mount(
   // (see applyFilter), not by excluding events here — so every manifest gets a
   // card and the filter can show/hide them without rebuilding.
   function sortedManifests(evts: any[]) {
-    return evts.filter(e => DISCOVER_KINDS.includes(e.kind)).sort((a, b) => b.created_at - a.created_at)
+    return evts
+      .filter(e => DISCOVER_KINDS.includes(e.kind))
+      .sort((a, b) => b.created_at - a.created_at)
   }
 
   // Add / update / remove the placeholder based on whether there are any cards
@@ -760,9 +769,7 @@ export function mount(
     // remove the stale same-address cards before the walk so `ref` never
     // points at a removed node.
     for (const evt of toRender) {
-      _listEl
-        .querySelector(`.apps-card[data-addr="${CSS.escape(computeNappId(evt))}"]`)
-        ?.remove()
+      _listEl.querySelector(`.apps-card[data-addr="${CSS.escape(computeNappId(evt))}"]`)?.remove()
     }
 
     // Merge the sorted-desc batch into the sorted-desc list. Both are ordered
@@ -1078,8 +1085,7 @@ export function mount(
     // any <details> the user just opened. Keeps the (possibly hidden) installed
     // pane fresh regardless of which tab is active.
     if (
-      ctx.apps
-        .list()
+      installedApps()
         .map(a => a.nappId)
         .join(",") === _installedSig
     )
@@ -1093,151 +1099,6 @@ export function mount(
       for (const url of [...subs.keys()]) closeRelaySub(url)
     }
   }
-}
-
-// ─── Unified app card (Installed + Discover render the same shape) ──
-
-
-interface AppCardOpts {
-  nappId: string
-  title: string
-  type: AppType
-  description?: string | null
-  iconSha?: string | null
-  iconMime?: string | null
-  iconUrl?: string | null
-  authorPubkey?: string | null
-  authorLabel?: string | null // plain text shown in place of author (e.g. "local")
-  createdAt?: number | null
-  actions: string[]
-  // `requires` domains this launcher can't provide, named on the card badge.
-  unsupported?: string[]
-  search: string
-  buttons: HTMLElement[]
-  menuTrigger?: HTMLElement | null
-  onAuthorClick?: () => void
-  onOpen?: () => void // clicking the card (away from buttons/author) opens full info
-}
-
-// One card shape for both tabs: head (icon · title · meta · action chips ·
-// buttons) plus a collapsed <details> built lazily on first expand. data-*
-// attributes drive filtering (search), sorted insertion (createdAt) and icon
-// resolution (author).
-function renderAppCard(o: AppCardOpts): HTMLElement {
-  const card = document.createElement("div")
-  card.className = "apps-card"
-  card.dataset.nappId = o.nappId
-  if (o.authorPubkey) card.dataset.author = o.authorPubkey
-  if (o.createdAt) card.dataset.createdAt = String(o.createdAt)
-  card.dataset.type = o.type
-  // Fold the type into the haystack so typing "napplet" narrows the list too.
-  card.dataset.search = `${o.search}\n${o.type}`
-
-  // Flat structure: icon, title, author/label, date, meta extras, handlers and
-  // actions are all direct children of .apps-card.
-
-  // Icon — always present (even when empty) so the layout slot is stable.
-  const icon = document.createElement("img")
-  icon.className = "apps-card-icon"
-  icon.alt = ""
-  icon.loading = "lazy" // defer off-screen blob fetches; loadCardIcons sets src later
-  if (o.iconSha) {
-    icon.dataset.iconSha = o.iconSha
-    if (o.iconMime) icon.dataset.iconMime = o.iconMime
-    icon.src = PLACEHOLDER_SRC
-  } else if (o.iconUrl) {
-    icon.src = o.iconUrl
-    icon.addEventListener("error", () => {
-      icon.src = PLACEHOLDER_SRC
-    })
-  } else {
-    icon.src = PLACEHOLDER_SRC
-  }
-  card.appendChild(icon)
-
-  const h = document.createElement("h3")
-  h.className = "apps-title"
-  h.textContent = o.title
-  card.appendChild(h)
-
-  if (o.description) {
-    const desc = document.createElement("p")
-    desc.className = "apps-description"
-    desc.textContent = o.description
-    card.appendChild(desc)
-  }
-
-  // The type reads inline as part of the author line — "<type> from <author>"
-  // (or "<type> · <label>" for dev/local), same style as the "from" text.
-  if (o.authorPubkey) {
-    const author = document.createElement("span")
-    author.className = "apps-author"
-    author.dataset.type = o.type // CSS ::before renders "<type> from "
-    if (o.onAuthorClick) {
-      author.style.cursor = "pointer"
-      author.addEventListener("click", e => {
-        e.stopPropagation()
-        o.onAuthorClick!()
-      })
-    }
-    const pic = document.createElement("nostr-picture")
-    pic.className = "apps-author-pic"
-    pic.setAttribute("pubkey", o.authorPubkey)
-    const name = document.createElement("nostr-name")
-    name.className = "apps-author-name"
-    name.setAttribute("pubkey", o.authorPubkey)
-    author.append(pic, name)
-    card.appendChild(author)
-  } else {
-    const label = document.createElement("span")
-    label.className = "apps-author apps-author-label"
-    label.textContent = o.authorLabel ? `${o.type} · ${o.authorLabel}` : o.type
-    card.appendChild(label)
-  }
-
-  if (o.unsupported?.length) {
-    const warn = document.createElement("span")
-    warn.className = "apps-unsupported"
-    warn.textContent = `requires unsupported features: ${o.unsupported.join(", ")}`
-    card.appendChild(warn)
-  }
-
-  if (o.createdAt) {
-    const dateEl = document.createElement("span")
-    dateEl.className = "apps-date"
-    dateEl.textContent = new Date(o.createdAt * 1000).toLocaleDateString()
-    card.appendChild(dateEl)
-  }
-
-  if (o.actions.length) {
-    const chips = document.createElement("div")
-    chips.className = "apps-handlers"
-    for (const a of o.actions) {
-      const chip = document.createElement("span")
-      chip.className = "apps-handler"
-      chip.textContent = a
-      chips.appendChild(chip)
-    }
-    card.appendChild(chips)
-  }
-
-  const actions = document.createElement("div")
-  actions.className = "apps-actions"
-  for (const b of o.buttons) actions.appendChild(b)
-  if (o.menuTrigger) actions.appendChild(o.menuTrigger)
-  card.appendChild(actions)
-
-  // Clicking the card (anywhere but a button or the author) opens the app-info
-  // detail overlay. The card itself stays minimal — no inline details.
-  if (o.onOpen) {
-    card.classList.add("apps-card-clickable")
-    card.addEventListener("click", e => {
-      if ((e.target as Element).closest("button, a, .apps-author")) return
-      o.onOpen!()
-    })
-  }
-
-  return card
 }
 
 // ─── Discover card rendering ─────────────────────────────────────
@@ -1291,7 +1152,10 @@ function renderCard(
           ],
           content: ""
         })
-        const outcomes = await publishOutcomes(relays, pool.publish(relays, signed))
+        const outcomes = await publishOutcomes(
+          relays,
+          pool.publish(relays, signed, { onauth: onRelayAuth })
+        )
         const ok = outcomes.filter(o => o.ok).length
         const missing = outcomes.filter(o => !o.ok).map(o => o.relay.replace(/^wss?:\/\//, ""))
         ctx.setStatus?.(
@@ -1447,63 +1311,6 @@ function computeNappId(evt: any) {
   return base
 }
 
-// Conventional icon filenames to fall back to when no icon is declared.
-// Conventional icon filenames to look for when a manifest declares no usable
-// `icon` tag. Matched by BASENAME (so an icon in a subfolder still counts);
-// apple-touch-icon is handled separately (preferred, any size/path).
-const ICON_FALLBACK_NAMES = [
-  "icon.svg",
-  "favicon.svg",
-  "icon.png",
-  "favicon.png",
-  "icon-192.png",
-  "favicon.ico"
-]
-
-// Resolve a discover card's icon to a blossom sha (loadIcons fetches it from the
-// author's blossom servers). The `icon` tag may hold a blossom sha OR a path
-// (e.g. "/icon.svg" from metadata.json) — for a path we map it to the file's sha
-// via the manifest's `path` tags. With no usable icon tag we look through the
-// manifest's files BY FILENAME (so icons in subfolders are found, not just at
-// the root), preferring an apple-touch-icon, then a conventional favicon name.
-function resolveCardIcon(evt: any): {
-  sha: string | null
-  mime: string | null
-  url: string | null
-} {
-  const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
-  const basename = (p: any) => String(p).replace(/^.*\//, "").toLowerCase()
-  // Match the full declared path (manifests vary on the leading slash).
-  const byFullPath = (p: string) => {
-    const want = String(p).replace(/^\//, "")
-    return pathTags.find((t: any) => String(t[1]).replace(/^\//, "") === want)
-  }
-  const byName = (name: string) => pathTags.find((t: any) => basename(t[1]) === name)
-
-  const iconTag = evt.tags.find((t: any) => t[0] === "icon" && t[1])
-  if (iconTag) {
-    const val = iconTag[1] as string
-    if (/^[0-9a-f]{64}$/i.test(val)) return { sha: val, mime: iconTag[2] || null, url: null }
-    // A self-contained napplet has no file paths to point at, so its icon is an
-    // inline data: URI or an absolute URL — use it directly.
-    if (/^(data:|https?:)/i.test(val)) return { sha: null, mime: null, url: val }
-    // The declared path may not match exactly (root vs subfolder); fall back to
-    // its filename anywhere in the manifest.
-    const pt = byFullPath(val) || byName(basename(val))
-    if (pt) return { sha: pt[2], mime: pt[3] || null, url: null }
-  }
-
-  // Prefer an apple-touch-icon (a real app icon), wherever it lives.
-  const apple = pathTags.find((t: any) => basename(t[1]).startsWith("apple-touch-icon"))
-  if (apple) return { sha: apple[2], mime: apple[3] || null, url: null }
-
-  for (const name of ICON_FALLBACK_NAMES) {
-    const pt = byName(name)
-    if (pt) return { sha: pt[2], mime: pt[3] || null, url: null }
-  }
-  return { sha: null, mime: null, url: null }
-}
-
 // ─── helpers ─────────────────────────────────────────────────────
 
 function sanitizeRelays(relays: string[]): string[] {
@@ -1626,7 +1433,6 @@ function loadAuthorNames(listEl: HTMLElement | null, refilter: () => void) {
       .catch(() => authorNamesInFlight.delete(pk))
   }
 }
-
 
 // ─── app-info detail (shown in the overlay over the list) ──────────
 // Built from the clicked app: a rebuilt list-item card (with live actions),
@@ -1784,7 +1590,10 @@ function detailInfo(
         b.addEventListener("click", async () => {
           b.disabled = true
           b.textContent = "publishing…"
-          const outcomes = await publishOutcomes(staleRelays, pool.publish(staleRelays, event))
+          const outcomes = await publishOutcomes(
+            staleRelays,
+            pool.publish(staleRelays, event, { onauth: onRelayAuth })
+          )
           for (const o of outcomes) {
             if (!o.ok) continue
             sightings?.set(o.relay, event.created_at)
@@ -1800,7 +1609,9 @@ function detailInfo(
             b.disabled = false
             b.textContent = btnLabel(staleRelays.length)
           } else {
-            ctx?.setStatus?.(`Re-published to ${outcomes.length} relay${outcomes.length === 1 ? "" : "s"}`)
+            ctx?.setStatus?.(
+              `Re-published to ${outcomes.length} relay${outcomes.length === 1 ? "" : "s"}`
+            )
             b.remove()
           }
         })
@@ -1999,34 +1810,6 @@ async function renderFiles(evt: any, list: HTMLElement, ctx?: SystemCtx) {
     }
   })
   list.after(b)
-}
-
-function normalizeServer(s: string): string {
-  const u = s.endsWith("/") ? s.slice(0, -1) : s
-  return u.startsWith("http") ? u : `https://${u}`
-}
-
-function code(text: string): HTMLElement {
-  const c = document.createElement("code")
-  c.textContent = text
-  return c
-}
-
-// A field, addressable via .apps-detail-<key> (e.g. .apps-detail-id). The
-// .apps-detail-label is added only when a label is given; the value always gets
-// .apps-detail-value.
-function detailField(key: string, value: HTMLElement, label?: string): HTMLElement {
-  const row = document.createElement("div")
-  row.className = `apps-detail-${key}`
-  if (label) {
-    const l = document.createElement("span")
-    l.className = "apps-detail-label"
-    l.textContent = label
-    row.appendChild(l)
-  }
-  value.classList.add("apps-detail-value")
-  row.appendChild(value)
-  return row
 }
 
 // A row of chips, addressable via .apps-detail-<key> (keeps .apps-chips for the

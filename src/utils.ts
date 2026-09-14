@@ -44,3 +44,8 @@ export async function publishOutcomes(
       r.status === "fulfilled" ? String(r.value ?? "") : (r.reason?.message ?? String(r.reason))
   }))
 }
+
+export function normalizeServer(s: string): string {
+  const u = s.endsWith("/") ? s.slice(0, -1) : s
+  return u.startsWith("http") ? u : `https://${u}`
+}

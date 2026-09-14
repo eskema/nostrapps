@@ -201,8 +201,9 @@ export type InstalledApp = {
   // Local napplets only: the folder's index.html, kept so reload can rebuild
   // the srcdoc (published napplets re-fetch from Blossom via `event` instead).
   html?: string
-  // Unix seconds when a local/dev/temp app was added (apps with no manifest
-  // event, so no publish date). Surfaced as the card's date for those.
+  // Unix seconds of the FIRST install, kept across updates. Orders the installed
+  // list, and stands in as the card's date for apps with no manifest event (no
+  // publish date of their own). Absent on apps installed before it was stamped.
   installedAt?: number
 }
 
@@ -214,6 +215,15 @@ export interface SuggestionItem {
   nappId?: string
   instanceId?: string
   petname?: string | null
+  // For "open" / "napp" rows, what the Apps card shows: the one <img> src its
+  // icon loads from (probed once per app, see main.ts; null when none works),
+  // and its author's pubkey — or, for apps with no manifest, the label standing
+  // in for one ("dev" / "temp" / "local").
+  icon?: Promise<string | null>
+  // Which icon that is for (the manifest version): a change rebuilds the row.
+  iconKey?: string
+  author?: string | null
+  authorLabel?: string | null
   raw?: string
   slash?: string
   systemId?: string

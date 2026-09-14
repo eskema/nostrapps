@@ -52,7 +52,14 @@ export function unsupportedRequires(domains: string[]): string[] {
 
 export interface PolicyPromptOpts {
   title: string
+  // A ready-to-use src: a data:/http(s): icon, or a path on an origin that is
+  // already serving (an installed app). NOT a raw manifest icon value — those
+  // need resolving first, see nsite/icon.ts.
   icon?: string
+  // The icon's bytes, for the install screens: they run before the napp's origin
+  // serves anything, so its own files can only be shown from memory. Preferred
+  // over `icon` when both are given.
+  iconBlob?: Blob
   // What this app is — "nsite" | "napp" | "napplet" — shown next to the name.
   type?: string
   // Ambiguous load (a lone index.html): show an nsite/napplet toggle instead
@@ -97,11 +104,23 @@ export function promptNappPolicy(
 
       const head = document.createElement("div")
       head.className = "napp-perms-head"
-      if (opts.icon) {
+      const iconSrc = opts.iconBlob ? URL.createObjectURL(opts.iconBlob) : opts.icon
+      if (iconSrc) {
         const img = document.createElement("img")
         img.className = "napp-perms-icon"
-        img.src = opts.icon
         img.alt = ""
+        // Revoke once the bitmap is decoded (it survives the revoke). There's no
+        // placeholder to fall back to, so an icon that won't load drops out and
+        // leaves the name on its own rather than showing a broken-image glyph.
+        const release = () => {
+          if (opts.iconBlob) URL.revokeObjectURL(iconSrc)
+        }
+        img.addEventListener("load", release)
+        img.addEventListener("error", () => {
+          release()
+          img.remove()
+        })
+        img.src = iconSrc
         head.appendChild(img)
       }
       const name = document.createElement("div")

@@ -47,7 +47,7 @@ async function handleFetch(req, url) {
   // Signing companion lazy-imported by bridge.js (napp.utils.signWithKey /
   // generateKey) — generated from @nostr/tools/pure, served like bridge.js.
   if (path === "/nostr-crypto.js") return fetch(req)
-  // Launcher-owned shared stylesheet (opt-in via metadata `ui: "wrapper"`),
+  // Launcher-owned shared stylesheet (opt-in via metadata `requires: ["ui"]`),
   // served from the launcher origin for every napp subdomain like bridge.js.
   // Its fonts are inlined as data URIs inside it (a separate /fonts/ request is
   // fetched in CORS mode, which fails the napp-subdomain passthrough).
@@ -287,14 +287,20 @@ function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
 }
 
 // The wrapper design system is a granted capability (`ui`) read from the
-// per-napp policy — see grantsFor() at the serve sites. TEMPORARY back-compat:
-// existing apps still declare `ui: "wrapper"` in metadata.json rather than
-// `requires: ["ui"]`, so we also detect that flag and apply the wrapper. Remove
-// once apps have migrated to the requires declaration.
+// per-napp policy — see grantsFor() at the serve sites. This is the fallback for
+// when the policy can't carry it: `ui` only lands in the stored grant at the
+// moment the permission screen runs (it's auto-granted there, never a toggle),
+// and that screen is first-run-only, so an app whose grant predates its
+// declaration would otherwise render unstyled until it's re-granted. Reading the
+// declaration straight from metadata.json costs nothing in permission terms —
+// `ui` is never withheld from an app that declares it.
+// `ui: "wrapper"` is the RETIRED spelling of the same declaration, still honored
+// for apps published before the migration.
 function wrapperFromMetaText(text) {
   try {
     const m = JSON.parse(text)
-    return !!m && m.ui === "wrapper"
+    if (!m) return false
+    return (Array.isArray(m.requires) && m.requires.includes("ui")) || m.ui === "wrapper"
   } catch {
     return false
   }

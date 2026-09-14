@@ -12,6 +12,8 @@
 // waits for the user's choice — so nothing is signed until they say so.
 
 import { normalizeURL } from "@nostr/tools/utils"
+import type { EventTemplate, VerifiedEvent } from "@nostr/tools"
+import { currentSigner } from "./signers/index.js"
 import { openToast } from "./toast.js"
 
 const AUTO_KEY = "nostrapps:auto-auth"
@@ -94,9 +96,11 @@ function notify() {
 // Non-modal (a challenge isn't user-initiated), grouped so a burst of relays
 // challenging at once can be answered in one click.
 
-function askRelayAuth(url: string): Promise<boolean> {
+function askRelayAuth(url: string, askedBy?: string): Promise<boolean> {
   return openToast<boolean>({
-    title: "This relay asks for authentication.",
+    title: askedBy
+      ? `${askedBy} is publishing to a relay that asks for authentication.`
+      : "This relay asks for authentication.",
     code: url,
     hint: "Your choice is remembered for this relay.",
     actions: [
@@ -118,10 +122,10 @@ function askRelayAuth(url: string): Promise<boolean> {
 // otherwise a burst of AUTHs stacks identical toasts.
 const pendingPrompts = new Map<string, Promise<boolean>>()
 
-function promptRelayAuth(url: string): Promise<boolean> {
+function promptRelayAuth(url: string, askedBy?: string): Promise<boolean> {
   const existing = pendingPrompts.get(url)
   if (existing) return existing
-  const p = askRelayAuth(url).then(ok => {
+  const p = askRelayAuth(url, askedBy).then(ok => {
     rememberRelayDecision(url, ok)
     pendingPrompts.delete(url)
     return ok
@@ -131,14 +135,34 @@ function promptRelayAuth(url: string): Promise<boolean> {
 }
 
 // ─── the decision entry point ────────────────────────────────────
-// Called by pool.automaticallyAuth's signer wrapper when a relay challenges.
-// Resolves true → sign the auth event; false → refuse.
+// Called by the signer wrapper below when a relay challenges. Resolves true →
+// sign the auth event; false → refuse.
 
-export async function authorizeRelay(url: string): Promise<boolean> {
+export async function authorizeRelay(url: string, askedBy?: string): Promise<boolean> {
   if (automaticallyAuthOn()) return true
   const key = normalizeURL(url)
   const stored = readDecisions()[key]
   if (stored === "allow") return true
   if (stored === "deny") return false
-  return promptRelayAuth(key)
+  return promptRelayAuth(key, askedBy)
 }
+
+// ─── the signer wrapper ──────────────────────────────────────────
+// Answers both ways a challenge arrives: the AUTH a relay sends unprompted, and
+// publish()'s onauth, which is the only thing that retries an "auth-required:"
+// rejection. The draft names its relay, so one function serves any number of
+// them. `askedBy` names whoever provoked it: a napp publishes to relays of its
+// own choosing, and "allow" is remembered, so the prompt has to say where it
+// came from.
+export function relayAuthSigner(askedBy?: string) {
+  return async (draft: EventTemplate): Promise<VerifiedEvent> => {
+    const url = draft.tags.find(t => t[0] === "relay")?.[1] || ""
+    if (!(await authorizeRelay(url, askedBy))) throw new Error(`auth not authorized for ${url}`)
+    const signer = currentSigner()
+    if (!signer) throw new Error("no signer connected")
+    return signer.signEvent(draft) as any
+  }
+}
+
+// The launcher's own publishes — no napp to name.
+export const onRelayAuth = relayAuthSigner()

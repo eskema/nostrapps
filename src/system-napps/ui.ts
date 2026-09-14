@@ -15,7 +15,7 @@
 // Variants: primary | outline | danger | warning | ghost. Layout (align-self,
 // margins, placement) belongs on the parent/context, not the variant. CSS lives
 // in launcher.css under "Design system" and is mirrored in public/napp-ui.css
-// for napps that opt in (`"ui": "wrapper"`) — keep the two in sync.
+// for napps that opt in (`requires: ["ui"]`) — keep the two in sync.
 //
 // Editable lists (a column of entries + an add affordance + per-entry controls,
 // like the relays napp or the discover tab's relay editor) are COMPOSED from

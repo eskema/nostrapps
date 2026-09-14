@@ -1,7 +1,7 @@
 /*
  * napp-ui.css — the nostrapps wrapper design system, for napps that opt in.
  *
- * A napp opts in by declaring `"ui": "wrapper"` in its metadata.json; the
+ * A napp opts in by declaring `requires: ["ui"]` in its metadata.json; the
  * launcher's service worker then injects
  *   <link rel="stylesheet" href="/napp-ui.css">
  * into the napp's <head> (before the napp's own styles, so the napp can still

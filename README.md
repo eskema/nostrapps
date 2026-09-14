@@ -118,6 +118,36 @@ window.napp.fx.satsFromBolt11(invoice)
 window.napp.link(url)
 ```
 
+### `metadata.json`
+
+A napp folder carries a `metadata.json` next to its `index.html`. The launcher reads it directly on the dev/local paths, and the uploader turns it into manifest tags when you publish — so the same file describes the napp in both places.
+
+```json
+{
+  "id": "relays",
+  "title": "Relays",
+  "icon": "/icon.svg",
+  "description": "Edit your relay lists",
+  "singleton": true,
+  "requires": ["ui"],
+  "actions": ["profile", "view:0"]
+}
+```
+
+| Field         | Published as         | Meaning                                                                           |
+| ------------- | -------------------- | --------------------------------------------------------------------------------- |
+| `id`          | `["d", …]`           | Required. The napp's identifier, and the basis of its origin.                     |
+| `title`       | `["title", …]`       | Display name.                                                                     |
+| `icon`        | `["icon", …]`        | Icon URL or path.                                                                 |
+| `description` | `["description", …]` | One line, shown on the app's card and detail view.                                |
+| `singleton`   | `["singleton"]`      | One window at a time — see below.                                                 |
+| `requires`    | `["requires", …]`    | Capability domains ([Permissions](#permissions), [Shared UI](#shared-ui-opt-in)). |
+| `actions`     | `["action", …]`      | Action patterns the napp `registerAction()`s.                                     |
+
+Declaring `actions` or `requires` is also what makes the launcher call your app a **napp** rather than a plain **nsite**: an app that declares neither is a static site, shown and launched as one. A pure-UI napp with no handlers still qualifies via `"requires": ["ui"]`.
+
+**`singleton`** — with `"singleton": true`, launching an app that's already open surfaces the existing window (adopting it into the space you're in) instead of opening a second one, and its `window.napp.instance` is a stable string rather than a per-window serial. Leave it out for napps that are useful several at a time — a feed reader, a note viewer — and set it for the ones that edit a single piece of your state, like a relay-list editor.
+
 ### Streaming feeds
 
 Napps can subscribe to live event streams. Each returns a handle with `.close()`:
@@ -158,7 +188,7 @@ Apps registering `"view"` (generic, no number) may receive either a nip19 code s
 
 Optionally `{ instance: "<instanceId>" }` as the third argument to route the action directly to a specific running instance instead of launching a new one.
 
-Each napp also gets its instance id at `window.napp.instance` (a string, unique per window).
+Each napp also gets its instance id at `window.napp.instance` (a string, unique per window — or the napp's own id, stable across launches, when it declares `singleton`).
 
 TypeScript types for everything above live in [`env.d.ts`](./env.d.ts). Reference it in your napp's `tsconfig.json` or copy it as a starting point.
 
@@ -174,7 +204,7 @@ A napp can adopt the launcher's design system (buttons, inputs, disclosures, che
 { "requires": ["ui"] }
 ```
 
-`ui` is auto-granted (never a permission toggle) and implies `theme`. The service worker injects `<link rel="stylesheet" href="/napp-ui.css">` before your own styles, so you can override anything. It provides `.btn` (+ `-primary`/`-outline`/`-danger`/`-warning`/`-ghost`/`-link`), `.ui-input`, `.ui-details`, `.ui-check`, and `.ui-icon-*`, with fonts and icons inlined and `--surface`/`--text` tracking the theme. Napps that don't declare `ui` are unaffected. (`"ui": "wrapper"` in `metadata.json` still works as back-compat.)
+`ui` is auto-granted (never a permission toggle) and implies `theme`. The service worker injects `<link rel="stylesheet" href="/napp-ui.css">` before your own styles, so you can override anything. It provides `.btn` (+ `-primary`/`-outline`/`-danger`/`-warning`/`-ghost`/`-link`), `.ui-input`, `.ui-details`, `.ui-check`, and `.ui-icon-*`, with fonts and icons inlined and `--surface`/`--text` tracking the theme. Napps that don't declare `ui` are unaffected. (The retired `"ui": "wrapper"` field is still honored for apps published before the migration — don't use it in new napps.)
 
 ### `window.napplet` (NIP-5D, experimental)
 

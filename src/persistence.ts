@@ -23,6 +23,8 @@ const POLICY_KEY = "nostrapps:policy"
 // factory reset, by anything. This is the minimum written down to make the
 // wipe possible, and each id is dropped the moment its origin is cleared.
 const EPHEMERAL_KEY = "nostrapps:ephemeral-origins"
+// Per-napp window size, remembered from the last deliberate resize.
+const WINDOW_SIZE_KEY = "nostrapps:window-sizes"
 // Legacy keys — read once to migrate into the spaces document, then removed.
 const LEGACY_OPEN_KEY = "nostrapps:open"
 const LEGACY_PACK_MODE_KEY = "nostrapps:packMode"
@@ -162,6 +164,37 @@ export function moveOpenToSpace(instanceId: string, targetId: string) {
 
 export function getLoadedActions(instanceId: string): Array<{ name: string; payload: unknown }> {
   return readOpen().find(n => n.instanceId === instanceId)?.loadedActions || []
+}
+
+// ─── Remembered window sizes ───────────────────────────────────────
+// Resizing a window records that size for its napp, so the next window you
+// open for it starts there instead of at the default. Keyed by nappId (system
+// windows included, as `__<sysId>__`) and global rather than per-space: the
+// size you picked is a property of the napp, not of where it was open.
+
+export function rememberWindowSize(nappId: string, width: number, height?: number) {
+  if (!nappId || !Number.isFinite(width) || width <= 0) return
+  const size: { width: number; height?: number } = { width: Math.round(width) }
+  // A system napp with no inline height is content-sized; keep it that way
+  // unless the resize gave it a real one.
+  if (Number.isFinite(height) && (height as number) > 0) size.height = Math.round(height as number)
+  const all = readJson(WINDOW_SIZE_KEY, {})
+  all[nappId] = size
+  writeJson(WINDOW_SIZE_KEY, all)
+}
+
+export function getWindowSize(nappId: string): { width: number; height?: number } | null {
+  const size = readJson(WINDOW_SIZE_KEY, {})[nappId]
+  if (!size || typeof size.width !== "number" || size.width <= 0) return null
+  const height = typeof size.height === "number" && size.height > 0 ? size.height : undefined
+  return { width: size.width, height }
+}
+
+export function forgetWindowSize(nappId: string) {
+  const all = readJson(WINDOW_SIZE_KEY, {})
+  if (!(nappId in all)) return
+  delete all[nappId]
+  writeJson(WINDOW_SIZE_KEY, all)
 }
 
 // ─── Spaces (the single source of truth for window state) ──────────
@@ -432,8 +465,23 @@ function writeInstalled(all: Record<string, Omit<InstalledApp, "nappId">>) {
   writeJson(INSTALLED_KEY, all)
 }
 
+// Parsed once per distinct stored string: the records carry whole manifests,
+// and the launcher input rebuilds its list from them on every open and
+// keystroke. Every mutation writes back in the same call, so a cached object
+// is never stale — the next read sees the new string and re-parses.
+let installedCache: {
+  raw: string | null
+  parsed: Record<string, Omit<InstalledApp, "nappId">>
+} | null = null
 function readInstalled(): Record<string, Omit<InstalledApp, "nappId">> {
-  return readJson(INSTALLED_KEY, {})
+  const raw = localStorage.getItem(INSTALLED_KEY)
+  if (installedCache && installedCache.raw === raw) return installedCache.parsed
+  let parsed: Record<string, Omit<InstalledApp, "nappId">> = {}
+  try {
+    parsed = JSON.parse(raw || "") ?? {}
+  } catch {}
+  installedCache = { raw, parsed }
+  return parsed
 }
 
 export function storeInstalledEvent(event: NostrEvent, petname?: string) {
@@ -451,7 +499,10 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string) {
     actions: event.tags.filter(t => t[0] === "action" && t[1]).map(t => t[1]),
     modes: modesFromEventTags(event.tags),
     initialSize: initialSizeFromEventTags(event.tags),
-    event
+    event,
+    // First install wins: an update re-runs this, and it shouldn't read as a
+    // fresh install (the apps list orders by this).
+    installedAt: existing?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)
 }

@@ -47,6 +47,13 @@ import { resolveInput } from "./nsite/resolve.js"
 import { fetchNsite } from "./nsite/fetch.js"
 import { resolveNapplet, isNappletKind, loadNappletFromManifest } from "./nsite/napplet.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
+import {
+  directIconSrc,
+  iconBlobFrom,
+  iconBlobFromDir,
+  installedIconSrc,
+  installedIconSources
+} from "./nsite/icon.js"
 import { currentSigner, reconnectIfNeeded } from "./signers/index.js"
 import { connectBunkerInput, disconnectBunkerSigner } from "./signers/nip46.js"
 import { googleLoginAndCreateBunker } from "./signers/google.js"
@@ -65,7 +72,8 @@ import type {
   NappPolicy,
   SystemCtx,
   NappWindow,
-  LaunchOpts
+  LaunchOpts,
+  InstalledApp
 } from "./types.js"
 import {
   registry as systemRegistry,
@@ -76,6 +84,7 @@ import {
   actionList
 } from "./system-napps/index.js"
 import { pool } from "@nostr/gadgets/global"
+import { bareNostrUser, loadNostrUser } from "@nostr/gadgets/metadata"
 import { EventTemplate } from "@nostr/tools"
 import * as relayAuth from "./relay-auth.js"
 import { buildUserIndex } from "./user-search.js"
@@ -97,19 +106,13 @@ pool.allowConnectingToRelay = (url, operation) => {
   if (!host || host === "undefined" || host === "null") return false
   return relayAllowed ? relayAllowed(url, operation) : true
 }
-pool.automaticallyAuth = (url: string) => {
-  const signer = currentSigner()
-  if (!signer) return null
+pool.automaticallyAuth = () => {
   // A signer is handed back even when auto-auth is off: returning non-null is
-  // what routes challenges to us at all, and authorizeRelay() then decides per
+  // what routes challenges to us at all, and the wrapper then decides per
   // challenge — auto mode signs everything; otherwise a stored per-relay
   // decision is honored or a confirmation toast is shown and remembered.
-  return async (evt: EventTemplate) => {
-    if (!(await relayAuth.authorizeRelay(url))) {
-      throw new Error(`auth not authorized for ${url}`)
-    }
-    return signer.signEvent(evt) as any
-  }
+  if (!currentSigner()) return null
+  return relayAuth.relayAuthSigner()
 }
 
 const stage = document.getElementById("stage")!
@@ -343,6 +346,7 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   persist.clearPolicy(nappId)
   persist.clearNappletStorage(nappId)
   persist.clearNappletConfig(nappId)
+  persist.forgetWindowSize(nappId)
   closeNappletSubs(nappId)
   handlers.removeApp(nappId)
   removeDevHandle(nappId)
@@ -798,7 +802,7 @@ async function editPermissions(nappId: string) {
       : metaAppType(app)
   const policy = await promptNappPolicy({
     title: app.petname || app.title || nappId,
-    icon: app.icon || undefined,
+    icon: installedIconSrc(app),
     type,
     declaredDomains: [...declared],
     current: persist.getPolicy(nappId),
@@ -896,6 +900,72 @@ async function invokeSystemNapp(sysId: string) {
 }
 
 // ─── suggestions ────────────────────────────────────────────────
+// The dropdown is a long-lived list changed in place: one row per item, built
+// once and kept (rows), so a change touches only the rows it concerns — a
+// window opening or closing, an app installed or updated, an author's name
+// landing. Typing filters by toggling rows. Nothing here rebuilds the list.
+
+// Three sections, each a container kept in the DOM, with a divider between
+// consecutive non-empty ones (see applyFilter):
+//   1. System items (slash commands and slash actions) — discoverability.
+//   2. Open windows across ALL spaces (current space first), a global switcher.
+//   3. Installed apps, alphabetical by friendly name.
+type Section = "system" | "open" | "apps"
+const suggSections: Record<Section, HTMLDivElement> = {
+  system: document.createElement("div"),
+  open: document.createElement("div"),
+  apps: document.createElement("div")
+}
+const suggDividers = [document.createElement("div"), document.createElement("div")]
+for (const d of suggDividers) d.className = "sugg-divider"
+suggestions.append(
+  suggSections.system,
+  suggDividers[0],
+  suggSections.open,
+  suggDividers[1],
+  suggSections.apps
+)
+
+type Row = {
+  item: SuggestionItem
+  el: HTMLDivElement
+  sig: string // what the row was built from — a change means a rebuild
+  base: string // the searchable text, minus the author's name
+  search: string
+  nameEl: HTMLElement | null // the author's name, patched when it lands
+}
+const rows = new Map<string, Row>()
+
+const itemKey = (item: SuggestionItem) =>
+  item.systemId
+    ? `sys:${item.systemId}`
+    : item.actionId
+      ? `act:${item.actionId}`
+      : item.instanceId
+        ? `sess:${item.instanceId}`
+        : `napp:${item.nappId}`
+
+const sectionOf = (item: SuggestionItem): Section =>
+  item.source === "system" || item.source === "action"
+    ? "system"
+    : item.source === "open"
+      ? "open"
+      : "apps"
+
+// Everything a row is built from. spaceCurrent is left out: it's a class
+// toggled in place (a space switch would otherwise rebuild every open row).
+const itemSig = (item: SuggestionItem) =>
+  [
+    item.petname,
+    item.slash,
+    item.appType,
+    item.author,
+    item.authorLabel,
+    item.iconKey,
+    item.spaceId,
+    item.spaceName
+  ].join(" ")
+
 function buildSuggestionItems(): SuggestionItem[] {
   const seen = new Set()
   const out: SuggestionItem[] = []
@@ -925,6 +995,10 @@ function buildSuggestionItems(): SuggestionItem[] {
     (a, b) => (a.spaceId === currentSpaceId ? 0 : 1) - (b.spaceId === currentSpaceId ? 0 : 1)
   )
   const allSessions = allWindows.map(a => a.window)
+  // One read of the installed set for the whole build: each record carries its
+  // manifest, so a per-row lookup would re-parse all of them every time.
+  const installed = persist.getInstalledApps()
+  const byId = new Map(installed.map(a => [a.nappId, a]))
 
   for (const { spaceId, spaceName, window: s } of allWindows) {
     if (s.system) continue // shown via systemList row instead
@@ -932,11 +1006,13 @@ function buildSuggestionItems(): SuggestionItem[] {
     if (seen.has(key)) continue
     seen.add(key)
     const customPet = s.petname && s.petname !== s.nappId ? s.petname : null
+    const app = byId.get(s.nappId)
     out.push({
       source: "open",
       nappId: s.nappId,
       instanceId: s.instanceId,
-      petname: customPet,
+      petname: customPet || app?.petname || app?.title || null,
+      ...describeApp(app),
       spaceId,
       spaceName,
       spaceCurrent: spaceId === currentSpaceId
@@ -946,22 +1022,23 @@ function buildSuggestionItems(): SuggestionItem[] {
   // Every installed app stays launchable, even while open — opening one doesn't
   // remove it from the list, so you can always open another instance. (An open
   // window also appears as its own "open" row above, for jumping to it.)
-  for (const app of persist.getInstalledApps()) {
+  for (const app of installed) {
     const key = `napp:${app.nappId}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push({
       source: "napp",
-      appType: persist.classifyInstalled(app),
       nappId: app.nappId,
-      petname: petnameForNappId(app.nappId, allSessions)
+      petname: petnameForNappId(app.nappId, allSessions, app),
+      ...describeApp(app)
     })
   }
 
   return out
 }
 
-function petnameForNappId(nappId: string, sessions: any[]): string | null {
+// `app` spares the storage read when the caller already holds the record.
+function petnameForNappId(nappId: string, sessions: any[], app?: InstalledApp): string | null {
   // Prefer a petname from any session for this nappId — that's typically the
   // friendliest name (manifest title we set at launch).
   for (const s of sessions) {
@@ -969,7 +1046,187 @@ function petnameForNappId(nappId: string, sessions: any[]): string | null {
       return s.petname
     }
   }
-  return persist.getInstalledApp(nappId)?.petname || null
+  return (app ?? persist.getInstalledApp(nappId))?.petname || null
+}
+
+// What the Apps card shows under an app's title: its icon, and "<type> from
+// <author>" — or "<type> · dev/temp/local" when there's no manifest, so no
+// publisher.
+function describeApp(
+  app: InstalledApp | undefined
+): Pick<SuggestionItem, "appType" | "icon" | "iconKey" | "author" | "authorLabel"> {
+  if (!app) return {}
+  const author = app.event?.pubkey || null
+  const authorLabel = author
+    ? null
+    : app.nappId.startsWith("dev~")
+      ? "dev"
+      : app.nappId.startsWith("temp~")
+        ? "temp"
+        : "local"
+  return {
+    appType: persist.classifyInstalled(app),
+    icon: iconSrcFor(app, true),
+    iconKey: iconKey(app),
+    author,
+    authorLabel
+  }
+}
+
+// What the list needs beyond its rows — icons and author names — is fetched
+// ahead of it, in the background: at startup, and again when the installed set
+// changes (prewarmSuggestions). Opening the list shows what is already in hand;
+// the rest patches in as it lands.
+//
+// The fetching is paced through one queue: a couple of jobs at a time, each
+// started only when the main thread is idle and dropped from its slot if it
+// overruns, so the fan-out behind a name or an icon (relay connections, the
+// signature checks on what comes back, image fetches) never crowds out the
+// boot or the user's input. A job wanted for a row on screen moves to the
+// front of the line.
+type Job = { key: string; run: () => Promise<unknown> }
+const queue: Job[] = []
+let running = 0
+const RUNNING_MAX = 2
+const JOB_MAX_MS = 15_000
+const idle = () =>
+  new Promise<void>(r => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => r(), { timeout: 1000 })
+    } else setTimeout(r, 50)
+  })
+function enqueue(key: string, run: () => Promise<unknown>, front = false) {
+  if (front) queue.unshift({ key, run })
+  else queue.push({ key, run })
+  pump()
+}
+// Moves a job still waiting in line to the front (for a row now on screen).
+function promote(key: string) {
+  const at = queue.findIndex(j => j.key === key)
+  if (at > 0) queue.unshift(...queue.splice(at, 1))
+}
+function pump() {
+  while (running < RUNNING_MAX && queue.length) {
+    running++
+    const job = queue.shift()!
+    idle()
+      .then(() => Promise.race([job.run(), new Promise(r => setTimeout(r, JOB_MAX_MS))]))
+      .catch(() => {})
+      .then(() => {
+        running--
+        pump()
+      })
+  }
+}
+
+// Each installed app's icon, probed to the one URL that loads (null: none did);
+// the row's <img> then sets a src the browser already holds. The probe images
+// are kept so the decoded icons stay cached. Keyed on the manifest version, so
+// an update probes afresh (and rebuilds the row, via itemSig).
+const iconKey = (app: InstalledApp) => `${app.nappId}\n${app.event?.id || app.icon}`
+const iconSrcs = new Map<string, Promise<string | null>>()
+const iconProbes = new Map<string, HTMLImageElement>()
+const PROBE_MAX_MS = 8_000
+function iconSrcFor(app: InstalledApp, front = false): Promise<string | null> {
+  const key = iconKey(app)
+  let p = iconSrcs.get(key)
+  if (p) {
+    if (front) promote(`icon:${key}`)
+    return p
+  }
+  p = new Promise<string | null>(resolve => {
+    enqueue(
+      `icon:${key}`,
+      () =>
+        installedIconSources(app)
+          .then(
+            srcs =>
+              new Promise<string | null>(done => {
+                const img = new Image()
+                iconProbes.set(key, img)
+                let i = 0
+                let timer = 0
+                const next = () => {
+                  clearTimeout(timer)
+                  if (i >= srcs.length) return done(null)
+                  img.src = srcs[i++]
+                  timer = window.setTimeout(next, PROBE_MAX_MS) // a server that hangs
+                }
+                img.onload = () => {
+                  clearTimeout(timer)
+                  done(img.src)
+                }
+                img.onerror = next
+                next()
+              })
+          )
+          .then(resolve, () => resolve(null)),
+      front
+    )
+  })
+  iconSrcs.set(key, p)
+  return p
+}
+
+// Everything the list will need, queued for the background: names first (they
+// need relays), then icons. Probes for apps no longer installed (or since
+// updated) are dropped.
+function prewarmSuggestions() {
+  const apps = persist.getInstalledApps()
+  const keep = new Set(apps.map(iconKey))
+  for (const key of iconSrcs.keys()) {
+    if (keep.has(key)) continue
+    iconSrcs.delete(key)
+    iconProbes.delete(key)
+  }
+  for (const app of apps) if (app.event?.pubkey) authorFor(app.event.pubkey)
+  for (const app of apps) iconSrcFor(app)
+}
+
+// Authors by pubkey: the name for the "from <author>" line, and the text a
+// typed filter matches against. A row built before its author is in shows the
+// short npub; authorLanded patches the name in when the profile arrives.
+type Author = { display: string; search: string }
+const authors = new Map<string, Author | null>() // null: queued or in flight
+function authorFor(pubkey: string, front = false): Author | null {
+  const known = authors.get(pubkey)
+  if (known !== undefined) {
+    if (known === null && front) promote(`author:${pubkey}`)
+    return known
+  }
+  authors.set(pubkey, null)
+  enqueue(
+    `author:${pubkey}`,
+    () =>
+      loadNostrUser(pubkey)
+        .then(u => {
+          const author = {
+            display: u.shortName,
+            search: [u.metadata?.name, u.metadata?.display_name, u.metadata?.nip05, u.shortName]
+              .filter(Boolean)
+              .join(" ")
+              .toLowerCase()
+          }
+          authors.set(pubkey, author)
+          authorLanded(pubkey, author)
+        })
+        .catch(() => authors.delete(pubkey)),
+    front
+  )
+  return null
+}
+
+// Patches the name into every row by that author, and into its search text so
+// a filter being typed can match it — no rebuild.
+function authorLanded(pubkey: string, author: Author) {
+  let any = false
+  for (const row of rows.values()) {
+    if (row.item.author !== pubkey) continue
+    if (row.nameEl) row.nameEl.textContent = author.display
+    row.search = `${row.base} ${author.search}`
+    any = true
+  }
+  if (any && !suggestions.hidden && input!.value.trim()) applyFilter()
 }
 
 function itemSearchText(item: SuggestionItem): string {
@@ -977,6 +1234,7 @@ function itemSearchText(item: SuggestionItem): string {
     item.nappId,
     item.instanceId,
     item.petname,
+    item.author,
     item.raw,
     item.slash,
     item.systemId,
@@ -992,48 +1250,90 @@ function itemPreferredValue(item: SuggestionItem): string {
   return item.slash || item.petname || item.nappId || item.raw || ""
 }
 
-function renderSuggestions() {
-  const filter = input!.value.trim().toLowerCase()
-  const items = buildSuggestionItems().filter(
-    item => !filter || itemSearchText(item).includes(filter)
-  )
-
-  // Three sections:
-  //   1. System items (slash commands and slash actions) — discoverability.
-  //   2. Open windows across ALL spaces (current space first), a global switcher.
-  //   3. Everything else (NAPP / NAME), alphabetical by friendly name.
-  const systemItems = items.filter(i => i.source === "system" || i.source === "action")
-  const sessionItems = items.filter(i => i.source === "open")
-  const sessionSet = new Set(sessionItems)
-  const sysSet = new Set(systemItems)
-  const restItems = items
-    .filter(i => !sysSet.has(i) && !sessionSet.has(i))
-    .sort((a, b) => itemSortLabel(a).localeCompare(itemSortLabel(b)))
-
-  suggestions.innerHTML = ""
-  let appended = false
-  for (const section of [systemItems, sessionItems, restItems]) {
-    if (section.length === 0) continue
-    if (appended) {
-      const divider = document.createElement("div")
-      divider.className = "sugg-divider"
-      suggestions.appendChild(divider)
-    }
-    appended = true
-    for (const item of section) suggestions.appendChild(renderSuggestionRow(item))
-  }
-}
-
 function itemSortLabel(item: SuggestionItem): string {
   return (item.petname || item.nappId || item.raw || "").toLowerCase()
 }
 
-function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
-  const row = document.createElement("div")
-  row.className = "suggestion"
+// Brings the rows in line with the current windows and installed apps: a row
+// is built for each new item, rebuilt where its item changed, dropped where
+// its item is gone, and each section is put in order by moving only what is
+// out of place. Then the filter is applied.
+function syncSuggestions() {
+  const order: Record<Section, Row[]> = { system: [], open: [], apps: [] }
+  const seen = new Set<string>()
+  for (const item of buildSuggestionItems()) {
+    const key = itemKey(item)
+    seen.add(key)
+    const sig = itemSig(item)
+    let row = rows.get(key)
+    if (!row) {
+      row = buildRow(item, sig)
+      rows.set(key, row)
+    } else if (row.sig !== sig) {
+      const fresh = buildRow(item, sig)
+      row.el.replaceWith(fresh.el)
+      row = fresh
+      rows.set(key, row)
+    } else {
+      row.item = item
+      row.el
+        .querySelector(".sugg-space")
+        ?.classList.toggle("sugg-space-current", !!item.spaceCurrent)
+    }
+    order[sectionOf(item)].push(row)
+  }
+  for (const [key, row] of rows) {
+    if (seen.has(key)) continue
+    row.el.remove()
+    rows.delete(key)
+  }
+  order.apps.sort((a, b) => itemSortLabel(a.item).localeCompare(itemSortLabel(b.item)))
+  for (const s of ["system", "open", "apps"] as const) {
+    placeInOrder(
+      suggSections[s],
+      order[s].map(r => r.el)
+    )
+  }
+  applyFilter()
+}
+
+// Puts `els` into `parent` in this order, touching only what's out of place.
+function placeInOrder(parent: HTMLElement, els: HTMLElement[]) {
+  let cursor = parent.firstElementChild
+  for (const el of els) {
+    if (el === cursor) cursor = cursor.nextElementSibling
+    else parent.insertBefore(el, cursor)
+  }
+}
+
+// Shows the rows matching what's typed (all of them when nothing is), hides
+// the rest, and sets the dividers and the empty message to suit.
+function applyFilter() {
+  const filter = input!.value.trim().toLowerCase()
+  const shown: Record<Section, boolean> = { system: false, open: false, apps: false }
+  for (const row of rows.values()) {
+    const show = !filter || row.search.includes(filter)
+    row.el.hidden = !show
+    if (show) shown[sectionOf(row.item)] = true
+  }
+  suggDividers[0].hidden = !(shown.system && shown.open)
+  suggDividers[1].hidden = !((shown.system || shown.open) && shown.apps)
+  suggestions.classList.toggle("sugg-none", !shown.system && !shown.open && !shown.apps)
+}
+
+function buildRow(item: SuggestionItem, sig: string): Row {
+  const el = document.createElement("div")
+  el.className = "suggestion"
+  const row: Row = { item, el, sig, base: itemSearchText(item), search: "", nameEl: null }
+  const author = item.author ? authorFor(item.author, true) : null
+  row.search = author ? `${row.base} ${author.search}` : row.base
 
   const main = document.createElement("span")
   main.className = "sugg-main"
+  let title: HTMLElement | null = null // the icon slots in right after it
+  // What trails the row: "<type> from <author>" for an installed app, the space
+  // it lives in for an open window.
+  let trail: HTMLElement | null = null
 
   if (item.systemId || item.actionId) {
     const cmd = document.createElement("span")
@@ -1046,42 +1346,77 @@ function renderSuggestionRow(item: SuggestionItem): HTMLDivElement {
     raw.textContent = item.raw || null
     main.appendChild(raw)
   } else {
-    // Friendly name first, then the pubkey-id, then the instance id for sessions.
+    // Like the Apps card: title (and icon). An installed app trails with
+    // "<type> from <author>"; an open window shows its instance id here and
+    // trails with its space instead. No installed record: the bare id stands in.
     if (item.petname) {
-      const pet = document.createElement("span")
-      pet.className = "sugg-pet"
-      pet.textContent = item.petname ?? null
-      main.appendChild(pet)
+      title = document.createElement("span")
+      title.className = "sugg-pet"
+      title.textContent = item.petname
+      main.appendChild(title)
+    } else {
+      const napp = document.createElement("span")
+      napp.className = "sugg-napp"
+      napp.textContent = item.nappId || null
+      main.appendChild(napp)
     }
-    const napp = document.createElement("span")
-    napp.className = "sugg-napp"
-    napp.textContent = item.nappId || null
-    main.appendChild(napp)
+    if (item.source === "napp" && (item.author || item.authorLabel)) {
+      trail = document.createElement("span")
+      trail.className = "sugg-author"
+      if (item.author) {
+        // The name from the cache, or the short npub until the profile lands
+        // (authorLanded patches it in).
+        const name = document.createElement("span")
+        name.className = "sugg-author-name"
+        name.textContent = author ? author.display : bareNostrUser(item.author).shortName
+        row.nameEl = name
+        trail.append(`${item.appType} from `, name)
+      } else {
+        trail.textContent = `${item.appType} · ${item.authorLabel}`
+      }
+    }
     if (item.instanceId) {
       const id = document.createElement("span")
       id.className = "sugg-id"
       id.textContent = item.instanceId.slice(0, 8)
       main.appendChild(id)
     }
-    // Global view: tag every open window with the space it lives in. The
+    // Global view: every open window is tagged with the space it lives in. The
     // current space's windows are de-emphasized (you're already in it).
     if (item.source === "open" && item.spaceName) {
-      const sp = document.createElement("span")
-      sp.className = item.spaceCurrent ? "sugg-space sugg-space-current" : "sugg-space"
-      sp.append(icon("window"), document.createTextNode(item.spaceName))
-      main.appendChild(sp)
+      trail = document.createElement("span")
+      trail.className = item.spaceCurrent ? "sugg-space sugg-space-current" : "sugg-space"
+      trail.append(icon("window"), document.createTextNode(item.spaceName))
     }
   }
 
-  const source = document.createElement("span")
-  source.className = "source"
-  // Installed-app rows read their flavor (nsite / napp / napplet) instead of the
-  // generic "napp" source; window/slash rows keep their affordance label.
-  source.textContent = item.appType ?? item.source
-  row.append(main, source)
+  el.appendChild(main)
+  if (trail) el.appendChild(trail)
+  // Slash rows carry their affordance label at the right edge; app rows trail
+  // with their author line or space instead.
+  if (item.source === "system" || item.source === "action") {
+    const source = document.createElement("span")
+    source.className = "source"
+    source.textContent = item.source
+    el.appendChild(source)
+  }
+  // The app's icon, next to its title: the probed src, already settled when the
+  // list was warmed ahead of time, so it lands before the paint. No src means
+  // no icon — there's no placeholder.
+  item.icon?.then(src => {
+    if (!src || !el.isConnected) return
+    const img = document.createElement("img")
+    img.className = "sugg-icon"
+    img.alt = ""
+    img.addEventListener("error", () => img.remove())
+    img.src = src
+    if (title) title.after(img)
+    else main.prepend(img)
+  })
 
-  row.addEventListener("mousedown", async (e: MouseEvent) => {
+  el.addEventListener("mousedown", async (e: MouseEvent) => {
     e.preventDefault()
+    const item = row.item // the row is kept; its item is the current one
     const label = itemPreferredValue(item)
     hideSuggestions()
     try {
@@ -1149,7 +1484,7 @@ async function launchSession(instanceId: string) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function showSuggestions() {
-  renderSuggestions()
+  syncSuggestions()
   suggestions.hidden = false
 }
 
@@ -1159,8 +1494,8 @@ function hideSuggestions() {
 
 input!.addEventListener("focus", showSuggestions)
 input!.addEventListener("input", () => {
-  if (!suggestions.hidden) renderSuggestions()
-  else showSuggestions()
+  if (suggestions.hidden) showSuggestions()
+  else applyFilter()
 })
 input!.addEventListener("blur", () => {
   // Debug aid: `window.__pinSuggestions = true` in the console keeps the
@@ -1189,7 +1524,8 @@ window.addEventListener("keydown", (e: KeyboardEvent) => {
 })
 
 function refreshSuggestions() {
-  if (!suggestions.hidden) renderSuggestions()
+  prewarmSuggestions()
+  if (!suggestions.hidden) syncSuggestions()
   notifyAppsChanged()
   scheduleSpacesBar()
 }
@@ -1845,6 +2181,10 @@ async function init() {
   if (packModeOn) maybeRepack()
   broadcastTheme()
   renderSpacesBar()
+  // Queue the launcher input's icons and author names for the background —
+  // paced behind the rest of the boot and the user's input, see the queue
+  // by prewarmSuggestions.
+  prewarmSuggestions()
   processQueryStringNapps().catch(err => {
     console.error("[url-napps] error:", err)
     setStatus(`URL napps error: ${err.message}`)
@@ -1872,6 +2212,7 @@ async function resolvePolicyForLaunch(
   opts: {
     title: string
     icon?: string
+    iconBlob?: Blob
     type?: string
     declaredDomains: string[]
   }
@@ -1921,7 +2262,8 @@ async function install(raw: string): Promise<string> {
   const iconUrl = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
   const policy = await resolvePolicyForLaunch(nappId, {
     title: label,
-    icon: iconUrl,
+    icon: directIconSrc(iconUrl),
+    iconBlob: iconBlobFrom(iconUrl, files, manifest),
     type: manifestAppType(manifest),
     declaredDomains: requiresFromEvent(manifest)
   })
@@ -2020,7 +2362,7 @@ async function launchInstalledNapplet(
   // install (returns the stored policy when one exists, so no re-prompt).
   const policy = await resolvePolicyForLaunch(nappId, {
     title: app.petname || app.title || nappId,
-    icon: app.icon || undefined,
+    icon: installedIconSrc(app),
     type: "napplet",
     declaredDomains: app.event ? requiresFromEvent(app.event) : (app.requires ?? [])
   })
@@ -2070,7 +2412,7 @@ async function installDevApp() {
     if (
       !(await resolvePolicyForLaunch(nappId, {
         title: label,
-        icon: metadata.icon || undefined,
+        iconBlob: await iconBlobFromDir(dirHandle, metadata.icon),
         type: metaAppType(metadata),
         declaredDomains: metadata.requires || []
       }))
@@ -2128,7 +2470,9 @@ async function installDevAppFromUrl(rawUrl: string) {
     if (
       !(await resolvePolicyForLaunch(nappId, {
         title: label,
-        icon: metadata.icon || undefined,
+        icon: metadata.icon
+          ? new URL(String(metadata.icon).replace(/^\//, ""), baseUrl).toString()
+          : undefined,
         type: metaAppType(metadata),
         declaredDomains: metadata.requires || []
       }))
@@ -2287,10 +2631,12 @@ async function launchFromInput(raw: string): Promise<void> {
 
     if (title) win.titleEl.textContent = title
 
+    const iconTag = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
     if (
       !(await resolvePolicyForLaunch(nappId, {
         title: label,
-        icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1],
+        icon: directIconSrc(iconTag),
+        iconBlob: iconBlobFrom(iconTag, files, manifest),
         type: manifestAppType(manifest),
         declaredDomains: requiresFromEvent(manifest)
       }))
@@ -2370,7 +2716,8 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       else if (impliedNapplet) {
         const granted = await resolvePolicyForLaunch(nappletId, {
           title: label,
-          icon: metadata.icon || undefined,
+          icon: directIconSrc(metadata.icon),
+          iconBlob: iconBlobFrom(metadata.icon, files),
           type: "napplet",
           declaredDomains: metadata.requires || []
         })
@@ -2382,7 +2729,8 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       } else {
         const granted = await promptNappPolicy({
           title: label,
-          icon: metadata.icon || undefined,
+          icon: directIconSrc(metadata.icon),
+          iconBlob: iconBlobFrom(metadata.icon, files),
           type: "nsite",
           chooseType: true,
           declaredDomains: []
@@ -2433,7 +2781,8 @@ localFolderInput.addEventListener("change", async (e: Event) => {
 
     const policy = await resolvePolicyForLaunch(nappId, {
       title: label,
-      icon: metadata?.icon || undefined,
+      icon: directIconSrc(metadata?.icon),
+      iconBlob: iconBlobFrom(metadata?.icon, files),
       type: metaAppType(metadata),
       declaredDomains: metadata?.requires || []
     })
@@ -2532,10 +2881,12 @@ async function loadTempNappFromNaddr(naddr: string): Promise<string> {
   const origin = nappOriginFor(nappId)
   const label = title || nappId
 
+  const iconTag = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
   if (
     !(await resolvePolicyForLaunch(nappId, {
       title: label,
-      icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1],
+      icon: directIconSrc(iconTag),
+      iconBlob: iconBlobFrom(iconTag, files, manifest),
       type: manifestAppType(manifest),
       declaredDomains: requiresFromEvent(manifest)
     }))

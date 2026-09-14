@@ -15,6 +15,7 @@ import { BlossomClient } from "@nostr/tools/nipb7"
 import type { NostrEvent } from "@nostr/tools/core"
 import { generateSecretKey, finalizeEvent } from "@nostr/tools/pure"
 import { getPubkey } from "../account.js"
+import { onRelayAuth } from "../relay-auth.js"
 
 // Upload auths are signed with a throwaway session key, never the user's
 // signer: heal runs in the background of an install, and a NIP-07 extension
@@ -45,7 +46,13 @@ export function healNapp(opts: {
 }
 
 async function heal({ manifest, relays, servers, files }: Parameters<typeof healNapp>[0]) {
-  const published = await Promise.allSettled(pool.publish(relays, manifest))
+  // A relay AUTH, unlike the upload auth below, has to be the user's own key —
+  // proving who you are is the whole point of it, and heal only re-publishes
+  // their own manifests. The usual relay-auth policy decides, so a remembered
+  // or automatic answer stays silent.
+  const published = await Promise.allSettled(
+    pool.publish(relays, manifest, { onauth: onRelayAuth })
+  )
   const republished = published.filter(r => r.status === "fulfilled").length
 
   let uploaded = 0

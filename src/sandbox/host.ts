@@ -92,6 +92,7 @@ import {
 import type { NappPolicy } from "../types.js"
 import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
+import { relayAuthSigner } from "../relay-auth.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS, goLive } from "../outbox.js"
 import { debounce, HEX64, isHex64 } from "../utils.js"
 
@@ -900,7 +901,9 @@ async function publishNappletOutbox(
     if (targets.size === 0) for (const u of FALLBACK_RELAYS) targets.add(u)
 
     const urls = [...targets]
-    const results = await Promise.allSettled(pool.publish(urls, signed))
+    const results = await Promise.allSettled(
+      pool.publish(urls, signed, { onauth: relayAuthSigner(nappId) })
+    )
     const relays: Record<string, boolean> = {}
     urls.forEach((u, i) => (relays[u] = results[i]?.status === "fulfilled"))
     const ok = Object.values(relays).some(Boolean)
@@ -1020,7 +1023,7 @@ async function publishNappletEvent(
       created_at: Number(template.created_at) || Math.floor(Date.now() / 1000)
     })
     const relays = await nappletWriteRelays(getPubkey())
-    await Promise.allSettled(pool.publish(relays, signed))
+    await Promise.allSettled(pool.publish(relays, signed, { onauth: relayAuthSigner(nappId) }))
     return { type: resultType, ok: true, event: signed, eventId: signed.id }
   } catch (err: any) {
     return { type: resultType, ok: false, error: err?.message ?? String(err) }
@@ -1184,7 +1187,11 @@ async function commonAction(
       ...template,
       created_at: Math.floor(Date.now() / 1000)
     })
-    await Promise.allSettled(pool.publish(await nappletWriteRelays(getPubkey()), signed))
+    await Promise.allSettled(
+      pool.publish(await nappletWriteRelays(getPubkey()), signed, {
+        onauth: relayAuthSigner(nappId)
+      })
+    )
     return { type: resultType, ok: true, event: signed, eventId: signed.id }
   } catch (err: any) {
     return { type: resultType, ok: false, error: err?.message ?? String(err) }
@@ -4159,7 +4166,7 @@ async function dispatch(
     case "napp.copyText":
       return copyTextForNapp(params)
     case "napp.publish":
-      return publishEvent(params.event, params.relays)
+      return publishEvent(params.event, params.relays, callerNappId)
     case "napp.loadEvent":
       return loadEvent(params)
     case "napp.loadEvents":
@@ -4564,7 +4571,11 @@ async function sweepStoredDeletions() {
   } catch {}
 }
 
-async function publishEvent(event: NostrEvent, relays?: string[]): Promise<PublishResult> {
+async function publishEvent(
+  event: NostrEvent,
+  relays?: string[],
+  nappId?: string
+): Promise<PublishResult> {
   // A published deletion must also take effect here — the napp's own feeds
   // answer from this store, and relays alone cannot clean it.
   if (event.kind === 5) {
@@ -4573,17 +4584,21 @@ async function publishEvent(event: NostrEvent, relays?: string[]): Promise<Publi
     } catch {}
     await applyDeletionLocally(event)
   }
-  return publishEventToRelays(event, relays)
+  return publishEventToRelays(event, relays, nappId)
 }
 
-async function publishEventToRelays(event: NostrEvent, relays?: string[]): Promise<PublishResult> {
+async function publishEventToRelays(
+  event: NostrEvent,
+  relays?: string[],
+  nappId?: string
+): Promise<PublishResult> {
   const targetRelays = await resolvePublishTargetRelays(event, relays)
 
   if (targetRelays.length === 0) {
     return { relays: {}, published: 0, failed: 0 }
   }
 
-  const promises = pool.publish(targetRelays, event)
+  const promises = pool.publish(targetRelays, event, { onauth: relayAuthSigner(nappId) })
   const settled = await Promise.allSettled(promises)
 
   const relaysMap: Record<string, { ok: boolean; error?: string }> = {}
