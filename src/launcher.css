@@ -1885,8 +1885,11 @@ body.popover-open .napp-body iframe {
   padding-bottom: 0.6rem;
   border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
+/* Like a window's title: uppercase, black weight, the base size. */
 .share-app .napp-perms-name {
   text-transform: uppercase;
+  font-weight: 900;
+  font-size: 1rem;
 }
 .share-status {
   display: grid;
