@@ -11,6 +11,7 @@
   --text: #111111;
   --danger: #d64545;
   --good: #2f9e44;
+  --warn: #f59e0b;
   /* ── design-system tokens ── */
   --btn-radius: 4px;
   --btn-pad-y: 0.35rem;
@@ -23,6 +24,7 @@
     --text: #ececec;
     --danger: #ff6b6b;
     --good: #69db7c;
+    --warn: #fbbf24;
     color-scheme: dark;
   }
 }
@@ -38,6 +40,7 @@
   --text: #ececec;
   --danger: #ff6b6b;
   --good: #69db7c;
+  --warn: #fbbf24;
   color-scheme: dark;
 }
 
@@ -1512,13 +1515,10 @@ body.popover-open .napp-body iframe {
   gap: 0.4rem;
 }
 
-/* Plain inline text, not a badge — reads "<name> · <type>". */
+/* The type: a small uppercase badge (ui-overline) pushed to the line's end. */
 .napp-perms-type {
-  font-weight: 400;
-  opacity: 0.6;
-}
-.napp-perms-type::before {
-  content: "· ";
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .napp-perms-reqs {
@@ -1718,14 +1718,15 @@ body.popover-open .napp-body iframe {
 }
 .share-head {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   gap: 0.6rem;
   align-items: center;
   cursor: pointer;
 }
-.share-state {
-  white-space: nowrap;
-  opacity: 0.7;
+/* The type badge doubles as the check state: checking…, all good, error. */
+.share-state.checking {
+  opacity: 1;
+  color: var(--warn);
 }
 .share-state.good {
   opacity: 1;
@@ -1765,14 +1766,17 @@ body.popover-open .napp-body iframe {
 .share-action-note {
   opacity: 0.6;
 }
-/* Created: no more ticks, the head's state takes the line's end, actions
-   read as name over payload in a smaller mono. */
+/* Created: no more ticks nor indent, actions read as name over payload in a
+   smaller mono. */
 .share-created .ui-check {
   display: none;
 }
 .share-created .share-head {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr;
   cursor: default;
+}
+.share-created .share-actions {
+  padding-left: 0;
 }
 .share-created .share-action {
   font-size: 0.875em;
@@ -1790,13 +1794,15 @@ body.popover-open .napp-body iframe {
 .share-status[hidden] {
   display: none;
 }
-/* The link, in a box two lines tall that scrolls. */
+/* The link, in a box a few lines tall that scrolls. */
 .share-url {
   width: 100%;
   box-sizing: border-box;
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.6rem;
   resize: none;
   font-size: inherit;
-  line-height: 1.3;
+  line-height: 1.4;
   word-break: break-all;
 }
 

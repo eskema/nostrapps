@@ -3,10 +3,11 @@
 // then every window of the space as a section with a tick to include it and
 // its actions below, each with a tick and an editable payload. Create link
 // drops what's unticked, freezes the rest into plain text, runs one
-// reachability check over every app (a state per app on its title line, the
-// details of anything wrong in one status below), then shows the link in a
-// two-line box with a copy button — a click, so the clipboard write is a user
-// gesture wherever it runs.
+// reachability check over every app — the type badge at the end of an app's
+// line turns into its state: checking…, then all good or error, the details
+// of anything wrong in one status below — then shows the link in a box with
+// a copy button (a click, so the clipboard write is a user gesture wherever
+// it runs).
 import { openDialog } from "./dialog.js"
 import { sectionHead } from "./napp-permissions.js"
 import { button, check, input } from "./system-napps/ui.js"
@@ -37,10 +38,7 @@ export function openShareDialog(opts: {
   name: string
   windows: ShareWindow[]
   // One check for all the apps at once (one signing prompt for the uploads).
-  check(
-    keys: string[],
-    onProgress: (key: string, msg: string) => void
-  ): Promise<Map<string, ShareCheck>>
+  check(keys: string[]): Promise<Map<string, ShareCheck>>
   buildLink(name: string, windows: Array<{ input: string; actions: LinkAction[] }>): string
   // An edited payload, made link-safe (null: it can't be).
   encode(name: string, payload: string): string | null
@@ -81,11 +79,13 @@ export function openShareDialog(opts: {
         head.className = "share-head"
         const include = check({ checked: w.shareable })
         if (!w.shareable) include.disabled = true
-        const state = document.createElement("span")
-        state.className = "share-state"
-        if (w.shareable) state.hidden = true
-        else state.textContent = "no address to share"
-        head.append(include, sectionHead(w), state)
+        // The type badge at the line's end is the state slot: the check
+        // writes over it.
+        const headEl = sectionHead({ title: w.title, icon: w.icon, type: w.type || "app" })
+        const state = headEl.querySelector<HTMLElement>(".napp-perms-type")!
+        state.classList.add("share-state")
+        if (!w.shareable) state.textContent = "no address"
+        head.append(include, headEl)
         el.appendChild(head)
 
         const list = document.createElement("div")
@@ -132,7 +132,7 @@ export function openShareDialog(opts: {
       status.hidden = true
       const url = document.createElement("textarea")
       url.className = "ui-input share-url"
-      url.rows = 2
+      url.rows = 3
       url.readOnly = true
       url.hidden = true
       wrap.append(status, url)
@@ -148,7 +148,12 @@ export function openShareDialog(opts: {
         const included = rows.filter(r => r.include.checked && r.w.shareable)
         if (!included.length) return
         create.disabled = true
-        name.disabled = true
+        const chosen = name.value.trim() || opts.name
+        // The name is settled: the title says it, bold, no field.
+        const settled = document.createElement("div")
+        settled.className = "napp-perms-name"
+        settled.textContent = `share ${chosen}`
+        title.replaceWith(settled)
         const problems: string[] = []
 
         // The link carries exactly what's ticked: the rest goes, the rest
@@ -181,17 +186,16 @@ export function openShareDialog(opts: {
         const keys = [...new Set(included.map(r => r.w.key))]
         const byKey = (key: string) => included.filter(r => r.w.key === key)
         for (const r of included) {
-          r.state.hidden = false
           r.state.textContent = "checking…"
+          r.state.classList.add("checking")
         }
-        const checks = await opts.check(keys, (key, msg) => {
-          for (const r of byKey(key)) r.state.textContent = msg
-        })
+        const checks = await opts.check(keys)
         for (const key of keys) {
           const c = checks.get(key)
           const fine = c && !c.error && !c.missing
           for (const r of byKey(key)) {
             r.state.textContent = fine ? "all good" : "error"
+            r.state.classList.remove("checking")
             r.state.classList.toggle("good", !!fine)
             r.state.classList.toggle("bad", !fine)
           }
@@ -216,7 +220,7 @@ export function openShareDialog(opts: {
         }
 
         const link = opts.buildLink(
-          name.value.trim() || opts.name,
+          chosen,
           included.map(r => ({
             input: checks.get(r.w.key)?.input ?? "",
             actions: r.actions.flatMap(a =>

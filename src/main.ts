@@ -3271,13 +3271,15 @@ async function shareCurrentSpace() {
   await openShareDialog({
     name,
     windows: shareWindows,
-    check: (keys, onProgress) =>
+    // The screen shows checking… / all good / error per app; the status line
+    // narrates the steps.
+    check: keys =>
       checkReachable(
         keys.flatMap(k => {
           const app = shareableFor(k)
           return app ? [[k, app] as const] : []
         }),
-        onProgress
+        (key, msg) => setStatus(`${shareWindows.find(w => w.key === key)?.title ?? key}: ${msg}`)
       ),
     buildLink: (n, ws) =>
       buildShareLink({ name: n, windows: ws }, `${location.origin}${location.pathname}`),
