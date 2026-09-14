@@ -40,7 +40,8 @@ import {
   launchNapplet,
   reloadNappletWindows,
   syncStageBottomSpacer,
-  getStageBounds
+  getStageBounds,
+  readNappFiles
 } from "./sandbox/host.js"
 import { button, chip, icon, tab } from "./system-napps/ui.js"
 import { promptNappPolicy, promptSharedSpace } from "./napp-permissions.js"
@@ -53,7 +54,8 @@ import {
   type ShareLink
 } from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
-import { fetchNsite } from "./nsite/fetch.js"
+import { fetchNsite, manifestRelays, blobServers, manifestPaths } from "./nsite/fetch.js"
+import { ensureReplicated } from "./nsite/heal.js"
 import { resolveNapplet, isNappletKind, loadNappletFromManifest } from "./nsite/napplet.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
 import {
@@ -77,6 +79,7 @@ import * as handlers from "./handlers.js"
 import type {
   SuggestionItem,
   NsiteResult,
+  NsiteFile,
   NappWindowState,
   NappPolicy,
   SystemCtx,
@@ -96,6 +99,7 @@ import {
 import { pool } from "@nostr/gadgets/global"
 import { bareNostrUser, loadNostrUser } from "@nostr/gadgets/metadata"
 import { EventTemplate } from "@nostr/tools"
+import type { NostrEvent } from "@nostr/tools/pure"
 import { naddrEncode } from "@nostr/tools/nip19"
 import * as relayAuth from "./relay-auth.js"
 import { buildUserIndex } from "./user-search.js"
@@ -3211,7 +3215,12 @@ async function keepCurrentSpace() {
 
 // Share: the current space as a link — windows in visual reading order (the
 // receiver lays them out from link order alone), each with the last payload it
-// got per action. Windows with no address (system, dev, local) are skipped.
+// got per action. Every app is first checked to be reachable (checkReachable):
+// its manifest republished, the relays holding it become the naddr's hints,
+// its blobs probed on the blossom servers and re-uploaded where missing.
+// Windows with no address (system, dev, local) are skipped.
+const SHARE_HINTS_MAX = 4
+
 async function shareCurrentSpace() {
   const name = persist.listSpaces().find(s => s.id === currentSpaceId)?.name || "space"
   const row = (w: NappWindowState) => Math.round((w.position?.top ?? 0) / 60)
@@ -3220,12 +3229,24 @@ async function shareCurrentSpace() {
     .filter(w => !w.system)
     .sort((a, b) => row(a) - row(b) || (a.position?.left ?? 0) - (b.position?.left ?? 0))
   const skipped: string[] = []
+  const missing: string[] = []
+  let uploaded = 0
+  // One check per app, however many windows it has.
+  const inputs = new Map<string, string>()
   const link: ShareLink = { name, windows: [] }
   for (const w of windows) {
-    const input = shareInputFor(w.nappId)
-    if (!input) {
-      skipped.push(w.petname)
-      continue
+    let input = inputs.get(w.nappId)
+    if (input === undefined) {
+      const app = shareableFor(w.nappId)
+      if (!app) {
+        skipped.push(w.petname)
+        continue
+      }
+      const r = await checkReachable(app, w.petname)
+      uploaded += r.uploaded
+      if (r.missing) missing.push(`${w.petname} (${r.missing})`)
+      input = r.input
+      inputs.set(w.nappId, input)
     }
     const last = new Map<string, unknown>()
     for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
@@ -3242,27 +3263,78 @@ async function shareCurrentSpace() {
     return
   }
   const url = buildShareLink(link, `${location.origin}${location.pathname}`)
+  const notes = [
+    uploaded ? `${uploaded} blob${uploaded === 1 ? "" : "s"} re-uploaded` : "",
+    missing.length ? `missing on every server: ${missing.join(", ")}` : "",
+    skipped.length ? `skipped ${skipped.join(", ")}` : ""
+  ].filter(Boolean)
   try {
     await navigator.clipboard.writeText(url)
-    setStatus(`Link copied${skipped.length ? ` — skipped ${skipped.join(", ")}` : ""}`)
+    setStatus(`Link copied${notes.length ? ` — ${notes.join("; ")}` : ""}`)
   } catch {
     window.prompt("Copy this link", url)
   }
 }
 
-// The link input for a window's app: what a temp app was opened from, or the
-// installed manifest's naddr. Null for apps with no address (dev, local, napplets).
-function shareInputFor(nappId: string): string | null {
+type Shareable = { manifest: NostrEvent; dTag: string; files(): Promise<NsiteFile[]> }
+
+// What a window's app can be shared as: its manifest, and its bytes for the
+// healing — a temp app's fetched files, an installed app's read back out of
+// its origin. Null for apps with no address (dev, local, napplets).
+function shareableFor(nappId: string): Shareable | null {
   const temp = sharedTemps.get(nappId)
-  if (temp) return temp.input
-  const event = persist.getInstalledApp(nappId)?.event
-  if (!event || event.kind !== 35128) return null
-  const dTag = event.tags.find(t => t[0] === "d")?.[1]
+  const manifest = temp ? temp.fetched.manifest : persist.getInstalledApp(nappId)?.event
+  if (!manifest || manifest.kind !== 35128) return null
+  const dTag = manifest.tags.find(t => t[0] === "d")?.[1]
   if (!dTag) return null
-  // Relay hints from wherever the manifest was seen — a few at most, each adds
-  // a good chunk to the naddr.
-  const relays = Array.from(pool.seenOn.get(event.id) || [])
-    .map((r: any) => r.url)
-    .slice(0, 3)
-  return naddrEncode({ pubkey: event.pubkey, kind: event.kind, identifier: dTag, relays })
+  return {
+    manifest,
+    dTag,
+    files: temp ? async () => temp.fetched.files : () => readNappFiles(nappId)
+  }
+}
+
+// Republish the manifest, probe and re-upload the blobs, and write the naddr
+// with the relays that hold the manifest as hints. Never fails the share: a
+// check that errors out yields an naddr without hints.
+async function checkReachable(
+  app: Shareable,
+  label: string
+): Promise<{ input: string; uploaded: number; missing: string }> {
+  const { manifest, dTag } = app
+  const naddr = (relays: string[]) =>
+    naddrEncode({ pubkey: manifest.pubkey, kind: manifest.kind, identifier: dTag, relays })
+  try {
+    setStatus(`Checking ${label} is reachable…`)
+    // Where it was seen this session, the author's write relays, the napp relays.
+    const seen = Array.from(pool.seenOn.get(manifest.id) || []).map((r: any) => r.url as string)
+    const relays = [...new Set([...seen, ...(await manifestRelays(manifest.pubkey))])]
+    const servers = await blobServers(manifest, manifest.pubkey)
+    let files: NsiteFile[] = []
+    try {
+      files = await app.files()
+    } catch (err) {
+      console.warn("[share] can't read the files of", label, err) // probe-only, then
+    }
+    const byPath = new Map(manifestPaths(manifest).map(p => [p.path, p]))
+    const r = await ensureReplicated({
+      manifest,
+      relays,
+      servers,
+      files: files.flatMap(f => {
+        const p = byPath.get(f.path.startsWith("/") ? f.path : `/${f.path}`)
+        return p ? [{ sha: p.sha, body: f.body, mime: f.mime || p.mime }] : []
+      }),
+      onProgress: msg => setStatus(`${label}: ${msg}`)
+    })
+    const n = r.missing.length
+    return {
+      input: naddr(r.relays.slice(0, SHARE_HINTS_MAX)),
+      uploaded: r.uploaded,
+      missing: n ? `${n} file${n === 1 ? "" : "s"}` : ""
+    }
+  } catch (err: any) {
+    setStatus(`Couldn't check ${label}: ${err.message}`)
+    return { input: naddr([]), uploaded: 0, missing: "" }
+  }
 }

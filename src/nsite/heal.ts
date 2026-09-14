@@ -88,3 +88,57 @@ export async function hasBytes(base: string, sha: string): Promise<boolean> {
     return false
   }
 }
+
+// Share-time replication check, for any author: the moment a link is about to
+// promise that a napp can be fetched, so an explicit user action — unlike the
+// install-time heal above, other authors' content is fair game. Publishes the
+// manifest to every candidate relay (idempotent) and returns the ones holding
+// it, in the order given — the link's hints; probes every blob on the servers
+// and re-uploads what's missing where the bytes are at hand. `missing` lists
+// the shas no server has after that.
+export async function ensureReplicated(opts: {
+  manifest: NostrEvent
+  relays: string[]
+  servers: string[]
+  files: Array<{ sha: string; body: Blob; mime?: string }>
+  onProgress?: (msg: string) => void
+}): Promise<{ relays: string[]; uploaded: number; missing: string[] }> {
+  const { manifest, servers, files, onProgress = () => {} } = opts
+  onProgress("Publishing manifest…")
+  const results = await Promise.allSettled(
+    pool.publish(opts.relays, manifest, { onauth: onRelayAuth })
+  )
+  const relays = opts.relays.filter((_, i) => results[i].status === "fulfilled")
+
+  const shas = manifest.tags.filter(t => t[0] === "path" && t[2]).map(t => t[2])
+  const bySha = new Map(files.map(f => [f.sha, f]))
+  const present = new Map<string, number>() // sha → servers that have it
+  let uploaded = 0
+  onProgress(
+    `Checking ${shas.length} file${shas.length === 1 ? "" : "s"} on ${servers.length} server${servers.length === 1 ? "" : "s"}…`
+  )
+  await Promise.allSettled(
+    servers.map(async server => {
+      const client = new BlossomClient(server, healSigner as any)
+      const base = (server.startsWith("http") ? server : `https://${server}`).replace(/\/$/, "")
+      for (const sha of shas) {
+        if (await hasBytes(base, sha)) {
+          present.set(sha, (present.get(sha) ?? 0) + 1)
+          continue
+        }
+        const f = bySha.get(sha)
+        if (!f) continue
+        try {
+          await client.uploadBlob(f.body, f.mime)
+          uploaded++
+          present.set(sha, (present.get(sha) ?? 0) + 1)
+        } catch (err) {
+          console.debug("[heal] upload refused", { server, sha, err: String(err) })
+        }
+      }
+    })
+  )
+  const missing = shas.filter(sha => !present.get(sha))
+  console.debug("[heal] share check", { id: manifest.id, relays, uploaded, missing })
+  return { relays, uploaded, missing }
+}

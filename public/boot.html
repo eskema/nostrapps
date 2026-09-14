@@ -141,6 +141,28 @@
           } catch {}
         }
 
+        // Every stored file, for the launcher to read a napp's bytes back out
+        // (share-time healing). The policy record isn't a file.
+        async function getAllFiles() {
+          const db = await openDB()
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE, "readonly")
+            const req = tx.objectStore(STORE).getAll()
+            req.onsuccess = () => {
+              try {
+                db.close()
+              } catch {}
+              resolve((req.result || []).filter(r => r.path !== "/__policy__"))
+            }
+            req.onerror = () => {
+              try {
+                db.close()
+              } catch {}
+              reject(req.error)
+            }
+          })
+        }
+
         async function putFile(path, body, mime) {
           const db = await openDB()
           return new Promise((resolve, reject) => {
@@ -297,6 +319,16 @@
             } catch (err) {
               event.source.postMessage(
                 { __nostrapps: "napp-wipe-error", error: err.message },
+                event.origin
+              )
+            }
+          } else if (data.__nostrapps === "napp-read-files") {
+            try {
+              const files = await getAllFiles()
+              event.source.postMessage({ __nostrapps: "napp-read-files-done", files }, event.origin)
+            } catch (err) {
+              event.source.postMessage(
+                { __nostrapps: "napp-read-files-error", error: err.message },
                 event.origin
               )
             }

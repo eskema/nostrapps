@@ -38,19 +38,8 @@ export async function fetchNsite(
 
   // 2. Resolve which relays to query for the manifest. Prefer the explicit
   // hints (e.g. the relays the Apps napp found this event on) — only without
-  // them fan out to the author's kind-10002 write relays and the napp relays.
-  let relays = [...relayHints]
-  if (relays.length === 0) {
-    let relayList = await loadRelayList(pubkey)
-    // gadgets remembers a no-answer for two days and serves it back instantly
-    // as an empty list: reset it and ask once more before going without.
-    if (relayList.items.length === 0) {
-      await loadRelayList(pubkey, [], null)
-      relayList = await loadRelayList(pubkey)
-    }
-    const write = relayList.items.filter(r => r.write).map((r: { url: string }) => r.url)
-    relays = [...new Set([...write, ...NAPP_RELAYS])]
-  }
+  // them fan out to the author's write relays and the napp relays.
+  const relays = relayHints.length ? [...relayHints] : await manifestRelays(pubkey)
   const reqs = relays.map((url: string) => ({ url, filter }))
 
   // 3. collect events
@@ -63,32 +52,16 @@ export async function fetchNsite(
   // 5. have manifest — download files
   const nappId = `${pubkey.slice(0, 16)}~${dTag}`
 
-  const pathTags = manifest.tags.filter(
-    (t: string[]) => t[0] === "path" && t.length >= 3 && t[1] && t[2]
-  )
-  if (pathTags.length === 0) throw new Error("nsite manifest has no path tags")
+  const paths = manifestPaths(manifest)
+  if (paths.length === 0) throw new Error("nsite manifest has no path tags")
 
-  // Prefer the blossom servers the manifest itself declares. Only consult the
-  // author's blossom list (another relay round-trip) when the manifest names
-  // none, so we don't reach out to relays we weren't asked to use.
-  const manifestServers = manifest.tags
-    .filter((t: string[]) => t[0] === "server" && t[1])
-    .map((t: string[]) => t[1])
-  const userServers = (await loadBlossomServers(pubkey)).items ?? []
-  const servers = [
-    "relay.nostrapps.com",
-    ...new Set(userServers),
-    ...new Set(manifestServers)
-  ].filter(Boolean)
+  const servers = await blobServers(manifest, pubkey)
 
   const files = []
   const healFiles = []
-  for (let i = 0; i < pathTags.length; i++) {
-    const tag = pathTags[i]
-    const path = tag[1].startsWith("/") ? tag[1] : `/${tag[1]}`
-    const sha = tag[2]
-    const mime = tag[3] || guessMime(path)
-    onProgress(`Fetching ${i + 1}/${pathTags.length}: ${path}`)
+  for (let i = 0; i < paths.length; i++) {
+    const { path, sha, mime } = paths[i]
+    onProgress(`Fetching ${i + 1}/${paths.length}: ${path}`)
     const blob = await fetchBlob(servers, sha)
     if (!blob)
       throw new Error(
@@ -109,6 +82,44 @@ export async function fetchNsite(
 }
 
 // ─── helpers ──────────────────────────────────────────────────────
+
+// The relays to ask for an author's manifests when no hints are known: their
+// write relays plus the napp relays. gadgets remembers a no-answer for two
+// days and serves it back instantly as an empty list — reset it and ask once
+// more before going without.
+export async function manifestRelays(pubkey: string): Promise<string[]> {
+  let relayList = await loadRelayList(pubkey)
+  if (relayList.items.length === 0) {
+    await loadRelayList(pubkey, [], null)
+    relayList = await loadRelayList(pubkey)
+  }
+  const write = relayList.items.filter(r => r.write).map((r: { url: string }) => r.url)
+  return [...new Set([...write, ...NAPP_RELAYS])]
+}
+
+// The blossom servers a manifest's blobs may be on: ours, the author's list,
+// and the ones the manifest itself names.
+export async function blobServers(manifest: NostrEvent, pubkey: string): Promise<string[]> {
+  const manifestServers = manifest.tags
+    .filter((t: string[]) => t[0] === "server" && t[1])
+    .map((t: string[]) => t[1])
+  const userServers = (await loadBlossomServers(pubkey)).items ?? []
+  return ["relay.nostrapps.com", ...new Set(userServers), ...new Set(manifestServers)].filter(
+    Boolean
+  )
+}
+
+// The manifest's files: ["path", path, sha, mime?] tags, paths made absolute.
+export function manifestPaths(
+  manifest: NostrEvent
+): Array<{ path: string; sha: string; mime: string }> {
+  return manifest.tags
+    .filter((t: string[]) => t[0] === "path" && t.length >= 3 && t[1] && t[2])
+    .map((t: string[]) => {
+      const path = t[1].startsWith("/") ? t[1] : `/${t[1]}`
+      return { path, sha: t[2], mime: t[3] || guessMime(path) }
+    })
+}
 
 function collect(reqs: Array<{ url: string; filter: Filter }>): Promise<NostrEvent[]> {
   const events: NostrEvent[] = []

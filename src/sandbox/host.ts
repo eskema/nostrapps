@@ -3257,6 +3257,33 @@ export async function applyNappPolicy(origin: string, nappId: string) {
   }
 }
 
+// Read an installed napp's files back out of its origin — the store its
+// service worker serves from — through a boot iframe. Share-time healing
+// re-uploads from these bytes.
+export async function readNappFiles(nappId: string): Promise<NsiteFile[]> {
+  const origin = nappOriginFor(nappId)
+  const boot = document.createElement("iframe")
+  boot.src = `${origin}/boot.html`
+  boot.style.display = "none"
+  document.body.appendChild(boot)
+  try {
+    const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
+    if (ready.__nostrapps === "napp-boot-error") throw new Error(ready.error)
+    boot.contentWindow!.postMessage({ __nostrapps: "napp-read-files" }, origin)
+    const result = await waitForMessage(origin, "napp-read-files-done", "napp-read-files-error")
+    if (result.__nostrapps === "napp-read-files-error") throw new Error(result.error)
+    const files: Array<{ path: string; body: Blob | ArrayBuffer; mime?: string }> =
+      result.files || []
+    return files.map(f => ({
+      path: f.path,
+      mime: f.mime || "",
+      body: f.body instanceof Blob ? f.body : new Blob([f.body], { type: f.mime || "" })
+    }))
+  } finally {
+    boot.remove()
+  }
+}
+
 // ─── Dev apps ───────────────────────────────────────────
 
 const devHandles = new Map<string, FileSystemDirectoryHandle>()
