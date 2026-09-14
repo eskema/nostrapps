@@ -70,6 +70,11 @@ interface Plan {
 
 const host = (url: string) => url.replace(/^[a-z]+:\/\//, "")
 
+// Per blob, per server. uploadBlob() passes no timeout of its own, so without
+// this a server that accepts the connection and never answers hangs the whole
+// run — every file waits for the slowest server.
+const UPLOAD_TIMEOUT = 30_000
+
 // Blossom endpoints are root-anchored, so a server is its origin — a path on
 // one is dropped on the first request.
 function serverOrigin(raw: string): string | null {
@@ -698,26 +703,47 @@ export function mount(
         )
     }
 
-    for (const f of plan!.upload) {
+    // Up front, so the run opens with the servers it is about to use rather
+    // than an empty box.
+    paint()
+
+    // A server that times out has answered about itself, not about that blob —
+    // keep it out of the remaining files rather than paying the wait again.
+    const dead = new Set<string>()
+
+    for (const [i, f] of plan!.upload.entries()) {
+      publishBtn.textContent = `uploading ${i + 1}/${plan!.upload.length}…`
+      const live = targets.filter(s => !dead.has(s))
+      if (live.length === 0) {
+        paint()
+        throw new Error(`No server left to upload ${f.path} to`)
+      }
       ctx.setStatus(`Uploader: uploading ${f.path}…`)
       const results = await Promise.allSettled(
-        targets.map(s => uploadBlob(s, blobFor(f), { auth }))
+        live.map(s =>
+          uploadBlob(s, blobFor(f), { auth, signal: AbortSignal.timeout(UPLOAD_TIMEOUT) })
+        )
       )
       let stored = 0
       results.forEach((r, i) => {
-        const st = stats.get(targets[i])!
+        const st = stats.get(live[i])!
         // A server that stored the blob under a different hash doesn't have it
         // under the one the manifest names — that's a failure, not a success.
         if (r.status === "fulfilled" && r.value?.sha256 === f.hash) {
-          okServers.add(targets[i])
+          okServers.add(live[i])
           st.ok++
           stored++
         } else {
           st.fail++
-          st.why =
-            r.status === "rejected"
-              ? r.reason?.message || String(r.reason)
-              : `hash mismatch (${String(r.value?.sha256).slice(0, 8)}…)`
+          if (r.status === "rejected" && r.reason?.name === "TimeoutError") {
+            dead.add(live[i])
+            st.why = `no answer in ${UPLOAD_TIMEOUT / 1000}s`
+          } else {
+            st.why =
+              r.status === "rejected"
+                ? r.reason?.message || String(r.reason)
+                : `hash mismatch (${String(r.value?.sha256).slice(0, 8)}…)`
+          }
         }
       })
       if (stored === 0) {
@@ -727,8 +753,8 @@ export function mount(
         )
       }
       ctx.setStatus(`Uploaded ${f.path} (${f.hash.slice(0, 8)}…)`)
+      paint() // every file, so a slow run shows where it is
     }
-    paint()
     return okServers
   }
 
@@ -757,7 +783,7 @@ export function mount(
     for (const s of [filesSec, serversSec, relaysSec, eventSec]) s.el.open = false
 
     try {
-      publishBtn.textContent = "uploading…"
+      publishBtn.textContent = "authorizing…"
       const okServers = await upload(signer, targets)
       // A napplet's server tags name the servers that actually took the blob.
       buildTemplate(okServers)
