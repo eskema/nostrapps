@@ -66,23 +66,55 @@ function ephemeralFor(spaceId: string): NappWindowState[] {
   return arr
 }
 
+// ─── Ephemeral spaces ───────────────────────────────────────────
+// A space opened from a share link lives only in memory: never written to the
+// document, its windows memory-only whatever their napp id (an installed app's
+// window in it must not persist either), gone on reload — the temp origins it
+// booted are swept on the next boot. The document's `current` never points at
+// one, so a reload lands on the last real space. Keep (promoteSpace) moves it
+// into the document under the same id.
+const ephemeralSpaces: SpaceData[] = []
+let ephemeralCurrent: string | null = null
+let ephemeralSerial = 0
+
+export function isEphemeralSpace(id: string): boolean {
+  return ephemeralSpaces.some(s => s.id === id)
+}
+
+function allSpaces(state: SpacesState): SpaceData[] {
+  return [...state.list, ...ephemeralSpaces]
+}
+
+function findSpace(state: SpacesState, id: string): SpaceData | undefined {
+  return state.list.find(s => s.id === id) ?? ephemeralSpaces.find(s => s.id === id)
+}
+
+function currentId(state: SpacesState): string {
+  return ephemeralCurrent ?? state.current
+}
+
 function currentSpace(state: SpacesState): SpaceData {
-  return state.list.find(s => s.id === state.current) ?? state.list[0]
+  return findSpace(state, currentId(state)) ?? state.list[0]
 }
 
 export function readOpen(): NappWindowState[] {
-  const state = ensureSpaces()
-  return [...currentSpace(state).open, ...ephemeralFor(state.current)]
+  const sp = currentSpace(ensureSpaces())
+  return [...sp.open, ...ephemeralFor(sp.id)]
 }
 
 export function writeOpen(napps: NappWindowState[]) {
   const state = ensureSpaces()
   const sp = currentSpace(state)
+  if (isEphemeralSpace(sp.id)) {
+    sp.open = [...napps]
+    devOpenBySpace.set(sp.id, [])
+    return
+  }
   const stored: NappWindowState[] = []
   const eph: NappWindowState[] = []
   for (const n of napps) (isEphemeralNappId(n.nappId) ? eph : stored).push(n)
   sp.open = stored
-  devOpenBySpace.set(state.current, eph)
+  devOpenBySpace.set(sp.id, eph)
   writeJson(SPACES_KEY, state)
 }
 
@@ -97,20 +129,25 @@ export function updateOpen(instanceId: string, state: NappWindowState) {
       return
     }
   }
-  if (isEphemeralNappId(state.nappId)) {
-    ephemeralFor(ensureSpaces().current).push(state)
-    return
-  }
   const spaces = ensureSpaces()
-  for (const sp of spaces.list) {
+  for (const sp of allSpaces(spaces)) {
     const i = sp.open.findIndex(n => n.instanceId === instanceId)
     if (i >= 0) {
       sp.open[i] = { ...sp.open[i], ...state }
-      writeJson(SPACES_KEY, spaces)
+      if (!isEphemeralSpace(sp.id)) writeJson(SPACES_KEY, spaces)
       return
     }
   }
-  currentSpace(spaces).open.push(state)
+  const cur = currentSpace(spaces)
+  if (isEphemeralSpace(cur.id)) {
+    cur.open.push(state)
+    return
+  }
+  if (isEphemeralNappId(state.nappId)) {
+    ephemeralFor(cur.id).push(state)
+    return
+  }
+  cur.open.push(state)
   writeJson(SPACES_KEY, spaces)
 }
 
@@ -125,11 +162,11 @@ export function removeOpen(instanceId: string) {
   }
   const spaces = ensureSpaces()
   let changed = false
-  for (const sp of spaces.list) {
+  for (const sp of allSpaces(spaces)) {
     const next = sp.open.filter(n => n.instanceId !== instanceId)
     if (next.length !== sp.open.length) {
       sp.open = next
-      changed = true
+      if (!isEphemeralSpace(sp.id)) changed = true
     }
   }
   if (changed) writeJson(SPACES_KEY, spaces)
@@ -142,24 +179,29 @@ export function moveOpenToSpace(instanceId: string, targetId: string) {
   const state = ensureSpaces()
   const cur = currentSpace(state)
   if (targetId === cur.id) return
-  const target = state.list.find(s => s.id === targetId)
+  const target = findSpace(state, targetId)
   if (!target) return
+
+  // Where it lands: an ephemeral space keeps everything in its own list, a real
+  // one keeps dev~/temp~ windows in the memory-only side list.
+  const land = (entry: NappWindowState) => {
+    if (isEphemeralSpace(targetId) || !isEphemeralNappId(entry.nappId)) target.open.push(entry)
+    else ephemeralFor(targetId).push(entry)
+  }
 
   const eph = devOpenBySpace.get(cur.id)
   const ei = eph ? eph.findIndex(n => n.instanceId === instanceId) : -1
   if (eph && ei >= 0) {
     const [entry] = eph.splice(ei, 1)
-    const dst = devOpenBySpace.get(targetId) || []
-    dst.push(entry)
-    devOpenBySpace.set(targetId, dst)
+    land(entry)
     return
   }
 
   const i = cur.open.findIndex(n => n.instanceId === instanceId)
   if (i === -1) return
   const [entry] = cur.open.splice(i, 1)
-  target.open.push(entry)
-  writeJson(SPACES_KEY, state)
+  land(entry)
+  if (!isEphemeralSpace(cur.id) || !isEphemeralSpace(targetId)) writeJson(SPACES_KEY, state)
 }
 
 export function getLoadedActions(instanceId: string): Array<{ name: string; payload: unknown }> {
@@ -274,27 +316,31 @@ function ensureSpaces(): SpacesState {
 }
 
 export function getCurrentSpaceId(): string {
-  return ensureSpaces().current
+  return currentId(ensureSpaces())
 }
 
-export function listSpaces(): Array<{ id: string; name: string }> {
-  return ensureSpaces().list.map(s => ({ id: s.id, name: s.name }))
+// Real spaces first, in document order; ephemeral ones after.
+export function listSpaces(): Array<{ id: string; name: string; ephemeral?: boolean }> {
+  return [
+    ...ensureSpaces().list.map(s => ({ id: s.id, name: s.name })),
+    ...ephemeralSpaces.map(s => ({ id: s.id, name: s.name, ephemeral: true }))
+  ]
 }
 
 export function getSpaceOpen(id: string): NappWindowState[] {
-  return ensureSpaces().list.find(s => s.id === id)?.open ?? []
+  return findSpace(ensureSpaces(), id)?.open ?? []
 }
 
 export function getSpacePackMode(id: string): boolean {
-  return ensureSpaces().list.find(s => s.id === id)?.packMode ?? false
+  return findSpace(ensureSpaces(), id)?.packMode ?? false
 }
 
 export function setSpacePackMode(id: string, on: boolean) {
   const state = ensureSpaces()
-  const sp = state.list.find(s => s.id === id)
+  const sp = findSpace(state, id)
   if (!sp) return
   sp.packMode = on
-  writeJson(SPACES_KEY, state)
+  if (!isEphemeralSpace(id)) writeJson(SPACES_KEY, state)
 }
 
 // Every open window across all spaces, tagged with its space — for the global
@@ -305,9 +351,10 @@ export function allOpenWindows(): Array<{
   window: NappWindowState
 }> {
   const state = ensureSpaces()
+  const cur = currentId(state)
   const out: Array<{ spaceId: string; spaceName: string; window: NappWindowState }> = []
-  for (const sp of state.list) {
-    const eph = sp.id === state.current ? ephemeralFor(state.current) : []
+  for (const sp of allSpaces(state)) {
+    const eph = sp.id === cur ? ephemeralFor(cur) : []
     for (const w of [...sp.open, ...eph]) {
       out.push({ spaceId: sp.id, spaceName: sp.name, window: w })
     }
@@ -317,8 +364,53 @@ export function allOpenWindows(): Array<{
 
 export function setCurrentSpaceId(id: string) {
   const state = ensureSpaces()
+  if (isEphemeralSpace(id)) {
+    ephemeralCurrent = id // the document's current stays on the last real space
+    return
+  }
   if (!state.list.some(s => s.id === id)) return
+  ephemeralCurrent = null
   state.current = id
+  writeJson(SPACES_KEY, state)
+}
+
+export function createEphemeralSpace(name: string): string {
+  const state = ensureSpaces()
+  // A kept space keeps its "sharedN" id in the document, so skip those too.
+  const taken = new Set(allSpaces(state).map(s => s.id))
+  let id = "shared" + ephemeralSerial++
+  while (taken.has(id)) id = "shared" + ephemeralSerial++
+  ephemeralSpaces.push({
+    id,
+    name: name.trim() || "shared",
+    open: [],
+    saved: [],
+    packMode: false,
+    savedPackMode: false
+  })
+  return id
+}
+
+// Keep: move an ephemeral space into the document under the same id, its live
+// layout committed as the saved one. Its windows should be real installs by
+// now; any dev~/temp~ one left stays memory-only, as in every space.
+export function promoteSpace(id: string) {
+  const i = ephemeralSpaces.findIndex(s => s.id === id)
+  if (i < 0) return
+  const state = ensureSpaces()
+  const [sp] = ephemeralSpaces.splice(i, 1)
+  const stored: NappWindowState[] = []
+  const eph: NappWindowState[] = []
+  for (const n of sp.open) (isEphemeralNappId(n.nappId) ? eph : stored).push(n)
+  sp.open = stored
+  sp.saved = [...stored]
+  sp.savedPackMode = sp.packMode
+  devOpenBySpace.set(id, eph)
+  state.list.push(sp)
+  if (ephemeralCurrent === id) {
+    ephemeralCurrent = null
+    state.current = id
+  }
   writeJson(SPACES_KEY, state)
 }
 
@@ -329,7 +421,7 @@ export function createSpace(name?: string): string {
   // regenerate "space0", "space1", … that collide with spaces persisted in an
   // earlier session. Skip any id already taken — duplicate ids corrupt every
   // id-keyed lookup (current-space, tab reconciliation, reorder…).
-  const taken = new Set(state.list.map(s => s.id))
+  const taken = new Set(allSpaces(state).map(s => s.id))
   let id = "space" + spaceSerial++
   while (taken.has(id)) id = "space" + spaceSerial++
   // Default name is one past the highest existing "space N". Counting the list
@@ -354,11 +446,11 @@ export function createSpace(name?: string): string {
 // Commit this space's current live layout as its saved snapshot (Save action).
 export function commitSpaceSaved(id: string) {
   const state = ensureSpaces()
-  const sp = state.list.find(s => s.id === id)
+  const sp = findSpace(state, id)
   if (!sp) return
   sp.saved = [...sp.open]
   sp.savedPackMode = sp.packMode
-  writeJson(SPACES_KEY, state)
+  if (!isEphemeralSpace(id)) writeJson(SPACES_KEY, state)
 }
 
 // Reorder the spaces list to match the given id order (drag-to-reorder). Any
@@ -381,19 +473,28 @@ export function setSpacesOrder(orderedIds: string[]) {
 
 // The saved snapshot to revert to (the "Reset" action).
 export function getSpaceSaved(id: string): { open: NappWindowState[]; packMode: boolean } {
-  const sp = ensureSpaces().list.find(s => s.id === id)
+  const sp = findSpace(ensureSpaces(), id)
   return { open: sp?.saved ?? [], packMode: sp?.savedPackMode ?? false }
 }
 
 export function renameSpace(id: string, name: string) {
   const state = ensureSpaces()
-  const sp = state.list.find(s => s.id === id)
+  const sp = findSpace(state, id)
   if (!sp) return
   sp.name = name.trim() || sp.name
-  writeJson(SPACES_KEY, state)
+  if (!isEphemeralSpace(id)) writeJson(SPACES_KEY, state)
 }
 
 export function deleteSpace(id: string) {
+  if (isEphemeralSpace(id)) {
+    ephemeralSpaces.splice(
+      ephemeralSpaces.findIndex(s => s.id === id),
+      1
+    )
+    devOpenBySpace.delete(id)
+    if (ephemeralCurrent === id) ephemeralCurrent = null // back to the document's current
+    return
+  }
   const state = ensureSpaces()
   if (state.list.length <= 1) return // keep at least one space
   state.list = state.list.filter(s => s.id !== id)
@@ -406,10 +507,11 @@ export function deleteSpace(id: string) {
 // top-level invocation to the system napp's home space.
 export function findSpaceOfSystemNapp(systemId: string): string | null {
   const state = ensureSpaces()
+  const cur = currentId(state)
   let fallback: string | null = null
-  for (const sp of state.list) {
+  for (const sp of allSpaces(state)) {
     if (sp.open.some(o => o.system && o.systemId === systemId)) {
-      if (sp.id === state.current) return sp.id
+      if (sp.id === cur) return sp.id
       if (!fallback) fallback = sp.id
     }
   }
@@ -429,11 +531,11 @@ export function appendLoadedAction(instanceId: string, name: string, payload: un
     }
   }
   const spaces = ensureSpaces()
-  for (const sp of spaces.list) {
+  for (const sp of allSpaces(spaces)) {
     const i = sp.open.findIndex(n => n.instanceId === instanceId)
     if (i >= 0) {
       sp.open[i] = withAction(sp.open[i])
-      writeJson(SPACES_KEY, spaces)
+      if (!isEphemeralSpace(sp.id)) writeJson(SPACES_KEY, spaces)
       return
     }
   }
