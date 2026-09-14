@@ -1495,9 +1495,10 @@ body.popover-open .napp-body iframe {
   font-family: var(--font-serif);
 }
 
+/* Icon (when there is one) and name in a row — flex, so the name takes the
+   rest either way and what it pushes to its end lands at the line's end. */
 .napp-perms-head {
-  display: grid;
-  grid-template-columns: auto 1fr;
+  display: flex;
   align-items: center;
   gap: 0.6rem;
 }
@@ -1514,9 +1515,7 @@ body.popover-open .napp-body iframe {
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
-  /* Whole width whether or not an icon took the first column, so the type
-     at its end really is at the line's end. */
-  grid-column-end: -1;
+  flex: 1;
   min-width: 0;
 }
 
@@ -1713,13 +1712,14 @@ body.popover-open .napp-body iframe {
    ticks shrink to nothing and everything slides left, the indent folds, the
    fields turn into plain text where they stand, "space as" folds away and
    the name reads as the title. */
-/* Bold like the current space's name on the launcher. The spacing lives on
-   the words, not in a grid gap, so it folds away with "space as". */
+/* The spacing lives on the words, not in a grid gap, so it folds away with
+   "space as". Created, the name alone goes bold like the current space's name
+   on the launcher. */
 .share-title-row {
   display: grid;
   grid-template-columns: auto auto 1fr;
   align-items: center;
-  font-weight: 800;
+  font-weight: 600;
 }
 .share-title-row > span:first-child {
   margin-right: 0.4rem;
@@ -1746,11 +1746,13 @@ body.popover-open .napp-body iframe {
   font: inherit;
   transition:
     background 250ms ease,
-    padding 250ms ease;
+    padding 250ms ease,
+    font-weight 250ms ease;
 }
 .share-created .share-title-row .ui-input {
   background: transparent;
   padding: 0;
+  font-weight: 800;
   cursor: default;
 }
 /* The tick's column is its width plus the gap after it; created, it's gone. */
@@ -1852,10 +1854,11 @@ body.popover-open .napp-body iframe {
 .share-action-note {
   opacity: 0.6;
 }
-/* A line under the app list, with room after it. */
-.share-sep {
-  border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  margin: 0.4rem 0 0.6rem;
+/* The list ends with a rule, carried by its last item, with room after it. */
+.share-app-last {
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  margin-bottom: 0.4rem;
 }
 .share-status {
   display: grid;
@@ -2775,6 +2778,7 @@ body.popover-open .napp-body iframe {
    typographic treatment for control captions, metadata badges, counts.
    overline() in ui.ts. Mirrored in public/napp-ui.css. */
 .ui-overline {
+  font-family: var(--font-sans); /* its own voice, wherever it sits */
   font-size: 0.65rem;
   font-weight: 400;
   text-transform: uppercase;

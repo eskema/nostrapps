@@ -61,7 +61,13 @@ export function openShareDialog(opts: {
       extra.textContent = "space as"
       const name = input({ value: opts.name, spellcheck: false })
       title.append(lead, extra, name)
-      wrap.appendChild(title)
+      // The link lands right under the title, above the list, once it exists.
+      const url = document.createElement("textarea")
+      url.className = "ui-input share-url share-in"
+      url.rows = 3
+      url.readOnly = true
+      url.hidden = true
+      wrap.append(title, url)
 
       type ActionRow = {
         name: string
@@ -78,7 +84,7 @@ export function openShareDialog(opts: {
       }
       const rows: Row[] = opts.windows.map(w => {
         const el = document.createElement("div")
-        el.className = "napp-perms-app napp-perms-shared"
+        el.className = "napp-perms-app napp-perms-shared share-app"
         const head = document.createElement("label")
         head.className = "share-head"
         const include = check({ checked: w.shareable })
@@ -130,20 +136,18 @@ export function openShareDialog(opts: {
         return { w, el, include, state, actions }
       })
 
-      const sep = document.createElement("div")
-      sep.className = "share-sep"
-      wrap.appendChild(sep)
+      // The list ends with a rule: the last item carries it.
+      const markLast = () => {
+        const live = rows.filter(r => r.el.isConnected)
+        for (const r of live) r.el.classList.toggle("share-app-last", r === live[live.length - 1])
+      }
+      markLast()
 
       // What went wrong, app by app — only shown when something did.
       const status = document.createElement("div")
       status.className = "share-status share-in"
       status.hidden = true
-      const url = document.createElement("textarea")
-      url.className = "ui-input share-url share-in"
-      url.rows = 3
-      url.readOnly = true
-      url.hidden = true
-      wrap.append(status, url)
+      wrap.appendChild(status)
 
       const buttons = document.createElement("div")
       buttons.className = "napp-perms-actions"
@@ -185,6 +189,7 @@ export function openShareDialog(opts: {
             a.field!.tabIndex = -1
           }
         }
+        markLast()
         wrap.classList.add("share-created")
 
         // One check over every app; a window shows its app's state.

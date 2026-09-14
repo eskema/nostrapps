@@ -270,6 +270,7 @@
    Small, thin, uppercase, letter-spaced sans — the typographic treatment for
    control captions (read/write toggles), metadata badges, field labels. */
 .ui-overline {
+  font-family: "Source Sans 3 Variable", system-ui, sans-serif; /* its own voice, wherever it sits */
   font-size: 0.65rem;
   font-weight: 400;
   text-transform: uppercase;
