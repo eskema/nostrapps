@@ -938,7 +938,7 @@ html[data-theme="dark"] .napp-window.focused {
   /* Truly maximized: fixed to the VIEWPORT (not the stage) so it covers the
      header, spaces bar, and every other window — on desktop and mobile alike.
      z-index above the pin tier (100000) and the suggestions dropdown (200000);
-     toasts (400000) and modal dialogs (top layer) still sit above. */
+     the dialog scrim (350000) and toasts (400000) still sit above. */
   position: fixed !important;
   inset: 0 !important;
   z-index: 300000 !important;
@@ -1383,33 +1383,42 @@ body.popover-open .napp-body iframe {
 
 /* ─── Reusable modal dialog (openDialog in dialog.ts) ──────────────
    The shared shell for launcher prompts/pickers (permissions, action handler,
-   …). The <dialog> itself is a transparent container; its two children — the
-   prompt card (.app-dialog-body) and the queue card (.app-dialog-queue) — carry
-   the surface background + radius so they read as separated, stacked cards. */
+   …). Opened with show(), so not in the top layer: the <dialog> is the scrim,
+   a fixed full-viewport tier above maximized windows (300000) and below the
+   toasts (400000), which stay live over it. Its child .app-dialog-cards is the
+   centred column of surface cards — the prompt (.app-dialog-body) and the
+   queue (.app-dialog-queue) — that read as separated, stacked cards. */
 .app-dialog {
-  max-width: 28rem;
-  max-height: 85vh;
-  overflow: auto;
-  padding: 0;
+  position: fixed;
+  inset: 0;
+  z-index: 350000;
+  width: auto; /* the UA's fit-content would shrink the scrim to the cards */
+  height: auto;
+  margin: 0;
+  padding: 1rem;
   border: none;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.45);
   color: inherit;
   font-family: inherit;
 }
 
 /* `display` on the class would override the closed <dialog>'s UA display:none,
-   so only set the grid layout while open. */
+   so only lay out while open. */
 .app-dialog[open] {
+  display: grid;
+  place-items: center;
+}
+
+.app-dialog-cards {
   display: grid;
   gap: 0.6rem;
   align-content: start;
+  max-width: 28rem;
+  max-height: 85vh;
+  overflow: auto;
 }
 
-.app-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.45);
-}
-
-/* Both children are surface cards — the gap between them shows the backdrop. */
+/* Both are surface cards — the gap between them shows the scrim. */
 .app-dialog-body,
 .app-dialog-queue {
   background: var(--surface);
@@ -1983,7 +1992,7 @@ body.popover-open .napp-body iframe {
   position: fixed;
   right: 0.8rem;
   bottom: 3rem; /* above the spaces bar */
-  z-index: 400000; /* above maximized windows (300000) */
+  z-index: 400000; /* above maximized windows (300000) and the dialog scrim (350000) */
   display: grid;
   gap: 0.5rem;
   max-width: min(22rem, calc(100vw - 1.6rem));

@@ -1,6 +1,14 @@
 // Reusable modal dialog for the whole launcher — a single native <dialog>
-// (showModal) reused across callers. Build prompts/pickers on top of this rather
-// than hand-rolling one-off modals. Buttons come from the design system (ui.ts).
+// reused across callers. Build prompts/pickers on top of this rather than
+// hand-rolling one-off modals. Buttons come from the design system (ui.ts).
+//
+// Opened with show(), not showModal(): the modality is ours. showModal() puts
+// the dialog in the top layer, above every z-index, and makes all but its own
+// descendants inert — nothing else can be live over it, not the toasts, not a
+// popover opened meanwhile. Here the dialog is a z-index tier like the windows
+// (.app-dialog), the toasts a tier above it, and the rest of the body goes
+// inert by attribute while one is open. Esc is a keydown; the back gesture a
+// CloseWatcher, the same thing showModal() uses underneath.
 import { button, type ButtonVariant } from "./system-napps/ui.js"
 
 export interface DialogAction<T> {
@@ -33,6 +41,23 @@ function ensureDialog(): HTMLDialogElement {
     document.body.appendChild(dialogEl)
   }
   return dialogEl
+}
+
+// Body children left live under an open dialog: the toasts (a tier above it)
+// and popovers (top layer, above any tier). Everything else goes inert —
+// only what we set, so an already-inert element stays that way after.
+const LIVE = ".toasts, [popover]"
+let inerted: Element[] = []
+function inertOthers(el: HTMLDialogElement) {
+  for (const c of document.body.children) {
+    if (c === el || c.hasAttribute("inert") || c.matches(LIVE)) continue
+    c.setAttribute("inert", "")
+    inerted.push(c)
+  }
+}
+function wakeOthers() {
+  for (const c of inerted) c.removeAttribute("inert")
+  inerted = []
 }
 
 interface Pending<T> {
@@ -95,7 +120,7 @@ function renderQueueBar() {
   if (!panel) {
     panel = document.createElement("div")
     panel.className = "app-dialog-queue"
-    el.appendChild(panel)
+    el.querySelector(".app-dialog-cards")?.appendChild(panel)
   }
   panel.classList.toggle("collapsed", collapsed)
 
@@ -160,38 +185,50 @@ function showOne<T>(opts: DialogOptions<T>): Promise<T> {
   const el = ensureDialog()
   return new Promise<T>(resolve => {
     let settled = false
+    const prev = document.activeElement
+    let watcher: CloseWatcher | null = null
     const finish = (value: T) => {
       if (settled) return
       settled = true
       current = null
+      watcher?.destroy()
+      document.removeEventListener("keydown", onKey)
       el.removeEventListener("close", onClose)
       el.removeEventListener("mousedown", onMouseDown)
       el.removeEventListener("click", onClick)
+      wakeOthers() // before close(): focus can't go back to an inert element
       el.close()
+      // close() hands focus back only while it is still in the dialog; a scrim
+      // click has dropped it on the body.
+      if (document.activeElement === document.body && prev instanceof HTMLElement) prev.focus()
       resolve(value)
     }
-    const onClose = () => finish(opts.dismissValue) // Esc
-    // Backdrop dismiss: only when BOTH the press AND the release land outside the
-    // dialog box. Tracking mousedown (not just the click, which fires on mouseup)
-    // means a text selection that starts inside and is released on the backdrop
-    // does NOT close the dialog.
-    const outside = (e: MouseEvent) => {
-      const r = el.getBoundingClientRect()
-      return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom
+    const onClose = () => finish(opts.dismissValue) // closed by anything else
+    // Esc. Not if a card handled it, and an open popover takes the key first.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return
+      if (!document.body.classList.contains("popover-open")) finish(opts.dismissValue)
     }
-    let pressedOutside = false
+    // Scrim dismiss: the dialog is the whole viewport and the cards its
+    // children, so an event on the dialog itself is one on the scrim — and
+    // only when BOTH the press AND the release land there. Tracking mousedown
+    // (not just the click, which fires on mouseup) means a text selection that
+    // starts in a card and is released on the scrim does NOT close the dialog.
+    let pressedScrim = false
     const onMouseDown = (e: MouseEvent) => {
-      pressedOutside = outside(e)
+      pressedScrim = e.target === el
     }
     const onClick = (e: MouseEvent) => {
-      if (pressedOutside && outside(e)) finish(opts.dismissValue)
+      if (pressedScrim && e.target === el) finish(opts.dismissValue)
     }
 
     el.className = `app-dialog${opts.class ? ` ${opts.class}` : ""}`
     el.replaceChildren()
 
-    // The prompt itself is one surface card; the queue panel is a sibling card
-    // (appended by renderQueueBar). The transparent dialog just stacks them.
+    // The centred column: the prompt is one surface card; the queue panel is a
+    // sibling card (appended by renderQueueBar). The scrim shows between them.
+    const cards = document.createElement("div")
+    cards.className = "app-dialog-cards"
     const card = document.createElement("div")
     card.className = "app-dialog-body"
 
@@ -224,13 +261,22 @@ function showOne<T>(opts: DialogOptions<T>): Promise<T> {
       card.appendChild(menu)
     }
 
-    el.appendChild(card)
+    cards.appendChild(card)
+    el.appendChild(cards)
 
     el.addEventListener("close", onClose)
     el.addEventListener("mousedown", onMouseDown)
     el.addEventListener("click", onClick)
     current = { opts, finish }
     renderQueueBar() // show the queue panel if requests are waiting behind this one
-    el.showModal()
+    // show() notes the focused element and moves focus in; only then can the
+    // rest go inert without blurring it first.
+    el.show()
+    inertOthers(el)
+    document.addEventListener("keydown", onKey)
+    if ("CloseWatcher" in window) {
+      watcher = new CloseWatcher()
+      watcher.onclose = () => finish(opts.dismissValue)
+    }
   })
 }
