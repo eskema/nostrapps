@@ -106,7 +106,7 @@ export function createNappWindow({
   header.className = "napp-header"
 
   const titleEl = document.createElement("span")
-  titleEl.className = "napp-title"
+  titleEl.className = "napp-title ui-title"
   titleEl.textContent = petname || nappId
   if (!system) {
     titleEl.title = "Double-click to rename"

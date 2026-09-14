@@ -10,6 +10,7 @@
 //   • input({ type, placeholder, … })           → a `.ui-input` text field
 //   • check({ checked, onChange, … })           → a `.ui-check` checkbox
 //   • overline(text)                            → a `.ui-overline` caption/badge
+//   • class `ui-title` on any text              → the window title's voice
 //   • itemList() + item({ label }, …controls)   → `.ui-items` / `.ui-item` rows
 //   • addControl({ label, onAdd, … })           → the two-step "add an item" form
 // Variants: primary | outline | danger | warning | ghost. Layout (align-self,

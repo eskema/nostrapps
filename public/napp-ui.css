@@ -279,6 +279,14 @@
   user-select: none;
 }
 
+/* Title — the window title's voice: serif, black weight, uppercase, tracked. */
+.ui-title {
+  font-family: "Source Serif 4 Variable", Georgia, ui-serif, serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 /* ─── Custom checkbox ──────────────────────────────────────────────────
    A themeable checkbox: when checked it takes a --surface fill with a --text
    border and a --text check (drawn via a mask), so it flips with the theme. */

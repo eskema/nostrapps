@@ -103,6 +103,7 @@ export function openShareDialog(opts: {
         })
         const state = headEl.querySelector<HTMLElement>(".napp-perms-type")!
         state.classList.add("share-state")
+        headEl.querySelector(".napp-perms-name")?.classList.add("ui-title")
         if (!w.shareable) state.textContent = "no address"
         head.append(include, headEl)
         el.appendChild(head)
