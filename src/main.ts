@@ -3078,6 +3078,7 @@ async function importShareLink(hash: string) {
     apps: entries.map(e => {
       const iconTag = e.fetched?.manifest?.tags.find(t => t[0] === "icon")?.[1]
       return {
+        key: e.nappId,
         title: e.title,
         icon: e.installed ? installedIconSrc(e.installed) : directIconSrc(iconTag),
         iconBlob: e.fetched
@@ -3096,13 +3097,11 @@ async function importShareLink(hash: string) {
     setStatus("Shared space cancelled")
     return
   }
-  // The one grant from that screen is every temp app's policy — the first-run
-  // gate install() runs, answered once for all of them. `ui` (the component
-  // kit) only where the app asked for it: it restyles.
+  // Each temp app's grant from that screen is its policy — the first-run gate
+  // install() runs, answered here.
   for (const e of entries) {
-    if (!e.fetched) continue
-    const ui = declaredOf(e).includes("ui")
-    persist.setPolicy(e.nappId, { domains: granted.policy.domains.filter(d => d !== "ui" || ui) })
+    const policy = e.fetched ? granted.policies.get(e.nappId) : undefined
+    if (policy) persist.setPolicy(e.nappId, policy)
   }
 
   const spaceId = persist.createEphemeralSpace(granted.name)

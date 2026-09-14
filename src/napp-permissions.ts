@@ -98,6 +98,8 @@ export function promptNappPolicy(
 }
 
 export interface SharedAppPrompt {
+  // What the returned grant is keyed by (the temp id of a not-yet-installed app).
+  key: string
   title: string
   icon?: string
   iconBlob?: Blob
@@ -111,22 +113,18 @@ export interface SharedAppPrompt {
 
 // The share-link screen, built from the share screen's parts so the two read
 // alike: "open <name>" (editable — one the user already has is refused, since
-// a kept space would sit beside its namesake), every app the link opens with
-// the actions it will receive, then one set of capability rows over
-// everything the new apps declare — one grant for all of them (they're
-// temporary; a per-app checklist is more screen than the moment deserves).
-// Resolves to the name and that grant, or null if cancelled. Nothing to grant
-// when every app is installed already.
+// a kept space would sit beside its namesake), then every app the link opens
+// with the actions it will receive and, for one not installed yet, its own
+// capability rows — apps want very different things. Resolves to the name and
+// the grants keyed by `key`, or null if cancelled.
 export function promptSharedSpace(opts: {
   name: string
   // Names of the spaces the user has, which the new one can't take.
   taken: string[]
   apps: SharedAppPrompt[]
-}): Promise<{ name: string; policy: NappPolicy } | null> {
-  const fresh = opts.apps.filter(a => !a.installed)
-  const declared = [...new Set(fresh.flatMap(a => a.declaredDomains))]
+}): Promise<{ name: string; policies: Map<string, NappPolicy> } | null> {
   const taken = new Set(opts.taken.map(n => n.trim().toLowerCase()))
-  return openDialog<{ name: string; policy: NappPolicy } | null>({
+  return openDialog<{ name: string; policies: Map<string, NappPolicy> } | null>({
     dismissValue: null,
     class: "napp-perms-dialog",
     build: resolve => {
@@ -145,6 +143,7 @@ export function promptSharedSpace(opts: {
       note.hidden = true
       wrap.append(title, note)
 
+      const sections = new Map<string, PolicySection>()
       for (const app of opts.apps) {
         const el = document.createElement("div")
         el.className = "napp-perms-app share-app"
@@ -153,20 +152,20 @@ export function promptSharedSpace(opts: {
         head.querySelector(".napp-perms-name")?.classList.add("ui-title")
         el.appendChild(head)
         if (app.actions.length) el.appendChild(frozenActions(app.actions))
+        if (!app.installed) {
+          // Its own rows, under its actions. Nothing is installed until the
+          // space is kept; the grant is the temp app's until then.
+          const caption = document.createElement("p")
+          caption.className = "napp-perms-reqs"
+          caption.textContent = "Permissions"
+          const section = policySection(
+            { title: "", declaredDomains: app.declaredDomains, type: app.type },
+            caption
+          )
+          sections.set(app.key, section)
+          el.appendChild(section.el)
+        }
         wrap.appendChild(el)
-      }
-
-      let section: PolicySection | null = null
-      if (fresh.length) {
-        const caption = document.createElement("p")
-        caption.className = "napp-perms-reqs"
-        caption.textContent =
-          (fresh.length === 1
-            ? "Permissions for the new app"
-            : "Permissions, the same for every new app") +
-          " — nothing is installed until you keep the space."
-        section = policySection({ title: "", declaredDomains: declared, type: "napp" }, caption)
-        wrap.appendChild(section.el)
       }
 
       wrap.appendChild(
@@ -178,7 +177,7 @@ export function promptSharedSpace(opts: {
             name.focus()
             return undefined
           }
-          return { name: chosen, policy: section?.read() ?? { domains: [] } }
+          return { name: chosen, policies: new Map([...sections].map(([k, s]) => [k, s.read()])) }
         })
       )
       return wrap
