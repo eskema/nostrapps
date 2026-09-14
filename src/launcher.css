@@ -1840,26 +1840,26 @@ body.popover-open .napp-body iframe {
 .share-action-name {
   margin-right: 0.5rem;
 }
+/* An editable block: as tall as its text, wrapping the unbroken ones. */
 .share-payload {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  resize: vertical;
   font-size: inherit;
   line-height: 1.3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   transition:
     background 250ms ease,
     padding 250ms ease,
     opacity 250ms ease;
 }
-/* Frozen: the field reads as text, sized to it where the engine can. */
+/* Frozen: the block reads as text where it stands. */
 .share-created .share-payload {
   background: transparent;
   padding: 0;
-  resize: none;
   opacity: 0.85;
   cursor: default;
-  field-sizing: content;
 }
 .share-action-note {
   opacity: 0.6;

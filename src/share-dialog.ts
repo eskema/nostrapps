@@ -74,7 +74,7 @@ export function openShareDialog(opts: {
         name: string
         row: HTMLElement
         tick: HTMLInputElement
-        field: HTMLTextAreaElement | null
+        field: HTMLElement | null
       }
       type Row = {
         w: ShareWindow
@@ -106,8 +106,8 @@ export function openShareDialog(opts: {
 
         const list = document.createElement("div")
         list.className = "share-actions"
-        // An action: tick + name on one line, the payload below it in a
-        // textarea that grows or resizes for the long ones (nevents, lists).
+        // An action: tick + name on one line, the payload below it in an
+        // editable block that's as tall as its text, long or short.
         const actions = w.actions.map((a): ActionRow => {
           const row = document.createElement("div")
           row.className = "share-action"
@@ -119,7 +119,7 @@ export function openShareDialog(opts: {
           nameEl.textContent = a.name
           actionHead.append(tick, nameEl)
           row.appendChild(actionHead)
-          let field: HTMLTextAreaElement | null = null
+          let field: HTMLElement | null = null
           if (a.payload == null) {
             tick.disabled = true
             const note = document.createElement("span")
@@ -127,11 +127,7 @@ export function openShareDialog(opts: {
             note.textContent = "can't go in a link"
             actionHead.appendChild(note)
           } else {
-            field = document.createElement("textarea")
-            field.className = "ui-input share-payload"
-            field.value = a.payload
-            field.rows = 2
-            field.spellcheck = false
+            field = payloadField(a.payload)
             row.appendChild(field)
           }
           list.appendChild(row)
@@ -143,7 +139,7 @@ export function openShareDialog(opts: {
           list.classList.toggle("share-off", !on)
           for (const a of actions) {
             a.tick.disabled = !on || !a.field
-            if (a.field) a.field.disabled = !on
+            if (a.field) setEditable(a.field, on)
           }
         }
         setOn(w.shareable)
@@ -192,7 +188,9 @@ export function openShareDialog(opts: {
           }
           for (const a of r.actions) {
             const payload =
-              a.tick.checked && a.field ? opts.encode(a.name, a.field.value.trim()) : null
+              a.tick.checked && a.field
+                ? opts.encode(a.name, (a.field.textContent ?? "").trim())
+                : null
             if (payload == null) {
               if (a.tick.checked && a.field) {
                 problems.push(`${r.w.title}: the ${a.name} payload isn't link-safe, left out`)
@@ -200,10 +198,8 @@ export function openShareDialog(opts: {
               a.row.remove()
               continue
             }
-            a.field!.value = payload // what the link gets (an npub for a hex key, …)
-            a.field!.readOnly = true
-            a.field!.tabIndex = -1
-            fitToText(a.field!)
+            a.field!.textContent = payload // what the link gets (an npub for a hex key, …)
+            setEditable(a.field!, false)
           }
         }
         markLast()
@@ -251,7 +247,9 @@ export function openShareDialog(opts: {
           included.map(r => ({
             input: checks.get(r.w.key)?.input ?? "",
             actions: r.actions.flatMap(a =>
-              a.row.isConnected && a.field ? [{ name: a.name, payload: a.field.value }] : []
+              a.row.isConnected && a.field
+                ? [{ name: a.name, payload: a.field.textContent ?? "" }]
+                : []
             )
           }))
         )
@@ -279,15 +277,38 @@ export function openShareDialog(opts: {
   })
 }
 
-// A frozen payload field is as tall as its text: drop whatever height a
-// resize left on it, let the engine size it to content where it can, and
-// elsewhere measure once the padding has gone (see the transition).
-function fitToText(field: HTMLTextAreaElement) {
-  field.style.height = ""
-  field.style.width = ""
-  field.rows = 1
-  if (CSS.supports("field-sizing", "content")) return
-  setTimeout(() => {
-    field.style.height = `${field.scrollHeight}px`
-  }, 300)
+// A payload field: an editable block, so it's as tall as its text with no
+// sizing of its own — plain text only, one line (Enter does nothing), and
+// frozen by turning editing off. Engines without plaintext-only editing get
+// the rich kind with pastes flattened to text.
+function payloadField(value: string): HTMLElement {
+  const el = document.createElement("div")
+  el.className = "ui-input share-payload"
+  el.textContent = value
+  el.spellcheck = false
+  el.setAttribute("role", "textbox")
+  el.addEventListener("keydown", e => {
+    if (e.key === "Enter") e.preventDefault()
+  })
+  el.addEventListener("paste", e => {
+    e.preventDefault()
+    const text = e.clipboardData?.getData("text/plain") ?? ""
+    document.execCommand("insertText", false, text.replace(/\s+/g, " "))
+  })
+  setEditable(el, true)
+  return el
+}
+
+function setEditable(el: HTMLElement, on: boolean) {
+  if (!on) {
+    el.contentEditable = "false"
+    el.tabIndex = -1
+    return
+  }
+  try {
+    el.contentEditable = "plaintext-only"
+  } catch {
+    el.contentEditable = "true"
+  }
+  el.tabIndex = 0
 }
