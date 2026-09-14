@@ -1877,15 +1877,13 @@ body.popover-open .napp-body iframe {
 .share-action-note {
   opacity: 0.6;
 }
-/* The title's rule stands for the first item's. */
-.share-app-first {
+/* Each item ends with its rule (none on top: the title's rule opens the list,
+   and nothing sits between the link box and the first item). */
+.share-app {
+  padding-top: 0;
   border-top: none;
-}
-/* The list ends with a rule, carried by its last item, with room after it. */
-.share-app-last {
   padding-bottom: 0.6rem;
   border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  margin-bottom: 0.4rem;
 }
 .share-status {
   display: grid;
