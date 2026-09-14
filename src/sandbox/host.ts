@@ -94,6 +94,8 @@ import type { NappPolicy } from "../types.js"
 import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
 import { relayAuthSigner } from "../relay-auth.js"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex } from "@noble/hashes/utils.js"
 import { current as outboxCurrent, outbox, FALLBACK_RELAYS, goLive } from "../outbox.js"
 import { debounce, HEX64, isHex64 } from "../utils.js"
 
@@ -352,7 +354,48 @@ export async function waitForRegisteredAction(instanceId: string, name: string) 
   })
 }
 
+// A napp's own origin is the isolation boundary — its files, its storage, its
+// service worker — so two nappIds must never land on one label. A DNS label is
+// 63 characters of [a-z0-9-] (and case-insensitive); a nappId is neither, since
+// a published d tag carries any character at any length. Cutting the id to fit
+// therefore collided: two d tags differing only past the cut, or only in
+// punctuation (`a~b` and `a-b` both sanitized to `a-b`), served each other's
+// files — the hazard tempNappIdFor already works around by hand.
+//
+// So the label is a readable head plus a hash of the WHOLE id: the head to keep
+// origins legible, the hash to carry identity. sw.js reads the dev-/temp-
+// prefix off the front, so the head keeps the id's own beginning.
+const LABEL_HEAD = 40
+const LABEL_HASH = 12
+
+export function nappLabel(nappId: string): string {
+  const head = nappId
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .slice(0, LABEL_HEAD)
+    .replace(/^-+|-+$/g, "")
+  // Over the id as given: two ids differing only in case are two napps, even
+  // though their heads are one string.
+  const tag = bytesToHex(sha256(new TextEncoder().encode(nappId))).slice(0, LABEL_HASH)
+  return head ? `${head}-${tag}` : tag
+}
+
+// The app's own name out of a nappId, for a log line: the d tag is the last
+// segment of every shape we mint. `nappId.slice(0, 8)` used to stand in for
+// this and read "napplet~" for every napplet.
+export function nappShortName(nappId: string): string {
+  return nappId.split("~").pop()!.slice(0, 16) || nappId.slice(0, 16)
+}
+
 export function nappOriginFor(nappId: string): string {
+  return `${location.protocol}//${nappLabel(nappId)}.${location.host}`
+}
+
+// The rule nappLabel replaced. A napp installed under it still owns files, a
+// service worker and whatever it stored at that origin, and no derivation
+// addresses that origin any more — so wipe() clears it too, or "erase all data"
+// would leave it behind forever. Delete once nobody can still be carrying one.
+function legacyNappOriginFor(nappId: string): string {
   const slug = nappId.slice(0, 63).replace(/[^a-zA-Z0-9.-]/g, "-")
   return `${location.protocol}//${slug}.${location.host}`
 }
@@ -1345,7 +1388,7 @@ async function nappletRelaySubscribe(nappId: string, data: any, post: (msg: obje
   }
   for (const filter of clean) {
     pool.subscribeMany(relays, filter, {
-      label: `napplet-${nappId.slice(0, 8)}-${subId}`,
+      label: `napplet-${nappShortName(nappId)}-${subId}`,
       abort: controller.signal,
       onevent(event: NostrEvent) {
         if (controller.signal.aborted) return
@@ -1402,7 +1445,7 @@ async function nappletOutboxSubscribe(nappId: string, data: any, post: (msg: obj
         )
       : []
     if (controller.signal.aborted) return
-    const label = `napplet-outbox-${nappId.slice(0, 8)}-${subId}`
+    const label = `napplet-outbox-${nappShortName(nappId)}-${subId}`
     if (maps.length) {
       pool.subscribeMap(maps, { label, abort: controller.signal, onevent: emit })
     } else {
@@ -3220,7 +3263,21 @@ function ensureStageObserver(stageEl: HTMLElement) {
 }
 
 export async function wipe(nappId: string): Promise<void> {
-  const origin = nappOriginFor(nappId)
+  await wipeOrigin(nappOriginFor(nappId))
+  // Best effort: the legacy origin may never have existed, in which case this
+  // boots it only to wipe it — wipeAll unregisters the worker it just
+  // registered, so nothing is left standing either way.
+  const legacy = legacyNappOriginFor(nappId)
+  if (legacy !== nappOriginFor(nappId)) {
+    try {
+      await wipeOrigin(legacy)
+    } catch (err) {
+      console.debug("[sandbox] legacy wipe skipped", { nappId, legacy, err: String(err) })
+    }
+  }
+}
+
+async function wipeOrigin(origin: string): Promise<void> {
   const boot = document.createElement("iframe")
   boot.src = `${origin}/boot.html`
   boot.style.display = "none"
