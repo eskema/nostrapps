@@ -155,12 +155,9 @@ export function promptSharedSpace(opts: {
         if (!app.installed) {
           // Its own rows, under its actions. Nothing is installed until the
           // space is kept; the grant is the temp app's until then.
-          const caption = document.createElement("p")
-          caption.className = "napp-perms-reqs"
-          caption.textContent = "Permissions"
           const section = policySection(
             { title: "", declaredDomains: app.declaredDomains, type: app.type },
-            caption
+            null
           )
           sections.set(app.key, section)
           el.appendChild(section.el)
@@ -192,10 +189,10 @@ interface PolicySection {
 
 // One app's part of a permission screen: head, requires summary, and the
 // grantable rows. `read()` collects the grant as ticked. `head` replaces the
-// icon + name head (a caption, for grants that cover several apps).
+// icon + name head; null for rows that sit under a head of their own.
 function policySection(
   opts: PolicyPromptOpts,
-  head: HTMLElement = sectionHead(opts)
+  head: HTMLElement | null = sectionHead(opts)
 ): PolicySection {
   const cur = opts.current
   // Declared caps we implement (order-stable), minus network (its own row) and
@@ -215,7 +212,7 @@ function policySection(
 
   const el = document.createElement("div")
   el.className = "napp-perms-app"
-  el.appendChild(head)
+  if (head) el.appendChild(head)
 
   // Ambiguous load: a one-of-two pick in the same row language as the
   // capability rows below, radio at the left.
