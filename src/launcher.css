@@ -1896,8 +1896,9 @@ body.popover-open .napp-body iframe {
   display: none;
 }
 /* The link box, between the title's rule and the list. It grows out from
-   under the rule — unfolding (scaleY) and pushing its margins open, the text
-   surfacing from the box's own color — a line tall,
+   under the rule — its height and margins from nothing, so at first there's
+   nothing between the rule and the list, the text surfacing from the box's
+   own color — a line tall,
    saying the link is on its way; the link fades in and the box grows to the
    lines it needs, slowly. Pull it taller. */
 .share-url {
@@ -1912,9 +1913,10 @@ body.popover-open .napp-body iframe {
   font-size: inherit;
   line-height: 1.4;
   word-break: break-all;
-  transform-origin: top;
   transition: height 600ms ease;
-  animation: share-url-in 400ms ease both;
+  /* backwards, not both: once it has opened, the height is the rule's own
+     again, free to transition to .ready */
+  animation: share-url-in 400ms ease backwards;
 }
 .share-url.ready {
   height: calc(1.4em * 2.3 + 1rem);
@@ -1927,13 +1929,17 @@ body.popover-open .napp-body iframe {
 }
 @keyframes share-url-in {
   from {
-    transform: scaleY(0);
+    height: 0;
     margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
     color: color-mix(in srgb, var(--text) 5%, var(--surface));
   }
   to {
-    transform: scaleY(1);
+    height: calc(1.4em + 1rem);
     margin: 0.6rem 0;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
     color: var(--text);
   }
 }
