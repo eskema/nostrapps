@@ -49,3 +49,9 @@ export function normalizeServer(s: string): string {
   const u = s.endsWith("/") ? s.slice(0, -1) : s
   return u.startsWith("http") ? u : `https://${u}`
 }
+
+// Window instance ids are the serial from the sandbox host — "1", "2", … — but
+// a singleton's is its own nappId and a system napp's is "system:<id>". Only
+// the serial tells two windows of one app apart; the others are an app's name
+// cut to length, which is what put a pubkey slice on the relays title.
+export const isInstanceSerial = (id: string) => /^\d+$/.test(id)

@@ -55,6 +55,7 @@ import {
   type ShareLink
 } from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
+import { isInstanceSerial } from "./utils.js"
 import { fetchNsite, manifestRelays, blobServers, manifestPaths } from "./nsite/fetch.js"
 import { ensureReplicatedAll, type ReplicationTarget } from "./nsite/heal.js"
 import { openShareDialog, type ShareCheck, type ShareWindow } from "./share-dialog.js"
@@ -1392,10 +1393,10 @@ function buildRow(item: SuggestionItem, sig: string): Row {
         trail.textContent = `${item.appType} · ${item.authorLabel}`
       }
     }
-    if (item.instanceId) {
+    if (item.instanceId && isInstanceSerial(item.instanceId)) {
       const id = document.createElement("span")
       id.className = "sugg-id"
-      id.textContent = item.instanceId.slice(0, 8)
+      id.textContent = item.instanceId
       main.appendChild(id)
     }
     // Global view: every open window is tagged with the space it lives in. The

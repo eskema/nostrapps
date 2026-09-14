@@ -10,6 +10,7 @@ import {
 } from "./host.js"
 import { moveBefore } from "../dom.js"
 import { getWindowSize, rememberWindowSize } from "../persistence.js"
+import { isInstanceSerial } from "../utils.js"
 import { icon } from "../system-napps/ui.js"
 
 let zIndexCounter = 1
@@ -110,7 +111,7 @@ export function createNappWindow({
   titleEl.textContent = petname || nappId
   if (!system) {
     titleEl.title = "Double-click to rename"
-    if (instanceId) titleEl.dataset.instance = instanceId.slice(0, 8)
+    if (isInstanceSerial(instanceId)) titleEl.dataset.instance = instanceId
   }
 
   const controls = document.createElement("div")
