@@ -5,7 +5,7 @@ declare module "*?raw" {
 }
 
 // ── Nostr core types (same as from @nostr/tools) ──────────────────────────
-interface NostrEvent {
+type NostrEvent = {
   id: string
   pubkey: string
   created_at: number
@@ -15,7 +15,7 @@ interface NostrEvent {
   sig: string
 }
 
-interface EventTemplate {
+type EventTemplate = {
   kind: number
   tags: string[][]
   content: string
@@ -29,17 +29,17 @@ interface VerifiedEvent extends NostrEvent {
 declare const verifiedSymbol: unique symbol
 
 // ── NIP-07 signer ────────────────────────────────────────────────────────
-interface NostrNip04 {
+type NostrNip04 = {
   encrypt(pubkey: string, plaintext: string): Promise<string>
   decrypt(pubkey: string, ciphertext: string): Promise<string>
 }
 
-interface NostrNip44 {
+type NostrNip44 = {
   encrypt(pubkey: string, plaintext: string): Promise<string>
   decrypt(pubkey: string, ciphertext: string): Promise<string>
 }
 
-interface NostrSigner {
+type NostrSigner = {
   getPublicKey(): Promise<string>
   signEvent(evt: EventTemplate): Promise<VerifiedEvent>
   nip04: NostrNip04
@@ -47,7 +47,7 @@ interface NostrSigner {
 }
 
 // ── Event store (NIP-DB) ─────────────────────────────────────────────────
-interface NostrDB {
+type NostrDB = {
   add(event: NostrEvent): Promise<void>
   query(filters: unknown): Promise<NostrEvent[]>
   count(filters: unknown): Promise<number>
@@ -58,44 +58,44 @@ interface NostrDB {
 }
 
 // ── NIP-51 list helpers ──────────────────────────────────────────────────
-interface RelayItem {
+type RelayItem = {
   url: string
   read: boolean
   write: boolean
 }
 
-interface ListResult<I> {
+type ListResult<I> = {
   event: NostrEvent | null
   items: I[]
 }
 
 // ── NIP-51 list item shapes (mirror @nostr/gadgets/lists) ─────────────────
-interface AddressPointer {
+type AddressPointer = {
   identifier: string
   pubkey: string
   kind: number
   relays: string[]
 }
 
-interface EventPointer {
+type EventPointer = {
   id: string
   kind?: number
   relays?: string[]
   author?: string
 }
 
-interface Emoji {
+type Emoji = {
   shortcode: string
   url: string
 }
 
-interface SimpleGroupItem {
+type SimpleGroupItem = {
   groupId: string
   relay: string
   name?: string
 }
 
-interface ResolvedSet<I> {
+type ResolvedSet<I> = {
   pointer: AddressPointer
   event: NostrEvent | null
   items: I[]
@@ -105,13 +105,13 @@ interface ResolvedSet<I> {
 }
 
 // ── Addressable set helpers ──────────────────────────────────────────────
-interface SetResult<I> {
+type SetResult<I> = {
   event: NostrEvent | null
   items: I[]
 }
 
 // ── Profile metadata ─────────────────────────────────────────────────────
-interface ProfileMetadata {
+type ProfileMetadata = {
   name?: string
   picture?: string
   about?: string
@@ -123,7 +123,7 @@ interface ProfileMetadata {
   lud06?: string
 }
 
-interface NostrUser {
+type NostrUser = {
   pubkey: string
   npub: string
   shortName: string
@@ -132,14 +132,14 @@ interface NostrUser {
   lastUpdated: number
 }
 
-interface NostrUserRequest {
+type NostrUserRequest = {
   pubkey: string
   relays?: string[]
   refreshStyle?: boolean | NostrEvent | null
 }
 
 // ── Relay info (NIP-11) ─────────────────────────────────────────────────
-interface RelayInfoDocument {
+type RelayInfoDocument = {
   url: string
   name?: string
   description?: string
@@ -152,26 +152,26 @@ interface RelayInfoDocument {
 }
 
 // ── Publishing result ────────────────────────────────────────────────────
-interface PublishResult {
+type PublishResult = {
   relays: { [url: string]: { ok: boolean; error?: string } }
   published: number
   failed: number
 }
 
 // ── Feed subscription ────────────────────────────────────────────────────
-interface FeedHandle {
+type FeedHandle = {
   close(): void
 }
 
 type FeedCallback = (events: NostrEvent[], synced: boolean) => void
 
-interface FeedOpts {
+type FeedOpts = {
   since?: number
   until?: number
   limit?: number
 }
 
-interface NappFeeds {
+type NappFeeds = {
   profile(pubkey: string, kinds: number[], callback: FeedCallback, opts?: FeedOpts): FeedHandle
   following(source: string, kinds: number[], callback: FeedCallback, opts?: FeedOpts): FeedHandle
   inbox(
@@ -189,7 +189,7 @@ interface NappFeeds {
 }
 
 // ── Data-loading utils ───────────────────────────────────────────────────
-interface NappUtils {
+type NappUtils = {
   // NIP-51 lists — accepts hex pubkey, npub, or nprofile
   loadRelayList(pubkey: string): Promise<ListResult<RelayItem>>
   loadFollowsList(pubkey: string): Promise<ListResult<string>>
@@ -283,7 +283,7 @@ type Nip19Decoded =
       data: { identifier: string; pubkey: string; kind: number; relays: string[] }
     }
 
-interface NappNip19 {
+type NappNip19 = {
   decode(bech: string): Nip19Decoded
   npubEncode(hex: string): string
   noteEncode(hex: string): string
@@ -296,7 +296,7 @@ interface NappNip19 {
   }): string
 }
 
-interface NappFx {
+type NappFx = {
   isHex64(s: unknown): boolean
   parseCoordinate(coord: string): { kind: number; pubkey: string; identifier: string } | null
   formatCoordinate(coord: { kind: number; pubkey: string; identifier: string }): string
@@ -304,7 +304,7 @@ interface NappFx {
 }
 
 // ── Main napp object ─────────────────────────────────────────────────────
-interface Napp {
+type Napp = {
   instance: string
   registerAction(
     pattern: string,
@@ -332,16 +332,16 @@ interface Napp {
 // the @napplet/nap contracts (result field names verbatim), so an app built
 // with @napplet/shim runs unchanged. This surface is separate from window.napp.
 
-interface NappletSubscription {
+type NappletSubscription = {
   close(): void
 }
 
-interface NappletTheme_Payload {
+type NappletTheme_Payload = {
   colors: { background: string; text: string; primary: string }
   title?: string
 }
 
-interface NappletIdentity {
+type NappletIdentity = {
   /** The launcher's cached account key, or "" when no signer is connected.
    *  Read-only — never triggers a signer prompt. */
   getPublicKey(): Promise<string>
@@ -358,12 +358,12 @@ interface NappletIdentity {
   onChanged(handler: (pubkey: string) => void): NappletSubscription
 }
 
-interface NappletTheme {
+type NappletTheme = {
   get(): Promise<NappletTheme_Payload>
   onChanged(handler: (theme: NappletTheme_Payload) => void): NappletSubscription
 }
 
-interface NappletStorageOps {
+type NappletStorageOps = {
   getItem(key: string): Promise<string | null>
   setItem(key: string, value: string): Promise<void>
   removeItem(key: string): Promise<void>
@@ -374,7 +374,7 @@ interface NappletStorage extends NappletStorageOps {
   instance: NappletStorageOps
 }
 
-interface NappletResource {
+type NappletResource = {
   /** Fetch a URL's bytes through the shell — works even when the napplet is
    *  sealed. Schemes: https/http/data/blob and blossom:<sha256>. The Blob's
    *  `.type` carries the MIME. */
@@ -385,10 +385,10 @@ interface NappletResource {
   bytesAsObjectURL(url: string): { url: string; revoke(): void; ready?: Promise<unknown> }
 }
 
-interface NappletRelaySubscription {
+type NappletRelaySubscription = {
   close(): void
 }
-interface NappletRelay {
+type NappletRelay = {
   /** Publish an UNSIGNED template; the shell signs (behind a prompt) and
    *  publishes. Resolves with the signed event. */
   publish(event: EventTemplate): Promise<NostrEvent>
@@ -411,37 +411,37 @@ interface NappletRelay {
 }
 
 // ── NIP-5D outbox domain (NIP-65 outbox-model relay routing) ──────────────
-interface NappletRelayEventResult {
+type NappletRelayEventResult = {
   event: NostrEvent
 }
-interface NappletOutboxEventResult {
+type NappletOutboxEventResult = {
   result?: NappletRelayEventResult
   incomplete?: boolean
   error?: string
 }
-interface NappletOutboxResult {
+type NappletOutboxResult = {
   events: NappletRelayEventResult[]
   incomplete?: boolean
   error?: string
 }
-interface NappletOutboxPublishResult {
+type NappletOutboxPublishResult = {
   ok: boolean
   event?: NostrEvent
   eventId?: string
   relays?: Record<string, boolean>
   error?: string
 }
-interface NappletOutboxRelayPlan {
+type NappletOutboxRelayPlan = {
   relays: string[]
   source: "nip65" | "cache" | "policy" | "fallback"
   missingAuthors?: string[]
 }
-interface NappletOutboxSubscription {
+type NappletOutboxSubscription = {
   on(event: "event", cb: (result: NappletRelayEventResult) => void): void
   on(event: "closed", cb: (reason?: string) => void): void
   close(): void
 }
-interface NappletOutbox {
+type NappletOutbox = {
   /** Fetch one event by id through shell-owned outbox routing. */
   getEvent(
     eventId: string,
@@ -473,13 +473,13 @@ interface NappletOutbox {
 
 // ── NAP-COMMON (shell-mediated social actions) ────────────────────────────
 // Results carry `ok` — ok:false is an answer (bad input, denied), not a throw.
-interface NappletCommonActionResult {
+type NappletCommonActionResult = {
   ok: boolean
   eventId?: string
   event?: NostrEvent
   error?: string
 }
-interface NappletCommon {
+type NappletCommon = {
   /** Public nip19 only — never nsec. */
   encodeNip19(input: {
     type: "npub" | "note" | "nprofile" | "nevent" | "naddr"
@@ -522,7 +522,7 @@ interface NappletCommon {
   ): Promise<NappletCommonActionResult>
 }
 
-interface NappletInc {
+type NappletInc = {
   /** `content` is a JSON string that becomes the payload; extraTags unused. */
   emit(topic: string, extraTags?: string[][], content?: string): void
   /** callback(payload, syntheticEvent) — the second arg is a kind-0-shaped
@@ -530,13 +530,13 @@ interface NappletInc {
   on(topic: string, callback: (payload: unknown, event: NostrEvent) => void): NappletSubscription
 }
 
-interface NappletLink {
+type NappletLink = {
   /** Opens in a new tab behind a prompt. Malformed or non-http(s) URLs reject;
    *  a user denial (or blocked popup) resolves with status "denied". */
   open(url: string, options?: { label?: string }): Promise<{ status: "opened" | "denied" }>
 }
 
-interface NappletConfig {
+type NappletConfig = {
   /** Restricted JSON Schema: no $ref, no regex keywords, depth ≤ 6, secrets
    *  (`x-napplet-secret`) carry no default. Rejections throw "<code>: <detail>". */
   registerSchema(schema: Record<string, unknown>, version?: number): Promise<void>
@@ -551,7 +551,7 @@ interface NappletConfig {
 }
 
 // Every domain is optional: presence = the shell granted it.
-interface Napplet {
+type Napplet = {
   identity?: NappletIdentity
   theme?: NappletTheme
   storage?: NappletStorage
