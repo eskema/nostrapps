@@ -62,7 +62,7 @@ async function heal({ manifest, relays, servers, files }: Parameters<typeof heal
       const client = new BlossomClient(server, healSigner as any)
       const base = (server.startsWith("http") ? server : `https://${server}`).replace(/\/$/, "")
       for (const f of files) {
-        if (await hasBytes(base, f.sha)) continue
+        if ((await hasBytes(base, f.sha)) !== false) continue // there, or no answer
         try {
           await client.uploadBlob(f.body, f.mime)
           uploaded++
@@ -75,7 +75,10 @@ async function heal({ manifest, relays, servers, files }: Parameters<typeof heal
   console.debug("[heal]", { id: manifest.id, republished, uploaded })
 }
 
-export async function hasBytes(base: string, sha: string): Promise<boolean> {
+// true: the bytes are there. false: the server answered and hasn't got them.
+// null: no answer worth acting on (down, timing out, failing with a 5xx) — a
+// server in that state says nothing about the file.
+export async function hasBytes(base: string, sha: string): Promise<boolean | null> {
   try {
     const res = await fetch(`${base}/${sha}`, {
       headers: { Range: "bytes=0-0" },
@@ -84,9 +87,10 @@ export async function hasBytes(base: string, sha: string): Promise<boolean> {
     // 206 (range honored) or 200 (range ignored, body streams) both prove the
     // bytes exist; cancel the body so a range-ignoring server doesn't send it all.
     res.body?.cancel()
-    return res.ok
+    if (res.ok) return true
+    return res.status >= 500 ? null : false
   } catch {
-    return false
+    return null
   }
 }
 
@@ -107,6 +111,13 @@ export type ReplicationTarget = {
 }
 export type ReplicationResult = { relays: string[]; uploaded: number; missing: string[] }
 
+// Not tried again this session: files no server would take, and servers that
+// refused an upload. A link needs one copy of a file somewhere, not one per
+// server — so a server that's down, refusing, or forgetful must not cost a
+// signing prompt on every share.
+const unhealable = new Set<string>()
+const refusing = new Set<string>()
+
 export async function ensureReplicatedAll(
   targets: ReplicationTarget[]
 ): Promise<ReplicationResult[]> {
@@ -117,11 +128,13 @@ export async function ensureReplicatedAll(
     shas: string[]
     bySha: Map<string, { sha: string; body: Blob; mime?: string }>
     present: Map<string, number> // sha → servers that have it
-    needs: Map<string, string[]> // server base → shas it lacks that we can give
+    lacks: Map<string, string[]> // server base → shas it answered it hasn't got
+    want: string[] // shas on no reachable server that we can give (and may try)
     uploaded: number
   }
 
-  // Phase one, every target together: manifests out, blobs probed.
+  // Phase one, every target together: manifests out, blobs probed. A server
+  // that doesn't answer drops out of this check.
   const plans = await Promise.all(
     targets.map(async (t): Promise<Plan> => {
       const onProgress = t.onProgress ?? (() => {})
@@ -132,7 +145,8 @@ export async function ensureReplicatedAll(
         shas,
         bySha: new Map(t.files.map(f => [f.sha, f])),
         present: new Map(),
-        needs: new Map(),
+        lacks: new Map(),
+        want: [],
         uploaded: 0
       }
       try {
@@ -148,11 +162,15 @@ export async function ensureReplicatedAll(
         await Promise.allSettled(
           bases.map(async base => {
             for (const sha of shas) {
-              if (await hasBytes(base, sha)) plan.present.set(sha, (plan.present.get(sha) ?? 0) + 1)
-              else if (plan.bySha.has(sha))
-                plan.needs.set(base, [...(plan.needs.get(base) ?? []), sha])
+              const has = await hasBytes(base, sha)
+              if (has === null) return // no answer: out of this check
+              if (has) plan.present.set(sha, (plan.present.get(sha) ?? 0) + 1)
+              else plan.lacks.set(base, [...(plan.lacks.get(base) ?? []), sha])
             }
           })
+        )
+        plan.want = shas.filter(
+          sha => !plan.present.get(sha) && plan.bySha.has(sha) && !unhealable.has(sha)
         )
       } catch (err) {
         console.debug("[heal] share check failed", { id: t.manifest.id, err: String(err) })
@@ -161,40 +179,55 @@ export async function ensureReplicatedAll(
     })
   )
 
-  // Phase two: one auth for everything missing anywhere, then the uploads.
-  const want = [...new Set(plans.flatMap(p => [...p.needs.values()].flat()))]
-  if (want.length) {
-    const servers = [...new Set(plans.flatMap(p => [...p.needs.keys()]))]
+  // Phase two: what's on no reachable server goes to every reachable server
+  // that answered it lacks it (any one taking it is enough) — under one auth
+  // for all of it, one signing prompt. Each upload is proved by a ranged GET.
+  const jobs: Array<{ p: Plan; base: string; shas: string[] }> = []
+  for (const p of plans) {
+    for (const [base, lacking] of p.lacks) {
+      if (refusing.has(base)) continue
+      const shas = lacking.filter(sha => p.want.includes(sha))
+      if (shas.length) jobs.push({ p, base, shas })
+    }
+  }
+  if (jobs.length) {
+    const want = [...new Set(jobs.flatMap(j => j.shas))]
+    const servers = [...new Set(jobs.map(j => j.base))]
     for (const p of plans) {
-      const n = new Set([...p.needs.values()].flat()).size
+      const n = new Set(jobs.filter(j => j.p === p).flatMap(j => j.shas)).size
       if (n) p.t.onProgress?.(`uploading ${plural(n, "missing file")}…`)
     }
     const auth = await uploadAuth(want, servers)
     await Promise.allSettled(
-      plans.flatMap(p =>
-        [...p.needs].map(async ([base, lacking]) => {
-          for (const sha of lacking) {
-            const f = p.bySha.get(sha)!
-            const blob =
-              f.body.type === f.mime ? f.body : new Blob([f.body], { type: f.mime || "" })
-            try {
-              const r = await uploadBlob(base, blob, { auth, signal: AbortSignal.timeout(30_000) })
-              // Stored under another hash, or accepted against a stale index row
-              // without the bytes (a server that lost a file still answers for
-              // it — see hasBytes): only a ranged GET afterwards proves it took.
-              if (r?.sha256 === sha && (await hasBytes(base, sha))) {
-                p.uploaded++
-                p.present.set(sha, (p.present.get(sha) ?? 0) + 1)
-              } else {
-                console.debug("[heal] upload didn't take", { base, sha, got: r?.sha256 })
-              }
-            } catch (err) {
-              console.debug("[heal] upload refused", { base, sha, err: String(err) })
+      jobs.map(async ({ p, base, shas }) => {
+        for (const sha of shas) {
+          const f = p.bySha.get(sha)!
+          const blob = f.body.type === f.mime ? f.body : new Blob([f.body], { type: f.mime || "" })
+          try {
+            const r = await uploadBlob(base, blob, { auth, signal: AbortSignal.timeout(30_000) })
+            // Stored under another hash, or accepted against a stale index row
+            // without the bytes (a server that lost a file still answers for
+            // it — see hasBytes): only a ranged GET afterwards proves it took.
+            if (r?.sha256 === sha && (await hasBytes(base, sha)) === true) {
+              p.uploaded++
+              p.present.set(sha, (p.present.get(sha) ?? 0) + 1)
+            } else {
+              console.debug("[heal] upload didn't take", { base, sha, got: r?.sha256 })
+              refusing.add(base)
             }
+          } catch (err) {
+            console.debug("[heal] upload refused", { base, sha, err: String(err) })
+            refusing.add(base)
           }
-        })
-      )
+        }
+      })
     )
+  }
+  // Tried and still on no server: not again this session. (Untried — every
+  // server out — stays open for a later share.)
+  const tried = new Set(jobs.flatMap(j => j.shas))
+  for (const p of plans) {
+    for (const sha of p.want) if (tried.has(sha) && !p.present.get(sha)) unhealable.add(sha)
   }
 
   return plans.map(p => {
