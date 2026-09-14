@@ -1761,9 +1761,11 @@ body.popover-open .napp-body iframe {
     padding 250ms ease,
     font-weight 250ms ease;
 }
+/* Keeps its vertical padding, so the line stays as tall and as far from the
+   list as it was. */
 .share-created .share-title-row .ui-input {
   background: transparent;
-  padding: 0;
+  padding: 0.35rem 0;
   font-weight: 800;
   cursor: default;
 }
@@ -1887,7 +1889,9 @@ body.popover-open .napp-body iframe {
 .share-status[hidden] {
   display: none;
 }
-/* The link, in a box a few lines tall that scrolls, or pull it taller. */
+/* The link, in a box a few lines tall that scrolls, or pull it taller. It
+   arrives by opening up: the box grows from a line and the text surfaces
+   from the box's own color. */
 .share-url {
   width: 100%;
   box-sizing: border-box;
@@ -1896,6 +1900,19 @@ body.popover-open .napp-body iframe {
   font-size: inherit;
   line-height: 1.4;
   word-break: break-all;
+  animation: share-url-in 400ms ease both;
+}
+@keyframes share-url-in {
+  from {
+    padding-top: 0;
+    padding-bottom: 0;
+    color: color-mix(in srgb, var(--text) 5%, var(--surface));
+  }
+  to {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    color: var(--text);
+  }
 }
 /* What appears once the link exists eases in. */
 .share-in {

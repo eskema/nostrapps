@@ -62,7 +62,14 @@ export function openShareDialog(opts: {
       lead.textContent = "share"
       const name = input({ value: opts.name, spellcheck: false })
       title.append(lead, name)
-      wrap.appendChild(title)
+      // The link lands right under the title, above the list, once it exists
+      // — never out of sight below a long list.
+      const url = document.createElement("textarea")
+      url.className = "ui-input share-url"
+      url.rows = 3
+      url.readOnly = true
+      url.hidden = true
+      wrap.append(title, url)
 
       type ActionRow = {
         name: string
@@ -149,17 +156,11 @@ export function openShareDialog(opts: {
       }
       markLast()
 
-      // What went wrong, app by app — only shown when something did — then
-      // the link, once it exists.
+      // What went wrong, app by app — only shown when something did.
       const status = document.createElement("div")
       status.className = "share-status share-in"
       status.hidden = true
-      const url = document.createElement("textarea")
-      url.className = "ui-input share-url share-in"
-      url.rows = 3
-      url.readOnly = true
-      url.hidden = true
-      wrap.append(status, url)
+      wrap.appendChild(status)
 
       const buttons = document.createElement("div")
       buttons.className = "napp-perms-actions"
