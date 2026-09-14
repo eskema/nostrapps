@@ -35,7 +35,7 @@ import { NAPPLET_NAMED_KIND, computeAggregateHash, nappletMetaFromHtml } from ".
 import { isIgnoredPath } from "../nsite/ignore.js"
 import { guessMime } from "../nsite/mime.js"
 import { resolveCardIcon } from "../nsite/icon.js"
-import { unsupportedRequires } from "../napp-permissions.js"
+import { permRow, unsupportedRequires } from "../napp-permissions.js"
 import { slug } from "../nsite/local.js"
 import { classifyEvent, computeNappId } from "../persistence.js"
 import { addControl, button, check, details, item, itemList, overline } from "./ui.js"
@@ -177,13 +177,13 @@ export function mount(
   jsonEl.className = "upload-json"
   eventSec.el.appendChild(jsonEl)
 
-  const protectedCb = check({
-    title: 'publish with a protected ("-") tag',
-    onChange: () => render()
-  })
-  const protectedLabel = document.createElement("label")
-  protectedLabel.className = "upload-protected"
-  protectedLabel.append(protectedCb, document.createTextNode("protected"))
+  const protectedCb = check({ onChange: () => render() })
+  const protectedLabel = permRow(
+    protectedCb,
+    "protected",
+    "prevents re-publishing by others (NIP-70)"
+  )
+  protectedLabel.classList.add("upload-protected")
   // Lives in the card's own button area (top right), where Apps puts install
   // and delete — so it's rebuilt into each new card rather than owned by the panel.
   const publishBtn = button({ label: "upload & publish", variant: "primary", disabled: true })

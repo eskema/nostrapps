@@ -365,7 +365,9 @@ function actionRow<T>(resolve: (v: T | null) => void, label: string, value: () =
 
 // A grantable row: checkbox at the left, then the title with its description
 // stacked below it. The whole row is a <label>, so clicking anywhere toggles.
-function permRow(box: HTMLInputElement, title: string, desc: string): HTMLLabelElement {
+// Exported because it is the shape for any labelled checkbox, not just a grant
+// — the uploader's "protected" reads as one of these.
+export function permRow(box: HTMLInputElement, title: string, desc: string): HTMLLabelElement {
   const row = document.createElement("label")
   row.className = "napp-perms-row"
   const text = document.createElement("div")
