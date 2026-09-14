@@ -2668,6 +2668,17 @@ async function launchFromInput(raw: string): Promise<void> {
     return
   }
 
+  // "<action> <payload>" — dispatch a napp action from the launcher, the path a
+  // napp takes with napp.action(): a handler is picked (or one of its open
+  // windows), the action lands and is recorded on the window, so it comes back
+  // on restore and goes into a share link. Payloads read like a link's.
+  const act = /^([a-z0-9:_-]+)\s+(\S.*)$/i.exec(raw)
+  if (act && handlers.hasAction(act[1])) {
+    console.debug("[launch] input → action", { name: act[1] })
+    await runNappAction("launcher", act[1], decodePayload(act[1], act[2].trim()))
+    return
+  }
+
   // ── temp install: show loading window immediately ──
   const suffix = raw
     .trim()
@@ -3057,12 +3068,13 @@ async function importShareLink(hash: string) {
     return
   }
 
+  const declaredOf = (e: LinkEntry) =>
+    requiresFromEvent(e.installed ? e.installed.event : e.fetched!.manifest)
   const granted = await promptSharedSpace({
     name: link.name,
     apps: entries.map(e => {
       const iconTag = e.fetched?.manifest?.tags.find(t => t[0] === "icon")?.[1]
       return {
-        key: e.nappId,
         title: e.title,
         icon: e.installed ? installedIconSrc(e.installed) : directIconSrc(iconTag),
         iconBlob: e.fetched
@@ -3072,7 +3084,7 @@ async function importShareLink(hash: string) {
           ? persist.classifyInstalled(e.installed)
           : manifestAppType(e.fetched!.manifest),
         installed: !!e.installed,
-        declaredDomains: requiresFromEvent(e.installed ? e.installed.event : e.fetched!.manifest),
+        declaredDomains: declaredOf(e),
         actions: e.actions.map(a => ({ ...a, supported: handlesAction(e.declared, a.name) }))
       }
     })
@@ -3081,9 +3093,14 @@ async function importShareLink(hash: string) {
     setStatus("Shared space cancelled")
     return
   }
-  // The grants from that screen are the temp apps' policies — the first-run
-  // gate install() runs, answered once for all of them.
-  for (const [key, policy] of granted) persist.setPolicy(key, policy)
+  // The one grant from that screen is every temp app's policy — the first-run
+  // gate install() runs, answered once for all of them. `ui` (the component
+  // kit) only where the app asked for it: it restyles.
+  for (const e of entries) {
+    if (!e.fetched) continue
+    const ui = declaredOf(e).includes("ui")
+    persist.setPolicy(e.nappId, { domains: granted.domains.filter(d => d !== "ui" || ui) })
+  }
 
   const spaceId = persist.createEphemeralSpace(link.name)
   await switchSpace(spaceId)

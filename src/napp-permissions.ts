@@ -2,8 +2,8 @@
 // from an app card. It turns the app's `requires` declarations into the single
 // granted `domains` list — nothing is serviced or reachable until it's ticked.
 // The capability rows use the design-system item list (the relays-napp look).
-// A share link opens several apps at once; promptSharedSpace stacks one section
-// per app on the same screen, so the whole link is answered once.
+// A share link opens several apps at once; promptSharedSpace lists them on one
+// screen with a single set of grants for every app the link runs.
 import { openDialog } from "./dialog.js"
 import { check, button, radio } from "./system-napps/ui.js"
 import type { NappPolicy } from "./types.js"
@@ -98,27 +98,29 @@ export function promptNappPolicy(
 }
 
 export interface SharedAppPrompt {
-  // What the returned grant is keyed by (the temp id of a not-yet-installed app).
-  key: string
   title: string
   icon?: string
   iconBlob?: Blob
   type?: string
-  // Already installed: listed for the record, nothing to grant.
+  // Already installed: listed for the record, its own grants stay.
   installed: boolean
   declaredDomains: string[]
   // What the link will send this app, and whether the app handles that action.
   actions: Array<{ name: string; payload: string; supported: boolean }>
 }
 
-// The share-link screen: every app the link opens, each with the actions it
-// will receive and (for apps not installed yet) its capability rows. Resolves
-// to the grants keyed by `key`, or null if cancelled.
+// The share-link screen: every app the link opens with the actions it will
+// receive, then one set of capability rows over everything the new apps
+// declare — one grant for all of them (they're temporary; a per-app checklist
+// is more screen than the moment deserves). Resolves to that grant, or null
+// if cancelled. Nothing to grant when every app is installed already.
 export function promptSharedSpace(opts: {
   name: string
   apps: SharedAppPrompt[]
-}): Promise<Map<string, NappPolicy> | null> {
-  return openDialog<Map<string, NappPolicy> | null>({
+}): Promise<NappPolicy | null> {
+  const fresh = opts.apps.filter(a => !a.installed)
+  const declared = [...new Set(fresh.flatMap(a => a.declaredDomains))]
+  return openDialog<NappPolicy | null>({
     dismissValue: null,
     class: "napp-perms-dialog",
     build: resolve => {
@@ -134,28 +136,29 @@ export function promptSharedSpace(opts: {
       intro.textContent = `${n} app${n === 1 ? "" : "s"} from a link. Nothing is installed until you keep the space.`
       wrap.append(title, intro)
 
-      const sections = new Map<string, PolicySection>()
       for (const app of opts.apps) {
-        let el: HTMLElement
-        if (app.installed) {
-          el = document.createElement("div")
-          el.className = "napp-perms-app"
-          el.appendChild(
-            sectionHead({ ...app, type: app.type ? `${app.type} · installed` : "installed" })
-          )
-        } else {
-          const section = policySection({ ...app, declaredDomains: app.declaredDomains })
-          sections.set(app.key, section)
-          el = section.el
-        }
-        el.classList.add("napp-perms-shared")
+        const el = document.createElement("div")
+        el.className = "napp-perms-app napp-perms-shared"
+        const type = app.installed ? [app.type, "installed"].filter(Boolean).join(" · ") : app.type
+        el.appendChild(sectionHead({ ...app, type }))
         if (app.actions.length) el.appendChild(actionsList(app.actions))
         wrap.appendChild(el)
       }
 
-      wrap.appendChild(
-        actionRow(resolve, "Open", () => new Map([...sections].map(([k, s]) => [k, s.read()])))
-      )
+      let section: PolicySection | null = null
+      if (fresh.length) {
+        const caption = document.createElement("p")
+        caption.className = "napp-perms-reqs"
+        caption.textContent =
+          fresh.length === 1
+            ? "Permissions for the new app"
+            : "Permissions, the same for every new app"
+        section = policySection({ title: "", declaredDomains: declared, type: "napp" }, caption)
+        section.el.classList.add("napp-perms-shared")
+        wrap.appendChild(section.el)
+      }
+
+      wrap.appendChild(actionRow(resolve, "Open", () => section?.read() ?? { domains: [] }))
       return wrap
     }
   })
@@ -167,8 +170,12 @@ interface PolicySection {
 }
 
 // One app's part of a permission screen: head, requires summary, and the
-// grantable rows. `read()` collects the grant as ticked.
-function policySection(opts: PolicyPromptOpts): PolicySection {
+// grantable rows. `read()` collects the grant as ticked. `head` replaces the
+// icon + name head (a caption, for grants that cover several apps).
+function policySection(
+  opts: PolicyPromptOpts,
+  head: HTMLElement = sectionHead(opts)
+): PolicySection {
   const cur = opts.current
   // Declared caps we implement (order-stable), minus network (its own row) and
   // ui (auto-granted). network is always offered so any app can be un-sealed.
@@ -187,7 +194,7 @@ function policySection(opts: PolicyPromptOpts): PolicySection {
 
   const el = document.createElement("div")
   el.className = "napp-perms-app"
-  el.appendChild(sectionHead(opts))
+  el.appendChild(head)
 
   // Ambiguous load: a one-of-two pick in the same row language as the
   // capability rows below, radio at the left.

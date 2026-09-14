@@ -88,6 +88,11 @@ export function findHandlersForAction(
   return [apps, openCandidates]
 }
 
+// Whether any installed app handles this action (the "view" wildcard included).
+export function hasAction(name: string): boolean {
+  return actionMap.has(name) || (name.startsWith("view:") && actionMap.has("view"))
+}
+
 export function setActionDispatcher(
   fn:
     | ((
