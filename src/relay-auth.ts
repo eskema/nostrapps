@@ -2,7 +2,7 @@
 //
 // Two layers, both persisted in localStorage (and thus wiped by factory reset
 // along with every other `nostrapps:*` key):
-//   • the global "automatically authenticate with relays" switch. When on,
+//   • the global "authenticate with relays automatically" switch. When on,
 //     every challenge is answered without asking.
 //   • per-relay decisions ("allow" / "deny") remembered from the confirmation
 //     toasts shown when the switch is off. The next challenge from a relay with
@@ -15,6 +15,7 @@ import { normalizeURL } from "@nostr/tools/utils"
 import type { EventTemplate, VerifiedEvent } from "@nostr/tools"
 import { currentSigner } from "./signers/index.js"
 import { openToast } from "./toast.js"
+import { nappNameText } from "./napp-name.js"
 
 const AUTO_KEY = "nostrapps:auto-auth"
 const DECISIONS_KEY = "nostrapps:relay-auth"
@@ -66,6 +67,14 @@ export function rememberRelayDecision(url: string, allow: boolean) {
   notify()
 }
 
+// Drop every remembered decision at once (settings' "forget all"). One write,
+// one notify — not a forget per url.
+export function forgetAllRelayDecisions() {
+  if (Object.keys(readDecisions()).length === 0) return
+  writeDecisions({})
+  notify()
+}
+
 export function forgetRelayDecision(url: string) {
   const key = normalizeURL(url)
   const all = readDecisions()
@@ -99,10 +108,9 @@ function notify() {
 function askRelayAuth(url: string, askedBy?: string): Promise<boolean> {
   return openToast<boolean>({
     title: askedBy
-      ? `${askedBy} is publishing to a relay that asks for authentication.`
+      ? `${nappNameText(askedBy)} is publishing to a relay that asks for authentication.`
       : "This relay asks for authentication.",
     code: url,
-    hint: "Your choice is remembered for this relay.",
     actions: [
       { label: "deny", value: false, variant: "outline" },
       { label: "allow", value: true, variant: "primary" }

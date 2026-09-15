@@ -1,4 +1,5 @@
 import { openDialog } from "./dialog.js"
+import { nappNameEl } from "./napp-name.js"
 
 const STORAGE_KEY = "nostrapps:permissions"
 
@@ -59,6 +60,14 @@ export function listDecisions() {
   return readAll()
 }
 
+// Drop every napp's decisions at once (settings' "forget all"). One write, one
+// notify — not a forget per napp.
+export function forgetAllDecisions() {
+  if (Object.keys(readAll()).length === 0) return
+  writeAll({})
+  notify()
+}
+
 export function forgetDecision(nappId: string, method?: string) {
   const all = readAll()
   if (!all[nappId]) return
@@ -117,11 +126,9 @@ export async function requireApproval(nappId: string, method: string, detail?: A
 function permissionBody(nappId: string, method: string, detail?: ApprovalDetail): Node {
   const wrap = document.createElement("div")
   const p = document.createElement("p")
-  const napp = document.createElement("code")
-  napp.textContent = nappId
   const meth = document.createElement("code")
   meth.textContent = method
-  p.append("Napp ", napp, " wants to use ", meth)
+  p.append(nappNameEl(nappId), " wants to use ", meth)
   wrap.appendChild(p)
   // Some methods can say what they are actually about to do — a filename is a
   // far better basis for a decision than a method name.

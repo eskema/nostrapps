@@ -93,6 +93,7 @@ import {
 import type { NappPolicy } from "../types.js"
 import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
+import { requireAccount } from "../login.js"
 import { relayAuthSigner } from "../relay-auth.js"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
@@ -593,6 +594,18 @@ const NAPPLET_LISTS: Record<string, (pk: string) => Promise<{ items: unknown[] }
   "wiki-relays": pk => loadWikiRelays(pk)
 }
 
+// currentSigner() always hands back an object, so what can actually be missing
+// is the account behind it. Every sign-and-publish path asks for one first —
+// consent to sign is meaningless while there is no key to sign with.
+async function requireSigner(nappId: string) {
+  return (await requireAccount({ nappId, what: "publish as you" })) ? currentSigner() : null
+}
+
+// Napplet ops that answer "who are you" — the ones that hand back a blank when
+// nobody is logged in. common.follows reads the account's own list, so it sits
+// with the identity domain here even though it is a common op.
+const asksWhoYouAre = (type: string) => type.startsWith("identity.") || type === "common.follows"
+
 // Request/response napplet ops. Each case returns the FULL result message
 // (its own `type` + named fields) — the @napplet/nap contracts differ per
 // domain (resource uses a `.error` type; relay.publish carries `ok`), so the
@@ -604,7 +617,13 @@ async function dispatchNapplet(
   data: any,
   nappId: string
 ): Promise<Record<string, unknown>> {
-  const pk = getPubkey()
+  let pk = getPubkey()
+  // Asking who you are before anyone has logged in used to answer "" — the
+  // napplet sees a blank key and renders nothing, with no error to show for
+  // it. Ask instead. Passive: a napp polling on load asks once per session.
+  if (!pk && asksWhoYouAre(type)) {
+    pk = await requireAccount({ nappId, what: "know who you are", passive: true })
+  }
   switch (type) {
     // ── identity (read-only; never prompts the signer) ──
     case "identity.getPublicKey":
@@ -907,8 +926,8 @@ async function publishNappletOutbox(
   if (!template || typeof template !== "object") {
     return { type: resultType, ok: false, error: "invalid event template" }
   }
-  const signer = currentSigner()
-  if (!signer) return { type: resultType, ok: false, error: "no signer connected" }
+  const signer = await requireSigner(nappId)
+  if (!signer) return { type: resultType, ok: false, error: "not logged in" }
 
   const kind = Number(template.kind)
   if (
@@ -1040,8 +1059,8 @@ async function publishNappletEvent(
   if (!template || typeof template !== "object") {
     return { type: resultType, ok: false, error: "invalid event template" }
   }
-  const signer = currentSigner()
-  if (!signer) return { type: resultType, ok: false, error: "no signer connected" }
+  const signer = await requireSigner(nappId)
+  if (!signer) return { type: resultType, ok: false, error: "not logged in" }
 
   const kind = Number(template.kind)
   const detail = enc
@@ -1221,8 +1240,8 @@ async function commonAction(
   template: { kind: number; content: string; tags: string[][] }
 ): Promise<Record<string, unknown>> {
   const resultType = `${action}.result`
-  const signer = currentSigner()
-  if (!signer) return { type: resultType, ok: false, error: "no signer connected" }
+  const signer = await requireSigner(nappId)
+  if (!signer) return { type: resultType, ok: false, error: "not logged in" }
   if (!(await requireApproval(nappId, action, detail))) {
     return { type: resultType, ok: false, error: "permission denied" }
   }
@@ -3612,6 +3631,18 @@ async function handleRpc(
     // this is the real boundary.
     if (SIGNER_METHODS.has(method!) && !getPolicy(nappId).domains.includes("identity")) {
       throw new Error(`identity access not granted: ${method!}`)
+    }
+    // Granted but nobody is logged in — the case where a napp opened from a
+    // link asks on load and gets "No NIP-07 extension detected" back, which it
+    // swallows. Ask first, and ask before the signing approval below: consent
+    // to sign is meaningless while there is no key to sign with.
+    if (SIGNER_METHODS.has(method!) && !getPubkey()) {
+      const pk = await requireAccount({
+        nappId,
+        what: method === "getPublicKey" ? "read your public key" : `use ${method}`,
+        passive: method === "getPublicKey"
+      })
+      if (!pk) throw new Error(`not logged in: ${method!}`)
     }
     if (isGated(method!)) {
       let detail: ApprovalDetail | undefined

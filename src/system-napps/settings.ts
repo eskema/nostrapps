@@ -2,8 +2,6 @@ export const id = "settings"
 export const title = "Settings"
 export const slash = "/settings"
 
-const GOOGLE_LABEL = "log in with google"
-
 // Manual build marker shown in Settings. Bump the integer by hand whenever we
 // want to confirm we're looking at a fresh build; the date is just a note.
 const APP_VERSION = "1 · 2026-06-06"
@@ -13,6 +11,8 @@ import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
+import { loginControls } from "../login.js"
+import { nappNameEl } from "../napp-name.js"
 import { button, check, details, item, itemList } from "./ui.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
@@ -26,32 +26,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
             <span class="settings-account-type"></span>
             <button type="button" class="btn btn-outline settings-disconnect-btn">disconnect</button>
           </div>
-          <div class="settings-account-disconnected">
-            <button type="button" class="btn btn-outline settings-connect-extension">connect with extension</button>
-
-            <div class="settings-bunker-section">
-              <button type="button" class="btn btn-outline settings-connect-bunker-toggle">connect with bunker</button>
-              <form class="settings-bunker-form" hidden>
-                <input
-                  type="text"
-                  class="ui-input settings-bunker-input"
-                  placeholder="bunker://…"
-                  autocomplete="off"
-                  spellcheck="false"
-                />
-                <div class="settings-bunker-actions">
-                  <button type="submit" class="btn btn-outline settings-bunker-submit">connect</button>
-                  <button type="button" class="btn btn-outline settings-bunker-cancel">cancel</button>
-                </div>
-                <div class="settings-bunker-error" hidden></div>
-              </form>
-            </div>
-
-            <div class="settings-google-section">
-              <button type="button" class="btn btn-outline settings-connect-google">${GOOGLE_LABEL}</button>
-              <div class="settings-google-error" hidden></div>
-            </div>
-          </div>
+          <div class="settings-account-disconnected"></div>
         </div>
       </details>
 
@@ -69,16 +44,13 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   const pubkeyEl = container.querySelector(".settings-pubkey") as HTMLElement
   const accountTypeEl = container.querySelector(".settings-account-type") as HTMLElement
   const disconnectBtn = container.querySelector(".settings-disconnect-btn") as HTMLElement
-  const connectExtBtn = container.querySelector(".settings-connect-extension") as HTMLElement
-  const bunkerToggleBtn = container.querySelector(".settings-connect-bunker-toggle") as HTMLElement
-  const googleBtn = container.querySelector(".settings-connect-google") as HTMLElement
-  const googleError = container.querySelector(".settings-google-error") as HTMLElement
-  const bunkerForm = container.querySelector(".settings-bunker-form") as HTMLElement
-  const bunkerInput = container.querySelector(".settings-bunker-input") as HTMLInputElement
-  const bunkerSubmit = container.querySelector(".settings-bunker-submit") as HTMLElement
-  const bunkerCancel = container.querySelector(".settings-bunker-cancel") as HTMLElement
-  const bunkerError = container.querySelector(".settings-bunker-error") as HTMLElement
   const resetBtn = container.querySelector(".settings-reset-btn") as HTMLElement
+
+  // The three ways in, from login.ts — the same block the prompt a napp raises
+  // is built from. Rebuilt on logout so a stale form doesn't sit there.
+  function fillLoginOptions() {
+    disconnectedEl.replaceChildren(loginControls())
+  }
 
   function renderAccount(pk: string | null) {
     if (pk) {
@@ -96,57 +68,11 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       stopOutbox()
       connectedEl.hidden = true
       disconnectedEl.hidden = false
-      bunkerForm.hidden = true
-      bunkerError.hidden = true
-      bunkerInput.value = ""
-      googleError.hidden = true
-      googleError.textContent = ""
+      fillLoginOptions()
     }
-  }
-
-  function showBunkerError(msg: string) {
-    bunkerError.textContent = msg
-    bunkerError.hidden = false
   }
 
   disconnectBtn.addEventListener("click", () => ctx.disconnect())
-
-  connectExtBtn.addEventListener("click", async () => {
-    try {
-      await ctx.connect()
-    } catch {
-      // setStatus already logged it
-    }
-  })
-
-  bunkerToggleBtn.addEventListener("click", () => {
-    bunkerForm.hidden = !bunkerForm.hidden
-    if (!bunkerForm.hidden) bunkerInput.focus()
-  })
-
-  googleBtn.addEventListener("click", async () => {
-    googleError.hidden = true
-    googleError.textContent = ""
-    googleBtn.disabled = true
-    googleBtn.textContent = "connecting…"
-    try {
-      // On success the account.subscribe callback re-renders the
-      // connected state; nothing to do here.
-      await ctx.connectGoogle()
-    } catch (err: any) {
-      googleError.textContent = err?.message || String(err)
-      googleError.hidden = false
-    } finally {
-      googleBtn.disabled = false
-      googleBtn.textContent = GOOGLE_LABEL
-    }
-  })
-
-  bunkerCancel.addEventListener("click", () => {
-    bunkerForm.hidden = true
-    bunkerError.hidden = true
-    bunkerInput.value = ""
-  })
 
   resetBtn.addEventListener("click", () => {
     const ok = window.confirm(
@@ -158,23 +84,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     )
     if (!ok) return
     ctx.factoryReset?.()
-  })
-
-  bunkerForm.addEventListener("submit", async e => {
-    e.preventDefault()
-    bunkerError.hidden = true
-    const uri = bunkerInput.value.trim()
-    if (!uri) return
-    bunkerSubmit.disabled = true
-    bunkerSubmit.textContent = "connecting…"
-    try {
-      await ctx.connectBunker(uri)
-    } catch (err: any) {
-      showBunkerError(err?.message || String(err))
-    } finally {
-      bunkerSubmit.disabled = false
-      bunkerSubmit.textContent = "connect"
-    }
   })
 
   renderAccount(ctx.account.getPubkey())
@@ -212,6 +121,15 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   panel.insertBefore(actionsDetails, buildRow)
   panel.insertBefore(relaysDetails, buildRow)
 
+  // A section-wide action sitting above its list, right aligned — the section's
+  // "forget all", next to the per-row "forget" buttons below it.
+  function listAction(label: string, onClick: () => void): HTMLElement {
+    const row = document.createElement("div")
+    row.className = "perm-list-actions"
+    row.appendChild(button({ label, variant: "outline", onClick }))
+    return row
+  }
+
   function renderRelays() {
     relaysEl.innerHTML = ""
     const decisions = ctx.relayAuth.decisions()
@@ -226,7 +144,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     text.className = "napp-perms-text"
     const label = document.createElement("div")
     label.className = "napp-perms-label"
-    label.textContent = "automatically authenticate with relays"
+    label.textContent = "authenticate with relays automatically"
     const desc = document.createElement("div")
     desc.className = "napp-perms-desc"
     desc.textContent = "answers every relay auth challenge without asking"
@@ -250,6 +168,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       }
       return
     }
+    relaysEl.appendChild(listAction("forget all", () => ctx.relayAuth.forgetAll()))
     // Design-system rows: the url truncates with an ellipsis instead of
     // widening the panel.
     const list = itemList()
@@ -276,19 +195,19 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     if (entries.length === 0) {
       const empty = document.createElement("div")
       empty.className = "perm-empty"
-      empty.textContent = "No permission decisions stored yet."
+      empty.textContent = "no permission was granted yet"
       decisionsEl.appendChild(empty)
       return
     }
+    decisionsEl.appendChild(listAction("forget all", () => perms.forgetAllDecisions()))
     for (const [nappId, methods] of entries as [string, Record<string, string>][]) {
       const group = document.createElement("div")
       group.className = "perm-group"
 
       const head = document.createElement("div")
       head.className = "perm-group-head"
-      const name = document.createElement("code")
-      name.className = "perm-napp-id"
-      name.textContent = nappId
+      const name = nappNameEl(nappId)
+      name.classList.add("perm-napp-id")
       head.appendChild(name)
       const clearAll = button({
         label: "forget all",
@@ -339,9 +258,12 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       const name = document.createElement("code")
       name.className = "perm-method"
       name.textContent = action
-      const targets = document.createElement("code")
+      const targets = document.createElement("span")
       targets.className = "perm-napp-id"
-      targets.textContent = nappIds.join(", ")
+      for (const id of nappIds) {
+        if (targets.childNodes.length) targets.append(", ")
+        targets.appendChild(nappNameEl(id))
+      }
       row.append(name, targets)
       handlersEl.appendChild(row)
     }

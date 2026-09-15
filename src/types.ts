@@ -287,11 +287,9 @@ export interface SystemCtx {
     setAuto(on: boolean): void
     decisions(): Array<{ url: string; decision: string }>
     forget(url: string): void
+    forgetAll(): void
     subscribe(fn: () => void): () => void
   }
-  connect(): Promise<void>
-  connectBunker(uri: string): Promise<void>
-  connectGoogle(): Promise<void>
   disconnect(): Promise<void>
   factoryReset(): Promise<void>
   loadFolder(): void

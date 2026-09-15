@@ -71,8 +71,8 @@ import {
   installedIconSources
 } from "./nsite/icon.js"
 import { currentSigner, reconnectIfNeeded } from "./signers/index.js"
-import { connectBunkerInput, disconnectBunkerSigner } from "./signers/nip46.js"
-import { googleLoginAndCreateBunker } from "./signers/google.js"
+import { disconnectBunkerSigner } from "./signers/nip46.js"
+import { resetRefusal, setLoginStatusSink } from "./login.js"
 import * as account from "./account.js"
 import { clearDecisions } from "./permissions.js"
 import { openPopover } from "./popover.js"
@@ -306,47 +306,10 @@ function notifyAppsChanged() {
 }
 
 // ─── account actions ────────────────────────────────────────────
-async function connect(): Promise<void> {
-  try {
-    if (!window.nostr) throw new Error("No NIP-07 extension detected")
-    setStatus("Requesting pubkey from extension…")
-    const pk = await window.nostr.getPublicKey()
-    account.setAccount(pk, "nip07")
-    setStatus(`Connected as ${pk.slice(0, 8)}…`)
-  } catch (err: any) {
-    setStatus(`Error: ${err.message}`)
-    throw err
-  }
-}
-
-async function connectBunker(uri: string): Promise<void> {
-  try {
-    setStatus("Connecting to bunker…")
-    const pk = await connectBunkerInput(uri)
-    account.setAccount(pk, "nip46")
-    setStatus(`Connected as ${pk.slice(0, 8)}… (bunker)`)
-  } catch (err: any) {
-    setStatus(`Error: ${err.message}`)
-    throw err
-  }
-}
-
-// One-shot Google OAuth → Pomegranate sharding → bunker handoff. End state
-// is identical to a plain `connect with bunker` paste, but the user never
-// sees a bunker URI: we mint one against our hardcoded central+operators.
-async function connectGoogle(): Promise<void> {
-  try {
-    setStatus("Logging in with Google…")
-    const uri = await googleLoginAndCreateBunker({ onProgress: setStatus })
-    setStatus("Connecting to bunker…")
-    const pk = await connectBunkerInput(uri)
-    account.setAccount(pk, "nip46")
-    setStatus(`Connected as ${pk.slice(0, 8)}… (bunker)`)
-  } catch (err: any) {
-    setStatus(`Error: ${err.message}`)
-    throw err
-  }
-}
+// Logging in lives in login.ts — the settings panel and the prompt a napp
+// raises when it asks for a key nobody has connected build the same controls
+// from there. Its progress lines come back through here.
+setLoginStatusSink(setStatus)
 
 async function disconnect(): Promise<void> {
   if (account.getType() === "nip46") {
@@ -355,6 +318,9 @@ async function disconnect(): Promise<void> {
     } catch {}
   }
   account.clearPubkey()
+  // Logging out is a fresh start: a napp that was told "later" earlier gets to
+  // ask again.
+  resetRefusal()
   setStatus("Disconnected")
 }
 
@@ -775,11 +741,9 @@ const systemCtx: SystemCtx = {
     setAuto: (on: boolean) => relayAuth.setAutomaticallyAuth(on),
     decisions: () => relayAuth.listRelayDecisions(),
     forget: (url: string) => relayAuth.forgetRelayDecision(url),
+    forgetAll: () => relayAuth.forgetAllRelayDecisions(),
     subscribe: (fn: () => void) => relayAuth.subscribe(fn)
   },
-  connect,
-  connectBunker,
-  connectGoogle,
   disconnect,
   factoryReset,
   loadFolder,

@@ -1,10 +1,9 @@
 :root {
   color-scheme: light dark;
-  font-family:
-    "Source Sans 3 Variable",
-    system-ui,
-    -apple-system,
-    sans-serif;
+  /* Serif is the voice of this launcher — the base, not an accent. Sans is the
+     exception, declared where it is wanted (.ui-overline, .ui-ring, the theme
+     toggle's glyph); mono is for machine text (ids, relays, logs, code). */
+  font-family: "Source Serif 4 Variable", Georgia, ui-serif, serif;
   --font-sans: "Source Sans 3 Variable", system-ui, -apple-system, sans-serif;
   --font-serif: "Source Serif 4 Variable", Georgia, ui-serif, serif;
   --font-mono: "Source Code Pro Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -204,7 +203,7 @@ h1 span {
   border: none;
   background: transparent;
   color: inherit;
-  font-family: var(--font-serif);
+  font-family: inherit; /* a <button>: the page's voice doesn't reach it on its own */
   font-size: 0.75em;
   font-weight: 700;
   white-space: nowrap;
@@ -246,7 +245,6 @@ h1 span {
 .spaces-current-name {
   flex-shrink: 0;
   padding: 0 0.4rem;
-  font-family: var(--font-serif);
   font-weight: 800;
   white-space: nowrap;
   user-select: none;
@@ -314,7 +312,6 @@ button {
   gap: 0.35rem;
   font: inherit;
   font-size: 0.8rem;
-  font-family: var(--font-serif);
   font-weight: 700;
   /* text-transform: uppercase; */
   line-height: 1.2;
@@ -467,10 +464,11 @@ button {
   place-items: center;
   font-size: 1rem;
   line-height: 1;
-  /* .btn forces serif/700, which reshapes the ☾/◐ glyph fallback — revert to the
-     inherited sans at normal weight so the moon matches its old rendering. */
+  /* .btn's 700 reshapes the ☾/◐ glyph fallback — back to sans at normal weight
+     so the moon matches its old rendering. Named, not inherited: the page is
+     serif now. */
   font-weight: 400;
-  font-family: inherit;
+  font-family: var(--font-sans);
   cursor: pointer;
   border-radius: 50%;
   align-self: center;
@@ -689,7 +687,6 @@ button {
 }
 
 .sugg-pet {
-  font-family: var(--font-serif);
   font-weight: 900;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -699,8 +696,7 @@ button {
 }
 
 /* App rows read like the Apps card: the icon next to the title, and "<type>
-   from <author>" trailing the row — serif for the type, mono and dimmer for
-   the name. */
+   from <author>" trailing the row — mono and dimmer for the name. */
 .sugg-icon {
   width: 1.25rem;
   height: 1.25rem;
@@ -712,7 +708,6 @@ button {
 
 .sugg-author {
   flex-shrink: 0;
-  font-family: var(--font-serif);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -742,7 +737,6 @@ button {
   padding: 0.05rem 0.35rem;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   border-radius: var(--btn-radius);
-  font-family: var(--font-serif);
   font-weight: 700;
   opacity: 0.75;
 }
@@ -1433,7 +1427,6 @@ body.popover-open .napp-body iframe {
 
 .app-dialog-title {
   margin: 0;
-  font-family: var(--font-serif);
   font-size: 1.05rem;
 }
 
@@ -1497,7 +1490,6 @@ body.popover-open .napp-body iframe {
 .napp-perms {
   display: grid;
   gap: 0.5rem;
-  font-family: var(--font-serif);
 }
 
 /* Icon (when there is one) and name in a row — flex, so the name takes the
@@ -1548,12 +1540,9 @@ body.popover-open .napp-body iframe {
 }
 
 /* A grantable row: checkbox at the left, then title + description stacked. The
-   whole row is a <label>, so clicking anywhere toggles the box. Carries the
-   serif itself rather than inheriting it from .napp-perms — it is used outside
-   that screen too (the uploader's "protected"). */
+   whole row is a <label>, so clicking anywhere toggles the box. */
 .napp-perms-row {
   display: grid;
-  font-family: var(--font-serif);
   grid-template-columns: auto 1fr;
   align-items: start;
   gap: 0.6rem;
@@ -2211,9 +2200,8 @@ body.popover-open .napp-body iframe {
   /* letter-spacing: 0.05rem; */
 
   padding: 0.5rem;
-  /* font: inherit; */
+  font-family: inherit; /* a <button>: the page's voice doesn't reach it on its own */
   /* font-style: italic; */
-  font-family: var(--font-serif);
   font-size: 1rem;
   /* font-weight: 500; */
   background: transparent;
@@ -2329,6 +2317,13 @@ body.popover-open .napp-body iframe {
   font-style: italic;
 }
 
+/* A section-wide action above its list (settings' "forget all"), sitting at
+   the right edge over the per-row "forget" buttons it stands in for. */
+.perm-list-actions {
+  display: grid;
+  justify-content: end;
+}
+
 .perm-group {
   display: flex;
   flex-direction: column;
@@ -2345,8 +2340,9 @@ body.popover-open .napp-body iframe {
   justify-content: space-between;
 }
 
+/* Holds a nappNameEl now — "<title> from <author>" prose, not an id, so no
+   mono. */
 .perm-napp-id {
-  font-family: var(--font-mono);
   font-size: 0.78rem;
   opacity: 0.85;
   overflow: hidden;
@@ -2518,7 +2514,6 @@ body.popover-open .napp-body iframe {
 }
 
 .apps-title {
-  font-family: var(--font-serif);
   font-weight: 700;
   font-size: 2rem;
   margin: 0;
@@ -2572,7 +2567,6 @@ body.popover-open .napp-body iframe {
 
 .apps-author:not(.apps-author-label)::before,
 .apps-author-label {
-  font-family: var(--font-serif);
   font-size: 0.75rem;
   font-weight: 600;
 }
@@ -2650,14 +2644,13 @@ body.popover-open .napp-body iframe {
   text-decoration: line-through;
 }
 
-/* The "requires unsupported features" line: red, serif, left-aligned. On the
-   card it sits below the meta; in detail it's the row below the requires list. */
+/* The "requires unsupported features" line: red, left-aligned. On the card it
+   sits below the meta; in detail it's the row below the requires list. */
 .apps-unsupported {
   grid-area: warn;
   justify-self: start;
   margin-top: 0.4rem;
   color: var(--danger);
-  font-family: var(--font-serif);
   font-size: 0.75rem;
   text-align: left;
 }
@@ -2673,7 +2666,6 @@ body.popover-open .napp-body iframe {
 .apps-description {
   grid-area: about;
   margin: 0;
-  font-family: var(--font-serif);
   font-size: 1rem;
   hyphens: auto;
   /* word-break: break-all; */
@@ -2722,7 +2714,6 @@ body.popover-open .napp-body iframe {
 
 .apps-detail-label {
   margin-right: 0.5rem;
-  font-family: var(--font-serif);
   font-weight: 700;
 }
 
@@ -2776,9 +2767,9 @@ body.popover-open .napp-body iframe {
   gap: 0.4rem;
 }
 
-/* Design system: disclosure — a collapsible <details> with a serif-bold
-   summary. Used by the apps-store file list and the settings permission/action
-   sections. details() in system-napps/ui.ts. */
+/* Design system: disclosure — a collapsible <details> with a bold summary.
+   Used by the apps file list and the settings permission/action sections.
+   details() in system-napps/ui.ts. */
 .ui-details {
   margin: 0.5rem 0;
   /* overflow: hidden; */
@@ -2810,7 +2801,6 @@ body.popover-open .napp-body iframe {
   grid-template-columns: 1fr auto;
   cursor: pointer;
   /* text-transform: uppercase; */
-  font-family: var(--font-serif);
   font-size: 1.2rem;
   font-weight: 700;
   user-select: none;
@@ -2855,6 +2845,18 @@ body.popover-open .napp-body iframe {
   user-select: none;
 }
 
+/* The overline's voice without its class: the same small tracked uppercase,
+   in the places that set their own size, color or pill. Sans is the point —
+   the page is serif, and tracked uppercase serif at this size turns to mush.
+   Fold these into .ui-overline when their sizing can be reconciled. */
+.suggestion .source,
+.perm-decision,
+.apps-handler,
+.apps-chip-category,
+.settings-account-type {
+  font-family: var(--font-sans);
+}
+
 /* Design system: ring — a word set around a circle, slowly turning: the
    overline's voice on a circular path, orange, glyphs only. Its size follows
    the font-size (the box is em-sized by the helper); placement is the
@@ -2889,10 +2891,9 @@ body.popover-open .napp-body iframe {
   }
 }
 
-/* Design system: title — the window title's voice: serif, black weight,
-   uppercase, tracked. Size is the context's. Mirrored in public/napp-ui.css. */
+/* Design system: title — the window title's voice: black weight, uppercase,
+   tracked. Size is the context's. Mirrored in public/napp-ui.css. */
 .ui-title {
-  font-family: var(--font-serif);
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -3373,31 +3374,29 @@ body.popover-open .napp-body iframe {
   gap: 0.4rem;
 }
 
-/* Three stacked groups: extension button, bunker section (button + form),
-   google section (button + error). */
-.settings-account-disconnected {
+/* The login block (loginControls in login.ts) — one per way in: extension,
+   bunker (button + form), google. Same block in the settings panel and in the
+   prompt a napp raises. */
+.login-options {
   display: grid;
   gap: 0.5rem;
 }
 
-.settings-bunker-section,
-.settings-google-section {
+.login-section {
   display: grid;
   gap: 0.4rem;
 }
 
-/* Connect buttons stay content-width and left-aligned; the sections, bunker
-   form and errors span the full row. */
-.settings-account-disconnected > .btn,
-.settings-bunker-section > .btn,
-.settings-google-section > .btn {
+/* Connect buttons stay content-width and left-aligned; forms and errors span
+   the full row. */
+.login-section > .btn {
   justify-self: start;
   white-space: nowrap;
 }
 
 .settings-account-connected[hidden],
 .settings-account-disconnected[hidden],
-.settings-bunker-form[hidden] {
+.login-bunker-form[hidden] {
   display: none;
 }
 
@@ -3411,22 +3410,45 @@ body.popover-open .napp-body iframe {
   /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
 }
 
-.settings-bunker-form {
+.login-bunker-form {
   display: grid;
   gap: 0.4rem;
 }
 
-.settings-bunker-actions {
+.login-bunker-actions {
   display: grid;
   grid-auto-flow: column;
   gap: 0.3rem;
   justify-content: end;
 }
 
-.settings-bunker-error,
-.settings-google-error {
-  font-size: 0.78rem;
+.login-error {
   color: #c0392b;
+}
+
+.login-error[hidden] {
+  display: none;
+}
+
+/* The prompt: the same options under a line naming the napp, then "later"
+   on its own row the way the dialog's own action menus sit. */
+.login-dialog .login-options {
+  margin-top: 0.6rem;
+}
+
+.login-dialog-actions {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 0.3rem;
+  justify-content: end;
+  margin-top: 0.8rem;
+}
+
+/* ─── how a napp is named (napp-name.ts) ──────────────────────────
+   "<title> from <author>", inline in whatever sentence names it. The author
+   is a <nostr-name> that fills its own text in when the profile lands. */
+.napp-name nostr-name {
+  opacity: 0.75;
 }
 
 /* ─── settings: reset ──────────────────────────────────────────── */
