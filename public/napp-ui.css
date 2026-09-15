@@ -279,6 +279,40 @@
   user-select: none;
 }
 
+/* ─── Ring ─────────────────────────────────────────────────────────────
+   A word set around a circle, slowly turning: the overline's voice on a
+   circular textPath, orange, glyphs only. Its size follows the font-size (the
+   box is em-sized by the helper); placement is the context's. */
+.ui-ring {
+  font-size: 0.65rem; /* the overline's */
+  color: #f97316;
+  overflow: visible;
+  transform-origin: center;
+  animation: ui-ring-spin 12s linear infinite;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ui-ring text {
+  font-family: "Source Sans 3 Variable", system-ui, sans-serif;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  fill: currentColor;
+}
+
+@keyframes ui-ring-spin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-ring {
+    animation: none;
+  }
+}
+
 /* Title — the window title's voice: serif, black weight, uppercase, tracked. */
 .ui-title {
   font-family: "Source Serif 4 Variable", Georgia, ui-serif, serif;

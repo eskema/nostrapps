@@ -431,11 +431,12 @@ export function mount(
     const author = app.event?.pubkey || null
     // Apps without a manifest (no publisher): show a type label + install date
     // in place of author + publish date.
+    const temporary = app.nappId.startsWith("temp~") || !!app.temporary
     const authorLabel = author
       ? null
       : app.nappId.startsWith("dev~")
         ? "dev"
-        : app.nappId.startsWith("temp~") || app.temporary
+        : temporary
           ? "temporary"
           : "local"
     const createdAt = app.event?.created_at || app.installedAt || null
@@ -467,6 +468,7 @@ export function mount(
       nappId: app.nappId,
       title,
       type: classifyInstalled(app),
+      temporary,
       description,
       iconSha,
       // Direct data:/URL icon (self-contained napplets), else the napp's own
@@ -518,6 +520,7 @@ export function mount(
       app.event?.id,
       app.installedAt,
       app.singleton,
+      app.temporary,
       app.actions?.join(","),
       app.requires?.join(","),
       latestUpdateFor(app)?.id
@@ -549,7 +552,6 @@ export function mount(
               nappId: app.nappId
             })
         })
-        if (app.nappId.startsWith("temp~") || app.temporary) el.classList.add("temp")
         if (card) card.el.replaceWith(el)
         card = { el, sig }
         installedCards.set(app.nappId, card)

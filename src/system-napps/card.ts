@@ -1,6 +1,7 @@
 import "nostr-web-components" // registers <nostr-picture> / <nostr-name>
 import { bareNostrUser } from "@nostr/gadgets/metadata"
 import type { AppType } from "../types.js"
+import { ring } from "./ui.js"
 
 // ─── Unified app card ────────────────────────────────────────────
 // The one card shape the app shows for a napp: the Apps window renders it in
@@ -25,6 +26,9 @@ export interface AppCardOpts {
   iconUrl?: string | null
   authorPubkey?: string | null
   authorLabel?: string | null // plain text shown in place of author (e.g. "local")
+  // Nothing of it persists until it's kept: italic title, a "temporary" ring
+  // on the corner.
+  temporary?: boolean
   createdAt?: number | null
   actions: string[]
   // `requires` domains this launcher can't provide, named on the card badge.
@@ -153,6 +157,11 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
   for (const b of o.buttons) actions.appendChild(b)
   if (o.menuTrigger) actions.appendChild(o.menuTrigger)
   card.appendChild(actions)
+
+  if (o.temporary) {
+    card.classList.add("temp")
+    card.appendChild(ring("temporary"))
+  }
 
   // Clicking the card (anywhere but a button or the author) opens the app-info
   // detail overlay. The card itself stays minimal — no inline details.

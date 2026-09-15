@@ -2412,7 +2412,16 @@ body.popover-open .napp-body iframe {
   font-style: italic;
 }
 
+/* …and the ring stamped on its lower right corner, out of flow: it lies over
+   whatever the card has there. */
+.apps-card.temp > .ui-ring {
+  position: absolute;
+  right: 0.4rem;
+  bottom: 0.4rem;
+}
+
 .apps-card {
+  position: relative; /* the ring's frame */
   display: grid;
   grid-template-areas:
     "icon handlers actions"
@@ -2844,6 +2853,40 @@ body.popover-open .napp-body iframe {
   letter-spacing: 0.06em;
   opacity: 0.6;
   user-select: none;
+}
+
+/* Design system: ring — a word set around a circle, slowly turning: the
+   overline's voice on a circular path, orange, glyphs only. Its size follows
+   the font-size (the box is em-sized by the helper); placement is the
+   context's. ring() in ui.ts. Mirrored in public/napp-ui.css. */
+.ui-ring {
+  font-size: 0.65rem; /* the overline's */
+  color: #f97316;
+  overflow: visible;
+  transform-origin: center;
+  animation: ui-ring-spin 12s linear infinite;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ui-ring text {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  fill: currentColor;
+}
+
+@keyframes ui-ring-spin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-ring {
+    animation: none;
+  }
 }
 
 /* Design system: title — the window title's voice: serif, black weight,

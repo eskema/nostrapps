@@ -10,6 +10,7 @@
 //   • input({ type, placeholder, … })           → a `.ui-input` text field
 //   • check({ checked, onChange, … })           → a `.ui-check` checkbox
 //   • overline(text)                            → a `.ui-overline` caption/badge
+//   • ring(word)                                → a `.ui-ring` word set round a circle, turning
 //   • class `ui-title` on any text              → the window title's voice
 //   • itemList() + item({ label }, …controls)   → `.ui-items` / `.ui-item` rows
 //   • addControl({ label, onAdd, … })           → the two-step "add an item" form
@@ -216,6 +217,62 @@ export function overline(text: string, cls?: string): HTMLSpanElement {
   s.className = `ui-overline${cls ? ` ${cls}` : ""}`
   s.textContent = text
   return s
+}
+
+// A word set around a circle (`.ui-ring`), slowly turning — the overline's
+// voice bent into a stamp. Geometry is in em of the ring's text (the font-size
+// on .ui-ring, the overline's by default) and the svg sizes itself to fit, like
+// icon(). The word goes round once, its letters spread to fill the
+// circumference (textLength on the textPath — where Blink reads it), and a dot
+// sits centred in the seam: its own run, since a fitted run gets no gap after
+// its last glyph. Orange by default, glyphs only; placement is the context's.
+let ringSeq = 0
+export function ring(word: string, cls?: string): SVGElement {
+  const NS = "http://www.w3.org/2000/svg"
+  // Drawn at 100 units per em: Blink measures a path by flattening it to a
+  // fixed tolerance in user units, so a circle a few units wide comes out
+  // short and glyphs placed past its "end" are dropped.
+  const em = 100
+  const r = 1.6 * em // the baseline circle's radius
+  const box = 2 * (r + 0.8 * em) // the glyphs stand outside the path: room for them
+  const c = box / 2
+  const circ = 2 * Math.PI * r
+  const n = word.length
+  const glyph = 0.6 * em // ≈ an uppercase glyph's advance, tracking included
+  const dot = 0.3 * em
+  // n − 1 gaps inside the word and one either side of the dot, all equal.
+  const gap = (circ - n * glyph - dot) / (n + 1)
+  const span = n * glyph + (n - 1) * gap // the word's run along the path
+  const svg = document.createElementNS(NS, "svg")
+  svg.setAttribute("viewBox", `0 0 ${box} ${box}`)
+  svg.setAttribute("width", `${box / em}em`)
+  svg.setAttribute("height", `${box / em}em`)
+  svg.setAttribute("aria-hidden", "true")
+  svg.classList.add("ui-ring")
+  if (cls) svg.classList.add(...cls.split(" "))
+  const id = `ui-ring-${++ringSeq}`
+  const defs = document.createElementNS(NS, "defs")
+  const path = document.createElementNS(NS, "path")
+  path.id = id
+  // A full circle from the top, clockwise, so the text reads the right way up
+  // along the outside.
+  path.setAttribute("d", `M${c} ${c - r}a${r} ${r} 0 1 1 0 ${2 * r}a${r} ${r} 0 1 1 0 ${-2 * r}`)
+  defs.appendChild(path)
+  const run = (content: string, attrs: Record<string, string>) => {
+    const text = document.createElementNS(NS, "text")
+    text.setAttribute("font-size", String(em))
+    const tp = document.createElementNS(NS, "textPath")
+    tp.setAttribute("href", `#${id}`)
+    for (const [k, v] of Object.entries(attrs)) tp.setAttribute(k, v)
+    tp.textContent = content
+    text.appendChild(tp)
+    return text
+  }
+  const wordRun = run(word, { textLength: span.toFixed(1), lengthAdjust: "spacing" })
+  const dotRun = run("·", { startOffset: ((span + circ) / 2).toFixed(1) })
+  dotRun.setAttribute("text-anchor", "middle")
+  svg.append(defs, wordRun, dotRun)
+  return svg
 }
 
 // ─── item lists ───────────────────────────────────────────────────
