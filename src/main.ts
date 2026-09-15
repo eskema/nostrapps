@@ -2279,6 +2279,18 @@ async function resolvePolicyForLaunch(
 }
 
 async function install(raw: string): Promise<string> {
+  // A share link's temp app (the Apps card hands over its id minus the temp~
+  // prefix): installed for real from the files it was fetched with, under the
+  // grant the link's screen gave it. Its window stays the temp one until the
+  // space is kept.
+  const tempId = raw.startsWith("temp~") ? raw : `temp~${raw}`
+  const temp = sharedTemps.get(tempId)
+  if (temp) {
+    const realId = temp.fetched.nappId
+    if (!persist.hasPolicy(realId)) persist.setPolicy(realId, persist.getPolicy(tempId))
+    return installFetched(temp.fetched, temp.input)
+  }
+
   let resolved
   try {
     resolved = resolveInput(raw)
