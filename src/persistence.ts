@@ -53,8 +53,10 @@ function sanitizeString(value: unknown): string {
 // windows can't be restored, so they're kept in memory only, per space.
 const devOpenBySpace = new Map<string, NappWindowState[]>()
 
+// Whose record is memory-only: dev and temp apps by prefix, and a share
+// link's app until it's kept (same id as its install, so by record).
 function isEphemeralNappId(nappId: string): boolean {
-  return nappId.startsWith("dev~") || nappId.startsWith("temp~")
+  return nappId.startsWith("dev~") || nappId.startsWith("temp~") || devApps.has(nappId)
 }
 
 function ephemeralFor(spaceId: string): NappWindowState[] {
@@ -1028,6 +1030,7 @@ export interface DevAppData {
   modes?: NappMode[]
   initialSize?: NappInitialSize
   installedAt: number
+  temporary?: boolean
 }
 
 const devApps = new Map<string, DevAppData>()
@@ -1042,6 +1045,7 @@ export function storeDevApp(app: {
   requires?: string[]
   modes?: unknown
   initialSize?: unknown
+  temporary?: boolean
 }) {
   if (!app?.nappId) return
   devApps.set(app.nappId, {
@@ -1053,6 +1057,13 @@ export function storeDevApp(app: {
     requires: sanitizeRequires(app.requires),
     modes: sanitizeModes(app.modes),
     initialSize: sanitizeInitialSize(app.initialSize),
-    installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000)
+    installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000),
+    ...(app.temporary ? { temporary: true } : {})
   })
+}
+
+// Drop only the memory-only record (a kept app's, once persisted under the
+// same id).
+export function forgetDevApp(nappId: string) {
+  devApps.delete(nappId)
 }

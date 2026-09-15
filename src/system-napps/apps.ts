@@ -268,10 +268,9 @@ export function mount(
         })
       ]
     }
-    if (app.nappId.startsWith("temp~")) {
-      // A temp app (a share link's, or one opened from the input): kept for
-      // real by the launcher, which swaps its windows over and takes this
-      // entry's place in the list.
+    if (app.nappId.startsWith("temp~") || app.temporary) {
+      // A temporary app (a share link's, or one opened from the input): kept
+      // by the launcher; this card becomes the installed app's.
       const keep = button({ label: "keep", variant: "primary" })
       keep.addEventListener("click", async () => {
         keep.disabled = true
@@ -436,7 +435,7 @@ export function mount(
       ? null
       : app.nappId.startsWith("dev~")
         ? "dev"
-        : app.nappId.startsWith("temp~")
+        : app.nappId.startsWith("temp~") || app.temporary
           ? "temporary"
           : "local"
     const createdAt = app.event?.created_at || app.installedAt || null
@@ -536,15 +535,6 @@ export function mount(
       seen.add(app.nappId)
       const sig = installedCardSig(app)
       let card = installedCards.get(app.nappId)
-      // A temp app just kept: its card is this app's now — rebuilt in place,
-      // so the app changes state where it stands rather than reappearing.
-      if (!card) {
-        const temp = installedCards.get(`temp~${app.nappId}`)
-        if (temp) {
-          card = { el: temp.el, sig: "" }
-          installedCards.delete(`temp~${app.nappId}`)
-        }
-      }
       if (!card || card.sig !== sig) {
         const opts = installedOpts(app)
         const el = renderAppCard({
@@ -559,7 +549,7 @@ export function mount(
               nappId: app.nappId
             })
         })
-        if (app.nappId.startsWith("temp~")) el.classList.add("temp")
+        if (app.nappId.startsWith("temp~") || app.temporary) el.classList.add("temp")
         if (card) card.el.replaceWith(el)
         card = { el, sig }
         installedCards.set(app.nappId, card)

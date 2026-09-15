@@ -207,6 +207,9 @@ export type InstalledApp = {
   // itself, so this field is only populated for local/dev/temp apps.
   requires?: string[]
   event?: NostrEvent
+  // Opened from a share link and not kept yet: the record is memory-only and
+  // the origin is swept on the next boot. Same id as the install would have.
+  temporary?: boolean
   // Local napplets only: the folder's index.html, kept so reload can rebuild
   // the srcdoc (published napplets re-fetch from Blossom via `event` instead).
   html?: string

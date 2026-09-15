@@ -1081,7 +1081,7 @@ function describeApp(
     ? null
     : app.nappId.startsWith("dev~")
       ? "dev"
-      : app.nappId.startsWith("temp~")
+      : app.nappId.startsWith("temp~") || app.temporary
         ? "temp"
         : "local"
   return {
@@ -2202,6 +2202,7 @@ async function sweepEphemeralOrigins() {
       // The close path (finalizeNappRemoval) clears these too — a reload skips
       // it, and an ephemeral napp's "Allow always" must not outlive its data.
       clearDecisions(nappId)
+      persist.clearPolicy(nappId) // a grant that outlives its app would skip the next first run
       persist.forgetEphemeralOrigin(nappId) // only on success, so a failure retries next boot
     } catch (err: any) {
       console.warn("[sandbox] sweep failed for", nappId, err)
@@ -2281,15 +2282,11 @@ async function resolvePolicyForLaunch(
 }
 
 async function install(raw: string): Promise<string> {
-  // A share link's temp app (the Apps card hands over its id minus the temp~
-  // prefix): installed for real from the files it was fetched with, under the
-  // grant the link's screen gave it. Its window stays the temp one until the
-  // space is kept.
-  const tempId = raw.startsWith("temp~") ? raw : `temp~${raw}`
-  if (sharedTemps.has(tempId)) {
-    const realId = await keepTempApp(tempId)
-    if (!realId) throw new Error(`Couldn't keep ${tempId}`)
-    return realId
+  // A share link's app, not kept yet (the Apps card's keep): kept.
+  if (sharedTemps.has(raw)) {
+    const id = await keepTempApp(raw)
+    if (!id) throw new Error(`Couldn't keep ${raw}`)
+    return id
   }
 
   let resolved
@@ -2936,8 +2933,8 @@ function syncDOM(win: NappWindow) {
 // nothing behind. Keep installs those for real and promotes the space; Discard
 // or a reload drops everything.
 
-// What each temp window came from — the fetched files, installed under their
-// real id by Keep, and the link input Share writes back out.
+// The link's apps the user doesn't have, by id — what each was fetched as (the
+// manifest Keep persists, the files and icon Share may need) and the input.
 const sharedTemps = new Map<string, { input: string; fetched: NsiteResult }>()
 // Cap per link action: an app that never registers the handler would otherwise
 // hang the import (callIframe waits for the registration).
@@ -2955,15 +2952,6 @@ const GRID_STATUS = {
 function reportShareLinkError(err: any) {
   console.error("[share-link] error:", err)
   setStatus(`Share link error: ${err.message}`)
-}
-
-// The temp id mirrors the real one (`<pubkey16>~<d>`) behind a temp~ prefix.
-// Not the link input: nappOriginFor cuts the id to the 63-char DNS label, and
-// an naddr can put kind and author first, so two apps by one author would
-// truncate to the same origin — and two boot iframes would then answer that
-// origin's file requests with different apps' files.
-function tempNappIdFor(target: { pubkey: string; dTag: string }): string {
-  return `temp~${target.pubkey.slice(0, 16)}~${target.dTag}`
 }
 
 // The match handlers.findHandlersForAction makes: exact, or "view" for any view:<kind>.
@@ -3051,7 +3039,8 @@ async function importShareLink(hash: string) {
       setStatus(`Skipping ${w.input}: napplets can't be shared yet`)
       continue
     }
-    const installed = persist.getInstalledApp(`${target.pubkey.slice(0, 16)}~${target.dTag}`)
+    const nappId = `${target.pubkey.slice(0, 16)}~${target.dTag}`
+    const installed = persist.getInstalledApp(nappId)
     if (installed) {
       entries.push({
         input: w.input,
@@ -3063,16 +3052,15 @@ async function importShareLink(hash: string) {
       })
       continue
     }
-    const tempId = tempNappIdFor(target)
     try {
       // The same app twice in a link is fetched once.
       const fetched =
-        entries.find(e => e.nappId === tempId)?.fetched ?? (await fetchNsite(target, setStatus))
+        entries.find(e => e.nappId === nappId)?.fetched ?? (await fetchNsite(target, setStatus))
       entries.push({
         input: w.input,
         actions: w.actions,
         title: fetched.title || target.dTag,
-        nappId: tempId,
+        nappId,
         fetched,
         declared: capabilitiesFromEvent(fetched.manifest)
       })
@@ -3129,7 +3117,7 @@ async function importShareLink(hash: string) {
     const e = entries[i]
     try {
       const win = e.fetched
-        ? await launchSharedTemp(e.nappId, e.input, e.fetched, e.title, cells[i])
+        ? await launchSharedApp(e.nappId, e.input, e.fetched, e.title, cells[i])
         : await launch(stage, e.nappId, {
             ...makeLaunchOpts(),
             petname: e.title,
@@ -3165,9 +3153,11 @@ async function importShareLink(hash: string) {
   setStatus(`Opened shared space "${link.name}" — keep it to install its apps`)
 }
 
-// A temp~ app for a shared space: booted like a /dev app (its origin is swept
-// on the next boot), its files kept for Keep. The policy is already stored.
-async function launchSharedTemp(
+// A link's app the user doesn't have: booted at its real origin with its files
+// in that origin's store, exactly as an install would — only its record is
+// memory-only and its origin is swept on the next boot, unless kept. Keeping
+// then changes nothing the app can see. The grant is already stored.
+async function launchSharedApp(
   nappId: string,
   input: string,
   fetched: NsiteResult,
@@ -3176,9 +3166,15 @@ async function launchSharedTemp(
 ): Promise<NappWindow> {
   if (!sharedTemps.has(nappId)) {
     const { files, title, manifest, singleton } = fetched
-    setTempFiles(nappId, files)
     setStatus(`Booting ${petname}…`)
-    await bootDevApp(nappOriginFor(nappId), nappId, setStatus, petname)
+    persist.rememberEphemeralOrigin(nappId)
+    await bootNapp(
+      nappOriginFor(nappId),
+      files,
+      setStatus,
+      petname,
+      persist.getStoredPolicy(nappId)
+    )
     persist.storeDevApp({
       nappId,
       title: title || null,
@@ -3188,7 +3184,8 @@ async function launchSharedTemp(
       requires: requiresFromEvent(manifest),
       modes: persist.modesFromEventTags(manifest?.tags ?? []),
       initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
-      singleton
+      singleton,
+      temporary: true
     })
     handlers.addApp(nappId, capabilitiesFromEvent(manifest))
     sharedTemps.set(nappId, { input, fetched })
@@ -3196,64 +3193,22 @@ async function launchSharedTemp(
   return launch(stage, nappId, { ...makeLaunchOpts(), petname, position, status: GRID_STATUS })
 }
 
-// Keep one temp app: install it for real from the files it was fetched with,
-// under the grant the link's screen gave it and in the temp entry's place in
-// the list; put each of its windows back under the real origin — in the space
-// it was in, with its layout and actions — and wipe the temp one. The real id,
-// or null if it wasn't a temp app.
-async function keepTempApp(tempId: string): Promise<string | null> {
-  const src = sharedTemps.get(tempId)
-  if (!src) return null
-  const realId = src.fetched.nappId
-  if (!persist.hasPolicy(realId)) persist.setPolicy(realId, persist.getPolicy(tempId))
-  await installFetched(src.fetched, src.input, persist.getInstalledApp(tempId)?.installedAt)
-  // The temp record goes the instant the real one is in, before anything can
-  // render — the Apps list then sees one app change hands, not two.
-  persist.forgetInstalledNapp(tempId)
-  handlers.removeApp(tempId)
-  const restore = persist
-    .allOpenWindows()
-    .filter(w => w.window.nappId === tempId)
-    .map(({ spaceId, window: w }) => ({
-      spaceId,
-      petname: w.petname,
-      position: w.position,
-      status: w.status,
-      actions: w.loadedActions ?? []
-    }))
-  // The temp app goes — windows, record, policy, origin — explicitly, the way
-  // uninstall does it: the windows' own destroy hook only sees the current
-  // space, and a temp window may live in another. The real app takes their
-  // place and gets its actions again.
-  uninstallingNapps.add(tempId)
-  try {
-    destroyByNappId(tempId)
-    await finalizeNappRemoval(tempId, "Wiping")
-  } catch (err: any) {
-    console.warn("[keep] temp wipe failed", { tempId, err })
-  } finally {
-    uninstallingNapps.delete(tempId)
-  }
-  sharedTemps.delete(tempId)
-  for (const { spaceId, actions, ...r } of restore) {
-    const win = await launch(stage, realId, { ...makeLaunchOpts(), ...r })
-    syncDOM(win)
-    const state = win.getState()
-    persist.updateOpen(state.instanceId, state)
-    if (spaceId !== currentSpaceId) {
-      moveWindowToSpace(state.instanceId, spaceId)
-      persist.moveOpenToSpace(state.instanceId, spaceId)
-    }
-    for (const a of actions) {
-      await withTimeout(
-        runNappAction("link", a.name, a.payload, { instance: state.instanceId }),
-        LINK_ACTION_MS,
-        `${a.name} on ${r.petname}`
-      )
-    }
-  }
+// Keep a link's app: its record persisted (the manifest; its first-open time
+// as its install time) and the sweep called off. The origin, its files and
+// whatever the app saved stay; its windows keep running. The id, or null if
+// it wasn't a link's app.
+async function keepTempApp(nappId: string): Promise<string | null> {
+  const src = sharedTemps.get(nappId)
+  if (!src?.fetched.manifest) return null
+  const dev = persist.getInstalledApp(nappId)
+  const petname = dev?.petname || src.fetched.title || undefined
+  persist.storeInstalledEvent(src.fetched.manifest, petname, dev?.installedAt)
+  persist.forgetDevApp(nappId)
+  persist.forgetEphemeralOrigin(nappId)
+  sharedTemps.delete(nappId)
+  setStatus(`Kept ${petname || nappId}`)
   notifyAppsChanged()
-  return realId
+  return nappId
 }
 
 // Keep: every temp app of the space kept for real, then the space promoted.
