@@ -3217,9 +3217,19 @@ async function keepTempApp(tempId: string): Promise<string | null> {
       status: w.status,
       actions: w.loadedActions ?? []
     }))
-  // Destroying the temp windows wipes their origin (onDestroy); the real app
-  // takes their place and gets its actions again.
-  destroyByNappId(tempId)
+  // The temp app goes — windows, record, policy, origin — explicitly, the way
+  // uninstall does it: the windows' own destroy hook only sees the current
+  // space, and a temp window may live in another. The real app takes their
+  // place and gets its actions again.
+  uninstallingNapps.add(tempId)
+  try {
+    destroyByNappId(tempId)
+    await finalizeNappRemoval(tempId, "Wiping")
+  } catch (err: any) {
+    console.warn("[keep] temp wipe failed", { tempId, err })
+  } finally {
+    uninstallingNapps.delete(tempId)
+  }
   sharedTemps.delete(tempId)
   for (const { spaceId, actions, ...r } of restore) {
     const win = await launch(stage, realId, { ...makeLaunchOpts(), ...r })
