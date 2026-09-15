@@ -536,6 +536,15 @@ export function mount(
       seen.add(app.nappId)
       const sig = installedCardSig(app)
       let card = installedCards.get(app.nappId)
+      // A temp app just kept: its card is this app's now — rebuilt in place,
+      // so the app changes state where it stands rather than reappearing.
+      if (!card) {
+        const temp = installedCards.get(`temp~${app.nappId}`)
+        if (temp) {
+          card = { el: temp.el, sig: "" }
+          installedCards.delete(`temp~${app.nappId}`)
+        }
+      }
       if (!card || card.sig !== sig) {
         const opts = installedOpts(app)
         const el = renderAppCard({

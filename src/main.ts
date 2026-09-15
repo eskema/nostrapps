@@ -3207,6 +3207,10 @@ async function keepTempApp(tempId: string): Promise<string | null> {
   const realId = src.fetched.nappId
   if (!persist.hasPolicy(realId)) persist.setPolicy(realId, persist.getPolicy(tempId))
   await installFetched(src.fetched, src.input, persist.getInstalledApp(tempId)?.installedAt)
+  // The temp record goes the instant the real one is in, before anything can
+  // render — the Apps list then sees one app change hands, not two.
+  persist.forgetInstalledNapp(tempId)
+  handlers.removeApp(tempId)
   const restore = persist
     .allOpenWindows()
     .filter(w => w.window.nappId === tempId)
