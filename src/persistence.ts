@@ -1031,6 +1031,9 @@ export interface DevAppData {
   initialSize?: NappInitialSize
   installedAt: number
   temporary?: boolean
+  // A link's app has its manifest in hand: kept on the record so its card
+  // shows what an installed one would (author, description, date, icon).
+  event?: NostrEvent
 }
 
 const devApps = new Map<string, DevAppData>()
@@ -1046,6 +1049,7 @@ export function storeDevApp(app: {
   modes?: unknown
   initialSize?: unknown
   temporary?: boolean
+  event?: NostrEvent | null
 }) {
   if (!app?.nappId) return
   devApps.set(app.nappId, {
@@ -1058,7 +1062,8 @@ export function storeDevApp(app: {
     modes: sanitizeModes(app.modes),
     initialSize: sanitizeInitialSize(app.initialSize),
     installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000),
-    ...(app.temporary ? { temporary: true } : {})
+    ...(app.temporary ? { temporary: true } : {}),
+    ...(app.event ? { event: app.event } : {})
   })
 }
 

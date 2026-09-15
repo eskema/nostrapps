@@ -3185,7 +3185,8 @@ async function launchSharedApp(
       modes: persist.modesFromEventTags(manifest?.tags ?? []),
       initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
       singleton,
-      temporary: true
+      temporary: true,
+      event: manifest
     })
     handlers.addApp(nappId, capabilitiesFromEvent(manifest))
     sharedTemps.set(nappId, { input, fetched })
