@@ -252,14 +252,10 @@ h1 span {
   user-select: none;
 }
 
-/* Ephemeral (shared-link) spaces: a dashed underline — nothing in them
-   persists. (Not italics: only the upright fonts are loaded, and the browser
-   would fake the slant.) */
+/* Ephemeral (shared-link) spaces: italic — nothing in them persists. */
 .spaces-tab.ephemeral,
 .spaces-current-name.ephemeral {
-  text-decoration: underline dashed;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.25em;
+  font-style: italic;
 }
 
 /* .btn sets display, which would beat the UA [hidden] rule. */
@@ -2410,17 +2406,14 @@ body.popover-open .napp-body iframe {
 /* ─── Apps card ──────────────────────────────────────────────────
    Flat structure: icon, title, author/label, date, handlers, and actions are
    all direct children of .apps-card. Styling left as placeholders to fill in. */
-/* A temp app's card: dashed edge and a dashed underline on the title —
-   nothing of it persists until it's kept. Same cue as an ephemeral space's
-   tab. */
+/* A temp app's card: dashed edge, italic title — nothing of it persists until
+   it's kept. Same cue as an ephemeral space's tab. */
 .apps-card.temp {
   border-left: 2px dashed color-mix(in srgb, currentColor 35%, transparent);
   padding-left: 0.6rem;
 }
 .apps-card.temp .apps-title {
-  text-decoration: underline dashed;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.25em;
+  font-style: italic;
 }
 
 .apps-card {
