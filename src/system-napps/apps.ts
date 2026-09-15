@@ -609,6 +609,69 @@ export function mount(
     }
   }
 
+  // A stand-in temporary app's card for styling work — MOCK_CARD pins it above
+  // the list: the temporary look (italic title, the ring) and every element a
+  // card shows when its manifest has it — description, author, an unsupported
+  // require, date, handlers, the own-app menu — and, opened, the detail's:
+  // images, requires, categories, tags, source, files. Nothing behind it: the
+  // event is made up (its images and icon inline, so nothing is fetched), the
+  // buttons are inert.
+  const MOCK_CARD = false
+  function mockTemporaryCard(): HTMLElement {
+    const nappId = "temp~mock"
+    const description = "A temporary app's card, here for its styles — not a real app."
+    const pubkey = ctx.account?.getPubkey() || null
+    const svg = (body: string) =>
+      `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9">${body}</svg>`
+    const event: NostrEvent = {
+      id: "0".repeat(64),
+      pubkey: pubkey || "0".repeat(64),
+      kind: 35128,
+      created_at: Math.floor(Date.now() / 1000),
+      content: "",
+      sig: "",
+      tags: [
+        ["d", "mock"],
+        ["title", "Mockup"],
+        ["description", description],
+        ["icon", svg('<circle cx="8" cy="4.5" r="4" fill="%23f97316"/>')],
+        ["image", svg('<rect width="16" height="9" fill="%23888"/>')],
+        ["image", svg('<rect width="16" height="9" fill="%23bbb"/>')],
+        ["action", "note"],
+        ["action", "profile"],
+        ["requires", "identity"],
+        ["requires", "storage"],
+        ["requires", "teleport"],
+        ["l", "napp.category:tools"],
+        ["t", "mock"],
+        ["t", "temporary"],
+        ["source", "https://url.com/source"],
+        ["path", "/index.html", "0".repeat(64), "text/html"],
+        ["path", "/icon.svg", "1".repeat(64), "image/svg+xml"]
+      ]
+    }
+    const opts = (): AppCardOpts => ({
+      nappId,
+      title: "Mockup",
+      type: classifyEvent(event),
+      temporary: true,
+      description,
+      iconUrl: resolveCardIcon(event).url,
+      authorPubkey: pubkey,
+      authorLabel: "temporary", // signed out: the no-manifest label instead
+      createdAt: event.created_at,
+      actions: actionsOf(event),
+      unsupported: unsupportedRequires(requiresOf(event)),
+      search: "",
+      buttons: [button({ label: "keep", variant: "primary" })],
+      menuTrigger: button({ label: "···", variant: "ghost", class: "apps-card-menu-trigger" })
+    })
+    return renderAppCard({
+      ...opts(),
+      onOpen: () => showDetail({ buildCard: () => renderAppCard(opts()), event, nappId })
+    })
+  }
+
   function renderInstalled() {
     installedPane.innerHTML = `
       <div class="apps-toolbar">
@@ -618,6 +681,7 @@ export function mount(
     `
     const searchEl = installedPane.querySelector(".apps-search") as HTMLInputElement
     _installedListEl = installedPane.querySelector(".apps-list") as HTMLElement
+    if (MOCK_CARD) installedPane.insertBefore(mockTemporaryCard(), _installedListEl)
     installedCards.clear() // a new list element — the old cards went with the old one
     installedPane.querySelector(".apps-toolbar")?.prepend(buildTypeSegments())
     searchEl.value = installedFilter
