@@ -2406,12 +2406,8 @@ body.popover-open .napp-body iframe {
 /* ─── Apps card ──────────────────────────────────────────────────
    Flat structure: icon, title, author/label, date, handlers, and actions are
    all direct children of .apps-card. Styling left as placeholders to fill in. */
-/* A temp app's card: dashed edge, italic title — nothing of it persists until
-   it's kept. Same cue as an ephemeral space's tab. */
-.apps-card.temp {
-  border-left: 2px dashed color-mix(in srgb, currentColor 35%, transparent);
-  padding-left: 0.6rem;
-}
+/* A temporary app's card: italic title — nothing of it persists until it's
+   kept. Same cue as an ephemeral space's tab. */
 .apps-card.temp .apps-title {
   font-style: italic;
 }
