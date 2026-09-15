@@ -2284,11 +2284,10 @@ async function install(raw: string): Promise<string> {
   // grant the link's screen gave it. Its window stays the temp one until the
   // space is kept.
   const tempId = raw.startsWith("temp~") ? raw : `temp~${raw}`
-  const temp = sharedTemps.get(tempId)
-  if (temp) {
-    const realId = temp.fetched.nappId
-    if (!persist.hasPolicy(realId)) persist.setPolicy(realId, persist.getPolicy(tempId))
-    return installFetched(temp.fetched, temp.input)
+  if (sharedTemps.has(tempId)) {
+    const realId = await keepTempApp(tempId)
+    if (!realId) throw new Error(`Couldn't keep ${tempId}`)
+    return realId
   }
 
   let resolved
@@ -2322,7 +2321,8 @@ async function install(raw: string): Promise<string> {
 // record. Keep runs it on the files a shared space already fetched.
 async function installFetched(
   { nappId, files, title, manifest }: NsiteResult,
-  raw: string
+  raw: string,
+  installedAt?: number
 ): Promise<string> {
   const dTag = manifest?.tags.find((t: any) => t[0] === "d")?.[1]
   const petname = title || dTag || raw
@@ -2349,7 +2349,7 @@ async function installFetched(
   onProgress(`Booting ${label}…`)
   await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId))
 
-  if (manifest) persist.storeInstalledEvent(manifest, petname)
+  if (manifest) persist.storeInstalledEvent(manifest, petname, installedAt)
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
 
   setStatus(`Installed ${label}`)
@@ -3194,49 +3194,68 @@ async function launchSharedTemp(
   return launch(stage, nappId, { ...makeLaunchOpts(), petname, position, status: GRID_STATUS })
 }
 
-// Keep: install the space's temp apps for real, put each window back under
-// its real origin with the same layout and actions, then promote the space.
+// Keep one temp app: install it for real from the files it was fetched with,
+// under the grant the link's screen gave it and in the temp entry's place in
+// the list; put each of its windows back under the real origin — in the space
+// it was in, with its layout and actions — and wipe the temp one. The real id,
+// or null if it wasn't a temp app.
+async function keepTempApp(tempId: string): Promise<string | null> {
+  const src = sharedTemps.get(tempId)
+  if (!src) return null
+  const realId = src.fetched.nappId
+  if (!persist.hasPolicy(realId)) persist.setPolicy(realId, persist.getPolicy(tempId))
+  await installFetched(src.fetched, src.input, persist.getInstalledApp(tempId)?.installedAt)
+  const restore = persist
+    .allOpenWindows()
+    .filter(w => w.window.nappId === tempId)
+    .map(({ spaceId, window: w }) => ({
+      spaceId,
+      petname: w.petname,
+      position: w.position,
+      status: w.status,
+      actions: w.loadedActions ?? []
+    }))
+  // Destroying the temp windows wipes their origin (onDestroy); the real app
+  // takes their place and gets its actions again.
+  destroyByNappId(tempId)
+  sharedTemps.delete(tempId)
+  for (const { spaceId, actions, ...r } of restore) {
+    const win = await launch(stage, realId, { ...makeLaunchOpts(), ...r })
+    syncDOM(win)
+    const state = win.getState()
+    persist.updateOpen(state.instanceId, state)
+    if (spaceId !== currentSpaceId) {
+      moveWindowToSpace(state.instanceId, spaceId)
+      persist.moveOpenToSpace(state.instanceId, spaceId)
+    }
+    for (const a of actions) {
+      await withTimeout(
+        runNappAction("link", a.name, a.payload, { instance: state.instanceId }),
+        LINK_ACTION_MS,
+        `${a.name} on ${r.petname}`
+      )
+    }
+  }
+  notifyAppsChanged()
+  return realId
+}
+
+// Keep: every temp app of the space kept for real, then the space promoted.
 async function keepCurrentSpace() {
   const spaceId = currentSpaceId
   if (!persist.isEphemeralSpace(spaceId)) return
   const name = persist.listSpaces().find(s => s.id === spaceId)?.name || "space"
-  const byTemp = new Map<string, NappWindowState[]>()
-  for (const w of persist.readOpen()) {
-    if (w.system || !sharedTemps.has(w.nappId)) continue
-    byTemp.set(w.nappId, [...(byTemp.get(w.nappId) ?? []), w])
-  }
-  for (const [tempId, wins] of byTemp) {
-    const src = sharedTemps.get(tempId)!
-    const realId = src.fetched.nappId
+  const temps = new Set(
+    persist
+      .readOpen()
+      .filter(w => !w.system && sharedTemps.has(w.nappId))
+      .map(w => w.nappId)
+  )
+  for (const tempId of temps) {
     try {
-      // The grant answered on the link's screen is the real app's policy too.
-      if (!persist.hasPolicy(realId)) persist.setPolicy(realId, persist.getPolicy(tempId))
-      await installFetched(src.fetched, src.input)
-      const restore = wins.map(w => ({
-        petname: w.petname,
-        position: w.position,
-        status: w.status,
-        actions: persist.getLoadedActions(w.instanceId)
-      }))
-      // Destroying the temp windows wipes their origin (onDestroy); the real
-      // app takes their place and gets its actions again.
-      destroyByNappId(tempId)
-      sharedTemps.delete(tempId)
-      for (const { actions, ...r } of restore) {
-        const win = await launch(stage, realId, { ...makeLaunchOpts(), ...r })
-        syncDOM(win)
-        const state = win.getState()
-        persist.updateOpen(state.instanceId, state)
-        for (const a of actions) {
-          await withTimeout(
-            runNappAction("link", a.name, a.payload, { instance: state.instanceId }),
-            LINK_ACTION_MS,
-            `${a.name} on ${r.petname}`
-          )
-        }
-      }
+      await keepTempApp(tempId)
     } catch (err: any) {
-      setStatus(`Couldn't keep ${wins[0].petname}: ${err.message}`)
+      setStatus(`Couldn't keep ${friendlyNameFor(tempId)}: ${err.message}`)
       return
     }
   }

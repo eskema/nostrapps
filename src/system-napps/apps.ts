@@ -269,28 +269,31 @@ export function mount(
       ]
     }
     if (app.nappId.startsWith("temp~")) {
-      const inst = button({ label: "install", variant: "primary" })
-      inst.addEventListener("click", async () => {
-        inst.disabled = true
-        inst.textContent = "installing…"
+      // A temp app (a share link's, or one opened from the input): kept for
+      // real by the launcher, which swaps its windows over and takes this
+      // entry's place in the list.
+      const keep = button({ label: "keep", variant: "primary" })
+      keep.addEventListener("click", async () => {
+        keep.disabled = true
+        keep.textContent = "keeping…"
+        const name = app.petname || app.title || app.nappId
         try {
-          const raw = app.nappId.slice(5)
-          ctx.setStatus?.(`Apps: installing ${raw}…`)
-          await ctx.install(raw)
-          ctx.setStatus?.(`Apps: installed ${raw}`)
+          ctx.setStatus?.(`Apps: keeping ${name}…`)
+          await ctx.install(app.nappId)
+          ctx.setStatus?.(`Apps: kept ${name}`)
           renderInstalledList()
         } catch (err: any) {
-          ctx.setStatus?.(`Apps: install failed for ${app.nappId}: ${err?.message || String(err)}`)
-          inst.disabled = false
-          inst.textContent = "error"
-          inst.title = err?.message || String(err)
+          ctx.setStatus?.(`Apps: couldn't keep ${name}: ${err?.message || String(err)}`)
+          keep.disabled = false
+          keep.textContent = "error"
+          keep.title = err?.message || String(err)
           setTimeout(() => {
-            inst.textContent = "install"
-            inst.removeAttribute("title")
+            keep.textContent = "keep"
+            keep.removeAttribute("title")
           }, 3000)
         }
       })
-      return [inst]
+      return [keep]
     }
     const perms = button({ label: "permissions", variant: "outline" })
     perms.addEventListener("click", () => {
@@ -434,7 +437,7 @@ export function mount(
       : app.nappId.startsWith("dev~")
         ? "dev"
         : app.nappId.startsWith("temp~")
-          ? "temp"
+          ? "temporary"
           : "local"
     const createdAt = app.event?.created_at || app.installedAt || null
     const search = buildHaystack({
@@ -547,6 +550,7 @@ export function mount(
               nappId: app.nappId
             })
         })
+        if (app.nappId.startsWith("temp~")) el.classList.add("temp")
         if (card) card.el.replaceWith(el)
         card = { el, sig }
         installedCards.set(app.nappId, card)

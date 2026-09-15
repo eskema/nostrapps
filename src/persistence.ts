@@ -600,7 +600,9 @@ function readInstalled(): Record<string, Omit<InstalledApp, "nappId">> {
   return parsed
 }
 
-export function storeInstalledEvent(event: NostrEvent, petname?: string) {
+// `installedAt` seeds the first-install time for a record that has none —
+// a temp app kept for real keeps its place in the list.
+export function storeInstalledEvent(event: NostrEvent, petname?: string, installedAt?: number) {
   if (!event?.id) return
   const all = readInstalled()
   const nappId = computeNappId(event)
@@ -618,7 +620,7 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string) {
     event,
     // First install wins: an update re-runs this, and it shouldn't read as a
     // fresh install (the apps list orders by this).
-    installedAt: existing?.installedAt || Math.floor(Date.now() / 1000)
+    installedAt: existing?.installedAt || installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)
 }
