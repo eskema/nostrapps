@@ -211,7 +211,6 @@ export function createNappWindow({
   }
 
   if (status?.minimized) root.classList.add("minimized")
-  if (status?.maximized) root.classList.add("maximized")
   if (status?.userSized || remembered) root.classList.add("user-sized")
   if (status?.pinned) {
     root.classList.add("pinned")
@@ -289,7 +288,6 @@ export function createNappWindow({
       },
       status: {
         minimized: root.classList.contains("minimized"),
-        maximized: root.classList.contains("maximized"),
         pinned: root.classList.contains("pinned"),
         userSized: root.classList.contains("user-sized"),
         zIndex: parseInt(root.style.zIndex, 10) || 0

@@ -2907,7 +2907,6 @@ const LINK_ACTION_MS = 15_000
 // holds off the default height cap).
 const GRID_STATUS = {
   minimized: false,
-  maximized: false,
   pinned: false,
   userSized: true,
   zIndex: 0

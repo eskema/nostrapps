@@ -62,9 +62,9 @@ export interface SpacesState {
   list: SpaceData[]
 }
 
+// Maximized is a local toggle, never persisted.
 export type Status = {
   minimized: boolean
-  maximized: boolean
   pinned: boolean
   userSized: boolean
   zIndex: number
