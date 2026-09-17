@@ -58,10 +58,22 @@ import {
 } from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
 import { formatPayload, isInstanceSerial } from "./utils.js"
-import { fetchNsite, manifestRelays, blobServers, manifestPaths } from "./nsite/fetch.js"
+import {
+  fetchNsite,
+  manifestRelays,
+  blobServers,
+  manifestPaths,
+  NSITE_NAMED_KIND
+} from "./nsite/fetch.js"
 import { ensureReplicatedAll, type ReplicationTarget } from "./nsite/heal.js"
 import { openShareDialog, type ShareCheck, type ShareWindow } from "./share-dialog.js"
-import { resolveNapplet, isNappletKind, loadNappletFromManifest } from "./nsite/napplet.js"
+import {
+  resolveNapplet,
+  isNappletKind,
+  loadNappletFromManifest,
+  NAPPLET_NAMED_KIND,
+  type ResolvedNapplet
+} from "./nsite/napplet.js"
 import { collectLocalFolder, slug } from "./nsite/local.js"
 import {
   directIconSrc,
@@ -2193,7 +2205,11 @@ async function sweepEphemeralOrigins() {
   setStatus(`Clearing ${stale.length} leftover dev napp${stale.length === 1 ? "" : "s"}…`)
   for (const nappId of stale) {
     try {
-      await wipe(nappId)
+      // A napplet never had an origin; what it kept (the storage and config
+      // domains, a napp's too) is with the launcher.
+      if (!nappId.startsWith("napplet~")) await wipe(nappId)
+      persist.clearNappletStorage(nappId)
+      persist.clearNappletConfig(nappId)
       // The close path (finalizeNappRemoval) clears these too — a reload skips
       // it, and an ephemeral napp's "Allow always" must not outlive its data.
       clearDecisions(nappId)
@@ -2597,7 +2613,8 @@ function normalizeDevUrl(raw: string): string {
   return u.toString()
 }
 
-async function launchFromInput(raw: string): Promise<void> {
+// Resolves true when the input was a share link: the import reports on itself.
+async function launchFromInput(raw: string): Promise<boolean | void> {
   console.debug("[launch] launchFromInput", { raw })
 
   // Slash commands → system napps or one-shot actions
@@ -2692,6 +2709,15 @@ async function launchFromInput(raw: string): Promise<void> {
     return
   }
 
+  // A share link, whole or just its `#…`: opens as the link would, in an
+  // ephemeral space.
+  const link = shareLinkIn(raw)
+  if (link) {
+    console.debug("[launch] input → share link")
+    await importShareLink(link)
+    return true
+  }
+
   // ── temp install: show loading window immediately ──
   const suffix = raw
     .trim()
@@ -2762,8 +2788,8 @@ form.addEventListener("submit", async (e: SubmitEvent) => {
   const raw = input!.value.trim()
   if (!raw) return
   try {
-    await launchFromInput(raw)
-    setStatus(`Launched ${raw}`)
+    const quiet = await launchFromInput(raw)
+    if (!quiet) setStatus(`Launched ${raw}`)
     input!.value = ""
   } catch (err: any) {
     setStatus(`Error: ${err.message}`)
@@ -2947,6 +2973,23 @@ const GRID_STATUS = {
   zIndex: 0
 }
 
+// The share link in a launcher input: `#…` as is, or the fragment of a url
+// that resolves to nothing else. An nsite address carrying one is still that
+// nsite. Null for anything the other paths take.
+function shareLinkIn(raw: string): string | null {
+  const i = raw.indexOf("#")
+  if (i === -1) return null
+  const hash = raw.slice(i)
+  if (!parseShareLink(hash)) return null
+  if (i === 0) return hash
+  try {
+    resolveInput(raw.slice(0, i))
+    return null
+  } catch {
+    return hash
+  }
+}
+
 function reportShareLinkError(err: any) {
   console.error("[share-link] error:", err)
   setStatus(`Share link error: ${err.message}`)
@@ -3033,11 +3076,13 @@ async function importShareLink(hash: string) {
       setStatus(`Skipping ${w.input}: ${err.message}`)
       continue
     }
-    if (target.kind && isNappletKind(target.kind)) {
-      setStatus(`Skipping ${w.input}: napplets can't be shared yet`)
-      continue
-    }
-    const nappId = `${target.pubkey.slice(0, 16)}~${target.dTag}`
+    // The id an install would give it: napplets have their own namespace.
+    const napplet = target.kind != null && isNappletKind(target.kind)
+    const nappId = persist.computeNappId({
+      kind: target.kind ?? NSITE_NAMED_KIND,
+      pubkey: target.pubkey,
+      tags: [["d", target.dTag]]
+    })
     const installed = persist.getInstalledApp(nappId)
     if (installed) {
       entries.push({
@@ -3053,7 +3098,10 @@ async function importShareLink(hash: string) {
     try {
       // The same app twice in a link is fetched once.
       const fetched =
-        entries.find(e => e.nappId === nappId)?.fetched ?? (await fetchNsite(target, setStatus))
+        entries.find(e => e.nappId === nappId)?.fetched ??
+        (napplet
+          ? nappletAsFetched(await resolveNapplet({ ...target, kind: target.kind! }, setStatus))
+          : await fetchNsite(target, setStatus))
       entries.push({
         input: w.input,
         actions: w.actions,
@@ -3154,7 +3202,9 @@ async function importShareLink(hash: string) {
 // A link's app the user doesn't have: booted at its real origin with its files
 // in that origin's store, exactly as an install would — only its record is
 // memory-only and its origin is swept on the next boot, unless kept. Keeping
-// then changes nothing the app can see. The grant is already stored.
+// then changes nothing the app can see. The grant is already stored. A napplet
+// has no origin: it runs from its one file, and the sweep clears what the
+// launcher kept for it.
 async function launchSharedApp(
   nappId: string,
   input: string,
@@ -3162,17 +3212,20 @@ async function launchSharedApp(
   petname: string,
   position: Position
 ): Promise<NappWindow> {
+  const { files, title, manifest, singleton } = fetched
+  const napplet = !!manifest && isNappletKind(manifest.kind)
   if (!sharedTemps.has(nappId)) {
-    const { files, title, manifest, singleton } = fetched
     setStatus(`Booting ${petname}…`)
     persist.rememberEphemeralOrigin(nappId)
-    await bootNapp(
-      nappOriginFor(nappId),
-      files,
-      setStatus,
-      petname,
-      persist.getStoredPolicy(nappId)
-    )
+    if (!napplet) {
+      await bootNapp(
+        nappOriginFor(nappId),
+        files,
+        setStatus,
+        petname,
+        persist.getStoredPolicy(nappId)
+      )
+    }
     persist.storeDevApp({
       nappId,
       title: title || null,
@@ -3189,7 +3242,24 @@ async function launchSharedApp(
     handlers.addApp(nappId, capabilitiesFromEvent(manifest))
     sharedTemps.set(nappId, { input, fetched })
   }
-  return launch(stage, nappId, { ...makeLaunchOpts(), petname, position, status: GRID_STATUS })
+  const opts = { ...makeLaunchOpts(), petname, position, status: GRID_STATUS }
+  // The bytes were verified a moment ago: no second fetch, as on install.
+  if (napplet) return launchNapplet(stage, nappId, await files[0].body.text(), opts)
+  return launch(stage, nappId, opts)
+}
+
+// A napplet is one file: in the fetched shape an nsite has, the consent
+// screen, Keep and Share read both alike.
+function nappletAsFetched(n: ResolvedNapplet): NsiteResult {
+  return {
+    nappId: persist.computeNappId(n.manifest),
+    files: nappletFiles(n),
+    title: n.title,
+    manifest: n.manifest
+  }
+}
+function nappletFiles(n: ResolvedNapplet): NsiteFile[] {
+  return [{ path: "/index.html", body: n.body, mime: "text/html" }]
 }
 
 // Keep a link's app: its record persisted (the manifest; its first-open time
@@ -3299,19 +3369,20 @@ async function shareCurrentSpace() {
 type Shareable = { manifest: NostrEvent; dTag: string; files(): Promise<NsiteFile[]> }
 
 // What a window's app can be shared as: its manifest, and its bytes for the
-// healing — a temp app's fetched files, an installed app's read back out of
-// its origin. Null for apps with no address (dev, local, napplets).
+// healing — a temp app's fetched files, an installed napp's read back out of
+// its origin, an installed napplet's (no origin) fetched again from its
+// manifest. Null for apps with no address (dev, local, a napplet with no name).
 function shareableFor(nappId: string): Shareable | null {
   const temp = sharedTemps.get(nappId)
   const manifest = temp ? temp.fetched.manifest : persist.getInstalledApp(nappId)?.event
-  if (!manifest || manifest.kind !== 35128) return null
+  if (!manifest) return null
+  if (manifest.kind !== NSITE_NAMED_KIND && manifest.kind !== NAPPLET_NAMED_KIND) return null
   const dTag = manifest.tags.find(t => t[0] === "d")?.[1]
   if (!dTag) return null
-  return {
-    manifest,
-    dTag,
-    files: temp ? async () => temp.fetched.files : () => readNappFiles(nappId)
-  }
+  const installed = isNappletKind(manifest.kind)
+    ? async () => nappletFiles(await loadNappletFromManifest(manifest))
+    : () => readNappFiles(nappId)
+  return { manifest, dTag, files: temp ? async () => temp.fetched.files : installed }
 }
 
 // One check over every app the link carries: each manifest republished and

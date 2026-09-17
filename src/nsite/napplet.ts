@@ -72,6 +72,8 @@ export interface ResolvedNapplet {
   dTag: string
   pubkey: string
   html: string
+  // The verified bytes as fetched (html is their text): what a share re-uploads.
+  body: Blob
   title: string | null
   requires: string[]
   manifest: NostrEvent
@@ -163,6 +165,7 @@ export async function loadNappletFromManifest(
     dTag: manifest.tags.find(t => t[0] === "d")?.[1] || "",
     pubkey,
     html: await blob.text(),
+    body: blob,
     title: manifest.tags.find(t => t[0] === "title")?.[1] ?? null,
     requires: manifest.tags.filter(t => t[0] === "requires" && t[1]).map(t => t[1]),
     manifest
