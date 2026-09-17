@@ -1,7 +1,10 @@
 import { generateSecretKey, finalizeEvent } from "@nostr/tools/pure"
 import { trustedKeyDeal, hexShard, hexPubShard } from "@fiatjaf/promenade-trusted-dealer"
+import { argon2id } from "@noble/hashes/argon2.js"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
+import { pool } from "@nostr/gadgets/global"
+import { loadRelayList } from "@nostr/gadgets/lists"
 
 // Hardcoded Pomegranate deployment we point this launcher at.
 const CENTRAL_URL = "https://auth.njump.me"
@@ -12,6 +15,29 @@ const OPERATORS = [
   "https://po.jumble.social",
   "https://po.coracle.social"
 ]
+
+// Kind 16440 setup announcements map argon2id(email) -> central URL so
+// clients can find where a Google identity already registered (spec step 5,
+// mirrors hallway's google-login.service.ts).
+const KIND_SETUP_ANNOUNCEMENT = 16440
+
+// Big public relays for announcement lookup/publish — same set hallway uses
+// as universe.bigRelayUrls.
+const BIG_RELAYS = ["wss://relay.damus.io/", "wss://relay.primal.net/", "wss://nos.lol/"]
+
+// Thrown when the 16440 lookup shows the user already registered at a
+// different central. Extends Error so the launcher's `err.message` status
+// path renders it, while callers can also `instanceof`-check `.central`.
+export class WrongCentralError extends Error {
+  readonly central: string
+  constructor(actualCentral: string, ours: string) {
+    super(
+      `Account already set up at ${actualCentral} (this launcher uses ${ours}). Log in there instead.`
+    )
+    this.name = "WrongCentralError"
+    this.central = actualCentral
+  }
+}
 
 const utf8_encode = (s: string) => new TextEncoder().encode(s)
 
@@ -38,6 +64,97 @@ async function tryFetchAccount(central: string, token: string) {
   return await resp.json()
 }
 
+// Poll GET /account until the operators confirm in the background and
+// central marks the account operational (spec step 14). Without this the
+// first POST /profiles can hit a half-provisioned account.
+async function waitForAccount(
+  central: string,
+  token: string,
+  log: (msg: string) => void,
+  { tries = 15, delayMs = 2000 }: { tries?: number; delayMs?: number } = {}
+) {
+  for (let i = 0; i < tries; i++) {
+    const account = await tryFetchAccount(central, token)
+    if (account) return account
+    log("Waiting for operators to confirm…")
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+  throw new Error("Account creation failed (operators never confirmed)")
+}
+
+// Token is base64-encoded JSON with a `tags` array; the operators want
+// the email so the user can later log into the recovery popups.
+function findTokenEmail(token: string): string {
+  try {
+    const parsed = JSON.parse(atob(token)) as { tags?: string[][] }
+    const emailTag = Array.isArray(parsed?.tags)
+      ? parsed.tags.find(
+          (t: string[]) => Array.isArray(t) && t[0] === "email" && typeof t[1] === "string"
+        )
+      : null
+    return emailTag?.[1] ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function emailSetupHash(email: string): string {
+  return bytesToHex(argon2id(utf8_encode(email), "pomegranate", { t: 1, m: 65536, p: 4 }))
+}
+
+// Spec step 5: look up the kind-16440 announcement for this email to find
+// which central it registered at. Returns null when there is none (or the
+// lookup itself fails — relay outages must not brick login for users who
+// do belong to our central, GET /account below remains authoritative).
+async function searchForActualCentralURLAnnounced(email: string): Promise<string | null> {
+  if (!email) return null
+  try {
+    const results = await pool.querySync(
+      BIG_RELAYS,
+      { kinds: [KIND_SETUP_ANNOUNCEMENT], "#m": [emailSetupHash(email)], limit: 1 },
+      { maxWait: 5000 }
+    )
+    const centralTag = results[0]?.tags?.find(
+      (t: string[]) => Array.isArray(t) && t[0] === "central" && typeof t[1] === "string"
+    )
+    return centralTag?.[1] ?? null
+  } catch {
+    return null
+  }
+}
+
+// Announce this registration so other clients (and future logins here) can
+// discover the right central via step 5. Best-effort: publish to the big
+// relays plus the user's own write relays, like hallway does.
+async function publishSetupAnnouncement(
+  email: string,
+  central: string,
+  secretKey: Uint8Array,
+  log: (msg: string) => void
+) {
+  if (!email) return
+  log("Announcing setup…")
+  const event = finalizeEvent(
+    {
+      kind: KIND_SETUP_ANNOUNCEMENT,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ["m", emailSetupHash(email)],
+        ["central", central]
+      ],
+      content: ""
+    },
+    secretKey
+  )
+  let writeRelays: string[] = []
+  try {
+    writeRelays = (await loadRelayList(event.pubkey)).items
+      .filter(r => r.write)
+      .map(r => r.url)
+  } catch {}
+  await Promise.allSettled(pool.publish([...BIG_RELAYS, ...writeRelays], event))
+}
+
 // GET /profiles, locate the one named "default", and produce a bunker://
 // URI pointing at central's wss relay with that profile's handler_pubkey.
 // If no "default" profile exists yet (fresh registration, or an existing
@@ -45,14 +162,10 @@ async function tryFetchAccount(central: string, token: string) {
 // makes the helper idempotent so both the new-account and existing-account
 // branches can call it unconditionally. The bunker URI shape lives only
 // here so both code paths agree on it.
-//
-// `skipInitialList`: when we *just* registered the account we know the
-// profile list is empty, so skip the first GET and go straight to POST.
 async function fetchDefaultBunkerUri(
   central: string,
   token: string,
-  log: (msg: string) => void,
-  { skipInitialList = false }: { skipInitialList?: boolean } = {}
+  log: (msg: string) => void
 ): Promise<string> {
   const findDefault = (profiles: any[]) =>
     Array.isArray(profiles) ? profiles.find((p: any) => p?.name === "default") : null
@@ -65,7 +178,7 @@ async function fetchDefaultBunkerUri(
     return await resp.json()
   }
 
-  let profile = skipInitialList ? null : findDefault(await list())
+  let profile = findDefault(await list())
   if (!profile) {
     // Single status update before the (only) side-effecting call.
     log("Creating default signing profile…")
@@ -155,27 +268,22 @@ export async function googleLoginAndCreateBunker({
   // 2. Existing account? Skip the whole sharding dance and just hand back
   //    the bunker that was minted on a previous login.
   log("Checking account…")
+  const email = findTokenEmail(token)
   const existingAccount = await tryFetchAccount(central, token)
   if (existingAccount) {
     log("Account found, fetching default bunker…")
     return await fetchDefaultBunkerUri(central, token, log)
   }
 
-  // 3. No account yet — run the full first-time registration flow.
-  const session = crypto.randomUUID()
+  // No account here — but the user may have registered at a different
+  // central. Redirect instead of minting a duplicate key/account.
+  const actualCentral = await searchForActualCentralURLAnnounced(email)
+  if (actualCentral && actualCentral !== central) {
+    throw new WrongCentralError(actualCentral, central)
+  }
 
-  // Token is base64-encoded JSON with a `tags` array; the operators want
-  // the email so the user can later log into the recovery popups.
-  let email = ""
-  try {
-    const parsed = JSON.parse(atob(token)) as { tags?: string[][] }
-    const emailTag = Array.isArray(parsed?.tags)
-      ? parsed.tags.find(
-          (t: string[]) => Array.isArray(t) && t[0] === "email" && typeof t[1] === "string"
-        )
-      : null
-    email = emailTag?.[1] ?? ""
-  } catch {}
+  // 3. No account anywhere yet — run the full first-time registration flow.
+  const session = crypto.randomUUID()
 
   // Generate a fresh nsec and split it.
   log("Generating key…")
@@ -248,8 +356,12 @@ export async function googleLoginAndCreateBunker({
     await assertOk(opResp, `${op} /register`)
   }
 
-  // Default signing profile is created lazily inside fetchDefaultBunkerUri.
-  // We just registered, so the profile list is guaranteed empty — skip the
-  // initial GET and have the helper POST directly, then re-list.
-  return await fetchDefaultBunkerUri(central, token, log, { skipInitialList: true })
+  // Announce the new setup, then wait until the operators confirm in the
+  // background and central reports the account as operational before
+  // touching /profiles.
+  await publishSetupAnnouncement(email, central, secretKey, log)
+  log("Waiting for account to become operational…")
+  await waitForAccount(central, token, log)
+
+  return await fetchDefaultBunkerUri(central, token, log)
 }
