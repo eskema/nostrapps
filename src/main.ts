@@ -1933,23 +1933,30 @@ function renderSpacesBar() {
   spacesKeepBtn.hidden = !ephemeral
   spacesTrashBtn.title = ephemeral ? "Discard this shared space" : "Delete this space"
 
-  // Window taskbar — rebuilt each render. Click → focus; drag → reorder (which
-  // reorders the stage / mobile stack, see reorderWindows).
-  spacesWinListEl.innerHTML = ""
-  for (const w of listOpenWindows()) {
-    const c = chip({
-      label: w.petname,
-      title: `${w.petname} — drag to reorder`,
-      class: "spaces-window" + (w.minimized ? " minimized" : ""),
-      onClick: () => {
-        if (windowReorder.wasDragging()) return
-        focusInstance(w.instanceId)
-      }
-    })
-    c.dataset.instanceId = w.instanceId
-    windowReorder.attach(c)
-    spacesWinListEl.appendChild(c)
-  }
+  // Window taskbar: chips kept by instanceId, changed in place. Click → focus;
+  // drag → reorder (see reorderWindows). A touch in any window renders this bar,
+  // and iOS drops the click of a tap during which new buttons appear.
+  const chips = new Map(
+    [...spacesWinListEl.children].map(c => [
+      (c as HTMLElement).dataset.instanceId!,
+      c as HTMLButtonElement
+    ])
+  )
+  listOpenWindows().forEach((w, i) => {
+    let c = chips.get(w.instanceId)
+    if (c) chips.delete(w.instanceId)
+    else c = buildWindowChip(w.instanceId)
+    const label = c.querySelector(".btn-chip-label")!
+    if (label.textContent !== w.petname) {
+      label.textContent = w.petname
+      c.title = `${w.petname} — drag to reorder`
+    }
+    c.classList.toggle("minimized", w.minimized)
+    if (spacesWinListEl.children[i] !== c) {
+      spacesWinListEl.insertBefore(c, spacesWinListEl.children[i] ?? null)
+    }
+  })
+  for (const [, c] of chips) c.remove() // windows that closed
 
   // Space tabs — REUSE existing elements so .active toggles (and its padding
   // transition) animate on a live node instead of being born already-active.
@@ -2103,6 +2110,20 @@ function reorderWindows(instanceIds: string[]) {
     if (win) moveBefore(stage, win, spacer)
   }
   persistDomOrder()
+}
+
+function buildWindowChip(instanceId: string): HTMLButtonElement {
+  const c = chip({
+    label: "", // renderSpacesBar fills the label and title
+    class: "spaces-window", // the drag handler selects on it
+    onClick: () => {
+      if (windowReorder.wasDragging()) return
+      focusInstance(instanceId)
+    }
+  })
+  c.dataset.instanceId = instanceId
+  windowReorder.attach(c)
+  return c
 }
 
 function buildSpaceChip(s: { id: string; name: string }): HTMLButtonElement {
