@@ -2,9 +2,10 @@ export const id = "apps"
 export const title = "Apps"
 export const slash = "/apps"
 
-import { pool } from "@nostr/gadgets/global"
+import { pool, purgatory } from "@nostr/gadgets/global"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
 import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
+import { normalizeURL } from "@nostr/tools/utils"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 import "nostr-web-components"
 
@@ -960,10 +961,18 @@ export function mount(
     _relaysStatusEl.textContent = `${total} napp${total === 1 ? "" : "s"}${loading ? " — loading…" : ""}`
   }
 
-  function openRelaySub(url: string) {
+  // Reopened, backing off, when it ends without closeRelaySub: a failed or
+  // dropped connection, or a relay that sends auth-required before its AUTH
+  // challenge, which nostr-tools gives up on. Purgatory is cleared first: after
+  // one failed connect the pool would skip the relay for minutes, silently,
+  // through reloads and rechecks.
+  function openRelaySub(url: string, attempt = 0) {
     if (subs.has(url)) return
     relayEose.delete(url)
-    const s = pool.subscribeMany(
+    delete purgatory.state[normalizeURL(url)]
+    let closed = false
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const sub = pool.subscribeMany(
       [url],
       { kinds: DISCOVER_KINDS, limit: 400 },
       {
@@ -996,12 +1005,28 @@ export function mount(
           scheduleFlush()
           updateStatus()
         },
+        onclose() {
+          if (closed) return
+          retry = setTimeout(
+            () => {
+              subs.delete(url)
+              openRelaySub(url, attempt + 1)
+            },
+            Math.min(2 ** attempt, 300) * 1000
+          )
+        },
         onauth(event) {
           return currentSigner().signEvent(event) as any
         }
       }
     )
-    subs.set(url, s)
+    subs.set(url, {
+      close() {
+        closed = true
+        clearTimeout(retry)
+        sub.close()
+      }
+    })
   }
 
   function closeRelaySub(url: string) {
