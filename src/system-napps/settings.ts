@@ -14,6 +14,7 @@ import { startOutbox, stopOutbox } from "../outbox.js"
 import { loginControls } from "../login.js"
 import { nappNameEl } from "../napp-name.js"
 import { button, check, details, item, itemList } from "./ui.js"
+import { backupSection } from "./backup-section.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `
@@ -115,11 +116,14 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   relaysEl.className = "perm-list"
   relaysDetails.appendChild(relaysEl)
 
+  const backup = backupSection(ctx)
+
   // Sections live directly on the root panel (user · permissions · actions ·
-  // relays), inserted before the build/reset footer.
+  // relays · backups), inserted before the build/reset footer.
   panel.insertBefore(permDetails, buildRow)
   panel.insertBefore(actionsDetails, buildRow)
   panel.insertBefore(relaysDetails, buildRow)
+  panel.insertBefore(backup.el, buildRow)
 
   // A section-wide action sitting above its list, right aligned — the section's
   // "forget all", next to the per-row "forget" buttons below it.
@@ -287,6 +291,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       unsubPerms()
       unsubHandlers()
       unsubRelays()
+      backup.unmount()
     }
   }
 }

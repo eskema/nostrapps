@@ -3346,6 +3346,74 @@ body.popover-open .napp-body iframe {
   margin-right: auto;
 }
 
+/* A backup's name, in the list and the field (where it beats the title row's
+   font: inherit). */
+.backup-name,
+.share-title-row .ui-input.backup-name {
+  font-family: var(--font-mono);
+}
+
+/* The lead reads "new backup as", wider than the share screen's one word. */
+.settings-backup .share-title-lead {
+  max-width: none;
+}
+
+/* The new backup starts clear of the list above it. */
+.backup-new {
+  margin-top: 1rem;
+}
+
+/* View and save side by side. */
+.backup-actions {
+  grid-auto-flow: column;
+  gap: 0.5rem;
+}
+
+/* The backup list reads like the relays list (.ui-items): small rows with a
+   rule below, the name at the start and the date at the end. A row opens to
+   what the backup holds and what can be done with it. */
+.backup-versions[hidden] {
+  display: none;
+}
+.backup-version {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+.backup-version:last-child {
+  border-bottom: 0;
+}
+.backup-version > summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.backup-version > summary::-webkit-details-marker {
+  display: none;
+}
+.backup-version-date,
+.backup-version-what {
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+.backup-version-date {
+  white-space: nowrap;
+}
+.backup-version-body {
+  display: grid;
+  gap: 0.4rem;
+  padding-top: 0.35rem;
+}
+.backup-version-actions {
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: start;
+  gap: 0.4rem;
+}
+
 .settings-account {
   /* display: inline-flex;
   align-items: center;
