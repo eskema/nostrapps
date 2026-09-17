@@ -1347,13 +1347,16 @@ body.popover-open .napp-body iframe {
     font-size: 0.9rem;
   }
 
+  /* Over every other window while it's dragged. Both need !important: the
+     flow stack forces position: static (which ignores z-index), and focus
+     leaves an inline z-index on the window. */
   .napp-window.reordering {
     box-shadow:
       0 0 0 2px #3b82f6,
       0 14px 36px rgba(59, 130, 246, 0.45) !important;
     opacity: 0.96;
-    position: relative;
-    z-index: 100;
+    position: relative !important;
+    z-index: 100 !important;
   }
 
   .napp-window.reordering .napp-header {
