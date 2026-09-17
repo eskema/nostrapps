@@ -3329,6 +3329,22 @@ body.popover-open .napp-body iframe {
   gap: 0.5rem; */
 }
 
+/* Section headers stick to the top while their section scrolls under them.
+   Opaque, so the kit's dimmed look moves from opacity to the text color; the
+   shadow fills the window body's top padding above a stuck header. */
+.settings-panel > .ui-details > summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: 0 -0.6rem 0 var(--surface);
+  opacity: 1;
+  color: color-mix(in srgb, var(--text) 40%, var(--surface));
+}
+.settings-panel > .ui-details > summary:hover {
+  color: var(--text);
+}
+
 /* Build stamp — de-emphasized via opacity, not a smaller font. */
 /* Footer row: build stamp on the left, reset button pushed to the right. */
 .settings-build-row {
@@ -3353,46 +3369,62 @@ body.popover-open .napp-body iframe {
   font-family: var(--font-mono);
 }
 
-/* The lead reads "new backup as", wider than the share screen's one word. */
-.settings-backup .share-title-lead {
-  max-width: none;
-}
-
-/* The new backup starts clear of the list above it. */
+/* The name, with save at the end of its line. */
 .backup-new {
-  margin-top: 1rem;
+  grid-template-columns: auto 1fr auto;
+}
+.backup-new .btn {
+  margin-left: 0.5rem;
 }
 
-/* View and save side by side. */
-.backup-actions {
-  grid-auto-flow: column;
-  gap: 0.5rem;
-}
-
-/* The backup list reads like the relays list (.ui-items): small rows with a
-   rule below, the name at the start and the date at the end. A row opens to
-   what the backup holds and what can be done with it. */
+/* The backups and "create new backup" read like the relays list (.ui-items):
+   small rows with a rule below, as tall as one with a button in it, and a
+   disclosure's +/– at the end, semibold while open. A backup's row has its
+   name at the start and its date before the +/–. */
 .backup-versions[hidden] {
   display: none;
 }
-.backup-version {
+.backup-row {
   padding: 0.35rem 0;
   border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
 }
-.backup-version:last-child {
+.backup-row:last-child {
   border-bottom: 0;
 }
-.backup-version > summary {
+.backup-row > summary {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 0.6rem;
+  /* A .btn: its line, its padding, its border. */
+  min-height: calc(0.8rem * 1.2 + 2 * var(--btn-pad-y) + 2px);
   cursor: pointer;
   list-style: none;
   user-select: none;
 }
-.backup-version > summary::-webkit-details-marker {
+.backup-row > summary::-webkit-details-marker {
   display: none;
+}
+.backup-row > summary::after {
+  grid-column: -2;
+  content: "+";
+  opacity: 0.4;
+}
+.backup-row[open] > summary {
+  font-weight: 600;
+}
+.backup-row[open] > summary::after {
+  content: "–";
+}
+.backup-row-title {
+  font-size: 0.8rem;
+}
+/* "create new backup" starts clear of the list above it. */
+.backup-create {
+  margin-top: 1rem;
+}
+.backup-create-body {
+  padding-top: 0.35rem;
 }
 .backup-version-date,
 .backup-version-what {
@@ -3400,6 +3432,7 @@ body.popover-open .napp-body iframe {
   opacity: 0.6;
 }
 .backup-version-date {
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 .backup-version-body {

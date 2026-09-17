@@ -1,10 +1,11 @@
 // Settings' backups section, in the share screen's parts. First the backups
 // made here, a line each (name and date) that opens to what it holds: view it
 // (a view:<kind> action, for whichever napp shows those) or restore it. Then
-// "new backup as <name>" and what can go in (apps, spaces, settings, relays),
-// each a ticked section with its items below. Apps and spaces are picked one by
-// one; settings and relays go whole, their rows only say what that means.
-// Nothing is signed or sent yet: save only keeps a version locally, for now.
+// "create new backup", a line that opens to the name with save beside it and
+// what can go in (apps, spaces, settings, relays), each a ticked section with
+// its items below. Apps and spaces are picked one by one; settings and relays
+// go whole, their rows only say what that means. Nothing is signed or sent
+// yet: save only keeps a version locally, for now.
 import type { EventTemplate } from "@nostr/tools/pure"
 import type { SystemCtx } from "../types.js"
 import * as persist from "../persistence.js"
@@ -28,6 +29,9 @@ type Row = { row: HTMLElement; tick: HTMLInputElement; name: HTMLElement; note: 
 type Part = { el: HTMLElement; tick: HTMLInputElement; list: HTMLElement; rows: Map<string, Row> }
 type Version = { el: HTMLDetailsElement }
 
+// Ties the name's label to its field.
+let nameSerial = 0
+
 export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount(): void } {
   const el = details({ summary: "backups", class: "settings-backup" })
   const wrap = document.createElement("div")
@@ -42,15 +46,37 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
   wrap.append(versions, empty)
   const rows = new Map<string, Version>()
 
-  // "new backup as <name>": the name is the slot a backup replaces.
-  const title = document.createElement("label")
+  const create = document.createElement("details")
+  create.className = "backup-row backup-create"
+  const createLine = document.createElement("summary")
+  const createTitle = document.createElement("span")
+  createTitle.className = "backup-row-title"
+  createTitle.textContent = "create new backup"
+  createLine.appendChild(createTitle)
+  const createBody = document.createElement("div")
+  createBody.className = "napp-perms backup-create-body"
+  create.append(createLine, createBody)
+  wrap.appendChild(create)
+
+  // "name <name> [save]": the name is the slot a backup replaces.
+  const title = document.createElement("div")
   title.className = "share-title-row backup-new"
-  const lead = document.createElement("span")
-  lead.className = "share-title-lead"
-  lead.textContent = "new backup as"
   const name = input({ placeholder: "default", spellcheck: false, class: "backup-name" })
-  title.append(lead, name)
-  wrap.appendChild(title)
+  name.id = `backup-name-${nameSerial++}`
+  const lead = document.createElement("label")
+  lead.className = "share-title-lead"
+  lead.htmlFor = name.id
+  lead.textContent = "name"
+  const save = button({
+    label: "save",
+    variant: "primary",
+    onClick: () => {
+      saveBackup(composed())
+      syncVersions()
+    }
+  })
+  title.append(lead, name, save)
+  createBody.appendChild(title)
 
   const apps = part("apps", true)
   const spaces = part("spaces", true)
@@ -60,22 +86,6 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
   const theme = fixedRow(settings, "theme")
   const auto = fixedRow(relays, "always authenticate")
   const decisions = fixedRow(relays, "per-relay decisions")
-
-  // Right under the name, above what goes in.
-  const actions = document.createElement("div")
-  actions.className = "perm-list-actions backup-actions"
-  actions.append(
-    button({ label: "view", variant: "outline", onClick: () => view(composed()) }),
-    button({
-      label: "save",
-      variant: "primary",
-      onClick: () => {
-        saveBackup(composed())
-        syncVersions()
-      }
-    })
-  )
-  title.after(actions)
 
   function composed() {
     syncSpaces()
@@ -91,17 +101,14 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
   // A line (name, date) that opens to what the backup holds and what to do with it.
   function version(v: BackupVersion): Version {
     const el = document.createElement("details")
-    el.className = "backup-version"
+    el.className = "backup-row backup-version"
     const line = document.createElement("summary")
     const label = document.createElement("span")
     label.className = "ui-item-label backup-name"
     label.textContent = v.name
     const when = document.createElement("span")
     when.className = "backup-version-date"
-    when.textContent = new Date(v.created_at * 1000).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short"
-    })
+    when.textContent = stamp(v.created_at)
     line.append(label, when)
     const body = document.createElement("div")
     body.className = "backup-version-body"
@@ -169,7 +176,7 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
     list.classList.toggle("share-off", !on)
     tick.addEventListener("change", () => list.classList.toggle("share-off", !tick.checked))
     el.append(head, list)
-    wrap.appendChild(el)
+    createBody.appendChild(el)
     return { el, tick, list, rows: new Map() }
   }
 
@@ -287,4 +294,11 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
       unsubRelays()
     }
   }
+}
+
+// "2026-09-17 09:13", local time.
+function stamp(seconds: number): string {
+  const d = new Date(seconds * 1000)
+  const two = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`
 }
