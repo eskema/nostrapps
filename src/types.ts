@@ -252,11 +252,14 @@ export interface SystemNappDef {
   title: string
   slash?: string
   singleton?: boolean
+  // Actions it takes, like an app's ("view" is every view:<kind>), as a
+  // fallback: only when no app handles one. Singletons only.
+  actions?: string[]
   mount(
     container: HTMLElement,
     ctx: SystemCtx,
     opts?: { params?: any; onStateChange?(state: NappWindowState): void }
-  ): { unmount(): void } | void
+  ): { unmount(): void; action?(name: string, payload: unknown): unknown } | void
 }
 
 export interface SystemCtx {

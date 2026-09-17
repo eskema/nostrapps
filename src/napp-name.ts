@@ -20,6 +20,8 @@ export interface NappName {
 }
 
 export function nappName(nappId: string): NappName {
+  const system = /^__(.+)__$/.exec(nappId)
+  if (system) return { title: system[1], author: null, authorLabel: null, known: true }
   const app = getInstalledApp(nappId)
   if (!app) return { title: nappId, author: null, authorLabel: null, known: false }
   return {

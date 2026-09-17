@@ -80,12 +80,22 @@ export function findHandlersForAction(
       .includes(wantAuxiliary ? "auxiliary" : "normal")
   )
 
+  // System napps (logs) are the fallback: they only take what no app does.
+  if (apps.some(id => !systemIdOf(id))) apps = apps.filter(id => !systemIdOf(id))
+
   // An auxiliary dispatch always opens a fresh ephemeral window that closes
   // itself on response — never route it into an already-open window.
   const openCandidates = options?.auxiliary
     ? []
     : persist.readOpen().filter(w => apps.includes(w.nappId))
-  return [apps, openCandidates]
+  // A system napp is one window: when it's open, the action goes there.
+  const open = new Set(openCandidates.map(w => w.nappId))
+  return [apps.filter(id => !(systemIdOf(id) && open.has(id))), openCandidates]
+}
+
+// The system napp behind a window's nappId (`__<id>__`), or null.
+export function systemIdOf(nappId: string): string | null {
+  return /^__(.+)__$/.exec(nappId)?.[1] ?? null
 }
 
 // Whether any installed app handles this action (the "view" wildcard included).

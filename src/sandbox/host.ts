@@ -1730,6 +1730,10 @@ export async function callIframe(
     }
   }
 
+  // A system napp has no iframe: it takes the action right here.
+  const system = systemActions.get(instanceId)
+  if (system) return system(actionName, actionPayload)
+
   await waitReady(instanceId)
   const win = openWindows.get(instanceId)
   if (!win || !win.iframe) {
@@ -1855,6 +1859,8 @@ export function reloadIframesByNappId(nappId: string): number {
 }
 
 const systemSingletons = new Map<string, string>() // sysId -> instanceId
+// instanceId -> the action handler of a system napp that takes actions
+const systemActions = new Map<string, (name: string, payload: unknown) => unknown>()
 
 // The space currently holding the live (singleton) system napp, or null if it
 // isn't mounted anywhere. Used to navigate to a system napp's home space.
@@ -1912,6 +1918,7 @@ export function launchSystem(
     onStateChange: state => opts.onStateChange?.(state),
     onClose: () => {
       handle && handle.unmount?.()
+      systemActions.delete(instanceId)
       openWindows.delete(instanceId)
       clearInstanceRuntimeState(instanceId)
       if (singleton) systemSingletons.delete(sysId)
@@ -1927,6 +1934,10 @@ export function launchSystem(
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
   if (singleton) systemSingletons.set(sysId, instanceId)
+  if (handle && handle.action) {
+    const action = handle.action
+    systemActions.set(instanceId, (name, payload) => action(name, payload))
+  }
   ensureStageObserver(stageEl)
   clampToStage(win.root, stageEl)
   captureWindowGeom(win.root)

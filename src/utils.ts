@@ -55,3 +55,43 @@ export function normalizeServer(s: string): string {
 // the serial tells two windows of one app apart; the others are an app's name
 // cut to length, which is what put a pubkey slice on the relays title.
 export const isInstanceSerial = (id: string) => /^\d+$/.test(id)
+
+// An action payload for people to read: strings as they are, the rest laid
+// out like an event reads best: nested and indented, with arrays of plain
+// values (tags) on one line each, and JSON held in a string (an event's
+// content) shown as what it holds, not as escaped text.
+export function formatPayload(payload: unknown): string {
+  if (typeof payload === "string") return payload
+  let value: unknown
+  try {
+    const json = JSON.stringify(payload, (_, v) => {
+      if (typeof v !== "string" || !/^\s*[[{]/.test(v)) return v
+      try {
+        return JSON.parse(v)
+      } catch {
+        return v
+      }
+    })
+    if (json === undefined) return String(payload)
+    value = JSON.parse(json)
+  } catch {
+    return String(payload)
+  }
+  return layout(value, "")
+}
+
+function layout(v: unknown, indent: string): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v)
+  const inner = indent + "  "
+  if (Array.isArray(v)) {
+    if (!v.length) return "[]"
+    if (v.every(x => x === null || typeof x !== "object")) {
+      return `[${v.map(x => JSON.stringify(x)).join(", ")}]`
+    }
+    return `[\n${v.map(x => inner + layout(x, inner)).join(",\n")}\n${indent}]`
+  }
+  const entries = Object.entries(v)
+  if (!entries.length) return "{}"
+  const lines = entries.map(([k, x]) => `${inner}${JSON.stringify(k)}: ${layout(x, inner)}`)
+  return `{\n${lines.join(",\n")}\n${indent}}`
+}

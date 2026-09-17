@@ -1,4 +1,6 @@
 import type { InstalledApp, NappWindowState } from "../types.js"
+import { nappNameText } from "../napp-name.js"
+import { formatPayload } from "../utils.js"
 import { button } from "./ui.js"
 
 export interface HandlerBodyOpts {
@@ -30,7 +32,7 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
   root.appendChild(request)
 
   const appLabel = (app: InstalledApp | undefined, nappId: string) =>
-    app?.petname || app?.title || nappId
+    app?.petname || app?.title || nappNameText(nappId)
 
   // ── already-open instances first (route to an existing window) ──
   if (o.openCandidates.length) {
@@ -97,14 +99,4 @@ function handlerItem(text: string, num: number | null, onClick: () => void): HTM
   }
   item.appendChild(btn)
   return item
-}
-
-function formatPayload(payload: unknown) {
-  if (payload === undefined) return "undefined"
-  if (typeof payload === "string") return payload
-  try {
-    return JSON.stringify(payload, null, 2)
-  } catch {
-    return String(payload)
-  }
 }

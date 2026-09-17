@@ -1,6 +1,9 @@
 export const id = "logs"
 export const title = "Logs"
 export const slash = "/logs"
+// Any view:<kind> no app handles. Routing an action already logs it with its
+// payload, so taking it is all there is to do.
+export const actions = ["view"]
 
 import type { SystemCtx } from "../types.js"
 
@@ -35,6 +38,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
   return {
     unmount() {
       unsub()
-    }
+    },
+    action() {}
   }
 }

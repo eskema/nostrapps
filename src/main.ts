@@ -57,7 +57,7 @@ import {
   type ShareLink
 } from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
-import { isInstanceSerial } from "./utils.js"
+import { formatPayload, isInstanceSerial } from "./utils.js"
 import { fetchNsite, manifestRelays, blobServers, manifestPaths } from "./nsite/fetch.js"
 import { ensureReplicatedAll, type ReplicationTarget } from "./nsite/heal.js"
 import { openShareDialog, type ShareCheck, type ShareWindow } from "./share-dialog.js"
@@ -566,14 +566,22 @@ async function runNappAction(
     // no instance specified, will open a new window, often prompting the user first
     const [candidates, openCandidates] = handlers.findHandlersForAction(name, { auxiliary })
     try {
+      // One way to go: the one app, or the one open window (an open system
+      // napp, which isn't offered again as a new one).
       const [nappId, existingInstanceId] =
         candidates.length + openCandidates.length === 1
-          ? [candidates[0], undefined]
+          ? candidates.length
+            ? [candidates[0], undefined]
+            : [openCandidates[0].nappId, openCandidates[0].instanceId]
           : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
 
       // the user may have picked an existing window.
       // if not, open a new window here and get its id
-      if (existingInstanceId) {
+      const sysId = handlers.systemIdOf(nappId)
+      if (sysId && systemRegistry[sysId]) {
+        // Opened, or surfaced where it is: a system napp is a single window.
+        instanceId = launchSystemNapp(sysId).getState().instanceId
+      } else if (existingInstanceId) {
         instanceId = existingInstanceId
       } else if (auxiliary) {
         // Ephemeral floating window at the cursor, sized from the app's
@@ -595,7 +603,7 @@ async function runNappAction(
         instanceId = win.getState().instanceId
       }
       setStatus(
-        `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}, ${JSON.stringify(payload)}`
+        `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}\n${formatPayload(payload)}`
       )
     } catch (err) {
       console.warn(err)
@@ -605,9 +613,11 @@ async function runNappAction(
   }
 
   try {
-    // actually call the instance (auxiliary windows are ephemeral — nothing
-    // to replay on restore, so don't record the action)
-    if (!auxWin) persist.appendLoadedAction(instanceId, name, payload)
+    // actually call the instance (auxiliary windows are ephemeral and system
+    // napps restore without a replay — nothing to record for either)
+    if (!auxWin && !instanceId.startsWith("system:")) {
+      persist.appendLoadedAction(instanceId, name, payload)
+    }
     const result = await callIframe(instanceId, name, payload)
 
     if (result) {
@@ -2187,6 +2197,10 @@ async function init() {
   // background. First sign request will wait if it's still connecting.
   reconnectIfNeeded().catch(err => setStatus(`Bunker reconnect failed: ${err.message}`))
   await handlers.init()
+  // System napps that take actions, under their windows' ids.
+  for (const def of Object.values(systemRegistry)) {
+    if (def.actions?.length) handlers.addApp(`__${def.id}__`, def.actions)
+  }
   // The current space's windows are about to be mounted — make it the active
   // (visible) space so they're tagged to it and shown.
   setActiveSpace(currentSpaceId)
