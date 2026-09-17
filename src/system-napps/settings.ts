@@ -148,11 +148,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     text.className = "napp-perms-text"
     const label = document.createElement("div")
     label.className = "napp-perms-label"
-    label.textContent = "authenticate with relays automatically"
-    const desc = document.createElement("div")
-    desc.className = "napp-perms-desc"
-    desc.textContent = "answers every relay auth challenge without asking"
-    text.append(label, desc)
+    label.textContent = "always authenticate"
+    text.append(label)
     autoRow.append(
       check({
         checked: ctx.relayAuth.getAuto(),

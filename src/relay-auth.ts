@@ -2,7 +2,7 @@
 //
 // Two layers, both persisted in localStorage (and thus wiped by factory reset
 // along with every other `nostrapps:*` key):
-//   • the global "authenticate with relays automatically" switch. When on,
+//   • the global "always authenticate" switch. When on,
 //     every challenge is answered without asking.
 //   • per-relay decisions ("allow" / "deny") remembered from the confirmation
 //     toasts shown when the switch is off. The next challenge from a relay with
