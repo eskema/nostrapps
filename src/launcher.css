@@ -2445,15 +2445,18 @@ body.popover-open .napp-body iframe {
   bottom: 0.4rem;
 }
 
+/* The buttons by the icon, the app's actions under its description, where the
+   detail has them. */
 .apps-card {
   position: relative; /* the ring's frame */
   display: grid;
   grid-template-areas:
-    "icon handlers actions"
-    "title title title"
-    "about about about"
-    "warn warn warn"
-    "author author author";
+    "icon actions"
+    "title title"
+    "about about"
+    "handlers handlers"
+    "warn warn"
+    "author author";
   grid-template-columns: auto 1fr;
   grid-gap: 0 1rem;
   padding: 1rem 0.4rem;
@@ -2661,8 +2664,9 @@ body.popover-open .napp-body iframe {
   /* border: 1px solid color-mix(in srgb, currentColor 18%, transparent); */
   opacity: 0.6;
   white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-all;
+  /* Whole names: a break inside one only when it can't fit a line at all
+     (break-all/anywhere let the column shrink to a letter). */
+  overflow-wrap: break-word;
 }
 
 /* A required NAP domain the launcher can't provide — red and struck through
@@ -2684,8 +2688,11 @@ body.popover-open .napp-body iframe {
   text-align: left;
 }
 
+/* Wrapping, still to the right, when a narrow card can't fit them on a line. */
 .apps-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.4rem;
   grid-area: actions;
   justify-self: end;
