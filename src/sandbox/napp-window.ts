@@ -6,7 +6,8 @@ import {
   capturePackSnapshot,
   captureWindowGeom,
   invalidatePackLayouts,
-  syncStageBottomSpacer
+  syncStageBottomSpacer,
+  TILE_GAP
 } from "./host.js"
 import { moveBefore } from "../dom.js"
 import { getWindowSize, rememberWindowSize } from "../persistence.js"
@@ -1084,6 +1085,10 @@ function setupResize(
   let startTop = 0
   let startW = 0
   let startH = 0
+  // How far the left, top and right edges may go, taken at pointerdown.
+  let minLeft = 0
+  let minTop = 0
+  let maxRight = Infinity
   // Pack-mode placeholder + reflow tracking (mirrors setupDrag).
   let packPlaceholder: HTMLElement | null = null
   let lastPackKey = ""
@@ -1120,6 +1125,16 @@ function setupResize(
     if (stage && stage.classList.contains("pack-mode")) {
       packSnapshot = capturePackSnapshot(stage)
     }
+    // Edges stop on the line grid mode lays its outer windows on, short of the
+    // stage's clipping edge, so the shadow stays. A window already past it
+    // isn't pulled in, it just can't grow further out.
+    if (stage) {
+      const { width, padL, padT } = getStageBounds(stage)
+      const inset = TILE_GAP / 2
+      minLeft = Math.min(startLeft, padL + inset)
+      minTop = Math.min(startTop, padT + inset)
+      maxRight = Math.max(startLeft + startW, padL + width - inset)
+    }
     // Mark a resize as in flight so main.js's maybeRepack short-circuits
     // — same reason as drag. The resize handler runs its own focused
     // live-pack; a generic bestFitPack in parallel would re-place the
@@ -1141,29 +1156,21 @@ function setupResize(
     let newW = startW
     let newH = startH
 
+    // The opposite edge stays put: left/top move and the size takes up the rest.
     if (hasW) {
-      const proposedW = startW - dx
-      if (proposedW < MIN_W) {
-        newW = MIN_W
-        newLeft = startLeft + (startW - MIN_W)
-      } else {
-        newW = proposedW
-        newLeft = Math.max(0, startLeft + dx)
-      }
+      const right = startLeft + startW
+      newLeft = Math.max(minLeft, Math.min(right - MIN_W, startLeft + dx))
+      newW = right - newLeft
     } else if (hasE) {
-      newW = Math.max(MIN_W, startW + dx)
+      newW = Math.max(MIN_W, Math.min(maxRight - startLeft, startW + dx))
     }
 
     if (!minimized) {
+      // No floor on the bottom: the stage scrolls down there.
       if (hasN) {
-        const proposedH = startH - dy
-        if (proposedH < MIN_H) {
-          newH = MIN_H
-          newTop = startTop + (startH - MIN_H)
-        } else {
-          newH = proposedH
-          newTop = Math.max(0, startTop + dy)
-        }
+        const bottom = startTop + startH
+        newTop = Math.max(minTop, Math.min(bottom - MIN_H, startTop + dy))
+        newH = bottom - newTop
       } else if (hasS) {
         newH = Math.max(MIN_H, startH + dy)
       }

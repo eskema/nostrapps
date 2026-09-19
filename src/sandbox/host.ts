@@ -2246,7 +2246,7 @@ export function mountWithLoading(
 // region of 1+ whole cells — some 1×1, some 2×1, some 2×2, etc. All cells
 // are covered (no empty space). For N > 12 we grow the grid in rows so the
 // column width stays consistent.
-const TILE_GAP = 8
+export const TILE_GAP = 8
 
 // The pack/tile grid steps down with the stage width so cells never get too
 // narrow. We skip ODD column counts on purpose: a 2-of-4-column window (half
