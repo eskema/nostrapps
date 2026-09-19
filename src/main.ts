@@ -820,7 +820,7 @@ const systemCtx: SystemCtx = {
   // Use a thunk so the reference resolves to the function declared later.
   isInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
   wasInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
-  install: (raw: string) => install(raw),
+  install: (raw: string, opts?: { launch?: boolean }) => install(raw, opts),
   uninstall: (nappId: string) => uninstall(nappId),
   editPermissions: (nappId: string) => editPermissions(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
@@ -2427,15 +2427,17 @@ function policyOptsFor({ files, manifest }: NsiteResult, title: string) {
 // it) skips the screen and opens where the user is. Null when cancelled.
 async function resolvePlacementForInstall(
   nappId: string,
-  opts: PolicyPromptOpts
+  opts: PolicyPromptOpts,
+  launch: boolean
 ): Promise<{ openIn: string | null } | null> {
-  if (persist.hasPolicy(nappId)) return { openIn: currentSpaceId }
+  if (persist.hasPolicy(nappId)) return { openIn: launch ? currentSpaceId : null }
   const granted = await promptNappPolicy({
     ...opts,
-    placement: { spaces: persist.listSpaces(), current: currentSpaceId }
+    ...(launch ? { placement: { spaces: persist.listSpaces(), current: currentSpaceId } } : {})
   })
   if (!granted) return null
   persist.setPolicy(nappId, granted)
+  if (!launch) return { openIn: null }
   return { openIn: granted.spaceId === undefined ? currentSpaceId : granted.spaceId }
 }
 
@@ -2458,7 +2460,7 @@ async function openInstalled(nappId: string, petname: string, spaceId: string) {
   win.focus()
 }
 
-async function install(raw: string): Promise<string> {
+async function install(raw: string, opts: { launch?: boolean } = {}): Promise<string> {
   // A temp app, not kept yet (the Apps card's keep): kept. Its card is up
   // from the moment its window is, before there is anything to keep.
   if (sharedTemps.has(raw)) return keepTempApp(raw)
@@ -2481,7 +2483,7 @@ async function install(raw: string): Promise<string> {
 
   // NIP-5D napplet (its own kind) takes the srcdoc loader, not the nsite path.
   if (resolved.kind && isNappletKind(resolved.kind)) {
-    return installNapplet({ ...resolved, kind: resolved.kind })
+    return installNapplet({ ...resolved, kind: resolved.kind }, opts)
   }
 
   const fetched = await fetchNsite(resolved, setStatus)
@@ -2491,7 +2493,7 @@ async function install(raw: string): Promise<string> {
     fileCount: fetched.files.length,
     hasManifest: !!fetched.manifest
   })
-  return installFetched(fetched, raw)
+  return installFetched(fetched, raw, opts)
 }
 
 // The install proper, from fetched files: the first-run permission screen (a
@@ -2500,7 +2502,7 @@ async function install(raw: string): Promise<string> {
 async function installFetched(
   fetched: NsiteResult,
   raw: string,
-  installedAt?: number
+  { launch = true, installedAt }: { launch?: boolean; installedAt?: number } = {}
 ): Promise<string> {
   const { nappId, files, title, manifest } = fetched
   const dTag = manifest?.tags.find((t: any) => t[0] === "d")?.[1]
@@ -2515,7 +2517,7 @@ async function installFetched(
   // ships with the install so the napp's first load is already under the right
   // CSP, and where it opens, if at all. Cancelling aborts. First run only — a
   // reinstall keeps the prior grant and opens where the user is.
-  const placed = await resolvePlacementForInstall(nappId, policyOptsFor(fetched, label))
+  const placed = await resolvePlacementForInstall(nappId, policyOptsFor(fetched, label), launch)
   if (!placed) throw new Error("Install cancelled")
 
   console.debug("[sandbox] install", { nappId, label, origin })
@@ -2534,25 +2536,33 @@ async function installFetched(
 // nsite install above. Resolve + verify the manifest, gate on the permission
 // screen (declaredDomains = its `requires`), store it as an installed app so
 // nappletDomainsFor sees the grant, then launch it into an opaque srcdoc window.
-async function installNapplet(target: {
-  pubkey: string
-  dTag: string
-  relayHints: string[]
-  kind: number
-}): Promise<string> {
+async function installNapplet(
+  target: {
+    pubkey: string
+    dTag: string
+    relayHints: string[]
+    kind: number
+  },
+  { launch = true }: { launch?: boolean } = {}
+): Promise<string> {
   setStatus("Resolving napplet…")
   const resolved = await resolveNapplet(target, setStatus)
   const nappId = persist.computeNappId(resolved.manifest)
 
-  const placed = await resolvePlacementForInstall(nappId, {
-    title: resolved.title || resolved.dTag,
-    type: "napplet",
-    author: resolved.manifest.pubkey,
-    declaredDomains: resolved.requires
-  })
+  const placed = await resolvePlacementForInstall(
+    nappId,
+    {
+      title: resolved.title || resolved.dTag,
+      type: "napplet",
+      author: resolved.manifest.pubkey,
+      declaredDomains: resolved.requires
+    },
+    launch
+  )
   if (!placed) throw new Error("Install cancelled")
   persist.storeInstalledEvent(resolved.manifest, resolved.title || resolved.dTag)
   handlers.addApp(nappId, [])
+  // Not opened: a restore (its spaces say what's open), or install only.
   if (!placed.openIn) {
     setStatus(`Installed napplet ${resolved.title || resolved.dTag}`)
     return nappId

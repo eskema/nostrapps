@@ -306,7 +306,8 @@ export interface SystemCtx {
   launchNapp(nappId: string, petname?: string): Promise<void>
   isInstalled(nappId: string): boolean
   wasInstalled(nappId: string): boolean
-  install(nappId: string): Promise<string>
+  // `launch: false` installs a napplet without opening its window.
+  install(raw: string, opts?: { launch?: boolean }): Promise<string>
   uninstall(nappId: string): Promise<void>
   editPermissions(nappId: string): Promise<void>
   update(target: {

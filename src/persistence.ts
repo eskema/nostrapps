@@ -479,6 +479,12 @@ export function getSpaceSaved(id: string): { open: NappWindowState[]; packMode: 
   return { open: sp?.saved ?? [], packMode: sp?.savedPackMode ?? false }
 }
 
+// Swap the whole spaces document for another: a restore, which reloads the
+// page right after, so nothing live needs telling.
+export function replaceSpaces(state: SpacesState) {
+  writeJson(SPACES_KEY, state)
+}
+
 export function renameSpace(id: string, name: string) {
   const state = ensureSpaces()
   const sp = findSpace(state, id)
@@ -881,8 +887,41 @@ export function getNappletConfig(nappId: string): {
 }
 export function setNappletConfigSchema(nappId: string, schema: any, version?: number) {
   const all = readNappletConfigs()
-  all[nappId] = { ...all[nappId], schema, ...(version === undefined ? {} : { version }) }
+  const values = all[nappId]?.values
+  all[nappId] = {
+    ...all[nappId],
+    schema,
+    ...(version === undefined ? {} : { version }),
+    // Restored values arrive as text; the schema says what they are.
+    ...(values ? { values: coerceConfigValues(schema, values) } : {})
+  }
   writeJson(NAPPLET_CONFIG_KEY, all)
+}
+
+// Config values as the schema types them: "true" for a boolean, "12" for a
+// number, a string matching one of an enum's values. Anything else as it is.
+export function coerceConfigValues(
+  schema: any,
+  values: Record<string, unknown>
+): Record<string, unknown> {
+  const props = schema?.properties ?? {}
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(values)) {
+    const p = props[key]
+    out[key] = typeof value === "string" && p && typeof p === "object" ? typed(p, value) : value
+  }
+  return out
+}
+
+function typed(p: any, value: string): unknown {
+  if (Array.isArray(p.enum)) return p.enum.find((e: unknown) => String(e) === value) ?? value
+  const type = Array.isArray(p.type) ? p.type[0] : p.type
+  if (type === "boolean") return value === "true" ? true : value === "false" ? false : value
+  if (type === "number" || type === "integer") {
+    const n = Number(value)
+    return value.trim() !== "" && Number.isFinite(n) ? n : value
+  }
+  return value
 }
 export function setNappletConfigValues(nappId: string, values: Record<string, unknown>) {
   const all = readNappletConfigs()

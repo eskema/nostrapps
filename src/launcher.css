@@ -3551,65 +3551,32 @@ body.popover-open .napp-body iframe {
   font-family: var(--font-mono);
 }
 
-/* The name, with save at the end of its line. */
-.backup-new {
-  grid-template-columns: auto 1fr auto;
+/* The name, with save at the end of its line, in plain weight: a field, not
+   the share screen's title. */
+.share-title-row.backup-new {
+  grid-template-columns: 1fr auto;
+  font-weight: 400;
+  border-bottom: 0;
 }
 .backup-new .btn {
   margin-left: 0.5rem;
 }
 
-/* The backups and "create new backup" read like the relays list (.ui-items):
-   small rows with a rule below, as tall as one with a button in it, and a
-   disclosure's +/– at the end, semibold while open. A backup's row has its
-   name at the start and its date before the +/–. */
-.backup-versions[hidden] {
-  display: none;
-}
-.backup-row {
-  padding: 0.35rem 0;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
-}
-.backup-row:last-child {
-  border-bottom: 0;
-}
-.backup-row > summary {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 0.6rem;
-  /* A .btn: its line, its padding, its border. */
-  min-height: calc(0.8rem * 1.2 + 2 * var(--btn-pad-y) + 2px);
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-.backup-row > summary::-webkit-details-marker {
-  display: none;
-}
-.backup-row > summary::after {
-  grid-column: -2;
-  content: "+";
-  opacity: 0.4;
-}
-.backup-row[open] > summary {
-  font-weight: 600;
-}
-.backup-row[open] > summary::after {
-  content: "–";
-}
-.backup-row-title {
-  font-size: 0.8rem;
-}
-/* "create new backup" starts clear of the list above it. */
-.backup-create {
-  margin-top: 1rem;
-}
-.backup-create-body {
+/* The backups list is a rowList(): "new backup" first, then a row per backup,
+   its name at the start and its date before the +/–. */
+/* What goes in, or went in: headings no heavier than the rows under them,
+   and the last section ends without a rule. */
+.backup-body {
   padding-top: 0.35rem;
 }
+.backup-body .napp-perms-name {
+  font-weight: 400;
+}
+.backup-body > .share-app:last-child {
+  border-bottom: 0;
+}
 .backup-version-date,
-.backup-version-what {
+.backup-version-status {
   font-size: 0.8rem;
   opacity: 0.6;
 }
@@ -3617,16 +3584,33 @@ body.popover-open .napp-body iframe {
   font-family: var(--font-mono);
   white-space: nowrap;
 }
-.backup-version-body {
+/* What a stored backup holds: the form's parts without their tick column, and
+   nothing to click. */
+.backup-saved .share-head {
+  grid-template-columns: 1fr;
+  cursor: default;
+}
+.backup-saved .share-action-head {
+  grid-template-columns: auto auto;
+  cursor: default;
+}
+
+/* A backup's first line: where it stands, then what to do with it. */
+.backup-version-head {
   display: grid;
-  gap: 0.4rem;
-  padding-top: 0.35rem;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
 }
 .backup-version-actions {
   display: grid;
   grid-auto-flow: column;
   justify-content: start;
   gap: 0.4rem;
+}
+/* .btn sets display, which would beat the UA [hidden] rule. */
+.backup-version-actions .btn[hidden] {
+  display: none;
 }
 
 .settings-account {
