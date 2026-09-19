@@ -1393,8 +1393,9 @@ function renderCard(
   }
 
   const buttons: HTMLElement[] = []
+  // An update says installed already: it stands alone.
   if (updateAvailable) {
-    buttons.push(makeActionBtn("update", "warning"), makeDisabledBtn("installed"))
+    buttons.push(makeActionBtn("update", "warning"))
   } else if (installed) {
     buttons.push(makeDisabledBtn("installed"))
   } else {
