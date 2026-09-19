@@ -211,7 +211,9 @@ export function createNappWindow({
   }
 
   if (status?.minimized) root.classList.add("minimized")
-  if (status?.userSized || remembered) root.classList.add("user-sized")
+  // Only a window with an explicit height sheds the cap. A content-sized one
+  // (a system napp) would otherwise grow with its content past the stage.
+  if ((status?.userSized || remembered) && root.style.height) root.classList.add("user-sized")
   if (status?.pinned) {
     root.classList.add("pinned")
     btnPin.textContent = "●"
@@ -477,15 +479,16 @@ function nextPosition(): Position {
 }
 
 // The user sized this window by hand — a resize drag, or a snap to an edge.
-// Drops the 420px starter cap so the window can grow freely, and remembers the
-// size for the napp so its next window opens here instead of at the default.
-// Reads the inline styles, which hold what the gesture just committed (a
-// minimized window only changed width and keeps its pre-collapse height).
+// Drops the 420px starter cap, and remembers the size for the napp so its next
+// window opens here instead of at the default. Reads the inline styles, which
+// hold what the gesture just committed (a minimized window only changed width
+// and keeps its pre-collapse height, or none if it is content-sized, in which
+// case it keeps the cap).
 // Pack and tile also set .user-sized, but only to hold off the cap while they
 // auto-lay-out — those sizes are the layout's, not the user's, so they don't
 // come through here.
 function markUserSized(root: HTMLElement) {
-  root.classList.add("user-sized")
+  if (root.style.height) root.classList.add("user-sized")
   rememberWindowSize(
     root.dataset.nappId || "",
     parseFloat(root.style.width),
@@ -1072,6 +1075,9 @@ function setupResize(
   const purelyVertical = !hasE && !hasW
 
   let resizing = false
+  // A press on an edge that never moves isn't a resize. Easy to do: the top
+  // handle sits over the header, where a drag starts.
+  let moved = false
   let startX = 0
   let startY = 0
   let startLeft = 0
@@ -1101,6 +1107,7 @@ function setupResize(
       }
     }
     resizing = true
+    moved = false
     startX = e.clientX
     startY = e.clientY
     startLeft = root.offsetLeft
@@ -1113,11 +1120,6 @@ function setupResize(
     if (stage && stage.classList.contains("pack-mode")) {
       packSnapshot = capturePackSnapshot(stage)
     }
-    // Drop the 420px starter cap immediately so the user sees height
-    // change even on edge-only resize (S/E/W/N).  Without this the CSS
-    // max-height:420px clamps the first resize silently and only width
-    // changes (no max-width cap) give visible feedback.
-    root.classList.add("user-sized")
     // Mark a resize as in flight so main.js's maybeRepack short-circuits
     // — same reason as drag. The resize handler runs its own focused
     // live-pack; a generic bestFitPack in parallel would re-place the
@@ -1132,6 +1134,8 @@ function setupResize(
     const minimized = root.classList.contains("minimized")
     const dx = e.clientX - startX
     const dy = e.clientY - startY
+    if (!moved && dx === 0 && dy === 0) return
+    moved = true
     let newLeft = startLeft
     let newTop = startTop
     let newW = startW
@@ -1170,6 +1174,9 @@ function setupResize(
     if (!minimized) {
       root.style.top = `${newTop}px`
       root.style.height = `${newH}px`
+      // The height is explicit now, so the 420px starter cap goes with it, in
+      // the same frame, or it would clamp an edge-only resize silently.
+      root.classList.add("user-sized")
     }
 
     // Pack-mode placeholder + live reflow. Mirrors the drag path: show a
@@ -1231,13 +1238,14 @@ function setupResize(
       handle.releasePointerCapture(e.pointerId)
     }
     document.body.classList.remove("napp-resizing")
-    markUserSized(root)
     if (packPlaceholder) {
       packPlaceholder.remove()
       packPlaceholder = null
     }
     lastPackKey = ""
     packSnapshot = null
+    if (!moved) return
+    markUserSized(root)
     // Bump the move timestamp — pack mode uses this for weight ordering.
     root.dataset.lastMovedAt = String(Date.now())
     // A real resize invalidates the per-grid layout memory (see drag end).
