@@ -220,7 +220,7 @@ export type InstalledApp = {
 }
 
 export interface SuggestionItem {
-  source: "system" | "action" | "open" | "napp"
+  source: "system" | "action" | "open" | "napp" | "recent"
   // For "open" / "napp" rows: which flavor the app is, so the row can read
   // "nsite" / "napp" / "napplet" instead of the generic "napp" source label.
   appType?: AppType
@@ -245,6 +245,11 @@ export interface SuggestionItem {
   spaceId?: string
   spaceName?: string
   spaceCurrent?: boolean
+  // For "recent" rows: the link that brings back what it was — a link opened
+  // or a space deleted — and how long ago, as the row says it.
+  link?: string
+  kind?: "link" | "space"
+  when?: string
 }
 
 export interface SystemNappDef {

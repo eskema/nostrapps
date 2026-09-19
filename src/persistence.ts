@@ -1072,3 +1072,37 @@ export function storeDevApp(app: {
 export function forgetDevApp(nappId: string) {
   devApps.delete(nappId)
 }
+
+// ─── history ───────────────────────────────────────────────────
+// What was tried and would otherwise be gone: a share link as opened (before
+// its fetch, so a cancelled one stays), a space as deleted or discarded — each
+// as the link that brings it back. Newest first, one entry per link (a repeat
+// moves up), capped. Local only, and the launcher's alone: no napp reads it.
+const HISTORY_KEY = "nostrapps:history"
+const HISTORY_MAX = 200
+export type HistoryEntry = { at: number; kind: "link" | "space"; name: string; link: string }
+
+export function listHistory(): HistoryEntry[] {
+  const raw = readJson(HISTORY_KEY, [])
+  return Array.isArray(raw) ? raw.filter(isHistoryEntry) : []
+}
+
+export function addHistory(entry: Omit<HistoryEntry, "at">) {
+  const rest = listHistory().filter(e => e.link !== entry.link)
+  writeJson(HISTORY_KEY, [{ at: Date.now(), ...entry }, ...rest].slice(0, HISTORY_MAX))
+}
+
+export function forgetHistory(link: string) {
+  const kept = listHistory().filter(e => e.link !== link)
+  writeJson(HISTORY_KEY, kept)
+}
+
+function isHistoryEntry(e: any): e is HistoryEntry {
+  return (
+    !!e &&
+    typeof e.at === "number" &&
+    (e.kind === "link" || e.kind === "space") &&
+    typeof e.name === "string" &&
+    typeof e.link === "string"
+  )
+}

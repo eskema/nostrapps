@@ -750,6 +750,21 @@ button {
   opacity: 0.4;
 }
 
+/* Recent rows: the name, how long ago, "link" / "space" as the source label,
+   and a × to forget the entry. */
+.sugg-when {
+  flex-shrink: 0;
+  white-space: nowrap;
+  opacity: 0.6;
+}
+
+.suggestion .sugg-forget {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 0 0.2rem;
+  line-height: 1;
+}
+
 #load-local {
   /* background: transparent;
   color: inherit; */

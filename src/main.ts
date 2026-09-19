@@ -60,6 +60,7 @@ import {
   encodePayload,
   parseShareLink,
   type LinkAction,
+  type LinkWindow,
   type ShareLink
 } from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
@@ -947,25 +948,31 @@ async function invokeSystemNapp(sysId: string) {
 // window opening or closing, an app installed or updated, an author's name
 // landing. Typing filters by toggling rows. Nothing here rebuilds the list.
 
-// Three sections, each a container kept in the DOM, with a divider between
+// Four sections, each a container kept in the DOM, with a divider between
 // consecutive non-empty ones (see applyFilter):
 //   1. System items (slash commands and slash actions) — discoverability.
 //   2. Open windows across ALL spaces (current space first), a global switcher.
 //   3. Installed apps, alphabetical by friendly name.
-type Section = "system" | "open" | "apps"
+//   4. Recent: links opened and spaces deleted, newest first, the latest few.
+type Section = "system" | "open" | "apps" | "recent"
+const SECTIONS = ["system", "open", "apps", "recent"] as const
+const RECENT_MAX = 8 // recent rows shown at once
 const suggSections: Record<Section, HTMLDivElement> = {
   system: document.createElement("div"),
   open: document.createElement("div"),
-  apps: document.createElement("div")
+  apps: document.createElement("div"),
+  recent: document.createElement("div")
 }
-const suggDividers = [document.createElement("div"), document.createElement("div")]
+const suggDividers = [0, 1, 2].map(() => document.createElement("div"))
 for (const d of suggDividers) d.className = "sugg-divider"
 suggestions.append(
   suggSections.system,
   suggDividers[0],
   suggSections.open,
   suggDividers[1],
-  suggSections.apps
+  suggSections.apps,
+  suggDividers[2],
+  suggSections.recent
 )
 
 type Row = {
@@ -985,14 +992,18 @@ const itemKey = (item: SuggestionItem) =>
       ? `act:${item.actionId}`
       : item.instanceId
         ? `sess:${item.instanceId}`
-        : `napp:${item.nappId}`
+        : item.link
+          ? `recent:${item.link}`
+          : `napp:${item.nappId}`
 
 const sectionOf = (item: SuggestionItem): Section =>
   item.source === "system" || item.source === "action"
     ? "system"
     : item.source === "open"
       ? "open"
-      : "apps"
+      : item.source === "recent"
+        ? "recent"
+        : "apps"
 
 // Everything a row is built from. spaceCurrent is left out: it's a class
 // toggled in place (a space switch would otherwise rebuild every open row).
@@ -1005,7 +1016,9 @@ const itemSig = (item: SuggestionItem) =>
     item.authorLabel,
     item.iconKey,
     item.spaceId,
-    item.spaceName
+    item.spaceName,
+    item.kind,
+    item.when
   ].join(" ")
 
 function buildSuggestionItems(): SuggestionItem[] {
@@ -1076,7 +1089,22 @@ function buildSuggestionItems(): SuggestionItem[] {
     })
   }
 
+  // What was tried and is gone — links opened, spaces deleted — newest first.
+  for (const h of persist.listHistory()) {
+    out.push({ source: "recent", petname: h.name, link: h.link, kind: h.kind, when: ago(h.at) })
+  }
+
   return out
+}
+
+// How long ago, the way a recent row says it.
+function ago(at: number): string {
+  const s = Math.max(0, (Date.now() - at) / 1000)
+  if (s < 60) return "just now"
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)} d ago`
+  return new Date(at).toLocaleDateString()
 }
 
 // `app` spares the storage read when the caller already holds the record.
@@ -1281,7 +1309,9 @@ function itemSearchText(item: SuggestionItem): string {
     item.slash,
     item.systemId,
     item.actionId,
-    item.appType
+    item.appType,
+    item.kind,
+    item.link
   ]
     .filter(Boolean)
     .join(" ")
@@ -1301,7 +1331,7 @@ function itemSortLabel(item: SuggestionItem): string {
 // its item is gone, and each section is put in order by moving only what is
 // out of place. Then the filter is applied.
 function syncSuggestions() {
-  const order: Record<Section, Row[]> = { system: [], open: [], apps: [] }
+  const order: Record<Section, Row[]> = { system: [], open: [], apps: [], recent: [] }
   const seen = new Set<string>()
   for (const item of buildSuggestionItems()) {
     const key = itemKey(item)
@@ -1330,7 +1360,7 @@ function syncSuggestions() {
     rows.delete(key)
   }
   order.apps.sort((a, b) => itemSortLabel(a.item).localeCompare(itemSortLabel(b.item)))
-  for (const s of ["system", "open", "apps"] as const) {
+  for (const s of SECTIONS) {
     placeInOrder(
       suggSections[s],
       order[s].map(r => r.el)
@@ -1352,15 +1382,21 @@ function placeInOrder(parent: HTMLElement, els: HTMLElement[]) {
 // the rest, and sets the dividers and the empty message to suit.
 function applyFilter() {
   const filter = input!.value.trim().toLowerCase()
-  const shown: Record<Section, boolean> = { system: false, open: false, apps: false }
+  const shown: Record<Section, boolean> = { system: false, open: false, apps: false, recent: false }
   for (const row of rows.values()) {
     const show = !filter || row.search.includes(filter)
     row.el.hidden = !show
     if (show) shown[sectionOf(row.item)] = true
   }
+  // Of the recent rows that match, the latest few; the rest stay hidden.
+  let left = RECENT_MAX
+  for (const el of [...suggSections.recent.children] as HTMLElement[]) {
+    if (!el.hidden && left-- <= 0) el.hidden = true
+  }
   suggDividers[0].hidden = !(shown.system && shown.open)
   suggDividers[1].hidden = !((shown.system || shown.open) && shown.apps)
-  suggestions.classList.toggle("sugg-none", !shown.system && !shown.open && !shown.apps)
+  suggDividers[2].hidden = !((shown.system || shown.open || shown.apps) && shown.recent)
+  suggestions.classList.toggle("sugg-none", !SECTIONS.some(s => shown[s]))
 }
 
 function buildRow(item: SuggestionItem, sig: string): Row {
@@ -1382,6 +1418,15 @@ function buildRow(item: SuggestionItem, sig: string): Row {
     cmd.className = "sugg-slash"
     cmd.textContent = item.slash || null
     main.appendChild(cmd)
+  } else if (item.link) {
+    // A recent row: the name, and how long ago.
+    title = document.createElement("span")
+    title.className = "sugg-pet"
+    title.textContent = item.petname || null
+    main.appendChild(title)
+    trail = document.createElement("span")
+    trail.className = "sugg-when"
+    trail.textContent = item.when || null
   } else if (item.raw) {
     const raw = document.createElement("span")
     raw.className = "sugg-raw"
@@ -1434,13 +1479,29 @@ function buildRow(item: SuggestionItem, sig: string): Row {
 
   el.appendChild(main)
   if (trail) el.appendChild(trail)
-  // Slash rows carry their affordance label at the right edge; app rows trail
-  // with their author line or space instead.
-  if (item.source === "system" || item.source === "action") {
+  // Slash rows carry their affordance label at the right edge, recent rows what
+  // they were (a link, a space); app rows trail with their author line or space
+  // instead.
+  if (item.source === "system" || item.source === "action" || item.source === "recent") {
     const source = document.createElement("span")
     source.className = "source"
-    source.textContent = item.source
+    source.textContent = item.kind || item.source
     el.appendChild(source)
+  }
+  if (item.link) {
+    // Forget: on mousedown like the row (a click would land after the input's
+    // blur has hidden the list), stopped there so the row doesn't open it.
+    const forget = button({ variant: "ghost", title: "Forget", class: "sugg-forget" })
+    forget.appendChild(icon("close"))
+    forget.addEventListener("mousedown", e => {
+      e.preventDefault()
+      e.stopPropagation()
+      persist.forgetHistory(item.link!)
+      rows.delete(itemKey(item))
+      el.remove()
+      applyFilter()
+    })
+    el.appendChild(forget)
   }
   // The app's icon, next to its title: the probed src, already settled when the
   // list was warmed ahead of time, so it lands before the paint. No src means
@@ -1480,6 +1541,8 @@ function buildRow(item: SuggestionItem, sig: string): Row {
         })
         syncDOM(win)
         win.focus()
+      } else if (item.link) {
+        await importShareLink(item.link)
       } else if (item.raw) {
         await install(item.raw) // opens where its screen said, if at all
       }
@@ -1870,6 +1933,10 @@ async function destroyCurrentSpace() {
       : `Delete space "${name}"?\n\n` + "Its windows and saved layout will be permanently removed."
   )
   if (!ok) return
+  // Gone, but for the history: the space as the link that brings it back
+  // (none when nothing in it has an address).
+  const link = spaceAsLink(name)
+  if (link) persist.addHistory({ kind: "space", name, link })
   if (ephemeral) {
     for (const w of persist.readOpen()) {
       if (!sharedTemps.has(w.nappId)) continue
@@ -3105,9 +3172,11 @@ async function importShareLink(hash: string) {
   const link = parseShareLink(hash)
   if (!link) return
   // Out of the address bar right away: a reload lands on the user's own spaces,
-  // and a cancelled import leaves nothing behind.
+  // and a cancelled import leaves nothing behind — but the link stays, in the
+  // history (a recent row of the launcher input) and the log.
   history.replaceState(null, "", location.pathname + location.search)
-  setStatus(`Opening shared space "${link.name}"…`)
+  persist.addHistory({ kind: "link", name: link.name, link: hash })
+  setStatus(`Opening shared space "${link.name}" — ${hash}`)
   // The space right away, empty: its tab and the input's "loading…" are the
   // progress while the apps are fetched. Not opened, it goes, and the user is
   // back where they were — unless they went elsewhere meanwhile.
@@ -3461,13 +3530,46 @@ async function keepCurrentSpace() {
 // address (system, dev, local) are listed as such and can't be included.
 const SHARE_HINTS_MAX = 4
 
-async function shareCurrentSpace() {
-  const name = persist.listSpaces().find(s => s.id === currentSpaceId)?.name || "space"
+// The space's windows the way a link lays them out: reading order.
+function windowsInReadingOrder(): NappWindowState[] {
   const row = (w: NappWindowState) => Math.round((w.position?.top ?? 0) / 60)
-  const windows = persist
+  return persist
     .readOpen()
     .filter(w => !w.system)
     .sort((a, b) => row(a) - row(b) || (a.position?.left ?? 0) - (b.position?.left ?? 0))
+}
+
+// The address a window's app opens from, plain (the share screen's check adds
+// the relay hints). Null for an app with none (dev, local).
+function addressFor(nappId: string): string | null {
+  const app = shareableFor(nappId)
+  if (!app) return null
+  const { pubkey, kind } = app.manifest
+  return naddrEncode({ pubkey, kind, identifier: app.dTag })
+}
+
+// The current space as a link, for the history: its windows with the last
+// payload each got per action. Null when nothing in it has an address.
+function spaceAsLink(name: string): string | null {
+  const windows: LinkWindow[] = []
+  for (const w of windowsInReadingOrder()) {
+    const input = addressFor(w.nappId)
+    if (!input) continue
+    const last = new Map<string, unknown>()
+    for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
+    const actions: LinkAction[] = []
+    for (const [n, p] of last) {
+      const payload = encodePayload(n, p)
+      if (payload !== null) actions.push({ name: n, payload })
+    }
+    windows.push({ input, actions })
+  }
+  return windows.length ? buildShareLink({ name, windows }, "") : null
+}
+
+async function shareCurrentSpace() {
+  const name = persist.listSpaces().find(s => s.id === currentSpaceId)?.name || "space"
+  const windows = windowsInReadingOrder()
   if (!windows.length) {
     setStatus("Nothing open in this space")
     return
