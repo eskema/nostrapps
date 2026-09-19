@@ -3164,7 +3164,35 @@ async function importShareLink(hash: string) {
   // and a cancelled import leaves nothing behind.
   history.replaceState(null, "", location.pathname + location.search)
   setStatus(`Opening shared space "${link.name}"…`)
+  // The space right away, empty: its tab and the input's "loading…" are the
+  // progress while the apps are fetched. Not opened, it goes, and the user is
+  // back where they were — unless they went elsewhere meanwhile.
+  const from = currentSpaceId
+  const spaceId = persist.createEphemeralSpace(link.name)
+  const release = holdLoading()
+  await switchSpace(spaceId)
+  renderSpacesBar()
+  let opened = false
+  try {
+    opened = await openSharedSpace(link, spaceId)
+  } finally {
+    release()
+    if (!opened) {
+      teardownSpaceWindows(spaceId)
+      materializedSpaces.delete(spaceId)
+      persist.deleteSpace(spaceId)
+      if (currentSpaceId === spaceId) {
+        const still = persist.listSpaces().some(s => s.id === from)
+        await switchSpace(still ? from : persist.getCurrentSpaceId())
+      }
+      renderSpacesBar()
+    }
+  }
+}
 
+// The link's apps into the space: fetched, granted on one screen, opened,
+// their actions run. False when nothing opened (nothing fetched, cancelled).
+async function openSharedSpace(link: ShareLink, spaceId: string): Promise<boolean> {
   // Resolve (and fetch) every app first, so the consent screen is one screen.
   const entries: LinkEntry[] = []
   for (const w of link.windows) {
@@ -3215,14 +3243,15 @@ async function importShareLink(hash: string) {
   }
   if (!entries.length) {
     setStatus("Nothing in that link could be opened")
-    return
+    return false
   }
 
   const declaredOf = (e: LinkEntry) =>
     requiresFromEvent(e.installed ? e.installed.event : e.fetched!.manifest)
+  const others = persist.listSpaces().filter(s => s.id !== spaceId)
   const granted = await promptSharedSpace({
     name: link.name,
-    taken: persist.listSpaces().map(s => s.name),
+    taken: others.map(s => s.name),
     apps: entries.map(e => {
       const iconTag = e.fetched?.manifest?.tags.find(t => t[0] === "icon")?.[1]
       return {
@@ -3243,8 +3272,10 @@ async function importShareLink(hash: string) {
   })
   if (!granted) {
     setStatus("Shared space cancelled")
-    return
+    return false
   }
+  // Trashed while it loaded: nothing to open into.
+  if (!persist.listSpaces().some(s => s.id === spaceId)) return false
   // Each temp app's grant from that screen is its policy — the first-run gate
   // install() runs, answered here.
   for (const e of entries) {
@@ -3252,8 +3283,8 @@ async function importShareLink(hash: string) {
     if (policy) persist.setPolicy(e.nappId, policy)
   }
 
-  const spaceId = persist.createEphemeralSpace(granted.name)
-  await switchSpace(spaceId)
+  persist.renameSpace(spaceId, granted.name)
+  await switchSpace(spaceId) // back here, if the wait was spent elsewhere
   renderSpacesBar()
 
   const cells = gridCells(entries.length)
@@ -3296,6 +3327,7 @@ async function importShareLink(hash: string) {
     }
   }
   setStatus(`Opened shared space "${link.name}" — keep it to install its apps`)
+  return true
 }
 
 // A link's app the user doesn't have: booted at its real origin with its files
