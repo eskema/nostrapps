@@ -161,6 +161,19 @@ pool.automaticallyAuth = () => {
 const stage = document.getElementById("stage")!
 const form = document.getElementById("launch-form")!
 const input = document.getElementById("nsite-input") as HTMLInputElement
+// The input reads "loading…" while windows are on their way (a restore, a
+// link import); its own placeholder is back once the last holder lets go.
+const inputPlaceholder = input.placeholder
+let loadingHolds = 0
+function holdLoading(): () => void {
+  if (loadingHolds++ === 0) input.placeholder = "loading…"
+  let held = true
+  return () => {
+    if (!held) return
+    held = false
+    if (--loadingHolds === 0) input.placeholder = inputPlaceholder
+  }
+}
 const suggestions = document.getElementById("suggestions")!
 const localFolderInput = document.getElementById("local-folder") as HTMLInputElement
 const tileBtn = document.getElementById("tile-windows")!
@@ -1615,10 +1628,24 @@ function makeLaunchOpts() {
   }
 }
 
+// Resolves once a frame has painted — at once in a hidden tab, where none comes.
+function nextPaint(): Promise<void> {
+  return new Promise(resolve => {
+    if (document.hidden) setTimeout(resolve, 0)
+    else requestAnimationFrame(() => setTimeout(resolve, 0))
+  })
+}
+
 async function restoreAll() {
   console.debug("[launch] restoreAll — restoring", {
     sessionCount: persist.readOpen().length
   })
+  // The space first, then its windows: the bar paints before a heavy napplet
+  // can hold the thread, and the input reads "loading…" until the last one is
+  // in. Each lands its chip as it mounts (restoreAllInner).
+  renderSpacesBar()
+  const release = holdLoading()
+  await nextPaint()
   // Stage bounds are in flux while windows mount (scrollbar appears once one
   // lands below the fold) — hold the observer's rescale until we're done, or
   // every reload shrinks the layout by the transient delta. See host.ts.
@@ -1626,6 +1653,7 @@ async function restoreAll() {
   try {
     await restoreAllInner()
   } finally {
+    release()
     // Two frames: one for layout, one for the scrollbar/spacer to settle,
     // then refs re-baseline against the final bounds.
     requestAnimationFrame(() => requestAnimationFrame(() => setStageSettling(false)))
@@ -1679,6 +1707,8 @@ async function restoreAllInner() {
       })
     } catch (err: any) {
       setStatus(`Failed to restore ${state.nappId}: ${err.message}`)
+    } finally {
+      renderSpacesBar() // its chip, as each window lands
     }
   }
 }
