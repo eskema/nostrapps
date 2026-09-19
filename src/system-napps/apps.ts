@@ -1015,9 +1015,9 @@ export function mount(
             Math.min(2 ** attempt, 300) * 1000
           )
         },
-        onauth(event) {
-          return currentSigner().signEvent(event) as any
-        }
+        // Through the policy, not the signer: a relay demanding auth for this
+        // read gets the same toast and stored decision as any other challenge.
+        onauth: onRelayAuth
       }
     )
     subs.set(url, {

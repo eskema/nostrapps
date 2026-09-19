@@ -1,7 +1,7 @@
 import { pool } from "@nostr/gadgets/global"
 import { guessMime } from "./mime.js"
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
-import { currentSigner } from "../signers/index.js"
+import { onRelayAuth } from "../relay-auth.js"
 import { Filter } from "@nostr/tools/filter"
 import { NostrEvent } from "@nostr/tools/pure"
 import { sha256 } from "@noble/hashes/sha2.js"
@@ -146,9 +146,7 @@ function collect(reqs: Array<{ url: string; filter: Filter }>): Promise<NostrEve
       onevent(e: any) {
         events.push(e)
       },
-      onauth(event) {
-        return currentSigner().signEvent(event) as any
-      },
+      onauth: onRelayAuth,
       oneose: finish,
       onclose(reasons) {
         done = true

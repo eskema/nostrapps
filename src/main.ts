@@ -82,7 +82,7 @@ import {
   installedIconSrc,
   installedIconSources
 } from "./nsite/icon.js"
-import { currentSigner, reconnectIfNeeded } from "./signers/index.js"
+import { reconnectIfNeeded } from "./signers/index.js"
 import { disconnectBunkerSigner } from "./signers/nip46.js"
 import { resetRefusal, setLoginStatusSink } from "./login.js"
 import * as account from "./account.js"
@@ -139,11 +139,15 @@ pool.allowConnectingToRelay = (url, operation) => {
   return relayAllowed ? relayAllowed(url, operation) : true
 }
 pool.automaticallyAuth = () => {
-  // A signer is handed back even when auto-auth is off: returning non-null is
-  // what routes challenges to us at all, and the wrapper then decides per
-  // challenge — auto mode signs everything; otherwise a stored per-relay
-  // decision is honored or a confirmation toast is shown and remembered.
-  if (!currentSigner()) return null
+  // Nothing while logged out: the challenge sits unanswered, and the pool asks
+  // here again on every use of the relay, so the first use after login arms it.
+  // currentSigner() is never null (it falls through to the extension), so the
+  // account is the check. Otherwise a signer is handed back even when auto-auth
+  // is off: returning non-null is what routes challenges to us at all, and the
+  // wrapper then decides per challenge — auto mode signs everything; otherwise
+  // a stored per-relay decision is honored or a confirmation toast is shown and
+  // remembered.
+  if (!account.getPubkey()) return null
   return relayAuth.relayAuthSigner()
 }
 

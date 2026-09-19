@@ -10,10 +10,13 @@
 //
 // With no setting and no stored decision, a toast pops up and the AUTH answer
 // waits for the user's choice — so nothing is signed until they say so.
+//
+// Nothing is asked or signed without an account: relay auth follows login.
 
 import { normalizeURL } from "@nostr/tools/utils"
 import type { EventTemplate, VerifiedEvent } from "@nostr/tools"
 import { currentSigner } from "./signers/index.js"
+import { getPubkey } from "./account.js"
 import { openToast } from "./toast.js"
 import { nappNameText } from "./napp-name.js"
 
@@ -147,6 +150,9 @@ function promptRelayAuth(url: string, askedBy?: string): Promise<boolean> {
 // sign the auth event; false → refuse.
 
 export async function authorizeRelay(url: string, askedBy?: string): Promise<boolean> {
+  // No account, no auth — the extension may have approved this origin already
+  // and would sign for a launcher that still says "disconnected".
+  if (!getPubkey()) return false
   if (automaticallyAuthOn()) return true
   const key = normalizeURL(url)
   const stored = readDecisions()[key]
