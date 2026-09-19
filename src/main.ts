@@ -22,7 +22,6 @@ import {
   bootDevApp,
   setDevHandle,
   setDevUrl,
-  setTempFiles,
   removeDevHandle,
   setInstanceIdSerial,
   teardownSpaceWindows,
@@ -2393,12 +2392,10 @@ async function openInstalled(nappId: string, petname: string, spaceId: string) {
 }
 
 async function install(raw: string): Promise<string> {
-  // A share link's app, not kept yet (the Apps card's keep): kept.
-  if (sharedTemps.has(raw)) {
-    const id = await keepTempApp(raw)
-    if (!id) throw new Error(`Couldn't keep ${raw}`)
-    return id
-  }
+  // A temp app, not kept yet (the Apps card's keep): kept. Its card is up
+  // from the moment its window is, before there is anything to keep.
+  if (sharedTemps.has(raw)) return keepTempApp(raw)
+  if (persist.getInstalledApp(raw)?.temporary) throw new Error("still opening")
 
   let resolved
   try {
@@ -2410,6 +2407,10 @@ async function install(raw: string): Promise<string> {
       `Couldn't resolve "${raw}" — try a pubkey, npub, nprofile, naddr, or nsite hostname`
     )
   }
+  // The address of a running temp app: kept, not booted a second time into
+  // the same origin with the sweep still due on it.
+  const tempId = nappIdFor(resolved)
+  if (sharedTemps.has(tempId)) return keepTempApp(tempId)
 
   // NIP-5D napplet (its own kind) takes the srcdoc loader, not the nsite path.
   if (resolved.kind && isNappletKind(resolved.kind)) {
@@ -2812,72 +2813,13 @@ async function launchFromInput(raw: string): Promise<boolean | void> {
   const link = shareLinkIn(raw)
   if (link) {
     console.debug("[launch] input → share link")
+    input.value = "" // taken: the space's tab and "loading…" show it's on its way
     await importShareLink(link)
     return true
   }
 
-  // ── temp install: show loading window immediately ──
-  const suffix = raw
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/[^a-z0-9._~-]/g, "-")
-  const nappId = `temp~${suffix}`
-  const petname = friendlyNameFor(nappId)
-
-  const win = mountWithLoading(stage, nappId, nappOriginFor(nappId), {
-    petname,
-    ...makeLaunchOpts()
-  })
-  syncDOM(win)
-  win.focus()
-
-  try {
-    const resolved = resolveInput(raw)
-    const { files, title, manifest, singleton } = await fetchNsite(resolved, setStatus)
-    const label = title || nappId
-    const origin = nappOriginFor(nappId)
-
-    if (title) win.titleEl.textContent = title
-
-    const iconTag = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
-    if (
-      !(await resolvePolicyForLaunch(nappId, {
-        title: label,
-        icon: directIconSrc(iconTag),
-        iconBlob: iconBlobFrom(iconTag, files, manifest),
-        type: manifestAppType(manifest),
-        declaredDomains: requiresFromEvent(manifest)
-      }))
-    ) {
-      win.close()
-      setStatus("Cancelled")
-      return
-    }
-
-    setTempFiles(nappId, files)
-    setStatus(`Booting temp ${label}…`)
-    await bootDevApp(origin, nappId, setStatus, label)
-
-    win.setIframe(`${origin}/`)
-
-    persist.storeDevApp({
-      nappId,
-      title: title || null,
-      icon: manifest?.tags.find((t: any) => t[0] === "icon")?.[1] || null,
-      petname: title || resolved.dTag || nappId,
-      actions: capabilitiesFromEvent(manifest),
-      requires: requiresFromEvent(manifest),
-      modes: persist.modesFromEventTags(manifest?.tags ?? []),
-      initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
-      singleton
-    })
-    handlers.addApp(nappId, capabilitiesFromEvent(manifest))
-    input!.value = ""
-  } catch (err: any) {
-    win.destroy()
-    throw err
-  }
+  // An address (naddr, nsite host): the app, as a temp unless it's here already.
+  await launchAddress(raw)
 }
 
 form.addEventListener("submit", async (e: SubmitEvent) => {
@@ -3053,12 +2995,14 @@ function syncDOM(win: NappWindow) {
 
 // ─── shared spaces (share links) ────────────────────────────────
 // A link (see share-link.ts) opens its apps in an ephemeral space: apps the
-// user has run as their installed copy, the rest as temp~ apps that leave
+// user has run as their installed copy, the rest as temp apps that leave
 // nothing behind. Keep installs those for real and promotes the space; Discard
-// or a reload drops everything.
+// or a reload drops everything. An address in the launcher input opens its app
+// the same way, in the current space.
 
-// The link's apps the user doesn't have, by id — what each was fetched as (the
-// manifest Keep persists, the files and icon Share may need) and the input.
+// The temp apps — a link's, or an address the input opened — by id: what each
+// was fetched as (the manifest Keep persists, the files and icon Share may
+// need) and the input.
 const sharedTemps = new Map<string, { input: string; fetched: NsiteResult }>()
 // Cap per link action: an app that never registers the handler would otherwise
 // hang the import (callIframe waits for the registration).
@@ -3203,13 +3147,8 @@ async function openSharedSpace(link: ShareLink, spaceId: string): Promise<boolea
       setStatus(`Skipping ${w.input}: ${err.message}`)
       continue
     }
-    // The id an install would give it: napplets have their own namespace.
     const napplet = target.kind != null && isNappletKind(target.kind)
-    const nappId = persist.computeNappId({
-      kind: target.kind ?? NSITE_NAMED_KIND,
-      pubkey: target.pubkey,
-      tags: [["d", target.dTag]]
-    })
+    const nappId = nappIdFor(target)
     const installed = persist.getInstalledApp(nappId)
     if (installed) {
       entries.push({
@@ -3330,53 +3269,132 @@ async function openSharedSpace(link: ShareLink, spaceId: string): Promise<boolea
   return true
 }
 
-// A link's app the user doesn't have: booted at its real origin with its files
-// in that origin's store, exactly as an install would — only its record is
-// memory-only and its origin is swept on the next boot, unless kept. Keeping
-// then changes nothing the app can see. The grant is already stored. A napplet
-// has no origin: it runs from its one file, and the sweep clears what the
-// launcher kept for it.
+// The id an install would give an address: napplets have their own namespace.
+function nappIdFor(target: { pubkey: string; dTag: string; kind?: number }): string {
+  return persist.computeNappId({
+    kind: target.kind ?? NSITE_NAMED_KIND,
+    pubkey: target.pubkey,
+    tags: [["d", target.dTag]]
+  })
+}
+
+// A temp app: booted at its real origin with its files in that origin's store,
+// exactly as an install would — only its record is memory-only and its origin
+// is swept on the next boot, unless kept. Keeping then changes nothing the app
+// can see. The grant is already stored. A napplet has no origin: it runs from
+// its one file, and the sweep clears what the launcher kept for it. Once per
+// id: a second window of the same temp is just a launch.
+async function bootTempApp(nappId: string, input: string, fetched: NsiteResult, petname: string) {
+  if (sharedTemps.has(nappId)) return
+  const { files, title, manifest, singleton } = fetched
+  setStatus(`Booting ${petname}…`)
+  persist.rememberEphemeralOrigin(nappId)
+  if (!(manifest && isNappletKind(manifest.kind))) {
+    await bootNapp(
+      nappOriginFor(nappId),
+      files,
+      setStatus,
+      petname,
+      persist.getStoredPolicy(nappId)
+    )
+  }
+  persist.storeDevApp({
+    nappId,
+    title: title || null,
+    icon: manifest?.tags.find(t => t[0] === "icon")?.[1] || null,
+    petname,
+    actions: capabilitiesFromEvent(manifest),
+    requires: requiresFromEvent(manifest),
+    modes: persist.modesFromEventTags(manifest?.tags ?? []),
+    initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
+    singleton,
+    temporary: true,
+    event: manifest
+  })
+  handlers.addApp(nappId, capabilitiesFromEvent(manifest))
+  sharedTemps.set(nappId, { input, fetched })
+}
+
+// A temp app booted and launched — into a grid cell when a link lays it out.
 async function launchSharedApp(
   nappId: string,
   input: string,
   fetched: NsiteResult,
   petname: string,
-  position: Position
+  position?: Position
 ): Promise<NappWindow> {
-  const { files, title, manifest, singleton } = fetched
-  const napplet = !!manifest && isNappletKind(manifest.kind)
-  if (!sharedTemps.has(nappId)) {
-    setStatus(`Booting ${petname}…`)
-    persist.rememberEphemeralOrigin(nappId)
-    if (!napplet) {
-      await bootNapp(
-        nappOriginFor(nappId),
-        files,
-        setStatus,
-        petname,
-        persist.getStoredPolicy(nappId)
-      )
-    }
-    persist.storeDevApp({
-      nappId,
-      title: title || null,
-      icon: manifest?.tags.find(t => t[0] === "icon")?.[1] || null,
-      petname,
-      actions: capabilitiesFromEvent(manifest),
-      requires: requiresFromEvent(manifest),
-      modes: persist.modesFromEventTags(manifest?.tags ?? []),
-      initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
-      singleton,
-      temporary: true,
-      event: manifest
-    })
-    handlers.addApp(nappId, capabilitiesFromEvent(manifest))
-    sharedTemps.set(nappId, { input, fetched })
+  await bootTempApp(nappId, input, fetched, petname)
+  const opts = {
+    ...makeLaunchOpts(),
+    petname,
+    ...(position ? { position, status: GRID_STATUS } : {})
   }
-  const opts = { ...makeLaunchOpts(), petname, position, status: GRID_STATUS }
+  const { files, manifest } = fetched
   // The bytes were verified a moment ago: no second fetch, as on install.
-  if (napplet) return launchNapplet(stage, nappId, await files[0].body.text(), opts)
+  if (manifest && isNappletKind(manifest.kind)) {
+    return launchNapplet(stage, nappId, await files[0].body.text(), opts)
+  }
   return launch(stage, nappId, opts)
+}
+
+// An address in the launcher input. An app that's here — installed, or a temp
+// still running — is its own launch. Any other opens as a link's app would: a
+// temp under its real id, in the current space, kept from its card (the Apps
+// card's keep goes through install). The window is up while the fetch runs.
+async function launchAddress(raw: string) {
+  const target = resolveInput(raw)
+  const nappId = nappIdFor(target)
+  if (persist.getInstalledApp(nappId)) {
+    const win = await launch(stage, nappId, {
+      ...makeLaunchOpts(),
+      petname: friendlyNameFor(nappId)
+    })
+    syncDOM(win)
+    win.focus()
+    return
+  }
+  // A napplet is srcdoc, no origin: nothing to show before its bytes are in.
+  if (target.kind != null && isNappletKind(target.kind)) {
+    const fetched = nappletAsFetched(
+      await resolveNapplet({ ...target, kind: target.kind }, setStatus)
+    )
+    const petname = fetched.title || target.dTag
+    if (!(await resolvePolicyForLaunch(nappId, policyOptsFor(fetched, petname)))) {
+      setStatus("Cancelled")
+      return
+    }
+    const win = await launchSharedApp(nappId, raw, fetched, petname)
+    syncDOM(win)
+    win.focus()
+    return
+  }
+  // The record first, provisional: it's what marks the id memory-only, and the
+  // window writes its state the moment it's focused.
+  persist.storeDevApp({ nappId, petname: target.dTag, temporary: true })
+  const origin = nappOriginFor(nappId)
+  const win = mountWithLoading(stage, nappId, origin, {
+    petname: target.dTag,
+    ...makeLaunchOpts()
+  })
+  syncDOM(win)
+  win.focus()
+  try {
+    const fetched = await fetchNsite(target, setStatus)
+    const petname = fetched.title || target.dTag
+    win.titleEl.textContent = petname
+    if (!(await resolvePolicyForLaunch(nappId, policyOptsFor(fetched, petname)))) {
+      persist.forgetDevApp(nappId)
+      win.close()
+      setStatus("Cancelled")
+      return
+    }
+    await bootTempApp(nappId, raw, fetched, petname)
+    win.setIframe(`${origin}/`)
+  } catch (err) {
+    persist.forgetDevApp(nappId)
+    win.destroy()
+    throw err
+  }
 }
 
 // A napplet is one file: in the fetched shape an nsite has, the consent
@@ -3393,13 +3411,13 @@ function nappletFiles(n: ResolvedNapplet): NsiteFile[] {
   return [{ path: "/index.html", body: n.body, mime: "text/html" }]
 }
 
-// Keep a link's app: its record persisted (the manifest; its first-open time
-// as its install time) and the sweep called off. The origin, its files and
-// whatever the app saved stay; its windows keep running. The id, or null if
-// it wasn't a link's app.
-async function keepTempApp(nappId: string): Promise<string | null> {
+// Keep a temp app: its record persisted (the manifest; its first-open time as
+// its install time) and the sweep called off. The origin, its files and
+// whatever the app saved stay; its windows keep running. Throws for an id
+// that isn't a temp app's.
+async function keepTempApp(nappId: string): Promise<string> {
   const src = sharedTemps.get(nappId)
-  if (!src?.fetched.manifest) return null
+  if (!src?.fetched.manifest) throw new Error("not a temporary app")
   const dev = persist.getInstalledApp(nappId)
   const petname = dev?.petname || src.fetched.title || undefined
   persist.storeInstalledEvent(src.fetched.manifest, petname, dev?.installedAt)
