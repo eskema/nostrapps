@@ -258,7 +258,7 @@ nsites get `window.napplet` alongside `window.napp` and can mix both. True nappl
 
 ### Permissions
 
-Before an app first runs, the launcher shows what it declared; the grants are stored and enforced per call. Two launcher-local capabilities join the NAP domains:
+Before an app first runs, the launcher shows what it declared; the grants are stored and enforced per call. An install's screen also asks where the app opens: a space, a new one, or install only. Two launcher-local capabilities join the NAP domains:
 
 - `identity`: `window.nostr`. When denied the signer is gone, pinned so an extension can't re-inject it.
 - `network`: the app's own direct connections, on by default for nsites. Not relay access: nostr always flows through the bridge, which works sealed. When denied the app is served under a locked CSP (`default-src 'self'`, and `worker-src 'none'` since workers have their own network) and any service worker it registered is unregistered.
