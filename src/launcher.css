@@ -3506,16 +3506,22 @@ body.popover-open .napp-body iframe {
 }
 
 /* Section headers stick to the top while their section scrolls under them.
-   Opaque, so the kit's dimmed look moves from opacity to the text color; the
-   shadow fills the window body's top padding above a stuck header. */
+   Opaque, so the kit's dimmed look moves from opacity to the text color. The
+   window body's top padding moves into the panel, so a stuck header sits
+   flush with the top with nothing to cover above it. */
 .settings-panel > .ui-details > summary {
   position: sticky;
   top: 0;
   z-index: 1;
   background: var(--surface);
-  box-shadow: 0 -0.6rem 0 var(--surface);
   opacity: 1;
   color: color-mix(in srgb, var(--text) 40%, var(--surface));
+}
+.napp-body-system:has(> .system-napp-settings) {
+  padding-top: 0;
+}
+.system-napp-settings {
+  padding-top: 0.6rem;
 }
 .settings-panel > .ui-details > summary:hover {
   color: var(--text);
