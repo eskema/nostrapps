@@ -138,6 +138,45 @@ export function markPackNew(instanceId: string) {
   if (win) win.root.dataset.packNew = "1"
 }
 
+// Whether every new window still lands on the first screen of the grid.
+// bestFitPack first-fits them 1×2, earliest row first, around the windows
+// already there: one with a free 1×2 slot inside the grid's rows lands on
+// screen, one without goes below the fold.
+export function packNewFitsOnScreen(stageEl: HTMLElement): boolean {
+  const fresh = Array.from(openWindows.values()).filter(
+    w => w.root.dataset.packNew === "1" && isPackable(w.root)
+  )
+  const { width: innerW, height: innerH } = getStageBounds(stageEl)
+  if (!fresh.length || innerW <= 0 || innerH <= 0) return true
+  const { cols: COLS, rows: ROWS } = gridForWidth(innerW)
+  const taken = Array.from({ length: ROWS }, () => new Array<boolean>(COLS).fill(false))
+  const mark = ({ col, row, cols, rows }: PackCell) => {
+    for (let r = row; r < Math.min(ROWS, row + rows); r++) {
+      for (let c = col; c < col + cols; c++) taken[r][c] = true
+    }
+  }
+  for (const [root, cell] of capturePackSnapshot(stageEl) as Map<HTMLElement, PackCell>) {
+    if (root.dataset.packNew !== "1") mark(cell)
+  }
+  for (let n = 0; n < fresh.length; n++) {
+    let slot: PackCell | null = null
+    for (let row = 0; row + 2 <= ROWS && !slot; row++) {
+      const col = taken[row].findIndex((t, c) => !t && !taken[row + 1][c])
+      if (col !== -1) slot = { col, row, cols: 1, rows: 2 }
+    }
+    if (!slot) return false
+    mark(slot)
+  }
+  return true
+}
+
+// The new windows in view stay where they opened instead of packing.
+export function clearPackNew() {
+  for (const w of openWindows.values()) {
+    if (!w.root.classList.contains("space-inactive")) delete w.root.dataset.packNew
+  }
+}
+
 // Switch which space is visible: show its windows, hide every other space's.
 // Pure visibility — nothing is mounted or unmounted, so iframe state survives.
 export function setActiveSpace(id: string) {

@@ -31,6 +31,8 @@ import {
   isWindowInactive,
   moveWindowToSpace,
   markPackNew,
+  packNewFitsOnScreen,
+  clearPackNew,
   placeInFreeSpot,
   hasOpenWindow,
   allInstanceIds,
@@ -203,7 +205,7 @@ function maybeRepack() {
     // between (moving a window out of a packed space into a freeform one) would
     // otherwise land this pack on the space we arrived in and flatten a layout
     // that was never meant to be packed.
-    if (!packModeOn) return
+    if (!packModeOn || floatNewWithoutRoom()) return
     repackInProgress = true
     try {
       bestFitPack(stage)
@@ -211,6 +213,18 @@ function maybeRepack() {
       repackInProgress = false
     }
   })
+}
+
+// A new window packs into the grid only if it lands on screen. With no room
+// left there it would go below the fold, so it stays floating where it opened
+// and the space goes to free mode, which leaves the grid as it is.
+function floatNewWithoutRoom(): boolean {
+  if (packNewFitsOnScreen(stage)) return false
+  clearPackNew()
+  packModeOn = false
+  applyPackMode()
+  setStatus("Grid full, switched to free mode")
+  return true
 }
 
 function applyPackMode() {
@@ -1775,9 +1789,10 @@ function openMoveToSpace(instanceId: string, x: number, y: number) {
     await switchSpace(targetId) // follow the window into its new space
     // Placed here rather than left to switchSpace's own maybeRepack: that one is
     // rAF-coalesced and the maybeRepack above has already claimed the slot, so it
-    // returns early. Landing the window is part of the move — do it now.
-    if (targetPacks) bestFitPack(stage)
-    else placeInFreeSpot(stage, instanceId)
+    // returns early. Landing the window is part of the move — do it now. A full
+    // grid leaves it floating where it was instead.
+    if (!targetPacks) placeInFreeSpot(stage, instanceId)
+    else if (!floatNewWithoutRoom()) bestFitPack(stage)
     renderSpacesBar()
     const name = persist.listSpaces().find(s => s.id === targetId)?.name || "space"
     setStatus(`Moved to ${name}`)
@@ -2952,7 +2967,8 @@ function syncDOM(win: NappWindow) {
   refreshSuggestions()
   // Pack the new window into the grid (no-op when pack mode is off). Fresh-in-
   // pack windows are flagged in the host, so bestFitPack sizes them 1×2 and
-  // appends them rather than disturbing the existing layout.
+  // appends them rather than disturbing the existing layout, or, with no room
+  // left on screen, floats them in free mode (floatNewWithoutRoom).
   maybeRepack()
 }
 
