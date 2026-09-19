@@ -399,6 +399,94 @@
   white-space: nowrap;
 }
 
+/* ─── Rows that open ───────────────────────────────────────────────────
+   Item rows as disclosures: a +/– at the end, semibold while open. Give the
+   rows one shared name so one opens at a time; while one is open the list
+   shows only it, the rest folding away. For them to unfold back as it closes,
+   put ui-rows-unfolding on the list for that moment. Markup:
+     <div class="ui-rows">
+       <details class="ui-row" name="my-list">
+         <summary><span>row</span></summary>
+         …what it opens to
+       </details>
+     </div> */
+.ui-rows {
+  display: grid;
+  min-width: 0;
+}
+/* The rest of the list folds away while a row is open, and back after:
+   scaleY, with its height, padding and rule going to 0 alongside, so nothing
+   jumps when it's gone. The height cap is for that: lines other than the
+   open row are a row tall. */
+.ui-rows > * {
+  max-height: 3rem;
+  transition:
+    scale 150ms ease,
+    max-height 150ms ease,
+    padding 150ms ease,
+    border-width 150ms ease,
+    display 150ms allow-discrete;
+}
+.ui-rows > .ui-row[open] {
+  max-height: none;
+}
+.ui-rows:has(> .ui-row[open]) > :not(.ui-row[open]) {
+  display: none;
+  scale: 1 0;
+  max-height: 0;
+  padding-block: 0;
+  border-bottom-width: 0;
+  overflow: clip;
+}
+/* Only as a row closes (rowList() sets the class for that moment): a list
+   shown again after display: none would otherwise unfold every time. */
+@starting-style {
+  .ui-rows.ui-rows-unfolding > * {
+    scale: 1 0;
+    max-height: 0;
+    padding-block: 0;
+    border-bottom-width: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-rows > * {
+    transition: none;
+  }
+}
+.ui-row {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+.ui-row:last-of-type,
+.ui-rows > .ui-row[open] {
+  border-bottom: 0;
+}
+.ui-row > summary {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  /* A .btn: its line, its padding, its border. */
+  min-height: calc(0.8rem * 1.2 + 2 * var(--btn-pad-y) + 2px);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.ui-row > summary::-webkit-details-marker {
+  display: none;
+}
+.ui-row > summary::after {
+  grid-column: -2;
+  content: "+";
+  opacity: 0.4;
+}
+.ui-row[open] > summary {
+  font-weight: 600;
+}
+.ui-row[open] > summary::after {
+  content: "–";
+}
+
 /* ─── Add control ──────────────────────────────────────────────────────
    The two-step add affordance under an item list: collapsed it's a single
    outline button; clicked, it swaps to a form with a .ui-input + add button,

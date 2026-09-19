@@ -13,6 +13,7 @@
 //   • ring(word)                                → a `.ui-ring` word set round a circle, turning
 //   • class `ui-title` on any text              → the window title's voice
 //   • itemList() + item({ label }, …controls)   → `.ui-items` / `.ui-item` rows
+//   • rowList() + row(list, …summary)           → `.ui-rows` / `.ui-row` rows that open
 //   • addControl({ label, onAdd, … })           → the two-step "add an item" form
 // Variants: primary | outline | danger | warning | ghost. Layout (align-self,
 // margins, placement) belongs on the parent/context, not the variant. CSS lives
@@ -306,6 +307,50 @@ export function item(opts: ItemOpts, ...controls: HTMLElement[]): HTMLDivElement
   row.appendChild(label)
   for (const c of controls) row.appendChild(c)
   return row
+}
+
+// Rows that open: rowList() holds them, row() is a line that opens to whatever
+// is appended to it. They read like item rows, with a +/– at the end. A list's
+// rows share a details name, so one opens at a time, and while one is open
+// the list shows only it (CSS, .ui-rows). Append rows, and any other lines,
+// to the list yourself.
+let rowListSerial = 0
+
+export function rowList(cls?: string): HTMLDivElement {
+  const el = document.createElement("div")
+  el.className = `ui-rows${cls ? ` ${cls}` : ""}`
+  el.dataset.rows = `ui-rows-${rowListSerial++}`
+  // The rest of the list unfolds when the open row closes, and only then: its
+  // @starting-style would otherwise run whenever the list shows up again (a
+  // space switched back to, a parent disclosure opened). A mutation callback
+  // runs before the next frame, so the class is there when the rows come back.
+  let settle = 0
+  new MutationObserver(changes => {
+    for (const c of changes) {
+      const row = c.target as HTMLDetailsElement
+      if (row.parentElement !== el || row.open || c.oldValue === null) continue
+      if (el.querySelector(":scope > .ui-row[open]")) continue
+      el.classList.add("ui-rows-unfolding")
+      clearTimeout(settle)
+      settle = window.setTimeout(() => el.classList.remove("ui-rows-unfolding"), 300)
+    }
+  }).observe(el, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["open"],
+    attributeOldValue: true
+  })
+  return el
+}
+
+export function row(list: HTMLElement, ...summary: Array<string | Node>): HTMLDetailsElement {
+  const el = document.createElement("details")
+  el.className = "ui-row"
+  el.setAttribute("name", list.dataset.rows || "")
+  const line = document.createElement("summary")
+  line.append(...summary)
+  el.appendChild(line)
+  return el
 }
 
 export interface AddControlOpts {
