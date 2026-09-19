@@ -242,6 +242,7 @@ interface LoginAnswer {
 function promptLogin(req: AccountRequest): Promise<LoginAnswer> {
   return openDialog<LoginAnswer>({
     title: "Log in",
+    queue: { kind: "log in", name: nappNameEl(req.nappId) },
     dismissValue: { pubkey: null, remember: false },
     class: "login-dialog",
     build: resolve => {

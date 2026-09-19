@@ -833,6 +833,7 @@ async function editPermissions(nappId: string) {
     title: app.petname || app.title || nappId,
     icon: installedIconSrc(app),
     type,
+    author: app.event?.pubkey,
     declaredDomains: [...declared],
     current: persist.getPolicy(nappId),
     mode: "edit"
@@ -2300,6 +2301,7 @@ async function resolvePolicyForLaunch(
     icon?: string
     iconBlob?: Blob
     type?: string
+    author?: string | null
     declaredDomains: string[]
   }
 ): Promise<NappPolicy | null> {
@@ -2308,6 +2310,20 @@ async function resolvePolicyForLaunch(
   if (!granted) return null
   persist.setPolicy(nappId, granted)
   return persist.getPolicy(nappId)
+}
+
+// What the permission screen shows for a fetched app: its manifest's icon (the
+// file itself when it's one of the app's), type, author and domains.
+function policyOptsFor({ files, manifest }: NsiteResult, title: string) {
+  const icon = manifest?.tags.find(t => t[0] === "icon")?.[1]
+  return {
+    title,
+    icon: directIconSrc(icon),
+    iconBlob: iconBlobFrom(icon, files, manifest),
+    type: manifestAppType(manifest),
+    author: manifest?.pubkey,
+    declaredDomains: requiresFromEvent(manifest)
+  }
 }
 
 // The install gate: the first-run screen, asking where to open the app too
@@ -2384,10 +2400,11 @@ async function install(raw: string): Promise<string> {
 // stored policy skips it), the boot into the napp's origin, the manifest
 // record. Keep runs it on the files a shared space already fetched.
 async function installFetched(
-  { nappId, files, title, manifest }: NsiteResult,
+  fetched: NsiteResult,
   raw: string,
   installedAt?: number
 ): Promise<string> {
+  const { nappId, files, title, manifest } = fetched
   const dTag = manifest?.tags.find((t: any) => t[0] === "d")?.[1]
   const petname = title || dTag || raw
   console.debug("[install] installing napp with opts", { nappId, petname })
@@ -2400,14 +2417,7 @@ async function installFetched(
   // ships with the install so the napp's first load is already under the right
   // CSP, and where it opens, if at all. Cancelling aborts. First run only — a
   // reinstall keeps the prior grant and opens where the user is.
-  const iconUrl = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
-  const placed = await resolvePlacementForInstall(nappId, {
-    title: label,
-    icon: directIconSrc(iconUrl),
-    iconBlob: iconBlobFrom(iconUrl, files, manifest),
-    type: manifestAppType(manifest),
-    declaredDomains: requiresFromEvent(manifest)
-  })
+  const placed = await resolvePlacementForInstall(nappId, policyOptsFor(fetched, label))
   if (!placed) throw new Error("Install cancelled")
 
   console.debug("[sandbox] install", { nappId, label, origin })
@@ -2439,6 +2449,7 @@ async function installNapplet(target: {
   const placed = await resolvePlacementForInstall(nappId, {
     title: resolved.title || resolved.dTag,
     type: "napplet",
+    author: resolved.manifest.pubkey,
     declaredDomains: resolved.requires
   })
   if (!placed) throw new Error("Install cancelled")

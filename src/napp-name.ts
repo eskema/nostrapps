@@ -44,9 +44,18 @@ export function nappName(nappId: string): NappName {
 // place it is still worth having.
 export function nappNameEl(nappId: string): HTMLElement {
   const { title, author, authorLabel } = nappName(nappId)
+  const el = nameEl(title, author)
+  el.title = nappId
+  if (!author && authorLabel) el.append(` (${authorLabel})`)
+  return el
+}
+
+// The same line for an app the launcher has no record of: an install screen
+// knows the title and the publisher off the manifest, before there is anything
+// to look up.
+export function nameEl(title: string, author?: string | null): HTMLElement {
   const el = document.createElement("span")
   el.className = "napp-name"
-  el.title = nappId
   const name = document.createElement("strong")
   name.textContent = title
   el.appendChild(name)
@@ -57,8 +66,6 @@ export function nappNameEl(nappId: string): HTMLElement {
     // only fills its own in later, and an empty gap would jump when it did.
     who.textContent = authorDisplayNames.get(author) ?? bareNostrUser(author).shortName
     el.append(" from ", who)
-  } else if (authorLabel) {
-    el.append(` (${authorLabel})`)
   }
   return el
 }

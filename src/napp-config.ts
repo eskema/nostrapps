@@ -6,6 +6,7 @@ import { openDialog } from "./dialog.js"
 import { button, check, input } from "./system-napps/ui.js"
 import * as persist from "./persistence.js"
 import { pushNappletConfig } from "./sandbox/host.js"
+import { nappNameText } from "./napp-name.js"
 
 export type ConfigSchemaErrorCode =
   | "invalid-schema"
@@ -88,6 +89,7 @@ export function openNappConfigSettings(
   return openDialog<void>({
     dismissValue: undefined,
     class: "napp-perms-dialog",
+    queue: { kind: "settings", name: opts.title || schema.title || nappNameText(nappId) },
     build: resolve => {
       const wrap = document.createElement("div")
       wrap.className = "napp-perms napp-config"

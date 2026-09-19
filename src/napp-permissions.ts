@@ -6,6 +6,7 @@
 // screen with a single set of grants for every app the link runs.
 import { openDialog } from "./dialog.js"
 import { check, button, input, radio, tab } from "./system-napps/ui.js"
+import { nameEl } from "./napp-name.js"
 import type { NappPolicy } from "./types.js"
 
 // Title + short description per grantable capability. Keys are the requires
@@ -64,6 +65,9 @@ export interface PolicyPromptOpts {
   iconBlob?: Blob
   // What this app is — "nsite" | "napp" | "napplet" — shown next to the name.
   type?: string
+  // Who published it, for the "<title> from <author>" line the queue shows a
+  // waiting grant as. Only apps carrying a manifest have one.
+  author?: string | null
   // Ambiguous load (a lone index.html): show an nsite/napplet toggle instead
   // of the static type, with `type` pre-selected. The choice is returned on
   // the resolved policy as `type`.
@@ -88,6 +92,12 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<GrantedPolicy 
   return openDialog<GrantedPolicy | null>({
     dismissValue: null,
     class: "napp-perms-dialog",
+    queue: {
+      kind: edit ? "permissions" : "install",
+      name: nameEl(opts.title, opts.author),
+      // Undecided while the screen is still asking which it is.
+      type: opts.chooseType ? undefined : opts.type
+    },
     build: resolve => {
       const wrap = document.createElement("div")
       wrap.className = "napp-perms"
@@ -173,6 +183,7 @@ export function promptSharedSpace(opts: {
   return openDialog<{ name: string; policies: Map<string, NappPolicy> } | null>({
     dismissValue: null,
     class: "napp-perms-dialog",
+    queue: { kind: "share link", name: opts.name },
     build: resolve => {
       const wrap = document.createElement("div")
       wrap.className = "napp-perms"
@@ -319,7 +330,8 @@ function policySection(
   }
 }
 
-// Icon + name, with the type as the kit's overline at the line's end.
+// Icon + name, with the type as the kit's overline at the line's end. The name
+// is the same "<title> from <author>" line every other prompt names an app by.
 // Shared with the share screen, the consent screen's twin, where the badge
 // doubles as the app's check state.
 export function sectionHead(opts: {
@@ -327,6 +339,7 @@ export function sectionHead(opts: {
   icon?: string
   iconBlob?: Blob
   type?: string
+  author?: string | null
   chooseType?: boolean
 }): HTMLElement {
   const head = document.createElement("div")
@@ -352,7 +365,7 @@ export function sectionHead(opts: {
   }
   const name = document.createElement("div")
   name.className = "napp-perms-name"
-  name.textContent = opts.title
+  name.appendChild(nameEl(opts.title, opts.author))
   if (opts.type && !opts.chooseType) {
     const t = document.createElement("span")
     t.className = "napp-perms-type ui-overline"

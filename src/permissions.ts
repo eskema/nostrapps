@@ -109,6 +109,7 @@ export async function requireApproval(nappId: string, method: string, detail?: A
 
   const decision = await openDialog<string>({
     title: "Permission request",
+    queue: { kind: "permission", name: nappNameEl(nappId), type: method },
     body: permissionBody(nappId, method, detail),
     actions: [
       { label: "Deny always", value: "deny-always", variant: "outline" },

@@ -9,7 +9,7 @@
 // (.app-dialog), the toasts a tier above it, and the rest of the body goes
 // inert by attribute while one is open. Esc is a keydown; the back gesture a
 // CloseWatcher, the same thing showModal() uses underneath.
-import { button, type ButtonVariant } from "./system-napps/ui.js"
+import { button, icon, overline, type ButtonVariant } from "./system-napps/ui.js"
 
 export interface DialogAction<T> {
   label: string
@@ -31,6 +31,21 @@ export interface DialogOptions<T> {
   // Requests sharing a group key can be settled together from the queue bar:
   // its actions apply to the open dialog and every queued request in the group.
   group?: { key: string; label: (n: number) => string; actions: DialogAction<T>[] }
+  // How this request reads while it waits behind another one. Whatever is here
+  // is all the user gets to judge it by, so it has to carry enough to settle it
+  // unseen. Without it the queue can only say `title`.
+  queue?: DialogQueueInfo
+}
+
+export interface DialogQueueInfo {
+  // What is being asked: "install", "permission", "log in", "settings".
+  kind: string
+  // Who is asking. A node so an app's line can fill its author in when the
+  // profile lands (nappNameEl); a string for what isn't an app.
+  name?: Node | string
+  // What kind of thing is being asked about, at the line's end: an app's
+  // nsite / napp / napplet, the method a permission wants.
+  type?: string
 }
 
 // One reusable modal element, created lazily and reused across calls.
@@ -63,11 +78,14 @@ function wakeOthers() {
 interface Pending<T> {
   opts: DialogOptions<T>
   resolve: (value: T) => void
+  // The row this request shows as while it waits. Built once and reused: the
+  // list is reordered by moving nodes, never rebuilt.
+  row?: HTMLElement
 }
 
 // Only one modal can be shown at a time (single <dialog>, and showModal() throws
 // on an already-open one), so requests queue. The queue is an explicit array so
-// the open dialog can surface "N more queued" and offer to dismiss the backlog.
+// the open dialog can surface the ones waiting behind it and settle them.
 const queue: Pending<any>[] = []
 let showing = false
 // The open request and its settle function (group actions reach it from the
@@ -78,7 +96,7 @@ export function openDialog<T = string>(opts: DialogOptions<T>): Promise<T> {
   return new Promise<T>(resolve => {
     queue.push({ opts, resolve })
     if (showing)
-      renderQueueBar() // refresh the count on the open dialog
+      renderQueueBar() // the open dialog lists the new request
     else pump()
   })
 }
@@ -96,89 +114,134 @@ function pump() {
   })
 }
 
-// Resolve every still-queued request (the ones behind the open dialog) with its
-// own dismissValue, clearing the backlog in one click. The open dialog is left
-// for the user to act on explicitly.
-function dismissAllQueued() {
-  const items = queue.splice(0)
-  for (const it of items) it.resolve(it.opts.dismissValue)
+// Settle one waiting request without ever showing it: it leaves the queue with
+// the value a dismissal would have given it.
+function dropQueued(p: Pending<any>) {
+  const i = queue.indexOf(p)
+  if (i < 0) return
+  queue.splice(i, 1)
+  p.resolve(p.opts.dismissValue)
   renderQueueBar()
+}
+
+// The same for the whole backlog, in one click. The open dialog is left for the
+// user to act on explicitly.
+function dismissAllQueued() {
+  for (const it of queue.splice(0)) it.resolve(it.opts.dismissValue)
+  renderQueueBar()
+}
+
+// Settle the open request and every queued one sharing its group key.
+function settleGroup(key: string, value: any) {
+  for (const m of [...queue]) {
+    if (m.opts.group?.key !== key) continue
+    queue.splice(queue.indexOf(m), 1)
+    m.resolve(value)
+  }
+  current?.finish(value)
+}
+
+// One waiting request, on one line: what is being asked and by whom, the kinds
+// at each end, and an x to settle this one alone.
+function queueRow(p: Pending<any>): HTMLElement {
+  const q = p.opts.queue
+  const row = document.createElement("li")
+  row.className = "app-dialog-queue-item"
+
+  const line = document.createElement("div")
+  line.className = "app-dialog-queue-line"
+  const kind = q?.kind || "request"
+  line.appendChild(overline(kind))
+  const name = document.createElement("span")
+  name.className = "app-dialog-queue-name"
+  name.append(q?.name || p.opts.title || "")
+  line.appendChild(name)
+  if (q?.type) line.appendChild(overline(q.type))
+
+  const drop = button({
+    variant: "ghost",
+    title: `Dismiss this ${kind}`,
+    class: "app-dialog-queue-drop",
+    onClick: () => dropQueued(p)
+  })
+  drop.appendChild(icon("close"))
+  row.append(line, drop)
+  return row
+}
+
+// The queue card's live parts. It is built with the dialog it sits on (showOne
+// empties the element) and then updated in place as requests arrive and leave —
+// a rebuild under a finger is a dropped tap.
+let bar: {
+  panel: HTMLElement
+  count: HTMLElement
+  group: HTMLElement
+  groupLabel: HTMLElement
+  list: HTMLElement
+} | null = null
+
+function buildQueueBar(el: HTMLDialogElement): NonNullable<typeof bar> {
+  const panel = document.createElement("div")
+  panel.className = "app-dialog-queue"
+  // Head: the count toggles the card; "Dismiss all" only shows while it is open
+  // (CSS) and must not toggle it.
+  const head = document.createElement("div")
+  head.className = "app-dialog-queue-head"
+  head.addEventListener("click", () => panel.classList.toggle("collapsed"))
+  const count = document.createElement("span")
+  count.className = "app-dialog-queue-count"
+  const dismiss = button({
+    label: "Dismiss all",
+    variant: "ghost",
+    class: "app-dialog-queue-dismiss",
+    onClick: e => {
+      e.stopPropagation()
+      dismissAllQueued()
+    }
+  })
+  head.append(count, dismiss)
+  // Group actions: settle the open request and every queued one in its group.
+  // Its own row, visible even when the card is collapsed. The open request
+  // can't change under this panel, so the buttons are built with it.
+  const group = document.createElement("div")
+  group.className = "app-dialog-queue-group"
+  const groupLabel = document.createElement("span")
+  group.appendChild(groupLabel)
+  const g = current?.opts.group
+  if (g)
+    for (const a of g.actions)
+      group.appendChild(
+        button({ label: a.label, variant: a.variant, onClick: () => settleGroup(g.key, a.value) })
+      )
+  const list = document.createElement("ul")
+  list.className = "app-dialog-queue-list"
+  panel.append(head, group, list)
+  el.querySelector(".app-dialog-cards")?.appendChild(panel)
+  return { panel, count, group, groupLabel, list }
 }
 
 function renderQueueBar() {
   const el = dialogEl
   if (!el) return
-  const titles = queue.map(q => q.opts.title || "Request")
-  let panel = el.querySelector(".app-dialog-queue") as HTMLElement | null
-  if (titles.length === 0) {
-    panel?.remove()
+  if (queue.length === 0) {
+    bar?.panel.remove()
+    bar = null
     return
   }
-  // Collapsed by default (count only); preserve the user's expand state across
-  // rebuilds when new requests arrive.
-  const collapsed = panel ? panel.classList.contains("collapsed") : true
-  if (!panel) {
-    panel = document.createElement("div")
-    panel.className = "app-dialog-queue"
-    el.querySelector(".app-dialog-cards")?.appendChild(panel)
-  }
-  panel.classList.toggle("collapsed", collapsed)
-
-  // Head: count (always visible) toggles collapse; "Dismiss all" only shows when
-  // expanded (CSS) and must not toggle the panel.
-  const head = document.createElement("div")
-  head.className = "app-dialog-queue-head"
-  head.addEventListener("click", () => panel!.classList.toggle("collapsed"))
-  const count = document.createElement("span")
-  count.className = "app-dialog-queue-count"
-  count.textContent = `${titles.length} queued`
-  const dismiss = button({
-    label: "Dismiss all",
-    variant: "ghost",
-    class: "app-dialog-queue-dismiss"
-  })
-  dismiss.addEventListener("click", e => {
-    e.stopPropagation()
-    dismissAllQueued()
-  })
-  head.append(count, dismiss)
-  // Group actions: settle the open request and every queued one in its group.
-  // Its own row, visible even when the panel is collapsed.
-  let groupRow: HTMLElement | null = null
+  // A new dialog empties the element, taking the old panel with it.
+  if (!bar?.panel.isConnected) bar = buildQueueBar(el)
+  bar.count.textContent = `${queue.length} waiting`
   const g = current?.opts.group
-  const members = g ? queue.filter(q => q.opts.group?.key === g.key) : []
-  if (g && members.length > 0) {
-    groupRow = document.createElement("div")
-    groupRow.className = "app-dialog-queue-group"
-    const label = document.createElement("span")
-    label.textContent = g.label(members.length + 1)
-    groupRow.appendChild(label)
-    for (const a of g.actions) {
-      groupRow.appendChild(
-        button({
-          label: a.label,
-          variant: a.variant,
-          onClick: () => {
-            for (const m of members) {
-              const i = queue.indexOf(m)
-              if (i >= 0) queue.splice(i, 1)
-              m.resolve(a.value)
-            }
-            current?.finish(a.value)
-          }
-        })
-      )
-    }
-  }
-
-  const list = document.createElement("ul")
-  list.className = "app-dialog-queue-list"
-  for (const t of titles) {
-    const li = document.createElement("li")
-    li.textContent = t
-    list.appendChild(li)
-  }
-  panel.replaceChildren(...(groupRow ? [head, groupRow, list] : [head, list]))
+  const members = g ? queue.filter(q => q.opts.group?.key === g.key).length : 0
+  bar.group.hidden = members === 0
+  if (g && members) bar.groupLabel.textContent = g.label(members + 1)
+  // Each request keeps its row, so the list is put in order by moving only what
+  // is out of place — nothing under the pointer is replaced.
+  const rows = queue.map(p => (p.row ||= queueRow(p)))
+  for (let i = 0; i < rows.length; i++)
+    if (bar.list.children[i] !== rows[i])
+      bar.list.insertBefore(rows[i], bar.list.children[i] || null)
+  while (bar.list.children.length > rows.length) bar.list.lastElementChild!.remove()
 }
 
 function showOne<T>(opts: DialogOptions<T>): Promise<T> {
@@ -203,7 +266,14 @@ function showOne<T>(opts: DialogOptions<T>): Promise<T> {
       if (document.activeElement === document.body && prev instanceof HTMLElement) prev.focus()
       resolve(value)
     }
-    const onClose = () => finish(opts.dismissValue) // closed by anything else
+    // Closed by anything else. close() QUEUES its event rather than firing it,
+    // so the one from the dialog before this can land after pump() has already
+    // reshown the same element for this request — which would settle this one
+    // at dismissValue the moment it appears. A real close clears .open before
+    // its event fires, so an open dialog means the event belongs to the last.
+    const onClose = () => {
+      if (!el.open) finish(opts.dismissValue)
+    }
     // Esc. Not if a card handled it, and an open popover takes the key first.
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return

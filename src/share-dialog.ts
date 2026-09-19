@@ -49,6 +49,7 @@ export function openShareDialog(opts: {
   return openDialog<void>({
     dismissValue: undefined,
     class: "napp-perms-dialog",
+    queue: { kind: "share", name: opts.name },
     build: resolve => {
       const wrap = document.createElement("div")
       wrap.className = "napp-perms"

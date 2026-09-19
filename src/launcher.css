@@ -1519,6 +1519,12 @@ body.popover-open .napp-body iframe {
   min-width: 0;
 }
 
+/* The head already carries the name's weight, so the title doesn't take the
+   <strong> on top of it — the author's contrast is its own opacity. */
+.napp-perms-name .napp-name strong {
+  font-weight: inherit;
+}
+
 /* The type: the kit's overline, pushed to the line's end. On the share
    screen it becomes the app's check state. */
 .napp-perms-type {
@@ -1640,8 +1646,9 @@ body.popover-open .napp-body iframe {
   width: 100%;
 }
 
-/* Queue card: collapsible. Collapsed shows only the count; expanded reveals the
-   list of waiting requests and the "Dismiss all" button. */
+/* Queue card: the requests waiting behind the open dialog. Collapsible —
+   collapsed shows only the count; open, it lists each one the way it would
+   introduce itself and offers to settle them. */
 .app-dialog-queue {
   display: grid;
   gap: 0.4rem;
@@ -1679,30 +1686,66 @@ body.popover-open .napp-body iframe {
 
 /* Group actions: settle the open request + every queued one in its group. */
 .app-dialog-queue-group {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: 1fr;
   align-items: center;
   gap: 0.4rem;
 }
+/* The display above would otherwise win over the UA's [hidden]. */
+.app-dialog-queue-group[hidden] {
+  display: none;
+}
 .app-dialog-queue-group > span {
-  flex: 1;
   opacity: 0.7;
 }
 
 .app-dialog-queue-list {
   display: grid;
-  gap: 0.2rem;
   margin: 0;
   padding: 0;
   list-style: none;
-  max-height: 8rem;
+  max-height: 12rem;
   overflow: auto;
 }
 
-.app-dialog-queue-list li {
-  opacity: 0.7;
+/* One waiting request, on one line: what is being asked, who is asking, what
+   kind of thing it is about, and an x to settle this one alone. */
+.app-dialog-queue-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.app-dialog-queue-line {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+/* The badges hold their line; the name takes the squeeze. */
+.app-dialog-queue-line > .ui-overline {
+  white-space: nowrap;
+}
+
+.app-dialog-queue-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The ghost button's padding tightened to the row it sits in. */
+.app-dialog-queue-drop {
+  padding: 0.2rem 0.35rem;
+  opacity: 0.6;
+}
+
+.app-dialog-queue-drop:hover {
+  opacity: 1;
 }
 
 /* ─── Floating popover (openPopover in popover.ts) ─────────────────
