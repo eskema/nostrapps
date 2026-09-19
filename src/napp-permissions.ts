@@ -5,7 +5,7 @@
 // A share link opens several apps at once; promptSharedSpace lists them on one
 // screen with a single set of grants for every app the link runs.
 import { openDialog } from "./dialog.js"
-import { check, button, input, radio } from "./system-napps/ui.js"
+import { check, button, input, radio, tab } from "./system-napps/ui.js"
 import type { NappPolicy } from "./types.js"
 
 // Title + short description per grantable capability. Keys are the requires
@@ -73,28 +73,74 @@ export interface PolicyPromptOpts {
   // Existing policy when editing; absent on a fresh grant.
   current?: NappPolicy
   mode?: "install" | "edit"
+  // An install: where the app opens once granted — the spaces to pick from,
+  // the current one preselected, or a new one — or nowhere, installed only.
+  // Absent, the screen grants and nothing more (a dev app, a temp one, an edit).
+  placement?: { spaces: Array<{ id: string; name: string }>; current: string }
 }
 
 // Resolves to the granted policy (plus the chosen `type` when chooseType was
-// set), or null if the user cancelled/dismissed.
-export function promptNappPolicy(
-  opts: PolicyPromptOpts
-): Promise<(NappPolicy & { type?: string }) | null> {
+// set, and with placement the space to open in as `spaceId` — NEW_SPACE for a
+// new one, null for install only), or null if the user cancelled/dismissed.
+export type GrantedPolicy = NappPolicy & { type?: string; spaceId?: string | null }
+export function promptNappPolicy(opts: PolicyPromptOpts): Promise<GrantedPolicy | null> {
   const edit = opts.mode === "edit"
-  return openDialog<(NappPolicy & { type?: string }) | null>({
+  return openDialog<GrantedPolicy | null>({
     dismissValue: null,
     class: "napp-perms-dialog",
     build: resolve => {
       const wrap = document.createElement("div")
       wrap.className = "napp-perms"
       const section = policySection(opts)
-      wrap.append(
-        section.el,
-        actionRow(resolve, edit ? "Save" : "Open", () => section.read())
+      const place = opts.placement ? placementRow(opts.placement) : null
+      const actions = actionRow(resolve, edit ? "Save" : "Open", () =>
+        place ? { ...section.read(), spaceId: place.read() } : section.read()
       )
+      if (place) {
+        // "Open" is the wrong word for an install that opens nothing.
+        const primary = actions.lastElementChild as HTMLButtonElement
+        place.onChange = () => (primary.textContent = place.read() ? "Open" : "Install")
+      }
+      wrap.append(section.el, ...(place ? [place.el] : []), actions)
       return wrap
     }
   })
+}
+
+// The space id an install picks to open in a space made for it.
+export const NEW_SPACE = "__new__"
+
+// The install screen's "open after install" toggle, a grant row like the ones
+// above it, with a tab per space under it (the current one selected) and one
+// for a new space, hidden while unticked. read(): the space's id, NEW_SPACE,
+// or null for install only.
+function placementRow(p: { spaces: Array<{ id: string; name: string }>; current: string }) {
+  const el = document.createElement("div")
+  el.className = "napp-perms-place"
+  const tabs = document.createElement("div")
+  tabs.className = "napp-perms-place-tabs"
+  let chosen = p.current
+  const box = check({
+    checked: true,
+    onChange: on => {
+      tabs.hidden = !on
+      out.onChange()
+    }
+  })
+  const out = { el, read: () => (box.checked ? chosen : null), onChange: () => {} }
+  for (const s of [...p.spaces, { id: NEW_SPACE, name: "+ new space" }]) {
+    const t: HTMLButtonElement = tab({
+      label: s.name,
+      active: s.id === chosen,
+      onClick: () => {
+        chosen = s.id
+        for (const other of tabs.children) other.classList.toggle("active", other === t)
+      }
+    })
+    tabs.appendChild(t)
+  }
+  el.append(permRow(box, "open after install"), tabs)
+  return out
 }
 
 export interface SharedAppPrompt {
@@ -367,7 +413,7 @@ function actionRow<T>(resolve: (v: T | null) => void, label: string, value: () =
 // stacked below it. The whole row is a <label>, so clicking anywhere toggles.
 // Exported because it is the shape for any labelled checkbox, not just a grant
 // — the uploader's "protected" reads as one of these.
-export function permRow(box: HTMLInputElement, title: string, desc: string): HTMLLabelElement {
+export function permRow(box: HTMLInputElement, title: string, desc?: string): HTMLLabelElement {
   const row = document.createElement("label")
   row.className = "napp-perms-row"
   const text = document.createElement("div")
@@ -375,10 +421,13 @@ export function permRow(box: HTMLInputElement, title: string, desc: string): HTM
   const l = document.createElement("div")
   l.className = "napp-perms-label"
   l.textContent = title
-  const d = document.createElement("div")
-  d.className = "napp-perms-desc"
-  d.textContent = desc
-  text.append(l, d)
+  text.append(l)
+  if (desc) {
+    const d = document.createElement("div")
+    d.className = "napp-perms-desc"
+    d.textContent = desc
+    text.append(d)
+  }
   row.append(box, text)
   return row
 }

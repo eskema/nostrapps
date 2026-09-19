@@ -1355,12 +1355,8 @@ function renderCard(
           identifier: dTag,
           relays: relayHints
         })
-        const nappId = await ctx.install(raw)
-        // Napplets self-launch during install (srcdoc); nsites don't, so launch
-        // here — the boot just finished, the best moment to open the window.
-        if (!nappId.startsWith("napplet~")) {
-          await ctx.launchNapp?.(nappId, title || dTag || undefined)
-        }
+        // Opens where its screen said — a space of the user's pick, or not at all.
+        await ctx.install(raw)
       }
       if (onChange) {
         onChange()

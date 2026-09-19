@@ -49,7 +49,12 @@ import {
   readNappFiles
 } from "./sandbox/host.js"
 import { button, chip, icon, tab } from "./system-napps/ui.js"
-import { promptNappPolicy, promptSharedSpace } from "./napp-permissions.js"
+import {
+  promptNappPolicy,
+  promptSharedSpace,
+  NEW_SPACE,
+  type PolicyPromptOpts
+} from "./napp-permissions.js"
 import {
   buildShareLink,
   decodePayload,
@@ -1463,17 +1468,7 @@ function buildRow(item: SuggestionItem, sig: string): Row {
         syncDOM(win)
         win.focus()
       } else if (item.raw) {
-        const nappId = await install(item.raw)
-        // Napplets self-launch inside install() (srcdoc path); only nsites need
-        // launching here.
-        if (!nappId.startsWith("napplet~")) {
-          const win = await launch(stage, nappId, {
-            ...makeLaunchOpts(),
-            petname: friendlyNameFor(nappId)
-          })
-          syncDOM(win)
-          win.focus()
-        }
+        await install(item.raw) // opens where its screen said, if at all
       }
       setStatus(`Launched ${label}`)
       input!.value = ""
@@ -2315,6 +2310,42 @@ async function resolvePolicyForLaunch(
   return persist.getPolicy(nappId)
 }
 
+// The install gate: the first-run screen, asking where to open the app too
+// (a space, a new one, or install only). A stored grant (a reinstall keeps
+// it) skips the screen and opens where the user is. Null when cancelled.
+async function resolvePlacementForInstall(
+  nappId: string,
+  opts: PolicyPromptOpts
+): Promise<{ openIn: string | null } | null> {
+  if (persist.hasPolicy(nappId)) return { openIn: currentSpaceId }
+  const granted = await promptNappPolicy({
+    ...opts,
+    placement: { spaces: persist.listSpaces(), current: currentSpaceId }
+  })
+  if (!granted) return null
+  persist.setPolicy(nappId, granted)
+  return { openIn: granted.spaceId === undefined ? currentSpaceId : granted.spaceId }
+}
+
+// Into a space other than the current one, the way a moved window is followed.
+// NEW_SPACE makes one, only now that the install got this far. One gone
+// meanwhile is skipped: the window opens here instead.
+async function goToSpace(spaceId: string) {
+  if (spaceId === NEW_SPACE) spaceId = persist.createSpace()
+  if (spaceId === currentSpaceId) return
+  if (!persist.listSpaces().some(s => s.id === spaceId)) return
+  await switchSpace(spaceId)
+  renderSpacesBar()
+}
+
+// A just-installed nsite's first window, in the space its screen picked.
+async function openInstalled(nappId: string, petname: string, spaceId: string) {
+  await goToSpace(spaceId)
+  const win = await launch(stage, nappId, { ...makeLaunchOpts(), petname })
+  syncDOM(win)
+  win.focus()
+}
+
 async function install(raw: string): Promise<string> {
   // A share link's app, not kept yet (the Apps card's keep): kept.
   if (sharedTemps.has(raw)) {
@@ -2367,16 +2398,17 @@ async function installFetched(
 
   // Summary + permission screen before anything is written; the granted policy
   // ships with the install so the napp's first load is already under the right
-  // CSP. Cancelling aborts. First run only — a reinstall keeps the prior grant.
+  // CSP, and where it opens, if at all. Cancelling aborts. First run only — a
+  // reinstall keeps the prior grant and opens where the user is.
   const iconUrl = manifest?.tags.find((t: any) => t[0] === "icon")?.[1]
-  const policy = await resolvePolicyForLaunch(nappId, {
+  const placed = await resolvePlacementForInstall(nappId, {
     title: label,
     icon: directIconSrc(iconUrl),
     iconBlob: iconBlobFrom(iconUrl, files, manifest),
     type: manifestAppType(manifest),
     declaredDomains: requiresFromEvent(manifest)
   })
-  if (!policy) throw new Error("Install cancelled")
+  if (!placed) throw new Error("Install cancelled")
 
   console.debug("[sandbox] install", { nappId, label, origin })
   onProgress(`Booting ${label}…`)
@@ -2386,6 +2418,7 @@ async function installFetched(
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
 
   setStatus(`Installed ${label}`)
+  if (placed.openIn) await openInstalled(nappId, petname, placed.openIn)
   return nappId
 }
 
@@ -2403,15 +2436,20 @@ async function installNapplet(target: {
   const resolved = await resolveNapplet(target, setStatus)
   const nappId = persist.computeNappId(resolved.manifest)
 
-  const policy = await resolvePolicyForLaunch(nappId, {
+  const placed = await resolvePlacementForInstall(nappId, {
     title: resolved.title || resolved.dTag,
     type: "napplet",
     declaredDomains: resolved.requires
   })
-  if (!policy) throw new Error("Install cancelled")
+  if (!placed) throw new Error("Install cancelled")
   persist.storeInstalledEvent(resolved.manifest, resolved.title || resolved.dTag)
   handlers.addApp(nappId, [])
+  if (!placed.openIn) {
+    setStatus(`Installed napplet ${resolved.title || resolved.dTag}`)
+    return nappId
+  }
 
+  await goToSpace(placed.openIn)
   const win = launchNapplet(stage, nappId, resolved.html, {
     ...makeLaunchOpts(),
     petname: resolved.title || resolved.dTag

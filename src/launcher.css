@@ -1582,6 +1582,32 @@ body.popover-open .napp-body iframe {
   border-radius: 0 0 12px 12px;
 }
 
+/* The install screen's "open after install" toggle: a grant row, with the space
+   tabs under its text column where a description would sit. The row shares the
+   grid's columns (subgrid) so the tabs line up with its label. */
+.napp-perms-place {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.6rem;
+}
+
+.napp-perms-place > .napp-perms-row {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.napp-perms-place-tabs {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+}
+
+/* The display above would otherwise win over the UA's [hidden]. */
+.napp-perms-place-tabs[hidden] {
+  display: none;
+}
+
 /* One app's section of a permission screen (the single-app screen has one). */
 .napp-perms-app {
   display: grid;
