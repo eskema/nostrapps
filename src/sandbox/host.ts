@@ -90,7 +90,6 @@ import {
   openNappConfigSettings,
   validateConfigSchema
 } from "../napp-config.js"
-import type { NappPolicy } from "../types.js"
 import { getPubkey, subscribe as onAccountChanged } from "../account.js"
 import { currentSigner } from "../signers/index.js"
 import { requireAccount } from "../login.js"
@@ -4171,7 +4170,7 @@ async function dispatch(
     }
     case "nostrdb.replaceable":
       // loadReplaceables returns [lastAttempt, event] tuples; napps are
-      // promised the bare event (env.d.ts).
+      // promised the bare event.
       const result = await getStore().loadReplaceables([
         [params.kind, params.author, params.identifier]
       ])
