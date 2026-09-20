@@ -30,7 +30,7 @@ const DEFAULT_BLOSSOM = ["https://relay.nostrapps.com"]
 import type { AppType, SystemCtx } from "../types.js"
 import { normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
-import { NSITE_NAMED_KIND } from "../nsite/fetch.js"
+import { NAPP_NAMED_KIND, NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NAPPLET_NAMED_KIND, computeAggregateHash, nappletMetaFromHtml } from "../nsite/napplet.js"
 import { isIgnoredPath } from "../nsite/ignore.js"
 import { guessMime } from "../nsite/mime.js"
@@ -341,7 +341,11 @@ export function mount(
   // window filters by, fed the tags this publish will carry.
   function flavor(): AppType {
     return classifyEvent({
-      kind: plan!.napplet ? NAPPLET_NAMED_KIND : NSITE_NAMED_KIND,
+      kind: plan!.napplet
+        ? NAPPLET_NAMED_KIND
+        : plan!.actions.length || plan!.requires.length
+          ? NAPP_NAMED_KIND
+          : NSITE_NAMED_KIND,
       tags: [...plan!.actions.map(a => ["action", a]), ...plan!.requires.map(r => ["requires", r])]
     })
   }
@@ -453,7 +457,11 @@ export function mount(
     tags.push(["d", plan.dTag])
 
     eventTemplate = {
-      kind: plan.napplet ? NAPPLET_NAMED_KIND : NSITE_NAMED_KIND,
+      kind: plan.napplet
+        ? NAPPLET_NAMED_KIND
+        : plan.actions.length || plan.requires.length
+          ? NAPP_NAMED_KIND
+          : NSITE_NAMED_KIND,
       created_at: Math.floor(Date.now() / 1000),
       tags,
       content: "",

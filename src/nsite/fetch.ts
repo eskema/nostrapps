@@ -10,6 +10,7 @@ import { NsiteResult } from "../types.js"
 import { healNapp } from "./heal.js"
 
 export const NSITE_NAMED_KIND = 35128
+export const NAPP_NAMED_KIND = 35130
 
 // Where manifests are looked for when a link or hostname carries no relay
 // hints: the author's write relays plus these, the relays the Apps napp
@@ -23,18 +24,18 @@ export const NAPP_RELAYS = [
 const COLLECT_TIMEOUT_MS = 10000
 
 export async function fetchNsite(
-  target: { pubkey: string; dTag: string; relayHints: string[] },
+  target: { pubkey: string; dTag: string; relayHints: string[]; kind?: number },
   onProgress: (msg: string) => void = () => {}
 ): Promise<NsiteResult> {
   console.debug("fetching nsite", target)
 
-  const { pubkey, dTag, relayHints } = target
+  const { pubkey, dTag, relayHints, kind = NSITE_NAMED_KIND } = target
   if (!pubkey) throw new Error("fetchNsite: no pubkey")
 
   // 1. build filter from input
   // By author, not just by d tag: every author publishes to the napp relays,
   // and two "profile" napps by two authors are two different apps.
-  const filter: Filter = { kinds: [NSITE_NAMED_KIND], authors: [pubkey], "#d": [dTag] }
+  const filter: Filter = { kinds: [kind], authors: [pubkey], "#d": [dTag] }
 
   onProgress("Querying relays…")
 

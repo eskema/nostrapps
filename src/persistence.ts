@@ -984,12 +984,11 @@ export function getInstalledApp(nappId: string): InstalledApp | undefined {
 }
 
 // The three app tiers. napplet = a NIP-5D capability app (its own kinds). napp =
-// an nsite (35128) that declares capabilities (action or requires tags). nsite =
-// a plain static site declaring neither.
+// kind 35130. nsite = kind 35128 without capabilities.
 export function classifyEvent(event: { kind: number; tags: string[][] }): AppType {
   if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) return "napplet"
-  const caps = event.tags.some(t => (t[0] === "action" || t[0] === "requires") && t[1])
-  return caps ? "napp" : "nsite"
+  if (event.kind === 35130) return "napp"
+  return "nsite"
 }
 
 export function classifyInstalled(app: InstalledApp): AppType {

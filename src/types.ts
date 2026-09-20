@@ -173,7 +173,7 @@ export type NappPolicy = {
   domains: string[]
 }
 
-// nsite = plain static site; napp = declares actions/requires; napplet = a
+// nsite = kind 35128; napp = kind 35130; napplet = a
 // self-contained kind-35129 app. The three flavors the launcher runs.
 export type AppType = "nsite" | "napp" | "napplet"
 

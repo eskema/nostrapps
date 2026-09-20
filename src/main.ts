@@ -70,7 +70,8 @@ import {
   manifestRelays,
   blobServers,
   manifestPaths,
-  NSITE_NAMED_KIND
+  NSITE_NAMED_KIND,
+  NAPP_NAMED_KIND
 } from "./nsite/fetch.js"
 import { ensureReplicatedAll, type ReplicationTarget } from "./nsite/heal.js"
 import { openShareDialog, type ShareCheck, type ShareWindow } from "./share-dialog.js"
@@ -2379,7 +2380,8 @@ window.addEventListener("hashchange", () => {
 function manifestAppType(event: { kind: number; tags: string[][] } | null | undefined): string {
   if (!event) return "napp"
   if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) return "napplet"
-  return event.tags.some(t => (t[0] === "action" || t[0] === "requires") && t[1]) ? "napp" : "nsite"
+  if (event.kind === NAPP_NAMED_KIND) return "napp"
+  return "nsite"
 }
 // Same, from a dev/local metadata.json.
 function metaAppType(m: any): string {

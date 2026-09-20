@@ -40,9 +40,8 @@ function resolveNaddr(s: string): {
     identifier: string
     relays?: string[]
   }
-  // 35128 = nsite; 35129 = named NIP-5D napplet. Both resolve here; install()
-  // routes on the kind.
-  if (addr.kind !== 35128 && addr.kind !== 35129) {
+  // 35128 = nsite; 35129 = named NIP-5D napplet; 35130 = napp.
+  if (addr.kind !== 35128 && addr.kind !== 35129 && addr.kind !== 35130) {
     throw new Error(`Unsupported naddr kind: ${addr.kind}`)
   }
   return {
