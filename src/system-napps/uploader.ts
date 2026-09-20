@@ -15,12 +15,6 @@ export const title = "Uploader"
 export const slash = "/upload"
 export const singleton = false
 
-const DEFAULT_RELAYS = [
-  "wss://relay.nostrapps.com",
-  "wss://relay.nostrapps.com/personal",
-  "wss://relay.nostrapps.com/internal"
-]
-
 // The app's own blossom server — every fetch path falls back to it, so a blob
 // put here is one the launcher can always read back. The account's own list
 // supplies the rest. Nothing asks whether an account may upload: a refusal just
@@ -130,7 +124,7 @@ export function mount(
   // its blossom servers, its write relays on top of the app's own. Unchecking
   // keeps a target listed without publishing to it.
   let servers: string[] = []
-  let relays: string[] = [...DEFAULT_RELAYS]
+  let relays: string[] = ["wss://relay.nostrapps.com"]
   const offServers = new Set<string>()
   const offRelays = new Set<string>()
   const onServers = () => servers.filter(s => !offServers.has(s))
@@ -612,6 +606,19 @@ export function mount(
   async function loadRelays() {
     const pubkey = ctx.account.getPubkey()
     let write: string[] = []
+    let isMember = false
+    if (pubkey) {
+      try {
+        const membership = await pool.querySync(
+          ["wss://relay.nostrapps.com"],
+          { kinds: [13534], limit: 1 },
+          { maxWait: 1000 }
+        )
+        isMember = membership.some(event =>
+          event.tags.some(([name, member]) => name === "member" && member === pubkey)
+        )
+      } catch {}
+    }
     if (pubkey) {
       try {
         write = (await loadRelayList(pubkey)).items
@@ -619,7 +626,14 @@ export function mount(
           .map(r => r.url.replace(/\/+$/, ""))
       } catch {}
     }
-    relays = [...new Set([...DEFAULT_RELAYS, ...write])]
+    relays = [
+      ...new Set([
+        ...(isMember
+          ? ["wss://relay.nostrapps.com"]
+          : ["wss://relay.nostrapps.com/public", "wss://relay.nostrapps.com/network"]),
+        ...write
+      ])
+    ]
     offRelays.clear()
     renderRelays()
   }

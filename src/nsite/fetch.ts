@@ -15,11 +15,7 @@ export const NAPP_NAMED_KIND = 35130
 // Where manifests are looked for when a link or hostname carries no relay
 // hints: the author's write relays plus these, the relays the Apps napp
 // discovers on. An naddr without hints must still resolve.
-export const NAPP_RELAYS = [
-  "wss://relay.nostrapps.com/",
-  "wss://relay.nostrapps.com/personal",
-  "wss://relay.nostrapps.com/internal"
-]
+export const NAPP_RELAYS = ["wss://relay.nostrapps.com", "wss://relay.nostrapps.com/public"]
 
 const COLLECT_TIMEOUT_MS = 10000
 
