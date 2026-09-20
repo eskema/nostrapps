@@ -3,7 +3,7 @@
 A napplet is a NIP-5D app published as its own event kind. Napplet kinds are:
 
 | Kind    | Role             |
-| ---     | ---              |
+| ------- | ---------------- |
 | `5129`  | Snapshot napplet |
 | `15129` | Root napplet     |
 | `35129` | Named napplet    |
@@ -15,8 +15,8 @@ Napplet kind, not manifest tags, identifies the app as a napplet.
 A napplet is one self-contained `/index.html`. Its metadata is read from HTML rather than `metadata.json`:
 
 ```html
-<meta name="napplet-id" content="counter">
-<meta name="napplet-requires" content="identity,storage">
+<meta name="napplet-id" content="counter" />
+<meta name="napplet-requires" content="identity,storage" />
 <title>Counter</title>
 ```
 

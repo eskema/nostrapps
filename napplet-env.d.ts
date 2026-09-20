@@ -39,7 +39,11 @@ type NappletResource = {
 }
 type NappletRelay = {
   publish(event: EventTemplate): Promise<NostrEvent>
-  publishEncrypted(event: EventTemplate, recipient: string, encryption?: "nip44" | "nip04"): Promise<NostrEvent>
+  publishEncrypted(
+    event: EventTemplate,
+    recipient: string,
+    encryption?: "nip44" | "nip04"
+  ): Promise<NostrEvent>
   query(filters: unknown[]): Promise<{ event: NostrEvent }[]>
   subscribe(id: string, filters: unknown[], handlers: object, relay?: string): { close(): void }
 }
@@ -68,9 +72,16 @@ type Napplet = {
   relay?: NappletRelay
   outbox?: NappletOutbox
   common?: NappletCommon
-  inc?: { emit(topic: string, tags?: string[][], content?: string): void; on(topic: string, cb: (payload: unknown, event: NostrEvent) => void): NappletSubscription }
+  inc?: {
+    emit(topic: string, tags?: string[][], content?: string): void
+    on(topic: string, cb: (payload: unknown, event: NostrEvent) => void): NappletSubscription
+  }
   link?: { open(url: string, options?: object): Promise<{ status: "opened" | "denied" }> }
-  config?: { registerSchema(schema: object, version?: number): Promise<void>; get(): Promise<Record<string, unknown>>; openSettings(options?: object): void }
+  config?: {
+    registerSchema(schema: object, version?: number): Promise<void>
+    get(): Promise<Record<string, unknown>>
+    openSettings(options?: object): void
+  }
 }
 
 interface Window {

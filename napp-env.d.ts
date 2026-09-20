@@ -14,7 +14,10 @@ type NappNostrEvent = {
 }
 
 type NappEventTemplate = Omit<NappNostrEvent, "id" | "pubkey" | "sig">
-type NappNip04 = { encrypt(pubkey: string, plaintext: string): Promise<string>; decrypt(pubkey: string, ciphertext: string): Promise<string> }
+type NappNip04 = {
+  encrypt(pubkey: string, plaintext: string): Promise<string>
+  decrypt(pubkey: string, ciphertext: string): Promise<string>
+}
 type NappNip44 = NappNip04
 type NappNostrSigner = {
   getPublicKey(): Promise<string>
@@ -35,10 +38,30 @@ type NappListResult<T> = { event: NappNostrEvent | null; items: T[] }
 type NappRelayItem = { url: string; read: boolean; write: boolean }
 type NappFeedHandle = { close(): void }
 type NappFeeds = {
-  profile(pubkey: string, kinds: number[], cb: (events: NappNostrEvent[], synced: boolean) => void, opts?: object): NappFeedHandle
-  following(source: string, kinds: number[], cb: (events: NappNostrEvent[], synced: boolean) => void, opts?: object): NappFeedHandle
-  inbox(pubkey: string | string[], kinds: number[], cb: (events: NappNostrEvent[], synced: boolean) => void, opts?: object): NappFeedHandle
-  outbox(pubkeys: string | string[], kinds: number[], cb: (events: NappNostrEvent[], synced: boolean) => void, opts?: object): NappFeedHandle
+  profile(
+    pubkey: string,
+    kinds: number[],
+    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    opts?: object
+  ): NappFeedHandle
+  following(
+    source: string,
+    kinds: number[],
+    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    opts?: object
+  ): NappFeedHandle
+  inbox(
+    pubkey: string | string[],
+    kinds: number[],
+    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    opts?: object
+  ): NappFeedHandle
+  outbox(
+    pubkeys: string | string[],
+    kinds: number[],
+    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    opts?: object
+  ): NappFeedHandle
 }
 type NappUtils = {
   loadRelayList(pubkey: string): Promise<NappListResult<NappRelayItem>>
@@ -78,20 +101,45 @@ type NappUtils = {
   verifyEvent(event: NappNostrEvent): Promise<boolean>
   generateKey(): Promise<{ sk: string; pk: string }>
   signWithKey(event: NappEventTemplate, sk: string): Promise<NappNostrEvent>
-  saveFile(name: string, data: Blob | ArrayBuffer | ArrayBufferView, type?: string): Promise<{ name: string; size: number }>
+  saveFile(
+    name: string,
+    data: Blob | ArrayBuffer | ArrayBufferView,
+    type?: string
+  ): Promise<{ name: string; size: number }>
   copyText(text: string): Promise<{ length: number }>
-  publish(event: NappNostrEvent, relays?: string[]): Promise<{ published: number; failed: number; relays: Record<string, unknown> }>
+  publish(
+    event: NappNostrEvent,
+    relays?: string[]
+  ): Promise<{ published: number; failed: number; relays: Record<string, unknown> }>
 }
 type Napp = {
   instance: string
-  registerAction(pattern: string, handler?: (name: string, payload: unknown) => Promise<unknown>): void
-  action(name: string, payload?: unknown, opts?: { instance?: string; auxiliary?: boolean }): Promise<unknown>
+  registerAction(
+    pattern: string,
+    handler?: (name: string, payload: unknown) => Promise<unknown>
+  ): void
+  action(
+    name: string,
+    payload?: unknown,
+    opts?: { instance?: string; auxiliary?: boolean }
+  ): Promise<unknown>
   close(): void
   link(url: string): void
   feeds: NappFeeds
   utils: NappUtils
-  nip19: { decode(value: string): unknown; npubEncode(hex: string): string; noteEncode(hex: string): string; neventEncode(pointer: object): string; naddrEncode(pointer: object): string }
-  fx: { isHex64(value: unknown): boolean; parseCoordinate(value: string): unknown; formatCoordinate(value: object): string; satsFromBolt11(invoice: string): number | null }
+  nip19: {
+    decode(value: string): unknown
+    npubEncode(hex: string): string
+    noteEncode(hex: string): string
+    neventEncode(pointer: object): string
+    naddrEncode(pointer: object): string
+  }
+  fx: {
+    isHex64(value: unknown): boolean
+    parseCoordinate(value: string): unknown
+    formatCoordinate(value: object): string
+    satsFromBolt11(invoice: string): number | null
+  }
 }
 
 interface Window {

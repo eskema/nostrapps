@@ -189,7 +189,9 @@ export async function safeQueryEvents(filter: Filter, maxLimit?: number): Promis
   }
   const chunks = await Promise.all(
     authors.flatMap(author =>
-      kinds.map(kind => store.queryEvents({ ...filter, authors: [author], kinds: [kind] }, maxLimit))
+      kinds.map(kind =>
+        store.queryEvents({ ...filter, authors: [author], kinds: [kind] }, maxLimit)
+      )
     )
   )
   const merged = chunks.flat().sort((a, b) => b.created_at - a.created_at)

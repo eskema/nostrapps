@@ -21,7 +21,7 @@ Local and uploaded napps use `metadata.json` next to `index.html`:
 `id` becomes the `d` tag. `requires` becomes `requires` tags. `actions` becomes `action` tags. `singleton` limits an app to one window.
 
 | Field         | Published as  | Meaning                                      |
-| ---           | ---           | ---                                          |
+| ------------- | ------------- | -------------------------------------------- |
 | `id`          | `d`           | Required identifier and origin basis.        |
 | `title`       | `title`       | Display name.                                |
 | `icon`        | `icon`        | Icon URL or path.                            |

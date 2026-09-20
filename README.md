@@ -7,7 +7,7 @@ Nostrapps is a browser launcher for Nostr apps. Apps are static sites published 
 Published manifests use event kind to identify app type:
 
 | App type | Event kinds              | Documentation                         |
-| ---      | ---                      | ---                                   |
+| -------- | ------------------------ | ------------------------------------- |
 | nsite    | `35128`                  | Static multi-file site.               |
 | napp     | `35130`                  | [Napp documentation](./NAPP.md)       |
 | napplet  | `5129`, `15129`, `35129` | [Napplet documentation](./NAPPLET.md) |

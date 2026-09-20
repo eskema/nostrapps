@@ -148,9 +148,7 @@ async function publishSetupAnnouncement(
   )
   let writeRelays: string[] = []
   try {
-    writeRelays = (await loadRelayList(event.pubkey)).items
-      .filter(r => r.write)
-      .map(r => r.url)
+    writeRelays = (await loadRelayList(event.pubkey)).items.filter(r => r.write).map(r => r.url)
   } catch {}
   await Promise.allSettled(pool.publish([...BIG_RELAYS, ...writeRelays], event))
 }

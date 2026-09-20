@@ -54,31 +54,47 @@
     }
     if (data.type === "relay.event") {
       const s = relaySubs.get(data.subId)
-      if (s && s.onEvent) try { s.onEvent(data.result && data.result.event) } catch {}
+      if (s && s.onEvent)
+        try {
+          s.onEvent(data.result && data.result.event)
+        } catch {}
       return
     }
     if (data.type === "relay.eose") {
       const s = relaySubs.get(data.subId)
-      if (s && s.onEose) try { s.onEose() } catch {}
+      if (s && s.onEose)
+        try {
+          s.onEose()
+        } catch {}
       return
     }
     if (data.type === "relay.closed") {
       const s = relaySubs.get(data.subId)
       if (s) {
-        if (s.onClosed) try { s.onClosed(data.reason) } catch {}
+        if (s.onClosed)
+          try {
+            s.onClosed(data.reason)
+          } catch {}
         relaySubs.delete(data.subId)
       }
       return
     }
     if (data.type === "outbox.event") {
       const s = outboxSubs.get(data.subId)
-      if (s) for (const fn of s.event) try { fn(data.result) } catch {}
+      if (s)
+        for (const fn of s.event)
+          try {
+            fn(data.result)
+          } catch {}
       return
     }
     if (data.type === "outbox.closed") {
       const s = outboxSubs.get(data.subId)
       if (s) {
-        for (const fn of s.closed) try { fn(data.reason) } catch {}
+        for (const fn of s.closed)
+          try {
+            fn(data.reason)
+          } catch {}
         outboxSubs.delete(data.subId)
       }
       return
@@ -94,12 +110,17 @@
         }
         return
       }
-      for (const fn of configSubscribers) try { fn(lastConfigValues) } catch {}
+      for (const fn of configSubscribers)
+        try {
+          fn(lastConfigValues)
+        } catch {}
       return
     }
     if (data.type === "config.schemaError") {
       for (const fn of configSchemaErrorHandlers)
-        try { fn({ code: data.code, error: data.error }) } catch {}
+        try {
+          fn({ code: data.code, error: data.error })
+        } catch {}
       return
     }
     if (data.type === "inc.event") {
@@ -117,7 +138,10 @@
           content: typeof payload === "string" ? payload : JSON.stringify(payload),
           sig: ""
         }
-        for (const fn of hs) try { fn(payload, synthetic) } catch {}
+        for (const fn of hs)
+          try {
+            fn(payload, synthetic)
+          } catch {}
       }
       return
     }
@@ -355,7 +379,10 @@
           else if (lastConfigValues !== null) {
             const snap = lastConfigValues
             queueMicrotask(() => {
-              if (configSubscribers.has(callback)) try { callback(snap) } catch {}
+              if (configSubscribers.has(callback))
+                try {
+                  callback(snap)
+                } catch {}
             })
           }
           return {

@@ -103,11 +103,12 @@ function render() {
   }
   // Group bars, pinned above the scrolling list: one per group with 2+ members.
   const groups = new Map<string, Item<any>[]>()
-  for (const it of items) if (it.opts.group) {
-    const members = groups.get(it.opts.group.key) || []
-    members.push(it)
-    groups.set(it.opts.group.key, members)
-  }
+  for (const it of items)
+    if (it.opts.group) {
+      const members = groups.get(it.opts.group.key) || []
+      members.push(it)
+      groups.set(it.opts.group.key, members)
+    }
   for (const old of el.querySelectorAll(".toast-group")) old.remove()
   for (const [key, members] of groups) {
     if (members.length < 2) continue

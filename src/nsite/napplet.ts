@@ -61,9 +61,7 @@ export function nappletMetaFromHtml(html: string): {
     id: meta("napplet-id") || meta("id"),
     title: /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1].trim() || null,
     description: meta("description"),
-    requires: (meta("napplet-requires") || meta("requires") || "")
-      .split(/[,\s]+/)
-      .filter(Boolean),
+    requires: (meta("napplet-requires") || meta("requires") || "").split(/[,\s]+/).filter(Boolean),
     icon: iconHref && /^(data:|https:)/.test(iconHref) ? iconHref : null
   }
 }
@@ -134,9 +132,7 @@ export async function loadNappletFromManifest(
     throw new Error("napplet aggregate hash mismatch — manifest tampered")
   }
 
-  const indexTag = pathTags.find(
-    t => (t[1].startsWith("/") ? t[1] : "/" + t[1]) === "/index.html"
-  )
+  const indexTag = pathTags.find(t => (t[1].startsWith("/") ? t[1] : "/" + t[1]) === "/index.html")
   if (!indexTag) throw new Error("napplet manifest has no /index.html path")
 
   const pubkey = manifest.pubkey

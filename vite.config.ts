@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from "vite"
 
 export default defineConfig({
   server: {
@@ -9,12 +9,12 @@ export default defineConfig({
     // Vite 5.4+ blocks unknown Host headers in dev to mitigate DNS rebinding.
     // Our per-napp origins land at `<id>.napps.localhost:5173`, which isn't
     // in the implicit allow-list. The leading dot makes this a wildcard.
-    allowedHosts: ['.localhost'],
+    allowedHosts: [".localhost"]
   },
   preview: {
-    allowedHosts: ['.localhost'],
+    allowedHosts: [".localhost"]
   },
   optimizeDeps: {
-    exclude: ['@nostr/gadgets/redstore'],
-  },
-});
+    exclude: ["@nostr/gadgets/redstore"]
+  }
+})
