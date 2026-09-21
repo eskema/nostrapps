@@ -14,6 +14,11 @@ import { getWindowSize, rememberWindowSize } from "../persistence.js"
 import { isInstanceSerial } from "../utils.js"
 import { icon } from "../system-napps/ui.js"
 
+// A window's starter height, and the ceiling a content-sized one fits within
+// until the user resizes it. The `max-height` on .napp-window:not(.user-sized)
+// in launcher.css is the same number.
+export const START_HEIGHT = 420
+
 let zIndexCounter = 1
 let positionOffset = 0
 let focusTrackerInstalled = false
@@ -201,14 +206,14 @@ export function createNappWindow({
   root.style.left = `${start.left ?? 40}px`
   root.style.top = `${start.top ?? 40}px`
   root.style.width = `${remembered?.width ?? start.width ?? 640}px`
-  // Persisted height wins, then the remembered one. Otherwise: system napps
-  // stay auto so their DOM content drives the size; iframe napps fall back to
-  // 420 since cross-origin iframes don't expose intrinsic dimensions.
+  // Persisted height wins, then the remembered one. Otherwise: a system napp
+  // is left auto for launchSystem to measure or set; an iframe napp falls back
+  // to the starter height, since cross-origin iframes expose no intrinsic one.
   const startHeight = start.height ?? remembered?.height
   if (startHeight) {
     root.style.height = `${startHeight}px`
   } else if (!system) {
-    root.style.height = `420px`
+    root.style.height = `${START_HEIGHT}px`
   }
 
   if (status?.minimized) root.classList.add("minimized")
@@ -474,17 +479,37 @@ function makeBtn(label: string, title: string) {
   return btn
 }
 
+// Content sizing, once. A window with no height of its own takes the one its
+// content asks for, and that measurement is committed inline — so whatever
+// arrives afterwards (a log line, a discovery result) scrolls inside the window
+// instead of pushing it taller under the user. A napp that swaps its own view
+// on a click asks for a new fit through the `fit` its mount was handed.
+// A user-sized window, or one a layout has placed, keeps the height it has.
+export function fitWindowHeight(root: HTMLElement) {
+  if (!root.isConnected) return
+  if (root.classList.contains("user-sized")) return
+  if (root.classList.contains("minimized") || root.classList.contains("maximized")) return
+  // Mobile's static flow owns the height; a window in a hidden space (display:
+  // none) has none to measure.
+  if (getComputedStyle(root).position === "static" || !root.offsetParent) return
+  const prev = root.style.height
+  root.style.height = ""
+  // With height:auto this is the content height already clamped by the CSS
+  // starter cap — the box we want to freeze.
+  const h = root.offsetHeight
+  root.style.height = h > 0 ? `${h}px` : prev
+}
+
 function nextPosition(): Position {
   positionOffset = (positionOffset + 28) % 240
   return { left: 40 + positionOffset, top: 40 + positionOffset, width: 640 }
 }
 
 // The user sized this window by hand — a resize drag, or a snap to an edge.
-// Drops the 420px starter cap, and remembers the size for the napp so its next
-// window opens here instead of at the default. Reads the inline styles, which
-// hold what the gesture just committed (a minimized window only changed width
-// and keeps its pre-collapse height, or none if it is content-sized, in which
-// case it keeps the cap).
+// Drops the starter cap, and remembers the size for the napp so its next window
+// opens here instead of at the default. Reads the inline styles, which hold
+// what the gesture just committed (a minimized window only changed width and
+// keeps its pre-collapse height).
 // Pack and tile also set .user-sized, but only to hold off the cap while they
 // auto-lay-out — those sizes are the layout's, not the user's, so they don't
 // come through here.

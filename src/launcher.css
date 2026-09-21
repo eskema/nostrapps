@@ -2140,10 +2140,11 @@ body.popover-open .napp-body iframe {
   margin-top: 0.15rem;
 }
 
-/* All windows snug to content (system) or sit at their default inline
-   height (iframe), capped at 420px until the user resizes. Once a window
-   has been deliberately resized, the .user-sized class is added and the
-   cap is dropped so the user can grow it freely. */
+/* The ceiling a window opens under: it holds while the height is being
+   measured (a system napp fitting to its content — see fitWindowHeight) and
+   over the inline default an iframe napp starts at. Once a window has been
+   deliberately resized, the .user-sized class is added and the cap is dropped
+   so the user can grow it freely. */
 .napp-window:not(.user-sized):not(.maximized):not(.minimized) {
   max-height: 420px;
 }

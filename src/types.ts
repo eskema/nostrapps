@@ -260,10 +260,20 @@ export interface SystemNappDef {
   // Actions it takes, like an app's ("view" is every view:<kind>), as a
   // fallback: only when no app handles one. Singletons only.
   actions?: string[]
+  // The height its window opens at. Without one the window is measured against
+  // what the napp mounted with — right for a panel that shows all it has, wrong
+  // for one whose content streams in (a list, a log).
+  height?: number
   mount(
     container: HTMLElement,
     ctx: SystemCtx,
-    opts?: { params?: any; onStateChange?(state: NappWindowState): void }
+    opts?: {
+      params?: any
+      // Re-measure the window against what the napp shows now. For a view the
+      // user just switched to — never for data arriving on its own.
+      fit?(): void
+      onStateChange?(state: NappWindowState): void
+    }
   ): { unmount(): void; action?(name: string, payload: unknown): unknown } | void
 }
 

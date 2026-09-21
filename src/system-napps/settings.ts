@@ -16,7 +16,7 @@ import { nappNameEl } from "../napp-name.js"
 import { button, check, details, item, itemList } from "./ui.js"
 import { backupSection } from "./backup-section.js"
 
-export function mount(container: HTMLElement, ctx: SystemCtx) {
+export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): void } = {}) {
   container.innerHTML = `
     <div class="settings-panel">
       <details class="ui-details settings-user" open>
@@ -274,6 +274,10 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     renderDecisions()
     renderHandlerPrefs()
   }
+
+  // Opening a section is a click, so the window may take the room for it.
+  // (`toggle` doesn't bubble — capture reaches it.)
+  panel.addEventListener("toggle", () => opts.fit?.(), true)
 
   renderPerms()
   const unsubPerms = perms.subscribe(renderPerms)

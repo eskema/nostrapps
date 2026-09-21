@@ -14,6 +14,9 @@ export const id = "uploader"
 export const title = "Uploader"
 export const slash = "/upload"
 export const singleton = false
+// The folder it was opened with is read after mount, so there's nothing to
+// measure then — and a publish form is never small anyway.
+export const height = START_HEIGHT
 
 // The app's own blossom server — every fetch path falls back to it, so a blob
 // put here is one the launcher can always read back. The account's own list
@@ -22,6 +25,7 @@ export const singleton = false
 const DEFAULT_BLOSSOM = ["https://relay.nostrapps.com"]
 
 import type { AppType, SystemCtx } from "../types.js"
+import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
 import { NAPP_NAMED_KIND, NSITE_NAMED_KIND } from "../nsite/fetch.js"

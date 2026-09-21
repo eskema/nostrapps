@@ -219,8 +219,8 @@ export function getLoadedActions(instanceId: string): Array<{ name: string; payl
 export function rememberWindowSize(nappId: string, width: number, height?: number) {
   if (!nappId || !Number.isFinite(width) || width <= 0) return
   const size: { width: number; height?: number } = { width: Math.round(width) }
-  // A system napp with no inline height is content-sized; keep it that way
-  // unless the resize gave it a real one.
+  // A minimized window only commits a width; leave the height off rather than
+  // remembering a zero.
   if (Number.isFinite(height) && (height as number) > 0) size.height = Math.round(height as number)
   const all = readJson(WINDOW_SIZE_KEY, {})
   all[nappId] = size

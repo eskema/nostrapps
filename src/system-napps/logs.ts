@@ -4,8 +4,12 @@ export const slash = "/logs"
 // Any view:<kind> no app handles. Routing an action already logs it with its
 // payload, so taking it is all there is to do.
 export const actions = ["view"]
+// Entries arrive over time, so there's nothing to measure at mount: open at the
+// standard height and let them scroll.
+export const height = START_HEIGHT
 
 import type { SystemCtx } from "../types.js"
+import { START_HEIGHT } from "../sandbox/napp-window.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `<ul class="logs-view"></ul>`

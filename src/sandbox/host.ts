@@ -17,7 +17,7 @@ import { isGated, requireApproval, type ApprovalDetail } from "../permissions.js
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
 import { getStore, safeQueryEvents } from "../store.js"
-import { createNappWindow } from "./napp-window.js"
+import { createNappWindow, fitWindowHeight } from "./napp-window.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
@@ -183,6 +183,9 @@ export function setActiveSpace(id: string) {
   for (const win of openWindows.values()) {
     const owns = (win.root.dataset.space || "") === id
     win.root.classList.toggle("space-inactive", !owns)
+    // A window built or restored while its space was hidden had nothing to
+    // measure then; showing it is the first chance to take its one fit.
+    if (owns && !win.root.style.height) fitWindowHeight(win.root)
   }
 }
 
@@ -206,6 +209,7 @@ export function moveWindowToSpace(instanceId: string, targetSpaceId: string) {
   if (!win) return
   win.root.dataset.space = targetSpaceId
   win.root.classList.toggle("space-inactive", targetSpaceId !== activeSpace)
+  if (targetSpaceId === activeSpace && !win.root.style.height) fitWindowHeight(win.root)
 }
 
 // Every live instance id across all materialized spaces (for serial bumping).
@@ -1929,6 +1933,9 @@ export function launchSystem(
       // surfaces it where you are, rather than focusing a display:none window.
       const win = openWindows.get(existing)!
       adoptWindow(win)
+      // Fit it here, before whatever is about to be routed into it lands — from
+      // then on that content scrolls rather than resizing the window.
+      if (!win.root.style.height) fitWindowHeight(win.root)
       focusInstance(existing)
       return win
     }
@@ -1942,6 +1949,10 @@ export function launchSystem(
 
   const handle = def.mount(bodyElement, ctx, {
     params: opts.params,
+    // For a napp that swaps its own view on a click: re-fit the window to what
+    // it shows now. Never on data arriving — that's the resize-under-the-user
+    // this exists to avoid.
+    fit: () => win && fitWindowHeight(win.root),
     onStateChange(sysState: NappWindowState) {
       if (win) opts.onStateChange?.({ ...win.getState(), ...sysState })
     }
@@ -1978,6 +1989,13 @@ export function launchSystem(
   }
   ensureStageObserver(stageEl)
   clampToStage(win.root, stageEl)
+  // The height is decided once, here: what the napp asks for, or a measurement
+  // of what it mounted with. Committed inline, so from now on the window is a
+  // fixed box and new content scrolls inside it.
+  if (!win.root.style.height) {
+    if (def.height) win.root.style.height = `${def.height}px`
+    else fitWindowHeight(win.root)
+  }
   captureWindowGeom(win.root)
   return win
 }

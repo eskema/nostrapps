@@ -1,6 +1,9 @@
 export const id = "apps"
 export const title = "Apps"
 export const slash = "/apps"
+// Both lists grow after mount (installs, discovery streaming in), so measuring
+// what's there at open would size the window to a moment that doesn't last.
+export const height = START_HEIGHT
 
 import { pool, purgatory } from "@nostr/gadgets/global"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
@@ -14,6 +17,7 @@ import { classifyEvent, classifyInstalled, getNappletConfig } from "../persisten
 import { unsupportedRequires } from "../napp-permissions.js"
 import { openNappConfigSettings } from "../napp-config.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
+import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { resolveCardIcon } from "../nsite/icon.js"
 import {
   authorDisplayNames,
