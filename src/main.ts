@@ -3639,7 +3639,7 @@ function shareableFor(nappId: string): Shareable | null {
   const temp = sharedTemps.get(nappId)
   const manifest = temp ? temp.fetched.manifest : persist.getInstalledApp(nappId)?.event
   if (!manifest) return null
-  if (manifest.kind !== NSITE_NAMED_KIND && manifest.kind !== NAPPLET_NAMED_KIND) return null
+  if (![NSITE_NAMED_KIND, NAPP_NAMED_KIND, NAPPLET_NAMED_KIND].includes(manifest.kind)) return null
   const dTag = manifest.tags.find(t => t[0] === "d")?.[1]
   if (!dTag) return null
   const installed = isNappletKind(manifest.kind)
