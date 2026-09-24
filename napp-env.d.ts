@@ -125,6 +125,7 @@ type Napp = {
   ): Promise<unknown>
   close(): void
   link(url: string): void
+  log(message: string): void
   feeds: NappFeeds
   utils: NappUtils
   nip19: {

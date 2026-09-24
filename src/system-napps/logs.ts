@@ -19,9 +19,18 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
     return new Date(at).toLocaleTimeString(undefined, { hour12: false })
   }
 
+  // Append what is new and drop what was evicted; the list is never rebuilt.
+  const rows = new Map<number, HTMLLIElement>()
   function render() {
-    list.innerHTML = ""
-    for (const entry of ctx.logs.history()) {
+    const entries = ctx.logs.history()
+    const kept = new Set(entries.map(e => e.seq))
+    for (const [seq, li] of rows) {
+      if (kept.has(seq)) continue
+      li.remove()
+      rows.delete(seq)
+    }
+    for (const entry of entries) {
+      if (rows.has(entry.seq)) continue
       const li = document.createElement("li")
       const time = document.createElement("time")
       const d = new Date(entry.at)
@@ -31,6 +40,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       pre.textContent = entry.msg
       li.append(time, pre)
       list.appendChild(li)
+      rows.set(entry.seq, li)
     }
     const scroller = list.closest(".napp-body")
     if (scroller) scroller.scrollTop = scroller.scrollHeight

@@ -43,6 +43,7 @@ window.napp.action("view", payload)
 window.napp.utils.loadRelayList(pubkey)
 window.napp.utils.publish(event, relays)
 window.napp.link(url)
+window.napp.log(message)
 ```
 
 Complete bridge method list:
@@ -123,7 +124,13 @@ window.napp.fx.satsFromBolt11(invoice)
 
 window.napp.close()
 window.napp.link(url)
+window.napp.log(message)
 ```
+
+`window.napp.log(message)` appends a line to the launcher's logs window,
+prefixed with the napp's id — for reports (a publish and what each relay
+answered, say), not prompts. One printable line of up to 400 characters, at
+most 60 lines per 10 seconds per napp; anything beyond is dropped.
 
 TypeScript declarations: [`napp-env.d.ts`](./napp-env.d.ts).
 

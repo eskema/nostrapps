@@ -4394,6 +4394,8 @@ async function dispatch(
       return saveFileForNapp(params)
     case "napp.copyText":
       return copyTextForNapp(params)
+    case "napp.log":
+      return logForNapp(callerNappId, params)
     case "napp.publish":
       return publishEvent(params.event, params.relays, callerNappId)
     case "napp.loadEvent":
@@ -4437,6 +4439,51 @@ export function describeSaveFile(params: any): string | undefined {
   }
   const pretty = `${u === 0 ? n : n.toFixed(1)} ${units[u]}`
   return `Save “${name}” (${pretty}) to your downloads folder.`
+}
+
+// ─── the logs window ────────────────────────────────────────────
+// main.ts wires the sink into its log bus and prefixes the source — a napp
+// id, or "launcher". Two writers: the host's own records of what it did on a
+// napp's behalf (a publish and each relay's answer, below), and napp.log, a
+// napp's own report line (sanitized, capped, rate-limited per napp so a
+// runaway loop cannot flood the log).
+let nappLogSink: ((source: string, message: string) => void) | null = null
+export function setNappLogSink(fn: (source: string, message: string) => void) {
+  nappLogSink = fn
+}
+function hostLog(source: string, message: string) {
+  try {
+    nappLogSink?.(source, message)
+  } catch {}
+}
+const NAPP_LOG_MAX = 400 // characters per line
+const NAPP_LOG_BURST = 60 // lines per window, per napp
+const NAPP_LOG_WINDOW_MS = 10_000
+const nappLogBudget = new Map<string, { until: number; left: number }>()
+function logForNapp(nappId: string, params: { message?: unknown }): boolean {
+  if (!nappLogSink) return false
+  const raw = typeof params?.message === "string" ? params.message : ""
+  // eslint-disable-next-line no-control-regex
+  const message = raw
+    .replace(/[\x00-\x1f\x7f]+/g, " ")
+    .trim()
+    .slice(0, NAPP_LOG_MAX)
+  if (!message) return false
+  const now = Date.now()
+  let budget = nappLogBudget.get(nappId)
+  if (!budget || budget.until <= now) {
+    budget = { until: now + NAPP_LOG_WINDOW_MS, left: NAPP_LOG_BURST }
+    nappLogBudget.set(nappId, budget)
+  }
+  if (budget.left <= 0) {
+    // Once per window, so the silence that follows reads as dropped, not idle.
+    if (budget.left === 0) nappLogSink(nappId, "too many log lines, dropping the rest for 10s")
+    budget.left = -1
+    return false
+  }
+  budget.left--
+  nappLogSink(nappId, message)
+  return true
 }
 
 // The clipboard preview shows enough to recognise what is being copied (an
@@ -4822,8 +4869,14 @@ async function publishEventToRelays(
   nappId?: string
 ): Promise<PublishResult> {
   const targetRelays = await resolvePublishTargetRelays(event, relays)
+  // The record of this send goes to the logs window from here — the host is
+  // the one that spoke to the relays — relay by relay, before the result
+  // reaches the napp that asked.
+  const who = nappId || "launcher"
+  const tag = `publish k${event.kind} ${String(event.id ?? "").slice(0, 8)}`
 
   if (targetRelays.length === 0) {
+    hostLog(who, `${tag}: no relays to publish to`)
     return { relays: {}, published: 0, failed: 0 }
   }
 
@@ -4844,6 +4897,10 @@ async function publishEventToRelays(
       relaysMap[relayUrl] = { ok: false, error: result.reason?.message ?? String(result.reason) }
       failed++
     }
+  }
+  for (const url of targetRelays) {
+    const r = relaysMap[url]
+    hostLog(who, `${tag} → ${url}: ${r.ok ? "OK" : `FAIL ${r.error ?? ""}`.trim()}`)
   }
 
   // update cache for known replaceable kinds

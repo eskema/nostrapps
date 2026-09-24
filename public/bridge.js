@@ -541,6 +541,12 @@
     close: () => {
       window.parent.postMessage({ __nostrapps: "napp-close", instanceId: window.name }, "*")
     },
+    // A line for the launcher's logs window — a report of something the napp
+    // did (a publish and each relay's answer, say), not a prompt. The launcher
+    // prefixes it with the napp's id. Fire-and-forget.
+    log: message => {
+      rpc("napp.log", { message: String(message ?? "") }).catch(() => {})
+    },
     feeds: {
       profile: (pubkey, kinds, callback, { since, until, limit } = {}) =>
         feedRpc("napp.feeds.profile", { pubkey, kinds, since, until, limit }, callback),

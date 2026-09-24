@@ -45,9 +45,11 @@ import {
   reloadNappletWindows,
   syncStageBottomSpacer,
   getStageBounds,
-  readNappFiles
+  readNappFiles,
+  setNappLogSink
 } from "./sandbox/host.js"
 import { button, chip, icon, tab } from "./system-napps/ui.js"
+import { nappNameText } from "./napp-name.js"
 import {
   promptNappPolicy,
   promptSharedSpace,
@@ -325,17 +327,40 @@ renderThemeToggle(theme.get())
 theme.subscribe(renderThemeToggle)
 
 // ─── log bus ────────────────────────────────────────────────────
-// Each entry is `{ at: msTimestamp, msg: string }`. Consumers (currently
-// /logs) format the timestamp how they want.
-const logHistory: Array<{ at: number; msg: string }> = []
+// Each entry is `{ seq, at: msTimestamp, msg }`; seq only grows, so a view can
+// append what is new and drop what was evicted. Consumers (currently /logs)
+// format the timestamp how they want. A napp keeps its last
+// LOG_KEEP_PER_NAPP lines, so a noisy one only pushes out its own; the whole
+// log keeps LOG_KEEP.
+const LOG_KEEP = 2000
+const LOG_KEEP_PER_NAPP = 200
+const logHistory: Array<{ seq: number; at: number; msg: string; source: string }> = []
+const logCounts = new Map<string, number>()
 const logSubs = new Set<() => void>()
-function setStatus(msg: string) {
-  logHistory.push({ at: Date.now(), msg })
+let logSeq = 0
+function pushLog(source: string, msg: string) {
+  logHistory.push({ seq: ++logSeq, at: Date.now(), msg, source })
+  const n = (logCounts.get(source) ?? 0) + 1
+  logCounts.set(source, n)
+  if (source !== "launcher" && n > LOG_KEEP_PER_NAPP) {
+    logHistory.splice(
+      logHistory.findIndex(e => e.source === source),
+      1
+    )
+    logCounts.set(source, n - 1)
+  }
+  if (logHistory.length > LOG_KEEP) {
+    const gone = logHistory.shift()!
+    logCounts.set(gone.source, logCounts.get(gone.source)! - 1)
+  }
   for (const fn of logSubs) {
     try {
       fn()
     } catch {}
   }
+}
+function setStatus(msg: string) {
+  pushLog("launcher", msg)
 }
 const logs = {
   history: () => logHistory.slice(),
@@ -359,6 +384,12 @@ function notifyAppsChanged() {
 // raises when it asks for a key nobody has connected build the same controls
 // from there. Its progress lines come back through here.
 setLoginStatusSink(setStatus)
+// The host's records of what it did for a napp (each relay's answer to a
+// publish) and a napp's own report lines (window.napp.log) join the same
+// log, prefixed with the source.
+setNappLogSink((source, msg) =>
+  pushLog(source, `[${source === "launcher" ? source : nappNameText(source)}] ${msg}`)
+)
 
 async function disconnect(): Promise<void> {
   if (account.getType() === "nip46") {
