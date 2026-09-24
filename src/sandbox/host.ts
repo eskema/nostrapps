@@ -14,6 +14,8 @@ import type {
 } from "../types.js"
 
 import { isGated, requireApproval, type ApprovalDetail } from "../permissions.js"
+import { openDialog } from "../dialog.js"
+import { nappNameEl } from "../napp-name.js"
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
 import { getStore, safeQueryEvents } from "../store.js"
@@ -1280,12 +1282,14 @@ async function commonAction(
   nappId: string,
   action: string,
   detail: string,
-  template: { kind: number; content: string; tags: string[][] }
+  template: { kind: number; content: string; tags: string[][] },
+  // The caller already asked, in a prompt of its own.
+  approved = false
 ): Promise<Record<string, unknown>> {
   const resultType = `${action}.result`
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
-  if (!(await requireApproval(nappId, action, detail))) {
+  if (!approved && !(await requireApproval(nappId, action, detail))) {
     return { type: resultType, ok: false, error: "permission denied" }
   }
   try {
@@ -1333,10 +1337,38 @@ async function commonFollowChange(
   const detail = `${add ? "Follow" : "Unfollow"} ${wanted.length} profile${
     wanted.length === 1 ? "" : "s"
   } (rewrites your follow list).`
-  return commonAction(nappId, add ? "common.follow" : "common.unfollow", detail, {
-    kind: 3,
-    content: current.event?.content ?? "",
-    tags
+  // No list found is a new account or relays that didn't answer, and the two
+  // look the same. Publishing on the second replaces everyone with these few,
+  // so this one is always asked, whatever was allowed before.
+  if (add && !current.event && !(await confirmNewFollowList(nappId, wanted.length))) {
+    return { type: resultType, ok: false, error: "no follow list found" }
+  }
+  return commonAction(
+    nappId,
+    add ? "common.follow" : "common.unfollow",
+    detail,
+    { kind: 3, content: current.event?.content ?? "", tags },
+    add && !current.event
+  )
+}
+
+function confirmNewFollowList(nappId: string, n: number): Promise<boolean> {
+  const p = document.createElement("p")
+  p.append(
+    nappNameEl(nappId),
+    ` wants to follow ${n} profile${n === 1 ? "" : "s"}, but no follow list was found ` +
+      `for you. Publishing starts a new one with only ${n === 1 ? "this one" : "these"}. ` +
+      "If you already follow people, cancel: your list may just not have loaded."
+  )
+  return openDialog<boolean>({
+    title: "No follow list found",
+    queue: { kind: "permission", name: nappNameEl(nappId), type: "common.follow" },
+    body: p,
+    actions: [
+      { label: "cancel", value: false, variant: "outline", autofocus: true },
+      { label: "publish new list", value: true, variant: "primary" }
+    ],
+    dismissValue: false
   })
 }
 
