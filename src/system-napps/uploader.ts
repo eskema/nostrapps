@@ -9,6 +9,8 @@ import {
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
+import { naddrEncode } from "@nostr/tools/nip19"
+import type { NostrEvent } from "@nostr/tools/pure"
 
 export const id = "uploader"
 export const title = "Uploader"
@@ -185,6 +187,10 @@ export function mount(
   // Lives in the card's own button area (top right), where Apps puts install
   // and delete — so it's rebuilt into each new card rather than owned by the panel.
   const publishBtn = button({ label: "upload & publish", variant: "primary", disabled: true })
+  // Once the event is out: install what was just published, or update the
+  // installed copy, the same way Apps would. Left of publish until used.
+  const installBtn = button({ label: "install", variant: "primary" })
+  let published: { event: NostrEvent; relays: string[] } | null = null
 
   // Only a hard failure speaks up — nothing to publish, or a run that broke.
   // Everything else is legible from the button, the badges and the result rows.
@@ -386,7 +392,7 @@ export function mount(
       createdAt: eventTemplate?.created_at ?? null,
       actions: plan.actions,
       search: "",
-      buttons: [publishBtn]
+      buttons: published ? [installBtn, publishBtn] : [publishBtn]
     })
     // Requires ride with the action chips, red when this launcher can't provide
     // them — same as the detail view, which is why no warning line is passed.
@@ -834,11 +840,58 @@ export function mount(
       )
       // The per-relay rows below carry the detail; the log keeps the summary.
       publishBtn.textContent = "published"
+      if (okCount)
+        offerInstall(
+          signed,
+          outcomes.filter(o => o.ok).map(o => o.relay)
+        )
       setTimeout(reset, 3000)
     } catch (err) {
       fail((err as any).message)
       publishBtn.textContent = "error"
       setTimeout(reset, 3000)
+    }
+  })
+
+  function offerInstall(event: NostrEvent, took: string[]) {
+    published = { event, relays: took }
+    const update = ctx.isInstalled(computeNappId(event))
+    installBtn.textContent = update ? "update" : "install"
+    installBtn.className = `btn btn-${update ? "warning" : "primary"}`
+    installBtn.disabled = false
+    installBtn.removeAttribute("title")
+    if (!installBtn.isConnected) publishBtn.before(installBtn)
+  }
+
+  installBtn.addEventListener("click", async () => {
+    if (!published) return
+    const { event, relays: relayHints } = published
+    const dTag = event.tags.find(t => t[0] === "d")![1]
+    const update = installBtn.textContent === "update"
+    installBtn.disabled = true
+    installBtn.textContent = update ? "updating…" : "installing…"
+    try {
+      if (update) await ctx.update({ pubkey: event.pubkey, dTag, kind: event.kind, relayHints })
+      // Opens where its screen said — a space of the user's pick, or not at all.
+      else
+        await ctx.install(
+          naddrEncode({
+            pubkey: event.pubkey,
+            kind: event.kind,
+            identifier: dTag,
+            relays: relayHints
+          })
+        )
+      published = null
+      installBtn.remove()
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      // Backing out of the permission screen isn't a failure: offered again.
+      if (msg === "Install cancelled") return offerInstall(event, relayHints)
+      ctx.setStatus(`Uploader: couldn't ${update ? "update" : "install"}: ${msg}`)
+      installBtn.textContent = "error"
+      installBtn.title = msg
+      setTimeout(() => offerInstall(event, relayHints), 3000)
     }
   })
 
