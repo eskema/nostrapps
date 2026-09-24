@@ -68,7 +68,7 @@ import {
   nprofileEncode,
   npubEncode
 } from "@nostr/tools/nip19"
-import { verifyEvent } from "@nostr/tools/pure"
+import { verifyEvent } from "../verify.js"
 import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
 import {
   getInstalledApp,

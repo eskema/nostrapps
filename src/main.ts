@@ -132,8 +132,12 @@ import type { NostrEvent } from "@nostr/tools/pure"
 import { naddrEncode } from "@nostr/tools/nip19"
 import * as relayAuth from "./relay-auth.js"
 import { buildUserIndex } from "./user-search.js"
+import { verifyEvent } from "./verify.js"
 
 pool.trackRelays = true
+// Relays capture pool.verifyEvent when they connect: set it before any does.
+pool.verifyEvent = verifyEvent
+
 // gadgets' list fetchers (lists.ts) fill their relay set with
 // randomPick(hardcodedRelays), and every loader except kind 3 and 10002 is
 // built with an EMPTY hardcoded list — `serial++ % 0` is NaN, so the pick is
