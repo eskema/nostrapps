@@ -423,6 +423,9 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   handlers.removeApp(nappId)
   removeDevHandle(nappId)
   setStatus(`${actionLabel} ${nappId}…`)
+  // Its records are gone, so this list is what still knows the origin: a
+  // failed wipe is retried at the next boot, and erase all data finds it.
+  persist.rememberEphemeralOrigin(nappId)
   try {
     await wipe(nappId)
     persist.forgetEphemeralOrigin(nappId) // origin is clean; nothing left to sweep

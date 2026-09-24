@@ -61,59 +61,59 @@
           })
         }
 
+        // Every step runs, and whatever didn't go is reported: the launcher
+        // says a napp was wiped only when all of it went.
         async function wipeAll() {
-          // First clear known file store. Even if later deleteDatabase() gets
-          // blocked by a still-closing worker connection, app files are gone.
-          try {
-            await clearAll()
-          } catch {}
-
-          // IndexedDB — every database at this origin
-          try {
-            if (indexedDB.databases) {
-              const dbs = await indexedDB.databases()
-              await Promise.all(
-                dbs.map(
-                  d =>
-                    new Promise(resolve => {
-                      const req = indexedDB.deleteDatabase(d.name)
-                      req.onsuccess = () => resolve()
-                      req.onerror = () => resolve()
-                      req.onblocked = () => resolve()
-                    })
-                )
-              )
-            } else {
-              // older browsers: at least delete the one we know about
-              await new Promise(resolve => {
-                const req = indexedDB.deleteDatabase(DB_NAME)
-                req.onsuccess = () => resolve()
-                req.onerror = () => resolve()
-                req.onblocked = () => resolve()
-              })
-            }
-          } catch {}
-
-          try {
-            localStorage.clear()
-          } catch {}
-          try {
-            sessionStorage.clear()
-          } catch {}
-
-          if (typeof caches !== "undefined") {
+          const failed = []
+          const step = async (what, fn) => {
             try {
+              await fn()
+            } catch (err) {
+              failed.push(`${what}: ${err?.message || err}`)
+            }
+          }
+          await step("files", clearAll)
+          await step("databases", async () => {
+            const names = indexedDB.databases
+              ? (await indexedDB.databases()).map(d => d.name).filter(Boolean)
+              : [DB_NAME]
+            await Promise.all(names.map(deleteDatabase))
+          })
+          await step("local storage", () => localStorage.clear())
+          await step("session storage", () => sessionStorage.clear())
+          if (typeof caches !== "undefined") {
+            await step("caches", async () => {
               const keys = await caches.keys()
               await Promise.all(keys.map(k => caches.delete(k)))
-            } catch {}
+            })
           }
-
           if (navigator.serviceWorker?.getRegistrations) {
-            try {
+            await step("service worker", async () => {
               const regs = await navigator.serviceWorker.getRegistrations()
               await Promise.all(regs.map(r => r.unregister()))
-            } catch {}
+            })
           }
+          if (failed.length) throw new Error(failed.join("; "))
+        }
+
+        // A database still open somewhere is only deleted once it closes. Give
+        // it a moment, then call it a failure rather than assume it went.
+        function deleteDatabase(name) {
+          return new Promise((resolve, reject) => {
+            const req = indexedDB.deleteDatabase(name)
+            let timer
+            req.onsuccess = () => {
+              clearTimeout(timer)
+              resolve()
+            }
+            req.onerror = () => {
+              clearTimeout(timer)
+              reject(req.error || new Error(`${name} not deleted`))
+            }
+            req.onblocked = () => {
+              timer = setTimeout(() => reject(new Error(`${name} is still open`)), 3000)
+            }
+          })
         }
 
         // Tear down any service worker the NAPP registered for itself, keeping
