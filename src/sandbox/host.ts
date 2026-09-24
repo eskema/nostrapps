@@ -3612,6 +3612,9 @@ window.addEventListener("message", async event => {
   if (!data || data.__nostrapps !== "napp-dev-read-file") return
 
   const { nappId, path, requestId } = data
+  // Only the napp's own origin (its boot frame, relaying its service worker)
+  // gets its files: any other napp could name this one and read the folder.
+  if (typeof nappId !== "string" || event.origin !== nappOriginFor(nappId)) return
 
   // The dev SW asks for /__policy__ the same way it asks for a file; answer it
   // from the policy store (dev apps have no IDB record to read).
