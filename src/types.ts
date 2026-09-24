@@ -91,6 +91,9 @@ export type NappWindow = {
   /** Reload the napp page (via bridge.js — the parent can't drive a
    *  cross-origin frame's history). No-op for system napps. */
   reload(): void
+  /** Take the window down without its close callbacks: nothing is recorded,
+   *  nothing wiped. For erase all data, which does both itself. */
+  unmount(): void
   systemId?: string
 }
 

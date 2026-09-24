@@ -317,6 +317,14 @@ function ensureSpaces(): SpacesState {
   return state
 }
 
+// Every space gone, the memory-only ones too. The next read seeds a fresh
+// default, as on a first run.
+export function clearSpaces() {
+  localStorage.removeItem(SPACES_KEY)
+  ephemeralSpaces.length = 0
+  devOpenBySpace.clear()
+}
+
 export function getCurrentSpaceId(): string {
   return currentId(ensureSpaces())
 }

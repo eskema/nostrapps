@@ -1687,6 +1687,27 @@ export function teardownSpaceWindows(spaceId: string) {
   }
 }
 
+// Every napp window down, in every space, for erase all data: a napp still
+// running while its origin is wiped can hold its storage open and block the
+// wipe. The close path is skipped, since it records the removal and wipes a
+// dev napp itself. Built-in windows stay: they run no napp. Returns the
+// nappIds that were open.
+export function unmountNappWindows(): string[] {
+  const ids = new Set<string>()
+  for (const [instanceId, win] of [...openWindows]) {
+    if (win.systemId) continue
+    const { nappId } = win.getState()
+    win.unmount()
+    openWindows.delete(instanceId)
+    clearInstanceRuntimeState(instanceId)
+    if (nappId) {
+      closeNappletSubs(nappId)
+      ids.add(nappId)
+    }
+  }
+  return [...ids]
+}
+
 // Snapshot of the live windows, for the spaces bar's window list.
 export function listOpenWindows(): Array<{
   instanceId: string

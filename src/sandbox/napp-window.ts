@@ -426,7 +426,8 @@ export function createNappWindow({
     focus,
     notifyState,
     setIframe,
-    reload
+    reload,
+    unmount: teardown
   }
 }
 

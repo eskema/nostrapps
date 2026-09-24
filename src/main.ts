@@ -25,6 +25,7 @@ import {
   removeDevHandle,
   setInstanceIdSerial,
   teardownSpaceWindows,
+  unmountNappWindows,
   listOpenWindows,
   setActiveSpace,
   isWindowInactive,
@@ -50,6 +51,7 @@ import {
 } from "./sandbox/host.js"
 import { button, chip, icon, tab } from "./system-napps/ui.js"
 import { nappNameText } from "./napp-name.js"
+import { openDialog } from "./dialog.js"
 import {
   promptNappPolicy,
   promptSharedSpace,
@@ -427,25 +429,65 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   }
 }
 
-// Wipe every trace of the launcher: every installed napp's origin storage,
-// every `nostrapps:*` localStorage entry, the launcher's IndexedDB, caches,
-// and any OPFS data. Then reload to a clean slate. Confirm gated upstream.
+// Wipe every trace of the launcher: every napp's origin storage, every
+// `nostrapps:*` localStorage entry, the launcher's IndexedDB, caches, and any
+// OPFS data. Then reload to a clean slate. Confirm gated upstream.
 async function factoryReset() {
   setStatus("Starting full reset…")
 
-  // 1. Wipe each napp origin we've ever touched.
-  const allNappIds = new Set<string>()
-  for (const id of persist.getInstalledNappIds()) allNappIds.add(id)
-  for (const s of persist.readOpen()) {
-    if (s.nappId && !s.system) allNappIds.add(s.nappId)
+  // 1. Every napp we know of, before the spaces that list some of them go:
+  //    installed, dev and temp ones, and whatever any space has open.
+  const allNappIds = new Set<string>(persist.getInstalledNappIds())
+  for (const { window: w } of persist.allOpenWindows()) {
+    if (w.nappId && !w.system) allNappIds.add(w.nappId)
   }
+
+  // 2. Nothing runs while it is wiped: every napp window comes down, and the
+  //    spaces with them.
+  for (const nappId of unmountNappWindows()) allNappIds.add(nappId)
+  persist.clearSpaces()
+
+  // 3. Wipe each napp's origin. A napplet has none; what it kept is under
+  //    `nostrapps:*`, cleared below.
+  const failed: Array<{ nappId: string; error: string }> = []
   for (const nappId of allNappIds) {
-    setStatus(`Wiping ${nappId}…`)
+    if (nappId.startsWith("napplet~")) continue
+    setStatus(`Wiping ${nappNameText(nappId)}…`)
     try {
       await wipe(nappId)
     } catch (err: any) {
-      console.warn("wipe failed for", nappId, err)
+      failed.push({ nappId, error: err?.message ?? String(err) })
     }
+  }
+
+  // A napp we could not wipe still has its data. Stop before the launcher's
+  // own records go, so the next attempt still knows what to wipe, and say so.
+  if (failed.length) {
+    setStatus(
+      `Erase stopped: ${failed.length} app${failed.length === 1 ? "" : "s"} could not be wiped`
+    )
+    const list = document.createElement("ul")
+    for (const f of failed) {
+      const li = document.createElement("li")
+      li.textContent = `${nappNameText(f.nappId)}: ${f.error}`
+      list.append(li)
+    }
+    const intro = document.createElement("p")
+    intro.textContent =
+      "Nothing else was erased. These apps still have their data, so the " +
+      "launcher's records of them were kept. Try again after the reload."
+    const body = document.createElement("div")
+    body.append(intro, list)
+    await openDialog<void>({
+      title: "Erase stopped",
+      body,
+      actions: [{ label: "ok", value: undefined, variant: "primary", autofocus: true }],
+      dismissValue: undefined
+    })
+    // The windows and spaces are gone; a reload rebuilds the launcher around
+    // what is left.
+    location.reload()
+    return
   }
 
   // 2. Clear every `nostrapps:*` localStorage key.
