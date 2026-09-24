@@ -342,7 +342,8 @@ function finishFeedRequest(instanceId: string, requestId: string) {
 }
 
 function cancelFeedRequest(instanceId: string | undefined, requestId: string | undefined) {
-  if (!instanceId || !requestId) return false
+  // bridge.js numbers feeds from 0, so the first one is falsy.
+  if (!instanceId || requestId == null) return false
   const requests = feedRequests.get(instanceId)
   const request = requests?.get(requestId)
   if (!request) return false
