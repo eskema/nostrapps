@@ -84,6 +84,9 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
         "This cannot be undone."
     )
     if (!ok) return
+    resetBtn.textContent = "erasing"
+    resetBtn.classList.add("is-erasing")
+    resetBtn.setAttribute("disabled", "")
     ctx.factoryReset?.()
   })
 

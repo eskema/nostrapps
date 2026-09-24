@@ -3725,6 +3725,31 @@ body.popover-open .napp-body iframe {
   justify-self: start;
 }
 
+/* Erasing: the wipe runs until the reload, so the button breathes meanwhile. */
+.settings-reset-btn.is-erasing {
+  animation: settings-erasing 1.6s ease-in-out infinite;
+}
+
+.settings-reset-btn.is-erasing:disabled {
+  cursor: progress;
+}
+
+@keyframes settings-erasing {
+  from,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-reset-btn.is-erasing {
+    animation: none;
+  }
+}
+
 /* ─── uploader ─────────────────────────────────────────────────── */
 /* Everything on show is design-system furniture: .ui-details sections whose
    summary carries a count badge, .ui-items rows with a .ui-check and a remove
