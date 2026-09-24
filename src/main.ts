@@ -662,6 +662,8 @@ async function runNappAction(
         // Opened, or surfaced where it is: a system napp is a single window.
         instanceId = launchSystemNapp(sysId).getState().instanceId
       } else if (existingInstanceId) {
+        // Raised like a new window would be, or it answers behind the caller.
+        focusInstance(existingInstanceId)
         instanceId = existingInstanceId
       } else if (auxiliary) {
         // Ephemeral floating window at the cursor, sized from the app's
