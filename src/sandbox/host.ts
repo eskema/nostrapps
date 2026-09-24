@@ -4687,7 +4687,48 @@ async function saveFileForNapp(params: {
   return { name, size: blob.size }
 }
 
-export async function loadEvent(params: { code: string; relays?: string[]; author?: string }) {
+// A napp that re-renders asks for the same pointer again, and a miss costs up
+// to three relay rounds. One lookup per pointer at a time, and a miss backs
+// off: the relays aren't asked again for 5s, then 10s, 20s… up to 2 minutes
+// while it keeps missing. Finding it starts over.
+const LOAD_EVENT_BACKOFF_MS = 5_000
+const LOAD_EVENT_BACKOFF_MAX_MS = 2 * 60_000
+const loadEventInflight = new Map<string, Promise<NostrEvent | null>>()
+const loadEventMisses = new Map<string, { until: number; wait: number }>()
+
+export function loadEvent(params: {
+  code: string
+  relays?: string[]
+  author?: string
+}): Promise<NostrEvent | null> {
+  const key = JSON.stringify([params?.code, params?.relays ?? [], params?.author ?? ""])
+  const miss = loadEventMisses.get(key)
+  if (miss && Date.now() < miss.until) return Promise.resolve(null)
+  let p = loadEventInflight.get(key)
+  if (!p) {
+    p = fetchEvent(params)
+      .then(event => {
+        if (event) loadEventMisses.delete(key)
+        else {
+          if (loadEventMisses.size >= 2000) loadEventMisses.clear()
+          const wait = miss
+            ? Math.min(miss.wait * 2, LOAD_EVENT_BACKOFF_MAX_MS)
+            : LOAD_EVENT_BACKOFF_MS
+          loadEventMisses.set(key, { until: Date.now() + wait, wait })
+        }
+        return event
+      })
+      .finally(() => loadEventInflight.delete(key))
+    loadEventInflight.set(key, p)
+  }
+  return p
+}
+
+async function fetchEvent(params: {
+  code: string
+  relays?: string[]
+  author?: string
+}): Promise<NostrEvent | null> {
   let id: string | undefined
   let kind: number | undefined
   let author: string | undefined
