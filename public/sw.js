@@ -205,43 +205,48 @@ function htmlHeaders(mime, policy) {
   return headers
 }
 
+// What a policy record we couldn't read counts as. "No record" means an
+// install from before policies and runs unrestricted, so an unreadable one
+// must not come out as null too: a broken read would unlock the napp.
+const UNREADABLE_POLICY = { domains: [], v: 2 }
+
 function parsePolicy(text) {
   try {
     const p = JSON.parse(text)
-    return p && typeof p === "object" ? p : null
+    return p && typeof p === "object" ? p : UNREADABLE_POLICY
   } catch {
-    return null
+    return UNREADABLE_POLICY
   }
 }
 
 async function readInstalledPolicy() {
   try {
     const db = await openDB()
-    const rec = await new Promise(resolve => {
+    const rec = await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly")
       const r = tx.objectStore(STORE).get("/__policy__")
       r.onsuccess = () => resolve(r.result ?? null)
-      r.onerror = () => resolve(null)
+      r.onerror = () => reject(r.error)
     })
     try {
       db.close()
     } catch {}
-    if (!rec) return null // no record = locked
+    if (!rec) return null // no record: see grantsFor
     const text = typeof rec.body === "string" ? rec.body : await rec.body.text()
     return parsePolicy(text)
   } catch {
-    return null
+    return UNREADABLE_POLICY
   }
 }
 
 async function readDevPolicy() {
   try {
     const rec = await requestFileFromHost("/__policy__")
-    if (!rec || rec.error) return null
+    if (!rec || rec.error) return UNREADABLE_POLICY
     const text = typeof rec.body === "string" ? rec.body : await new Blob([rec.body]).text()
     return parsePolicy(text)
   } catch {
-    return null
+    return UNREADABLE_POLICY
   }
 }
 

@@ -1916,7 +1916,9 @@ export async function reinstallFiles(
 ) {
   const origin = nappOriginFor(nappId)
   console.debug("[sandbox] reinstallFiles", { nappId, origin, fileCount: files.length, label })
-  await bootNapp(origin, files, onProgress ?? (() => {}), label || nappId)
+  // The install clears the origin's store, the policy record with it: write it
+  // back, or the updated napp comes up with no lock at all.
+  await bootNapp(origin, files, onProgress ?? (() => {}), label || nappId, getStoredPolicy(nappId))
 }
 
 // Reload every open iframe whose dataset.nappId matches. Reassigning
