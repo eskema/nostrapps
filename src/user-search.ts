@@ -3,8 +3,8 @@ import { loadNostrUser, nostrUserFromEvent, type NostrUser } from "@nostr/gadget
 import { pool } from "@nostr/gadgets/global"
 import type { NostrEvent } from "@nostr/tools/core"
 import { getStore } from "./store.js"
-import { loadSearchRelays } from "./extra-lists.js"
 import { getPubkey } from "./account.js"
+import { loadSearchRelays } from "@nostr/gadgets/lists"
 
 // Default NIP-50 search relays, used when the user has no kind:10007
 // search-relay list (or isn't logged in).

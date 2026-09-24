@@ -37,8 +37,10 @@ import {
   fetchFavoriteFollowSetsWithSets,
   fetchFavoriteRelaysWithSets,
   loadAuthoredPodcasts,
+  loadBlockedRelays,
   loadBlossomServers,
   loadBookmarks,
+  loadDMRelays,
   loadEmojis,
   loadFavoriteFollowSets,
   loadFavoritePodcasts,
@@ -52,11 +54,11 @@ import {
   loadPins,
   loadProfileBadges,
   loadRelayList,
+  loadSearchRelays,
   loadSimpleGroups,
   loadWikiAuthors,
   loadWikiRelays
 } from "@nostr/gadgets/lists"
-import { loadBlockedRelays, loadDmRelays, loadSearchRelays } from "../extra-lists.js"
 import { loadEmojiSets, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { outboxFilterRelayBatch } from "@nostr/gadgets/outbox"
 import {
@@ -4816,7 +4818,7 @@ async function dispatch(
     case "napp.loadBookmarks":
       return loadBookmarks(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadDmRelays":
-      return loadDmRelays(resolvePubkey(params), undefined, undefined, undefined)
+      return loadDMRelays(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadEmojis":
       return loadEmojis(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadFavoriteRelays":
