@@ -4109,23 +4109,36 @@ async function startInboxFeed(
   }
 }
 
+// A napp's pubkey argument, as hex. Anything else is refused here rather than
+// passed on: a malformed author panics the store's wasm, and after three of
+// those in a minute the store stays down for everyone.
 function resolvePubkey(user: string): string {
-  if (typeof user !== "string") return user
-  if (user.startsWith("npub1") || user.startsWith("nprofile1")) {
+  let pk: unknown = user
+  if (typeof user === "string" && (user.startsWith("npub1") || user.startsWith("nprofile1"))) {
     const { type, data } = decode(user)
-    if (type === "npub") return data as string
-    if (type === "nprofile") return (data as { pubkey: string }).pubkey
+    if (type === "npub") pk = data
+    if (type === "nprofile") pk = (data as { pubkey: string }).pubkey
   }
-  return user
+  if (!isHex64(pk)) throw new Error("invalid pubkey")
+  return pk
+}
+
+// Event kinds from a napp: integers in range, anything else dropped.
+function intKinds(kinds: unknown): number[] {
+  return Array.isArray(kinds) ? kinds.filter(k => Number.isInteger(k) && k >= 0 && k <= 65535) : []
 }
 
 // The metadata loader's EOSE fallback npub-encodes every pubkey it was asked
 // about; a malformed one throws inside the shared dataloader batch and takes
 // everyone else's pending requests down with it. Validate before it can.
+// Only the pubkey and relay hints go through: the loader's refreshStyle would
+// let a napp clear anyone's cached profile or plant one of its own making.
 function safeLoadNostrUser(input: any) {
   const pk = resolvePubkey(typeof input === "string" ? input : String(input?.pubkey ?? ""))
-  if (!isHex64(pk)) throw new Error("invalid pubkey")
-  return typeof input === "string" ? loadNostrUser(pk) : loadNostrUser({ ...input, pubkey: pk })
+  const relays = Array.isArray(input?.relays)
+    ? input.relays.filter((r: unknown) => typeof r === "string")
+    : undefined
+  return loadNostrUser(relays?.length ? { pubkey: pk, relays } : pk)
 }
 
 // A filter whose only id/author constraint is emptied by this is dropped, so
@@ -4144,6 +4157,10 @@ function sanitizeFilter(filter: any): any | null {
   if (Array.isArray(g.authors)) {
     g.authors = g.authors.filter(isHex64)
     if (g.authors.length === 0) return null
+  }
+  if (g.kinds !== undefined) {
+    g.kinds = intKinds(g.kinds)
+    if (g.kinds.length === 0) return null
   }
   return g
 }
@@ -4205,6 +4222,9 @@ async function dispatch(
     case "nip44.decrypt":
       return signer.nip44.decrypt(params.pubkey, params.ciphertext)
     case "nostrdb.add": {
+      // Shared with every napp and the launcher: a forged event (or deletion)
+      // must not get in.
+      if (!params?.event || !verifyEvent(params.event)) return false
       const saved = await store.saveEvent(params.event)
       await applyDeletionLocally(params.event)
       return saved
@@ -4248,8 +4268,9 @@ async function dispatch(
     case "nostrdb.replaceable":
       // loadReplaceables returns [lastAttempt, event] tuples; napps are
       // promised the bare event.
+      if (!Number.isInteger(params?.kind) || !isHex64(params?.author)) return undefined
       const result = await getStore().loadReplaceables([
-        [params.kind, params.author, params.identifier]
+        [params.kind, params.author, typeof params.identifier === "string" ? params.identifier : ""]
       ])
       return result[0][1]
     case "napp.action": {
@@ -4268,7 +4289,7 @@ async function dispatch(
       if (!isHex64(params.pubkey)) return
       const filter: Filter = {
         authors: [params.pubkey],
-        kinds: params.kinds,
+        kinds: intKinds(params.kinds),
         limit: params.limit || 100
       }
       if (params.since) filter.since = params.since
@@ -4277,7 +4298,7 @@ async function dispatch(
         instanceId!,
         params.callbackId,
         [params.pubkey],
-        params.kinds,
+        intKinds(params.kinds),
         params.until,
         filter
       )
@@ -4286,15 +4307,22 @@ async function dispatch(
     case "napp.feeds.following": {
       // k3 p-tags are relay-accepted garbage sometimes — never let them
       // reach the wasm or the gadgets loaders (see utils isHex64).
-      const authors = (await loadFollowsList(params.source)).items.filter(isHex64)
+      const authors = (await loadFollowsList(resolvePubkey(params.source))).items.filter(isHex64)
       const filter: Filter = {
         authors,
-        kinds: params.kinds,
+        kinds: intKinds(params.kinds),
         limit: params.limit || 100
       }
       if (params.since) filter.since = params.since
       if (params.until) filter.until = params.until
-      startOutboxFeed(instanceId!, params.callbackId, authors, params.kinds, params.until, filter)
+      startOutboxFeed(
+        instanceId!,
+        params.callbackId,
+        authors,
+        intKinds(params.kinds),
+        params.until,
+        filter
+      )
       return
     }
     case "napp.feeds.inbox": {
@@ -4304,7 +4332,7 @@ async function dispatch(
       if (pubkeys.length === 0) return
       const filter: Filter = {
         "#p": pubkeys,
-        kinds: params.kinds,
+        kinds: intKinds(params.kinds),
         limit: params.limit || 100
       }
       if (params.since) filter.since = params.since
@@ -4339,7 +4367,7 @@ async function dispatch(
       if (pubkeys.length === 0) return
       const filter: Filter = {
         authors: pubkeys,
-        kinds: params.kinds,
+        kinds: intKinds(params.kinds),
         limit: params.limit || 100
       }
       if (params.since) filter.since = params.since
@@ -4904,7 +4932,7 @@ async function applyDeletionLocally(event: NostrEvent) {
       if (tag[0] !== "a" || typeof tag[1] !== "string") continue
       const [kindStr, author, ...rest] = tag[1].split(":")
       const kind = Number(kindStr)
-      if (!Number.isFinite(kind) || author !== event.pubkey) continue
+      if (!Number.isInteger(kind) || author !== event.pubkey) continue
       const filter: any = { kinds: [kind], authors: [author] }
       const d = rest.join(":")
       if (d) filter["#d"] = [d]
@@ -4953,7 +4981,7 @@ async function publishEvent(
 ): Promise<PublishResult> {
   // A published deletion must also take effect here — the napp's own feeds
   // answer from this store, and relays alone cannot clean it.
-  if (event.kind === 5) {
+  if (event.kind === 5 && verifyEvent(event)) {
     try {
       await store.saveEvent(event)
     } catch {}
