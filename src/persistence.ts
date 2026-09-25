@@ -1061,7 +1061,9 @@ export function setInstalledPetname(nappId: string, petname: string) {
   if (!nappId || !petname) return
 
   const all = readInstalled()
-  if (!all[nappId]) return
+  // Called on every window commit: the catalog (whole manifests) is only
+  // written back for an actual rename.
+  if (!all[nappId] || all[nappId].petname === petname) return
 
   all[nappId].petname = petname
   writeInstalled(all)
