@@ -229,9 +229,15 @@
           return
         }
 
+        // Commands come from the launcher only. This frame's host is
+        // <label>.<launcher host>, so the launcher is that minus the label; any
+        // other sender (a napp, this one's own windows included) is ignored —
+        // it could otherwise wipe a napp, swap its files or rewrite its policy.
+        const LAUNCHER = `${location.protocol}//${location.host.slice(location.host.indexOf(".") + 1)}`
+
         window.addEventListener("message", async event => {
           const data = event.data
-          if (!data) return
+          if (!data || event.origin !== LAUNCHER) return
           if (data.__nostrapps === "napp-install") {
             try {
               await clearAll()
@@ -279,6 +285,7 @@
               })
               // Listen for file responses from host and forward to SW
               window.addEventListener("message", hostEvent => {
+                if (hostEvent.origin !== LAUNCHER) return
                 if (hostEvent.data?.__nostrapps === "napp-dev-file-result") {
                   if (navigator.serviceWorker.controller) {
                     navigator.serviceWorker.controller.postMessage({

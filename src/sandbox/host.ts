@@ -3484,12 +3484,12 @@ async function wipeOrigin(origin: string): Promise<void> {
   document.body.appendChild(boot)
 
   try {
-    const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
+    const ready = await waitForMessage(boot, origin, "napp-boot-ready", "napp-boot-error")
     if (ready.__nostrapps === "napp-boot-error") {
       throw new Error(`Napp boot failed: ${ready.error}`)
     }
     boot.contentWindow!.postMessage({ __nostrapps: "napp-wipe" }, origin)
-    const result = await waitForMessage(origin, "napp-wipe-done", "napp-wipe-error")
+    const result = await waitForMessage(boot, origin, "napp-wipe-done", "napp-wipe-error")
     if (result.__nostrapps === "napp-wipe-error") {
       throw new Error(result.error)
     }
@@ -3513,7 +3513,7 @@ export async function bootNapp(
   document.body.appendChild(boot)
 
   try {
-    const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
+    const ready = await waitForMessage(boot, origin, "napp-boot-ready", "napp-boot-error")
     if (ready.__nostrapps === "napp-boot-error") {
       throw new Error(`Napp boot failed: ${ready.error}`)
     }
@@ -3523,7 +3523,7 @@ export async function bootNapp(
     // the napp's very first load (no unlocked window before the grant applies).
     boot.contentWindow!.postMessage({ __nostrapps: "napp-install", files, policy }, origin)
 
-    const result = await waitForMessage(origin, "napp-install-done", "napp-install-error")
+    const result = await waitForMessage(boot, origin, "napp-install-done", "napp-install-error")
     if (result.__nostrapps === "napp-install-error") {
       throw new Error(result.error)
     }
@@ -3542,14 +3542,19 @@ export async function applyNappPolicy(origin: string, nappId: string) {
   boot.style.display = "none"
   document.body.appendChild(boot)
   try {
-    const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
+    const ready = await waitForMessage(boot, origin, "napp-boot-ready", "napp-boot-error")
     if (ready.__nostrapps === "napp-boot-error") throw new Error(ready.error)
     // Ship the versioned stored record so the SW honors the exact grant.
     boot.contentWindow!.postMessage(
       { __nostrapps: "napp-set-policy", policy: getStoredPolicy(nappId) },
       origin
     )
-    const result = await waitForMessage(origin, "napp-set-policy-done", "napp-set-policy-error")
+    const result = await waitForMessage(
+      boot,
+      origin,
+      "napp-set-policy-done",
+      "napp-set-policy-error"
+    )
     if (result.__nostrapps === "napp-set-policy-error") throw new Error(result.error)
   } finally {
     boot.remove()
@@ -3570,10 +3575,15 @@ export async function readNappFiles(nappId: string): Promise<NsiteFile[]> {
   boot.style.display = "none"
   document.body.appendChild(boot)
   try {
-    const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
+    const ready = await waitForMessage(boot, origin, "napp-boot-ready", "napp-boot-error")
     if (ready.__nostrapps === "napp-boot-error") throw new Error(ready.error)
     boot.contentWindow!.postMessage({ __nostrapps: "napp-read-files" }, origin)
-    const result = await waitForMessage(origin, "napp-read-files-done", "napp-read-files-error")
+    const result = await waitForMessage(
+      boot,
+      origin,
+      "napp-read-files-done",
+      "napp-read-files-error"
+    )
     if (result.__nostrapps === "napp-read-files-error") throw new Error(result.error)
     const files: Array<{ path: string; body: Blob | ArrayBuffer; mime?: string }> =
       result.files || []
@@ -3647,7 +3657,7 @@ export async function bootDevApp(
   devBootIframes.set(nappId, boot)
 
   try {
-    const ready = await waitForMessage(origin, "napp-boot-ready", "napp-boot-error")
+    const ready = await waitForMessage(boot, origin, "napp-boot-ready", "napp-boot-error")
     if (ready.__nostrapps === "napp-boot-error") {
       throw new Error(`Napp boot failed: ${ready.error}`)
     }
@@ -3655,7 +3665,12 @@ export async function bootDevApp(
     onProgress(`Registering dev app ${label}…`)
     boot.contentWindow!.postMessage({ __nostrapps: "napp-dev-install", nappId }, origin)
 
-    const result = await waitForMessage(origin, "napp-dev-install-done", "napp-dev-install-error")
+    const result = await waitForMessage(
+      boot,
+      origin,
+      "napp-dev-install-done",
+      "napp-dev-install-error"
+    )
     if (result.__nostrapps === "napp-dev-install-error") {
       throw new Error(result.error)
     }
@@ -3766,7 +3781,11 @@ window.addEventListener("message", async event => {
   }
 })
 
+// A boot frame's answer: from that frame only. The origin alone doesn't say
+// which frame spoke — the napp's own windows run at it too, and could answer
+// for the boot frame (a policy "written", a file list of their choosing).
 function waitForMessage(
+  boot: HTMLIFrameElement,
   expectedOrigin: string,
   successType: string,
   errorType: string
@@ -3778,7 +3797,7 @@ function waitForMessage(
     }, BOOT_TIMEOUT_MS)
 
     const handler = (event: MessageEvent) => {
-      if (event.origin !== expectedOrigin) return
+      if (event.origin !== expectedOrigin || event.source !== boot.contentWindow) return
       const data: any = event.data
       if (!data) return
       if (data.__nostrapps === successType || (errorType && data.__nostrapps === errorType)) {
