@@ -28,6 +28,12 @@ const CAP_INFO: Record<string, { title: string; desc: string }> = {
   network: { title: "network", desc: "connects directly to the web (nostr works without it)" }
 }
 
+// Whether this browser holds a napp to the network lock the launcher sets on its
+// window (the iframe `csp` attribute; Chromium only). Elsewhere the lock is
+// best effort: a napp written to get around it can. Napplets are sealed in
+// every browser, so this is about napps only.
+const LOCK_ENFORCED = "csp" in HTMLIFrameElement.prototype
+
 // Grantable rows are the NAP domains (network is appended separately).
 const CAP_ORDER = [
   "identity",
@@ -314,7 +320,11 @@ function policySection(
     for (const d of rowsFor()) {
       const box = check({ checked: cur ? cur.domains.includes(d) : true })
       boxes.set(d, box)
-      body.appendChild(permRow(box, CAP_INFO[d].title, CAP_INFO[d].desc))
+      const desc =
+        d === "network" && !LOCK_ENFORCED && type !== "napplet"
+          ? `${CAP_INFO.network.desc}; this browser can't enforce leaving it off`
+          : CAP_INFO[d].desc
+      body.appendChild(permRow(box, CAP_INFO[d].title, desc))
     }
   }
   renderBody()
