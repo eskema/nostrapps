@@ -103,18 +103,22 @@
         return
       }
       case "napp-dispatch-action": {
-        // if a callback was previously registered with registerAction() we'll have an idx here
+        // if a callback was previously registered with registerAction() we'll have an idx here.
+        // A handler always answers, its error included, or the caller waits for good. With
+        // no handler (popstate only, below) nothing answers: the window is the answer, and
+        // an auxiliary one closes on it.
         if (typeof data.idx === "number") {
           const fn = actionHandlers[data.idx]?.[1]
           if (!fn) {
-            throw new Error("No registered action handler matched this dispatch")
+            reply(data.requestId, false, "No registered action handler matched this dispatch")
+          } else {
+            Promise.resolve()
+              .then(() => fn(data.name, data.payload))
+              .then(
+                result => reply(data.requestId, true, result ?? null),
+                err => reply(data.requestId, false, String(err?.message ?? err))
+              )
           }
-
-          // this is necessary to pass a result back to the caller, which is only possible when
-          // a callback is registered with registerAction()
-          Promise.resolve()
-            .then(() => fn(data.name, data.payload))
-            .then(result => reply(data.requestId, true, result ?? null))
         }
 
         // regardless of whether we have a callback registered or not, always call popstate

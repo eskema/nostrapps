@@ -292,6 +292,9 @@ function clearInstanceActionState(
 }
 
 function clearReady(instanceId: string) {
+  // Let anyone still waiting go on: they find the window gone (closed) or
+  // wait for the new document's actions (reloaded), instead of hanging.
+  readyResolve.get(instanceId)?.()
   readyWaits.delete(instanceId)
   readyResolve.delete(instanceId)
   readyInstances.delete(instanceId)
@@ -304,6 +307,8 @@ function clearInstanceRuntimeState(
   clearReady(instanceId)
   clearInstanceActionState(instanceId, reason)
   clearInstanceFeedRequests(instanceId)
+  closeInstanceSubs(instanceId)
+  rejectInstanceDispatches(instanceId, reason)
 }
 
 function clearInstanceFeedRequests(instanceId: string) {
@@ -1460,19 +1465,33 @@ async function nappletWriteRelays(pk: string | null): Promise<string[]> {
 }
 
 // ── relay streaming (relay.subscribe → relay.event/eose, relay.close) ──
-// Each subscription is an AbortController keyed by nappId+subId; the napplet
-// owns its lifecycle via subId. Cleared for a napp when it's uninstalled.
-const nappletSubs = new Map<string, AbortController>()
-const nappletSubKey = (nappId: string, subId: string) => `${nappId}\u0000${subId}`
+// Each subscription is an AbortController keyed by window + subId; the
+// napplet owns its lifecycle via subId, and it ends with the window (closed
+// or reloaded, see clearInstanceRuntimeState) or the napp (uninstalled).
+const nappletSubs = new Map<
+  string,
+  { controller: AbortController; nappId: string; instanceId: string }
+>()
+const nappletSubKey = (instanceId: string, subId: string) => `${instanceId}\u0000${subId}`
 
-async function nappletRelaySubscribe(nappId: string, data: any, post: (msg: object) => void) {
+function openNappletSub(nappId: string, instanceId: string, subId: string): AbortController {
+  const key = nappletSubKey(instanceId, subId)
+  nappletSubs.get(key)?.controller.abort() // replace an existing sub with the same id
+  const controller = new AbortController()
+  nappletSubs.set(key, { controller, nappId, instanceId })
+  return controller
+}
+
+async function nappletRelaySubscribe(
+  nappId: string,
+  instanceId: string,
+  data: any,
+  post: (msg: object) => void
+) {
   const subId = String(data?.subId ?? "")
   if (!subId) return
   const filters: any[] = Array.isArray(data?.filters) ? data.filters : []
-  const key = nappletSubKey(nappId, subId)
-  nappletSubs.get(key)?.abort() // replace an existing sub with the same id
-  const controller = new AbortController()
-  nappletSubs.set(key, controller)
+  const controller = openNappletSub(nappId, instanceId, subId)
   const relays = data?.relay ? [String(data.relay)] : await nappletReadRelays(getPubkey())
   let eosed = false
   const clean = filters.map(f => sanitizeFilter(f)).filter(Boolean) as any[]
@@ -1501,13 +1520,16 @@ async function nappletRelaySubscribe(nappId: string, data: any, post: (msg: obje
 // Live outbox subscription: outbox-route the filters, then stream matching
 // events as outbox.event. Same AbortController lifecycle as relay.subscribe,
 // keyed by nappId+subId; the outbox wire has no eose, only event/closed.
-async function nappletOutboxSubscribe(nappId: string, data: any, post: (msg: object) => void) {
+async function nappletOutboxSubscribe(
+  nappId: string,
+  instanceId: string,
+  data: any,
+  post: (msg: object) => void
+) {
   const subId = String(data?.subId ?? "")
   if (!subId) return
-  const key = nappletSubKey(nappId, subId)
-  nappletSubs.get(key)?.abort()
-  const controller = new AbortController()
-  nappletSubs.set(key, controller)
+  const key = nappletSubKey(instanceId, subId)
+  const controller = openNappletSub(nappId, instanceId, subId)
 
   const clean = (Array.isArray(data?.filters) ? data.filters : [data?.filters])
     .map((f: any) => sanitizeFilter(f))
@@ -1553,34 +1575,37 @@ async function nappletOutboxSubscribe(nappId: string, data: any, post: (msg: obj
   }
 }
 
-function nappletOutboxClose(nappId: string, subId: unknown, post: (msg: object) => void) {
-  const key = nappletSubKey(nappId, String(subId ?? ""))
-  const controller = nappletSubs.get(key)
-  if (controller) {
-    controller.abort()
-    nappletSubs.delete(key)
-  }
+function closeNappletSub(instanceId: string, subId: unknown) {
+  const key = nappletSubKey(instanceId, String(subId ?? ""))
+  nappletSubs.get(key)?.controller.abort()
+  nappletSubs.delete(key)
+}
+
+function nappletOutboxClose(instanceId: string, subId: unknown, post: (msg: object) => void) {
+  closeNappletSub(instanceId, subId)
   post({ type: "outbox.closed", subId: String(subId ?? "") })
 }
 
-function nappletRelayClose(nappId: string, subId: unknown, post: (msg: object) => void) {
-  const key = nappletSubKey(nappId, String(subId ?? ""))
-  const controller = nappletSubs.get(key)
-  if (controller) {
-    controller.abort()
+function nappletRelayClose(instanceId: string, subId: unknown, post: (msg: object) => void) {
+  closeNappletSub(instanceId, subId)
+  post({ type: "relay.closed", subId: String(subId ?? "") })
+}
+
+// Abort every live subscription of one window (closed or reloaded).
+function closeInstanceSubs(instanceId: string) {
+  for (const [key, sub] of nappletSubs) {
+    if (sub.instanceId !== instanceId) continue
+    sub.controller.abort()
     nappletSubs.delete(key)
   }
-  post({ type: "relay.closed", subId: String(subId ?? "") })
 }
 
 // Abort every live subscription of a napp (called on uninstall/reset).
 export function closeNappletSubs(nappId: string) {
-  const prefix = `${nappId}\u0000`
-  for (const [key, controller] of nappletSubs) {
-    if (key.startsWith(prefix)) {
-      controller.abort()
-      nappletSubs.delete(key)
-    }
+  for (const [key, sub] of nappletSubs) {
+    if (sub.nappId !== nappId) continue
+    sub.controller.abort()
+    nappletSubs.delete(key)
   }
   for (const [iframe, sub] of incSubs) if (sub.nappId === nappId) incSubs.delete(iframe)
   for (const [iframe, id] of configSubs) if (id === nappId) configSubs.delete(iframe)
@@ -1652,17 +1677,20 @@ function handleNapplet(
   data: { type: string; id?: string; subId?: string },
   iframe: HTMLIFrameElement,
   origin: string,
-  nappId: string
+  nappId: string,
+  instanceId: string
 ) {
   const domain = data.type.split(".")[0]
   if (!nappletDomainsFor(nappId).includes(domain)) return
   const post = (msg: object) => iframe.contentWindow?.postMessage(msg, origin)
 
   // Streaming ops have no single .result — they push by subId.
-  if (data.type === "relay.subscribe") return void nappletRelaySubscribe(nappId, data, post)
-  if (data.type === "relay.close") return nappletRelayClose(nappId, data.subId, post)
-  if (data.type === "outbox.subscribe") return void nappletOutboxSubscribe(nappId, data, post)
-  if (data.type === "outbox.close") return nappletOutboxClose(nappId, data.subId, post)
+  if (data.type === "relay.subscribe")
+    return void nappletRelaySubscribe(nappId, instanceId, data, post)
+  if (data.type === "relay.close") return nappletRelayClose(instanceId, data.subId, post)
+  if (data.type === "outbox.subscribe")
+    return void nappletOutboxSubscribe(nappId, instanceId, data, post)
+  if (data.type === "outbox.close") return nappletOutboxClose(instanceId, data.subId, post)
 
   // inc rides the bus, not dispatch: emit/unsubscribe are fire-and-forget.
   if (data.type === "inc.emit") return incEmit(iframe, nappId, data)
@@ -1790,7 +1818,20 @@ export function findOpenWindowByNappId(nappId: string): NappWindow | null {
 // Launcher → iframe dispatch calls (action). Each call gets a
 // requestId; the iframe replies with that id once `window.napp.onAction`
 // has run.
-const pendingDispatches = new Map<string, { resolve(v: unknown): void; reject(e: Error): void }>()
+// Actions sent into a window, waiting for its answer. Tied to the window: only
+// it can answer, and closing or reloading it settles what it never answered.
+const pendingDispatches = new Map<
+  string,
+  { instanceId: string; resolve(v: unknown): void; reject(e: Error): void }
+>()
+
+function rejectInstanceDispatches(instanceId: string, reason: string) {
+  for (const [requestId, p] of pendingDispatches) {
+    if (p.instanceId !== instanceId) continue
+    pendingDispatches.delete(requestId)
+    p.reject(new Error(reason))
+  }
+}
 
 // A string payload for a view:<kind> action is a nip19 code to resolve — or,
 // leniently, the event itself as JSON (a napp handing over what it had stored).
@@ -1845,6 +1886,7 @@ export async function callIframe(
     }
     pendingDispatches.delete(requestId)
     pendingDispatches.set(requestId, {
+      instanceId,
       resolve: result => {
         resolve(result)
       },
@@ -1874,9 +1916,12 @@ export async function callIframe(
   })
 }
 
-function settleDispatch(data: Extract<MessageData, { __nostrapps: "napp-dispatch-result" }>) {
+function settleDispatch(
+  data: Extract<MessageData, { __nostrapps: "napp-dispatch-result" }>,
+  instanceId: string
+) {
   const p = pendingDispatches.get(data.requestId!)
-  if (!p) return
+  if (!p || p.instanceId !== instanceId) return
   pendingDispatches.delete(data.requestId!)
   if (data.__nostrapps === "napp-dispatch-result") p.resolve(data.result)
   else p.reject(new Error(data.error || "dispatch failed"))
@@ -2089,7 +2134,7 @@ function mount(
       // NIP-5D dialect (window.napplet) carries `type`; legacy carries
       // `__nostrapps`. Same channel, two routers.
       if (typeof (data as any).type === "string" && !data.__nostrapps) {
-        handleNapplet(data as any, iframe, origin, nappId)
+        handleNapplet(data as any, iframe, origin, nappId, instanceId)
         return
       }
       switch (data.__nostrapps) {
@@ -2121,7 +2166,7 @@ function mount(
           return
         }
         case "napp-dispatch-result": {
-          settleDispatch(data)
+          settleDispatch(data, instanceId)
           return
         }
         case "napp-link": {
@@ -2221,7 +2266,7 @@ export function launchNapplet(
     onMessage: (data, iframe) => {
       // Napplets speak only NIP-5D; postback targets '*' (opaque origin).
       if (typeof (data as any).type === "string" && !data.__nostrapps) {
-        handleNapplet(data as any, iframe, "*", nappId)
+        handleNapplet(data as any, iframe, "*", nappId, instanceId)
       }
     },
     onClose: () => {
@@ -2276,7 +2321,7 @@ export function mountWithLoading(
     onMessage: (data, iframe) => {
       // NIP-5D dialect — same routing as mount() above.
       if (typeof (data as any).type === "string" && !data.__nostrapps) {
-        handleNapplet(data as any, iframe, origin, nappId)
+        handleNapplet(data as any, iframe, origin, nappId, instanceId)
         return
       }
       switch (data.__nostrapps) {
@@ -2308,7 +2353,7 @@ export function mountWithLoading(
           return
         }
         case "napp-dispatch-result": {
-          settleDispatch(data)
+          settleDispatch(data, instanceId)
           return
         }
         case "napp-link": {
