@@ -3844,6 +3844,72 @@ async function handleRpc(
   }
 }
 
+// The full-set feeds (profile, following, single inbox) hand the napp the whole
+// current result on every update. The set is kept here: built by a store query,
+// then new events merge in by hand, so an update is a post, not a store query
+// parsed on this thread. The store is asked again only when something wrote to
+// it past us: a sync round, a heal, a deletion.
+function feedResultSet(filter: Filter, signal: AbortSignal, post: (events: NostrEvent[]) => void) {
+  const limit = filter.limit ?? 100
+  let events: NostrEvent[] = []
+  let stale = true
+  let querying = false
+  // merged while a query was out: its result doesn't have them yet
+  let arrived: NostrEvent[] = []
+  const flush = debounce(async () => {
+    if (signal.aborted) return
+    if (stale) {
+      stale = false
+      querying = true
+      arrived = []
+      try {
+        let fresh = await safeQueryEvents(filter)
+        for (const e of arrived) fresh = mergeFeedEvent(fresh, e, limit)
+        events = fresh
+      } catch (err) {
+        stale = true // the next update tries again
+        console.warn("[feed] store query failed", err)
+      } finally {
+        querying = false
+        arrived = []
+      }
+      if (signal.aborted) return
+    }
+    post(events)
+  }, 800)
+  const requery = () => {
+    stale = true
+    flush()
+  }
+  const add = (event: NostrEvent) => {
+    // a deletion takes events out of the store: ask it
+    if (event.kind === 5) return requery()
+    events = mergeFeedEvent(events, event, limit)
+    if (querying) arrived.push(event)
+    flush()
+  }
+  return { requery, add }
+}
+
+// One event into a newest-first result of at most `limit`, the way the store
+// would hold it: a replaceable or addressable event replaces its older version.
+function mergeFeedEvent(list: NostrEvent[], event: NostrEvent, limit: number): NostrEvent[] {
+  if (list.some(e => e.id === event.id)) return list
+  let next = list
+  const addressable = isAddressableKind(event.kind)
+  if (addressable || isReplaceableKind(event.kind)) {
+    const d = (e: NostrEvent) => e.tags.find(t => t[0] === "d")?.[1] ?? ""
+    const same = (e: NostrEvent) =>
+      e.kind === event.kind && e.pubkey === event.pubkey && (!addressable || d(e) === d(event))
+    const current = next.find(same)
+    if (current && current.created_at >= event.created_at) return list
+    next = next.filter(e => !same(e))
+  } else next = [...next]
+  const at = next.findIndex(e => e.created_at < event.created_at)
+  next.splice(at === -1 ? next.length : at, 0, event)
+  return next.length > limit ? next.slice(0, limit) : next
+}
+
 async function startOutboxFeed(
   instanceId: string,
   callbackId: string,
@@ -3856,18 +3922,14 @@ async function startOutboxFeed(
 
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
   let synced = authors.map(() => false)
-  const notify = debounce(async () => {
-    if (!controller.signal.aborted)
-      win?.postMessage(
-        {
-          __nostrapps: "napp-feed-callback",
-          callbackId,
-          events: await safeQueryEvents(filter),
-          synced: synced.every(v => v)
-        },
-        "*"
-      )
-  }, 800)
+  const results = feedResultSet(filter, controller.signal, events =>
+    win?.postMessage(
+      { __nostrapps: "napp-feed-callback", callbackId, events, synced: synced.every(v => v) },
+      "*"
+    )
+  )
+  // sync, before and heal write to the store themselves: each round asks it
+  const notify = results.requery
   notify()
 
   const onSync = (pubkey?: string) => {
@@ -3882,7 +3944,7 @@ async function startOutboxFeed(
     if (authors.includes(pubkey)) notify()
   }
   const onNew = (event: NostrEvent) => {
-    if (matchFilter(filter, event)) notify()
+    if (matchFilter(filter, event)) results.add(event)
   }
   const cleanup = () => {
     outboxCurrent.onsync = outboxCurrent.onsync.filter(listener => listener !== onSync)
@@ -4110,19 +4172,10 @@ async function startInboxFeed(
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
 
   let synced = false
-  const notify = debounce(async () => {
-    if (!controller.signal.aborted)
-      win?.postMessage(
-        {
-          __nostrapps: "napp-feed-callback",
-          callbackId,
-          events: await safeQueryEvents(filter),
-          synced
-        },
-        "*"
-      )
-  }, 800)
-  notify()
+  const results = feedResultSet(filter, controller.signal, events =>
+    win?.postMessage({ __nostrapps: "napp-feed-callback", callbackId, events, synced }, "*")
+  )
+  results.requery()
 
   try {
     const relays = new Set<string>()
@@ -4140,11 +4193,12 @@ async function startInboxFeed(
       label: `inbox-${pubkeys[0].substring(0, 6)}${more}`,
       abort: controller.signal,
       async onevent(event) {
-        if (await tombstoned(event)) return
+        // a relay that ignores the filter doesn't get into the result
+        if (!matchFilter(filter, event) || (await tombstoned(event))) return
         const isNew = await store.saveEvent(event)
         if (isNew) {
           await applyDeletionLocally(event)
-          notify()
+          results.add(event)
         }
       },
       oneose() {
