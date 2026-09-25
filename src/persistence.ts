@@ -561,8 +561,17 @@ function editLoadedActions(instanceId: string, edit: (list: LoadedAction[]) => L
 }
 
 // An action dispatched to the window: appended, replayed in order on restore.
+// Bounded: the last LOADED_ACTIONS_KEEP, none over 8 KB (the size a napp's own
+// state gets, see setLoadedAction's caller). A window taking actions all day
+// would otherwise grow the spaces document until localStorage refuses it.
+const LOADED_ACTIONS_KEEP = 20
 export function appendLoadedAction(instanceId: string, name: string, payload: unknown) {
-  editLoadedActions(instanceId, list => [...list, { name, payload }])
+  let size = 0
+  try {
+    size = JSON.stringify(payload ?? null).length
+  } catch {}
+  if (size > 8192) return
+  editLoadedActions(instanceId, list => [...list, { name, payload }].slice(-LOADED_ACTIONS_KEEP))
 }
 
 // Where the napp took itself (its own history state): the latest of that
