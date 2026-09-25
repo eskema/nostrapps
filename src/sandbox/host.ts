@@ -3846,9 +3846,9 @@ async function startOutboxFeed(
   trackFeedRequest(instanceId, callbackId, { controller, cleanup })
   ;(async () => {
     try {
-      // Live streaming is opt-in now — a feed being open is the request.
-      // (Idempotent: the manager skips authors/kinds already subscribed.)
-      void goLive({ authors, kinds })
+      // Live streaming is opt-in now — a feed being open is the request, and
+      // it lasts as long as the feed.
+      void goLive({ authors, kinds, signal: controller.signal })
       try {
         await outbox.sync(authors, kinds, { signal: controller.signal })
         // The sync writes into the store from inside the gadgets package,

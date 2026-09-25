@@ -102,16 +102,16 @@ export async function ready(): Promise<void> {
 
 // ─── live mode (opt-in) ──────────────────────────────────────────
 // Sync alone no longer opens live subscriptions — those are only started when
-// something actually asks (e.g. an open napp feed calls goLive). Requests
-// accumulate: the OutboxManager marks already-live author/kind pairs as
-// permanent and skips them, so overlapping calls are cheap and idempotent.
-export function goLive(opts?: { authors?: string[]; kinds?: number[] }) {
+// something actually asks (e.g. an open napp feed calls goLive). With a
+// signal the subscription closes when it aborts; without one the manager
+// keeps it for the session, so a caller that goes away must pass one.
+export function goLive(opts?: { authors?: string[]; kinds?: number[]; signal?: AbortSignal }) {
   if (!outbox) return
   // live() mutates the arrays it's given — always hand it copies.
   const authors = opts?.authors?.length ? [...opts.authors] : liveTargets.slice()
   const kinds = opts?.kinds?.length ? [...opts.kinds] : DEFAULT_KINDS.slice()
   if (!authors.length) return
-  outbox.live(authors, kinds, { signal: undefined }).catch(err => {
+  outbox.live(authors, kinds, { signal: opts?.signal }).catch(err => {
     console.warn("failed to start live subscriptions", err)
   })
 }
