@@ -1136,7 +1136,11 @@ async function publishNappletEvent(
       created_at: Number(template.created_at) || Math.floor(Date.now() / 1000)
     })
     const relays = await nappletWriteRelays(getPubkey())
-    await Promise.allSettled(pool.publish(relays, signed, { onauth: relayAuthSigner(nappId) }))
+    const settled = await Promise.allSettled(
+      pool.publish(relays, signed, { onauth: relayAuthSigner(nappId) })
+    )
+    if (!settled.some(r => r.status === "fulfilled"))
+      return { type: resultType, ok: false, error: "no relay accepted the event", event: signed }
     return { type: resultType, ok: true, event: signed, eventId: signed.id }
   } catch (err: any) {
     return { type: resultType, ok: false, error: err?.message ?? String(err) }
@@ -1302,11 +1306,13 @@ async function commonAction(
       ...template,
       created_at: Math.floor(Date.now() / 1000)
     })
-    await Promise.allSettled(
+    const settled = await Promise.allSettled(
       pool.publish(await nappletWriteRelays(getPubkey()), signed, {
         onauth: relayAuthSigner(nappId)
       })
     )
+    if (!settled.some(r => r.status === "fulfilled"))
+      return { type: resultType, ok: false, error: "no relay accepted the event", event: signed }
     return { type: resultType, ok: true, event: signed, eventId: signed.id }
   } catch (err: any) {
     return { type: resultType, ok: false, error: err?.message ?? String(err) }
@@ -5074,6 +5080,11 @@ async function publishEventToRelays(
     const r = relaysMap[url]
     hostLog(who, `${tag} → ${url}: ${r.ok ? "OK" : `FAIL ${r.error ?? ""}`.trim()}`)
   }
+
+  // Nobody stored it: report that, and leave the caches alone. A relay taking
+  // the event is what vouches for it (relays check signatures), and a list
+  // nobody stored must not stand in for the real one here.
+  if (published === 0) return { relays: relaysMap, published, failed }
 
   // update cache for known replaceable kinds
   switch (event.kind) {
