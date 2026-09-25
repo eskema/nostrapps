@@ -69,6 +69,7 @@ export function createNappWindow({
   sourceRouting = false,
   petname,
   sandbox = "allow-scripts allow-same-origin allow-forms",
+  csp,
   onMessage,
   onClose,
   onDestroy,
@@ -93,6 +94,9 @@ export function createNappWindow({
   sourceRouting?: boolean
   petname?: string
   sandbox?: string
+  // The policy the browser holds the napp's documents to (the iframe `csp`
+  // attribute), asked each time an iframe is made: null for none.
+  csp?: () => string | null
   onMessage?: (data: MessageData, iframe: HTMLIFrameElement) => void
   onClose?: (instanceId: string) => void
   onDestroy?: (instanceId: string) => void
@@ -161,6 +165,7 @@ export function createNappWindow({
   } else {
     const iframe = document.createElement("iframe")
     iframe.sandbox = sandbox
+    applyCsp(iframe)
     // window.name is cross-origin readable from inside the iframe, so the bridge
     // can pick up the instance id without us polluting the URL.
     iframe.name = instanceId || "<missing-window-name>"
@@ -404,10 +409,23 @@ export function createNappWindow({
     setupResize(root, resizeHandles[dir], dir, notifyState)
   }
 
+  // Set before the iframe navigates: the attribute is read per navigation.
+  function applyCsp(iframe: HTMLIFrameElement) {
+    const policy = csp?.() ?? null
+    if (policy) iframe.setAttribute("csp", policy)
+    else iframe.removeAttribute("csp")
+  }
+
+  // A changed grant: the attribute follows, and takes hold at the next load.
+  function refreshCsp() {
+    if (iframeRef.current) applyCsp(iframeRef.current)
+  }
+
   function setIframe(src: string, sandboxVal?: string) {
     body.innerHTML = ""
     const newIframe = document.createElement("iframe")
     newIframe.sandbox = sandboxVal || sandbox
+    applyCsp(newIframe)
     newIframe.name = instanceId || ""
     newIframe.src = src
     body.appendChild(newIframe)
@@ -437,6 +455,7 @@ export function createNappWindow({
     notifyState,
     setIframe,
     reload,
+    refreshCsp,
     unmount: teardown
   }
 }

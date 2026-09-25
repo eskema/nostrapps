@@ -193,8 +193,17 @@ function grantsFor(policy) {
   return domains
 }
 
+// The launcher: this worker's host is <label>.<launcher host>.
+const LAUNCHER_ORIGIN = `${self.location.protocol}//${self.location.host.slice(
+  self.location.host.indexOf(".") + 1
+)}`
+
 function htmlHeaders(mime, policy) {
-  const headers = { "Content-Type": mime }
+  // A locked napp's iframe carries the lock as its `csp` attribute, and the
+  // browser only loads a document into it that accepts that from the embedder.
+  // Anything served without this (a helper file, the dev server's fallback)
+  // doesn't load there at all.
+  const headers = { "Content-Type": mime, "Allow-CSP-From": LAUNCHER_ORIGIN }
   // Locked unless the user granted the `network` capability. Network-granted
   // napps still get http:// loads upgraded — one stale image URL would
   // otherwise flag the whole page as insecure (CSP is per-document, so the

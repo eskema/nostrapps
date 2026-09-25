@@ -445,6 +445,31 @@ export function nappShortName(nappId: string): string {
   return nappId.split("~").pop()!.slice(0, 16) || nappId.slice(0, 16)
 }
 
+// The network lock, held by the browser: set on a locked napp's iframe as its
+// `csp` attribute, which the napp can't reach, and which also binds every frame
+// the napp opens inside itself. The service worker sends the same policy, but
+// it runs at the napp's origin, where the napp can reach its inputs; this is
+// the copy the napp can't undo (Chromium: other engines ignore the attribute).
+// Same policy as sw.js LOCKED_CSP.
+const NAPP_LOCK_CSP = [
+  "default-src 'self' blob: data:",
+  "script-src 'self' 'unsafe-inline' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' blob: data:",
+  "frame-src 'self'",
+  "child-src 'self' blob:",
+  "worker-src 'none'",
+  "form-action 'self'",
+  "base-uri 'self'",
+  "upgrade-insecure-requests"
+].join("; ")
+
+function nappLockCsp(nappId: string): string | null {
+  return getPolicy(nappId).domains.includes("network") ? null : NAPP_LOCK_CSP
+}
+
 export function nappOriginFor(nappId: string): string {
   return `${location.protocol}//${nappLabel(nappId)}.${location.host}`
 }
@@ -2145,6 +2170,7 @@ function mount(
     instanceId,
     origin,
     src: `${origin}/`,
+    csp: () => nappLockCsp(nappId),
     petname,
     position,
     status,
@@ -2332,6 +2358,7 @@ export function mountWithLoading(
     nappId,
     instanceId,
     origin,
+    csp: () => nappLockCsp(nappId),
     petname,
     loading: true,
     position,
@@ -3566,7 +3593,9 @@ export async function applyNappPolicy(origin: string, nappId: string) {
   }
   // Reload every open window of this napp so the new CSP takes effect now.
   for (const [, win] of openWindows) {
-    if (win.root?.dataset.nappId === nappId) win.reload?.()
+    if (win.root?.dataset.nappId !== nappId) continue
+    win.refreshCsp?.()
+    win.reload?.()
   }
 }
 
