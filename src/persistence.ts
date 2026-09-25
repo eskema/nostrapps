@@ -153,6 +153,36 @@ export function updateOpen(instanceId: string, state: NappWindowState) {
   writeJson(SPACES_KEY, spaces)
 }
 
+// Several windows' states in one read and one write of the spaces document: a
+// pack commits every window it moves. Windows not found anywhere are added as
+// updateOpen would, after that write.
+export function updateOpenMany(states: NappWindowState[]) {
+  if (states.length === 1) return updateOpen(states[0].instanceId, states[0])
+  const spaces = ensureSpaces()
+  const missing: NappWindowState[] = []
+  let write = false
+  next: for (const state of states) {
+    for (const arr of devOpenBySpace.values()) {
+      const i = arr.findIndex(n => n.instanceId === state.instanceId)
+      if (i >= 0) {
+        arr[i] = { ...arr[i], ...state }
+        continue next
+      }
+    }
+    for (const sp of allSpaces(spaces)) {
+      const i = sp.open.findIndex(n => n.instanceId === state.instanceId)
+      if (i >= 0) {
+        sp.open[i] = { ...sp.open[i], ...state }
+        if (!isEphemeralSpace(sp.id)) write = true
+        continue next
+      }
+    }
+    missing.push(state)
+  }
+  if (write) writeJson(SPACES_KEY, spaces)
+  for (const state of missing) updateOpen(state.instanceId, state)
+}
+
 // Remove a window wherever it lives — any space, or ephemeral.
 export function removeOpen(instanceId: string) {
   for (const arr of devOpenBySpace.values()) {

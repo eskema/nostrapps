@@ -948,12 +948,7 @@ function makeSystemLaunchOpts(sysId: string) {
   return {
     onStateChange: (state: NappWindowState) => {
       if (isWindowInactive(state.instanceId)) return // background-space window
-      persist.updateOpen(state.instanceId, {
-        ...state,
-        system: true,
-        systemId: sysId
-      })
-      refreshSuggestions()
+      commitWindowState({ ...state, system: true, systemId: sysId })
       maybeRepack()
     },
     onReorder: persistDomOrder,
@@ -1745,9 +1740,7 @@ function makeLaunchOpts() {
     onProgress: setStatus,
     onStateChange: (state: NappWindowState) => {
       if (isWindowInactive(state.instanceId)) return // background-space window
-      persist.updateOpen(state.instanceId, state)
-      if (state.petname) persist.setInstalledPetname(state.nappId, state.petname)
-      refreshSuggestions()
+      commitWindowState(state)
       maybeRepack()
     },
     onReorder: persistDomOrder,
@@ -1771,6 +1764,26 @@ function makeLaunchOpts() {
       refreshSuggestions()
     }
   }
+}
+
+// Window commits come in bursts: a pack moves every window, one commit each,
+// and each used to read and write the whole spaces document on its own. Saved
+// together instead, as the burst's task ends (a microtask, so the next task
+// already reads it). A window gone by then (closed in the same task) isn't
+// brought back.
+const pendingWindowStates = new Map<string, NappWindowState>()
+function commitWindowState(state: NappWindowState) {
+  if (!pendingWindowStates.size) queueMicrotask(flushWindowStates)
+  pendingWindowStates.set(state.instanceId, state)
+}
+function flushWindowStates() {
+  const states = [...pendingWindowStates.values()].filter(s => hasOpenWindow(s.instanceId))
+  pendingWindowStates.clear()
+  if (!states.length) return
+  persist.updateOpenMany(states)
+  for (const s of states)
+    if (!s.system && s.petname) persist.setInstalledPetname(s.nappId, s.petname)
+  refreshSuggestions()
 }
 
 // Resolves once a frame has painted — at once in a hidden tab, where none comes.
