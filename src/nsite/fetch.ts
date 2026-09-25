@@ -131,14 +131,18 @@ function collect(reqs: Array<{ url: string; filter: Filter }>): Promise<NostrEve
   const events: NostrEvent[] = []
   return new Promise((resolve, reject) => {
     let done = false
+    let sub: { close(): void } | undefined
+    // A one-shot lookup: the subscription closes with it, or it stays open
+    // on every relay asked for the rest of the session.
     const finish = () => {
       if (done) return
       done = true
       clearTimeout(timer)
+      sub?.close()
       resolve(events)
     }
     const timer = setTimeout(finish, COLLECT_TIMEOUT_MS)
-    pool.subscribeMap(reqs, {
+    sub = pool.subscribeMap(reqs, {
       label: "napp",
       onevent(e: any) {
         events.push(e)
@@ -151,6 +155,7 @@ function collect(reqs: Array<{ url: string; filter: Filter }>): Promise<NostrEve
         reject(reasons)
       }
     })
+    if (done) sub.close()
   })
 }
 
