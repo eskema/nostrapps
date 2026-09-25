@@ -40,18 +40,18 @@ async function handleFetch(req, url) {
   // napp's network grant. Never serve it back to the napp as a file.
   if (path === "/__policy__") return new Response("not found", { status: 404 })
 
-  if (path === "/boot.html") return fetch(req)
-  if (path === "/sw.js") return fetch(req)
-  if (path === "/bridge.js") return fetch(req)
-  if (path === "/napplet-bridge.js") return fetch(req)
+  if (path === "/boot.html") return passthrough(req, BOOT_CSP)
+  if (path === "/sw.js") return passthrough(req, LOCKED_CSP)
+  if (path === "/bridge.js") return passthrough(req, LOCKED_CSP)
+  if (path === "/napplet-bridge.js") return passthrough(req, LOCKED_CSP)
   // Signing companion lazy-imported by bridge.js (napp.utils.signWithKey /
   // generateKey) — generated from @nostr/tools/pure, served like bridge.js.
-  if (path === "/nostr-crypto.js") return fetch(req)
+  if (path === "/nostr-crypto.js") return passthrough(req, LOCKED_CSP)
   // Launcher-owned shared stylesheet (opt-in via metadata `requires: ["ui"]`),
   // served from the launcher origin for every napp subdomain like bridge.js.
   // Its fonts are inlined as data URIs inside it (a separate /fonts/ request is
   // fetched in CORS mode, which fails the napp-subdomain passthrough).
-  if (path === "/napp-ui.css") return fetch(req)
+  if (path === "/napp-ui.css") return passthrough(req, LOCKED_CSP)
 
   if (url.host.startsWith("dev-") || url.host.startsWith("temp-")) {
     try {
@@ -116,8 +116,30 @@ async function handleFetch(req, url) {
   }
 
   return new Response(`file ${url} not found`, {
-    status: 404
+    status: 404,
+    headers: { "Content-Security-Policy": LOCKED_CSP }
   })
+}
+
+// The launcher's own files, fetched from the server. Opened as a page (a napp
+// framing one) each would be a page at the napp's origin with no lock at all,
+// so each carries a policy: the lock, or for boot.html what it needs (its
+// script, registering this worker) and no framing by anything but the
+// launcher. Chromium holds a napp's frames to the launcher's csp attribute
+// anyway; this is for engines that don't. A failed fetch is a network error,
+// not an uncaught rejection.
+async function passthrough(req, csp) {
+  let res
+  try {
+    res = await fetch(req)
+  } catch {
+    return Response.error()
+  }
+  const headers = new Headers(res.headers)
+  headers.delete("Content-Encoding")
+  headers.delete("Content-Length")
+  headers.set("Content-Security-Policy", csp)
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
 }
 
 let serial = 1
@@ -197,6 +219,14 @@ function grantsFor(policy) {
 const LAUNCHER_ORIGIN = `${self.location.protocol}//${self.location.host.slice(
   self.location.host.indexOf(".") + 1
 )}`
+
+const BOOT_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "connect-src 'self'",
+  "worker-src 'self'",
+  `frame-ancestors ${LAUNCHER_ORIGIN}`
+].join("; ")
 
 function htmlHeaders(mime, policy) {
   // A locked napp's iframe carries the lock as its `csp` attribute, and the
