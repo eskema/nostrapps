@@ -1446,6 +1446,11 @@ async function linkOpen(nappId: string, data: any): Promise<Record<string, unkno
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     return { type: resultType, error: "unsupported-scheme" }
   }
+  // A napp's origin opened as a tab runs it outside its window, where the
+  // launcher's network lock (the iframe's csp) doesn't reach.
+  if (url.host.endsWith(`.${location.host}`)) {
+    return { type: resultType, error: "napp-origin" }
+  }
   const label = typeof data?.options?.label === "string" ? ` — "${data.options.label}"` : ""
   if (!(await requireApproval(nappId, "link.open", `Open ${url.href} in a new tab${label}.`))) {
     return { type: resultType, status: "denied" }
