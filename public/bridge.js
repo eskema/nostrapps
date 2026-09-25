@@ -551,6 +551,11 @@
     log: message => {
       rpc("napp.log", { message: String(message ?? "") }).catch(() => {})
     },
+    // What the NIP-66 relay monitors say about these relays, with their place
+    // in the launcher's ranking. See NAPP.md.
+    relays: {
+      health: urls => rpc("napp.relays.health", { urls })
+    },
     feeds: {
       profile: (pubkey, kinds, callback, { since, until, limit } = {}) =>
         feedRpc("napp.feeds.profile", { pubkey, kinds, since, until, limit }, callback),

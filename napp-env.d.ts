@@ -37,6 +37,19 @@ type NappNostrDB = {
 type NappListResult<T> = { event: NappNostrEvent | null; items: T[] }
 type NappRelayItem = { url: string; read: boolean; write: boolean }
 type NappFeedHandle = { close(): void }
+type NappRelayHealth = {
+  url: string
+  // online: a monitor checked it in the last 2 hours; offline: checked this
+  // week, not since; unknown: no monitor checked it this week
+  status: "online" | "offline" | "unknown"
+  checkedAt: number | null
+  rtt: number | null
+  nips: number[] | null
+  // [] when the monitors say it requires nothing, null when nobody said
+  requires: string[] | null
+  // place in the launcher's ranking across the user's follows, 0 first
+  rank: number | null
+}
 type NappFeeds = {
   profile(
     pubkey: string,
@@ -126,6 +139,7 @@ type Napp = {
   close(): void
   link(url: string): void
   log(message: string): void
+  relays: { health(urls: string[]): Promise<NappRelayHealth[]> }
   feeds: NappFeeds
   utils: NappUtils
   nip19: {

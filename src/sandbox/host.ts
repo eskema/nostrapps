@@ -98,7 +98,14 @@ import { requireAccount } from "../login.js"
 import { relayAuthSigner } from "../relay-auth.js"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
-import { current as outboxCurrent, outbox, FALLBACK_RELAYS, goLive } from "../outbox.js"
+import {
+  current as outboxCurrent,
+  outbox,
+  FALLBACK_RELAYS,
+  goLive,
+  relayRankOf
+} from "../outbox.js"
+import { relayHealth } from "../relay-health.js"
 import { debounce, HEX64, isHex64 } from "../utils.js"
 
 const BOOT_TIMEOUT_MS = 10_000
@@ -4583,6 +4590,12 @@ async function dispatch(
       return copyTextForNapp(params)
     case "napp.log":
       return logForNapp(callerNappId, params)
+    case "napp.relays.health": {
+      const urls = (Array.isArray(params?.urls) ? params.urls : [])
+        .filter((u: unknown) => typeof u === "string")
+        .slice(0, 200)
+      return (await relayHealth(urls)).map(h => ({ ...h, rank: relayRankOf(h.url) }))
+    }
     case "napp.publish":
       return publishEvent(params.event, params.relays, callerNappId)
     case "napp.loadEvent":

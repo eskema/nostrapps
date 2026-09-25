@@ -122,10 +122,20 @@ window.napp.fx.parseCoordinate("kind:pubkey:d")
 window.napp.fx.formatCoordinate(pointer)
 window.napp.fx.satsFromBolt11(invoice)
 
+// Relay health (NIP-66)
+window.napp.relays.health(urls)
+
 window.napp.close()
 window.napp.link(url)
 window.napp.log(message)
 ```
+
+`window.napp.relays.health(urls)` answers, per relay, what the NIP-66 monitors
+say: `status` (`online` if checked in the last 2 hours, `offline` if checked
+this week but not since, `unknown` otherwise), `checkedAt`, `rtt` (ms),
+`nips`, `requires` (`auth`, `payment`, …) and `rank`, the relay's place across
+the user's follows (null if unranked). Waits up to 6 s for relays the launcher
+hasn't asked about yet; up to 200 urls per call.
 
 `window.napp.log(message)` appends a line to the launcher's logs window,
 prefixed with the napp's id — for reports (a publish and what each relay
