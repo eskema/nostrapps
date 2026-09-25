@@ -49,10 +49,14 @@ const queue = new Set<string>()
 const inflight = new Map<string, Promise<void>>()
 let timer: ReturnType<typeof setTimeout> | null = null
 
+// A relay url, normalized, or null: normalizeURL makes a url of anything
+// ("not a url" → wss://not%20a%20url/), so the host has to look like one.
 function norm(url: string): string | null {
   try {
     const u = normalizeURL(url)
-    return /^wss?:\/\//.test(u) ? u : null
+    const { protocol, hostname } = new URL(u)
+    if (protocol !== "wss:" && protocol !== "ws:") return null
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)*$/i.test(hostname) ? u : null
   } catch {
     return null
   }
