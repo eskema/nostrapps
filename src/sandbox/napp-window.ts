@@ -30,11 +30,14 @@ const PIN_BASE = 100000
 function ensureFocusTracker() {
   if (focusTrackerInstalled) return
   focusTrackerInstalled = true
-  // Cross-origin iframes don't reliably fire `focus` when their content is
-  // clicked, so we poll document.activeElement instead. Whenever the focus
-  // lands on a different napp iframe, bring its window to the front.
+  // A click inside a napp's iframe never reaches this document, so the window
+  // in use is read off document.activeElement: once as focus leaves the
+  // launcher for an iframe (window blur), then 4 times a second while it
+  // stays in napps, since hopping from one iframe straight into another fires
+  // nothing here. Nothing runs while focus is in the launcher itself.
   let lastFocused: Element | null = null
-  function tick() {
+  let poll: ReturnType<typeof setInterval> | null = null
+  function check() {
     const el = document.activeElement
     if (el && el.tagName === "IFRAME") {
       const root = el.closest(".napp-window")
@@ -45,9 +48,16 @@ function ensureFocusTracker() {
     } else {
       lastFocused = null
     }
-    requestAnimationFrame(tick)
   }
-  requestAnimationFrame(tick)
+  window.addEventListener("blur", () => {
+    setTimeout(check, 0) // activeElement moves to the iframe just after blur
+    poll ??= setInterval(check, 250)
+  })
+  window.addEventListener("focus", () => {
+    if (poll) clearInterval(poll)
+    poll = null
+    check()
+  })
 }
 
 export function createNappWindow({
