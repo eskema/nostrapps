@@ -5,6 +5,7 @@ import { globalism } from "@nostr/gadgets/utils"
 import { NostrEvent } from "@nostr/tools/core"
 import { getStore } from "./store"
 import { isHex64 } from "./utils"
+import { relayHealthNow } from "./relay-health"
 
 export const FALLBACK_RELAYS = ["relay.damus.io", "relay.primal.net", "nos.lol"]
 const DEFAULT_KINDS = [1, 1111]
@@ -13,6 +14,33 @@ let globalSyncAbort: AbortController | null = null
 let syncStartTimer: ReturnType<typeof setTimeout> | null = null
 // relay url → its place in the popularity ranking (0 is the most listed)
 let relayRank = new Map<string, number>()
+
+// A relay's place in the ranking, or null when it isn't ranked.
+export function relayRankOf(url: string): number | null {
+  return relayRank.get(url) ?? null
+}
+
+// Where to read an author from, two of their write relays (gadgets has already
+// left out the ones that failed to connect lately):
+//   - none the NIP-66 monitors report offline, unless that's all there is;
+//   - free before those that require payment or auth, which may not let us read;
+//   - then the most listed across our follows (unranked last, not first);
+//   - then the fastest.
+// Whatever the monitors don't know about yet is neutral, and asked about in
+// the background (relay-health.ts) for next time.
+const LAST = Number.MAX_SAFE_INTEGER
+setRelayPicker(candidates => {
+  const urls = candidates.map(r => r.url)
+  const facts = new Map(urls.map(u => [u, relayHealthNow(u)]))
+  const up = urls.filter(u => facts.get(u)?.status !== "offline")
+  const gated = (u: string) =>
+    facts.get(u)?.requires?.some(r => r === "payment" || r === "auth") ? 1 : 0
+  const rank = (u: string) => relayRank.get(u) ?? LAST
+  const rtt = (u: string) => facts.get(u)?.rtt ?? LAST
+  return (up.length ? up : urls)
+    .sort((a, b) => gated(a) - gated(b) || rank(a) - rank(b) || rtt(a) - rtt(b))
+    .slice(0, 2)
+})
 let liveTargets: string[] = []
 let startSignal: AbortSignal | undefined
 let refreshTimer: ReturnType<typeof setInterval> | undefined
@@ -139,20 +167,12 @@ export async function startOutbox(pubkey: string) {
     console.warn("failed to load follows list", err)
   }
 
-  // Rank relays by how prevalent they are across our follows' relay lists,
-  // then make the pool prefer the top two when picking where to read from.
+  // Rank relays by how prevalent they are across our follows' relay lists;
+  // the relay picker above prefers the most listed.
   const rankingPool = Array.from(new Set([pubkey, ...followings]))
   if (rankingPool.length > 0) {
     const rank = await globalism(rankingPool)
     relayRank = new Map(rank.map((url, i) => [url, i]))
-    // A relay missing from the ranking (nobody we follow lists it, or it
-    // failed to connect lately) goes last, not first.
-    const at = (url: string) => relayRank.get(url) ?? Number.MAX_SAFE_INTEGER
-    setRelayPicker(candidates => {
-      const urls = candidates.map(r => r.url)
-      if (relayRank.size === 0) return urls.slice(0, 2)
-      return urls.sort((a, b) => at(a) - at(b)).slice(0, 2)
-    })
   }
 
   globalSyncAbort = new AbortController()
