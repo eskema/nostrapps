@@ -13,7 +13,13 @@ import type {
   SystemCtx
 } from "../types.js"
 
-import { isGated, requireApproval, type ApprovalDetail } from "../permissions.js"
+import {
+  cancelApprovals,
+  isGated,
+  requireApproval,
+  wouldRefuse,
+  type ApprovalDetail
+} from "../permissions.js"
 import { openDialog } from "../dialog.js"
 import { nappNameEl } from "../napp-name.js"
 import { dispatchAction } from "../handlers.js"
@@ -1811,6 +1817,12 @@ export function unmountNappWindows(): string[] {
   return [...ids]
 }
 
+// A napp's last window went: the prompts it still has waiting are refused.
+function cancelApprovalsIfGone(nappId: string) {
+  for (const w of openWindows.values()) if (w.root.dataset.nappId === nappId) return
+  cancelApprovals(nappId)
+}
+
 // Snapshot of the live windows, for the spaces bar's window list.
 export function listOpenWindows(): Array<{
   instanceId: string
@@ -2230,11 +2242,13 @@ function mount(
     onClose: () => {
       openWindows.delete(instanceId)
       clearInstanceRuntimeState(instanceId)
+      cancelApprovalsIfGone(nappId)
       onClose?.(instanceId)
     },
     onDestroy: () => {
       openWindows.delete(instanceId)
       clearInstanceRuntimeState(instanceId)
+      cancelApprovalsIfGone(nappId)
       onDestroy?.(instanceId)
     },
     onStateChange,
@@ -2316,11 +2330,13 @@ export function launchNapplet(
     onClose: () => {
       openWindows.delete(instanceId)
       clearInstanceRuntimeState(instanceId)
+      cancelApprovalsIfGone(nappId)
       onClose?.(instanceId)
     },
     onDestroy: () => {
       openWindows.delete(instanceId)
       clearInstanceRuntimeState(instanceId)
+      cancelApprovalsIfGone(nappId)
       onDestroy?.(instanceId)
     },
     onStateChange,
@@ -2418,11 +2434,13 @@ export function mountWithLoading(
     onClose: () => {
       openWindows.delete(instanceId)
       clearInstanceRuntimeState(instanceId)
+      cancelApprovalsIfGone(nappId)
       onClose?.(instanceId)
     },
     onDestroy: () => {
       openWindows.delete(instanceId)
       clearInstanceRuntimeState(instanceId)
+      cancelApprovalsIfGone(nappId)
       onDestroy?.(instanceId)
     },
     onStateChange,
@@ -3882,6 +3900,9 @@ async function handleRpc(
       if (!pk) throw new Error(`not logged in: ${method!}`)
     }
     if (isGated(method!)) {
+      // Refused without asking (a denial just now, too many waiting): skip
+      // the details only a prompt needs.
+      if (wouldRefuse(nappId, method!)) throw new Error(`Permission denied: ${method!}`)
       let detail: ApprovalDetail | undefined
       if (method === "napp.saveFile") detail = describeSaveFile(params)
       else if (method === "napp.copyText") detail = describeCopyText(params)
