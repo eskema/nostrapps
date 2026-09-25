@@ -11,7 +11,8 @@ const DEFAULT_KINDS = [1, 1111]
 
 let globalSyncAbort: AbortController | null = null
 let syncStartTimer: ReturnType<typeof setTimeout> | null = null
-let relayPopularityRanking: string[] = []
+// relay url → its place in the popularity ranking (0 is the most listed)
+let relayRank = new Map<string, number>()
 let liveTargets: string[] = []
 let startSignal: AbortSignal | undefined
 let refreshTimer: ReturnType<typeof setInterval> | undefined
@@ -74,7 +75,7 @@ export function stopOutbox() {
   refreshTimer = undefined
   outbox?.close()
   liveTargets = []
-  relayPopularityRanking = []
+  relayRank = new Map()
   status.syncing = undefined
   resetPromises()
 }
@@ -143,14 +144,14 @@ export async function startOutbox(pubkey: string) {
   const rankingPool = Array.from(new Set([pubkey, ...followings]))
   if (rankingPool.length > 0) {
     const rank = await globalism(rankingPool)
-    relayPopularityRanking = rank
+    relayRank = new Map(rank.map((url, i) => [url, i]))
+    // A relay missing from the ranking (nobody we follow lists it, or it
+    // failed to connect lately) goes last, not first.
+    const at = (url: string) => relayRank.get(url) ?? Number.MAX_SAFE_INTEGER
     setRelayPicker(candidates => {
-      const urls: string[] = candidates.length === 0 ? [] : candidates.map(r => r.url)
-      if (relayPopularityRanking.length === 0) return urls.slice(0, 2)
-
-      return [...urls]
-        .sort((a, b) => relayPopularityRanking.indexOf(a) - relayPopularityRanking.indexOf(b))
-        .slice(0, 2)
+      const urls = candidates.map(r => r.url)
+      if (relayRank.size === 0) return urls.slice(0, 2)
+      return urls.sort((a, b) => at(a) - at(b)).slice(0, 2)
     })
   }
 
