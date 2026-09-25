@@ -2,6 +2,8 @@ import { setReplaceableStore } from "@nostr/gadgets/global"
 import { RedEventStore } from "@nostr/gadgets/redstore"
 import type { Filter } from "@nostr/tools/filter"
 import type { NostrEvent } from "@nostr/tools/core"
+import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
+import { isHex64 } from "./utils.js"
 
 // The redstore wasm is single-threaded: any panic inside it (a malformed
 // event hitting the binary codec, a bad author in a query) aborts with
@@ -30,6 +32,7 @@ export function getStore(): RedEventStore {
     instance = spawn()
     facade = new Proxy({} as RedEventStore, {
       get(_, prop) {
+        if (prop === "saveEvent") return guardedSave
         const v = (instance as any)[prop]
         return typeof v === "function" ? v.bind(instance) : v
       },
@@ -41,6 +44,64 @@ export function getStore(): RedEventStore {
     setReplaceableStore(facade)
   }
   return facade
+}
+
+// ─── deletions ───────────────────────────────────────────────────
+// Every stored deletion's targets, in memory, checked on every save. Events
+// reach the store from many places (the outbox sync, live and pagination
+// inside gadgets, the list loaders, napps), and a relay that missed a deletion
+// re-delivers what it deleted: refused here, at the one door they all go
+// through. NIP-09: a deletion only covers its own author's events. What was
+// already stored when a deletion arrives is removed by its receiver
+// (host.ts applyDeletionLocally).
+const deletedIds = new Set<string>() // `${author}:${id}`
+const deletedAddrs = new Map<string, number>() // "kind:author:d" → newest deletion's created_at
+let deletionsLoaded: Promise<void> | null = null
+
+function recordDeletion(del: NostrEvent) {
+  for (const t of del.tags) {
+    if (t[0] === "e" && isHex64(t[1])) deletedIds.add(`${del.pubkey}:${t[1]}`)
+    else if (t[0] === "a" && typeof t[1] === "string") {
+      const [kind, author, ...d] = t[1].split(":")
+      if (!Number.isInteger(Number(kind)) || author !== del.pubkey) continue
+      const addr = `${kind}:${author}:${d.join(":")}`
+      if ((deletedAddrs.get(addr) ?? -1) < del.created_at) deletedAddrs.set(addr, del.created_at)
+    }
+  }
+}
+
+// Once per session, before the first check: every deletion the store holds.
+function loadDeletions(): Promise<void> {
+  deletionsLoaded ??= instance.queryEvents({ kinds: [5] }, 1_000_000).then(
+    dels => {
+      for (const del of dels) recordDeletion(del)
+    },
+    err => console.warn("[store] loading deletions failed", err)
+  )
+  return deletionsLoaded
+}
+
+// Whether a stored deletion covers this event. An address deletion covers the
+// versions up to its own timestamp; a later one is a legitimate re-publish.
+export async function isDeleted(event: NostrEvent): Promise<boolean> {
+  await loadDeletions()
+  if (deletedIds.has(`${event.pubkey}:${event.id}`)) return true
+  const addressable = isAddressableKind(event.kind)
+  if (!addressable && !isReplaceableKind(event.kind)) return false
+  const d = addressable ? (event.tags.find(t => t[0] === "d")?.[1] ?? "") : ""
+  const until = deletedAddrs.get(`${event.kind}:${event.pubkey}:${d}`)
+  return until !== undefined && event.created_at <= until
+}
+
+async function guardedSave(
+  event: NostrEvent,
+  opts?: Parameters<RedEventStore["saveEvent"]>[1]
+): Promise<boolean> {
+  if (event.kind === 5) {
+    await loadDeletions()
+    recordDeletion(event)
+  } else if (await isDeleted(event)) return false
+  return instance.saveEvent(event, opts)
 }
 
 // bfcache keeps a navigated-away page's dedicated worker ALIVE (heartbeating,

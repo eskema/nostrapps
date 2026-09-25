@@ -18,7 +18,7 @@ import { openDialog } from "../dialog.js"
 import { nappNameEl } from "../napp-name.js"
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
-import { getStore, safeQueryEvents } from "../store.js"
+import { getStore, isDeleted, safeQueryEvents } from "../store.js"
 import { createNappWindow, fitWindowHeight } from "./napp-window.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
@@ -3963,12 +3963,9 @@ async function startOutboxFeed(
       // it lasts as long as the feed.
       void goLive({ authors, kinds, signal: controller.signal })
       try {
+        // Deleted events a lagging relay re-delivers are refused by the store
+        // itself (store.ts isDeleted), the sync's saves included.
         await outbox.sync(authors, kinds, { signal: controller.signal })
-        // The sync writes into the store from inside the gadgets package,
-        // past any ingest hook — re-apply stored deletions so a tombstoned
-        // event a lagging relay just re-delivered does not reach the next
-        // callback.
-        await sweepStoredDeletions()
       } catch (err) {
         // A failed sync must not skip the heal below — a flaky sync is one
         // of the ways events go missing in the first place.
@@ -4124,9 +4121,8 @@ async function startStreamFeed(
     // A relay that ignores the filter must not reach the napp; the legacy
     // path got this for free by re-querying the store.
     if (!matchFilter(filter, event)) return
-    // Only addressable events can be tombstoned, and that check is a store
-    // read — so ordinary feed traffic never waits on the store here.
-    if (isAddressableKind(event.kind) && (await tombstoned(event))) return
+    // Posted before it's saved, so the store's deletion check is asked here.
+    if (await isDeleted(event)) return
     queue.push(event)
     schedule()
     void writeBehind(event)
@@ -4194,7 +4190,7 @@ async function startInboxFeed(
       abort: controller.signal,
       async onevent(event) {
         // a relay that ignores the filter doesn't get into the result
-        if (!matchFilter(filter, event) || (await tombstoned(event))) return
+        if (!matchFilter(filter, event) || (await isDeleted(event))) return
         const isNew = await store.saveEvent(event)
         if (isNew) {
           await applyDeletionLocally(event)
@@ -5049,34 +5045,6 @@ async function applyDeletionLocally(event: NostrEvent) {
   } catch (err) {
     console.warn("[store] applying deletion failed", err)
   }
-}
-
-// Whether a stored kind 5 already covers this addressable event — checked
-// before feed ingest re-saves one, so a deleted tree/article does not
-// resurrect from a relay that missed (or ignored) the deletion. Scoped to
-// addressable kinds: rare in feed traffic, and where resurrection bites.
-async function tombstoned(event: NostrEvent): Promise<boolean> {
-  if (event.kind < 30000 || event.kind >= 40000) return false
-  try {
-    const d = event.tags.find(t => t[0] === "d")?.[1] ?? ""
-    const addr = `${event.kind}:${event.pubkey}:${d}`
-    const dels = await store.queryEvents({ kinds: [5], authors: [event.pubkey], "#a": [addr] }, 5)
-    return dels.some(del => del.created_at >= event.created_at)
-  } catch {
-    return false
-  }
-}
-
-// Re-apply every stored deletion — run after outbox syncs, which write into
-// the store from inside the gadgets package where ingest cannot be hooked.
-let lastDeletionSweep = 0
-async function sweepStoredDeletions() {
-  if (Date.now() - lastDeletionSweep < 2000) return
-  lastDeletionSweep = Date.now()
-  try {
-    const dels = await store.queryEvents({ kinds: [5] }, 500)
-    for (const del of dels) await applyDeletionLocally(del)
-  } catch {}
 }
 
 async function publishEvent(
