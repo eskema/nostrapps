@@ -1,4 +1,6 @@
-// Shared UI primitives — the small design system for this app.
+// Shared UI primitives — the small design system for this app, and for napps:
+// one that declares `requires: ["ui"]` gets this module as /napp-ui.js
+// (window.napp.ui) and the CSS as /napp-ui.css, both built by vite.config.ts.
 //
 // CONVENTION: build interactive controls through these helpers, never by
 // hand-rolling `document.createElement("button")` + bespoke CSS:
@@ -15,16 +17,23 @@
 //   • itemList() + item({ label }, …controls)   → `.ui-items` / `.ui-item` rows
 //   • rowList() + row(list, …summary)           → `.ui-rows` / `.ui-row` rows that open
 //   • addControl({ label, onAdd, … })           → the two-step "add an item" form
+// And a layer over them that owns the state and the structure, so a screen is
+// a few calls:
+//   • button({ icon, … })                       → a glyph before the label, or alone
+//   • tabs({ items, active, onChange })         → `.ui-tabs`, a row owning its selection
+//   • check({ label, note, … })                 → the box and its text as one <label>
+//   • radios({ name, options, value, onChange }) → `.ui-radios`, one of N, labelled
+//   • field({ label, control, note })           → `.ui-field`, the form line
+//   • list({ items, label, controls, add })     → `.ui-list`: rows, add control, add/delete/items
+//   • el(tag, class, …children), stack(…), bar(…) → plain glue, a column, a row
 // Variants: primary | outline | danger | warning | ghost. Layout (align-self,
 // margins, placement) belongs on the parent/context, not the variant. CSS lives
-// in launcher.css under "Design system" and is mirrored in public/napp-ui.css
-// for napps that opt in (`requires: ["ui"]`) — keep the two in sync.
+// in src/ui.css, the one file the launcher and the napps share.
 //
-// Editable lists (a column of entries + an add affordance + per-entry controls,
-// like the relays napp or the discover tab's relay editor) are COMPOSED from
-// the small parts above — itemList/item/check/addControl — never built as one
-// monolithic "list editor" component. Each context picks the controls its rows
-// need and wires its own handlers.
+// list() is the one list component, and all it knows is structure: the column,
+// the add control under it, the operations. What a row means — which controls
+// it carries, what they do — stays the context's, given as `controls`. For any
+// other shape, compose itemList/item/check/addControl directly.
 
 export type ButtonVariant = "primary" | "outline" | "danger" | "warning" | "ghost" | "link"
 
@@ -35,14 +44,17 @@ export interface ButtonOpts {
   title?: string
   type?: "button" | "submit"
   disabled?: boolean
+  /** A glyph before the label. Alone, the title names the button for assistive tech. */
+  icon?: string
   /** Extra classes for layout/context (e.g. "apps-relay-delete"). */
   class?: string
 }
 
 // ─── icons ────────────────────────────────────────────────────────
 // Inline SVG glyphs (stroke = currentColor, 1em) so they sit consistently next
-// to text and follow the theme — no more mismatched unicode characters.
-const ICONS: Record<string, string> = {
+// to text and follow the theme — no more mismatched unicode characters. The
+// body of a 16×16 viewBox per name; exported so a napp can add its own.
+export const icons: Record<string, string> = {
   tile: '<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>',
   pack: '<path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>',
   grid: '<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M8 2v12M2 8h12"/>',
@@ -71,7 +83,7 @@ export function icon(name: string): SVGElement {
   svg.setAttribute("stroke-linecap", "round")
   svg.setAttribute("stroke-linejoin", "round")
   svg.classList.add("ui-icon")
-  svg.innerHTML = ICONS[name] || ""
+  svg.innerHTML = icons[name] || ""
   return svg
 }
 
@@ -82,6 +94,10 @@ export function button(opts: ButtonOpts = {}): HTMLButtonElement {
   b.type = opts.type || "button"
   b.className = `btn btn-${opts.variant || "outline"}${opts.class ? ` ${opts.class}` : ""}`
   if (opts.label != null) b.textContent = opts.label
+  if (opts.icon) {
+    b.prepend(icon(opts.icon))
+    if (opts.label == null && opts.title) b.setAttribute("aria-label", opts.title)
+  }
   if (opts.title) b.title = opts.title
   if (opts.disabled) b.disabled = true
   if (opts.onClick) b.addEventListener("click", opts.onClick)
@@ -137,6 +153,66 @@ export function tab(o: TabOpts): HTMLButtonElement {
   return b
 }
 
+export interface TabItem<T extends string = string> {
+  value: T
+  /** Shown text; the value if not given. */
+  label?: string
+  title?: string
+  class?: string
+}
+
+export interface TabsOpts<T extends string = string> {
+  items: Array<T | TabItem<T>>
+  active?: T
+  onChange?: (value: T) => void
+  class?: string
+}
+
+export type Tabs<T extends string = string> = HTMLDivElement & {
+  /** Move the selection without reporting it (restoring state, say). */
+  select(value: T): void
+  readonly value: T | undefined
+}
+
+// A row of tabs that owns the selection: a click moves it and reports the
+// value, once, when it changes. Built from tab(); the row is `.ui-tabs`.
+export function tabs<T extends string = string>(opts: TabsOpts<T>): Tabs<T> {
+  const row = document.createElement("div") as Tabs<T>
+  row.className = `ui-tabs${opts.class ? ` ${opts.class}` : ""}`
+  row.setAttribute("role", "tablist")
+  const buttons = new Map<T, HTMLButtonElement>()
+  let current = opts.active
+  const select = (value: T) => {
+    current = value
+    for (const [v, b] of buttons) {
+      b.classList.toggle("active", v === value)
+      b.setAttribute("aria-selected", String(v === value))
+    }
+  }
+  for (const it of opts.items) {
+    const t: TabItem<T> = typeof it === "string" ? { value: it } : it
+    const b = tab({
+      label: t.label ?? t.value,
+      title: t.title,
+      class: t.class,
+      active: t.value === current,
+      onClick: () => {
+        if (t.value === current) return
+        select(t.value)
+        opts.onChange?.(t.value)
+      }
+    })
+    b.setAttribute("role", "tab")
+    b.setAttribute("aria-selected", String(t.value === current))
+    b.dataset.value = t.value
+    buttons.set(t.value, b)
+    row.append(b)
+  }
+  row.select = select
+  Object.defineProperty(row, "value", { get: () => current })
+  return row
+}
+
 export interface DetailsOpts {
   /** Summary label — the always-visible disclosure header. */
   summary: string
@@ -183,32 +259,133 @@ export function input(opts: InputOpts = {}): HTMLInputElement {
   return el
 }
 
+export interface FieldOpts {
+  label: string
+  control: HTMLElement
+  /** A dimmed line under the control. */
+  note?: string
+  class?: string
+}
+
+// A form line (`.ui-field`): an overline caption, the control under it filling
+// the width, a note under that. A <label>, so the caption focuses the control.
+export function field(opts: FieldOpts): HTMLLabelElement {
+  const l = document.createElement("label")
+  l.className = `ui-field${opts.class ? ` ${opts.class}` : ""}`
+  l.append(overline(opts.label), opts.control)
+  if (opts.note) {
+    const n = document.createElement("span")
+    n.className = "ui-field-note"
+    n.textContent = opts.note
+    l.append(n)
+  }
+  return l
+}
+
 export interface CheckOpts {
   checked?: boolean
   title?: string
   onChange?: (checked: boolean) => void
+  /** Extra classes: on the box, or on the <label> when there is one. */
   class?: string
+  /** Text beside the box, as one <label> with it: the words toggle it too. The box is its `.control`. */
+  label?: string
+  /** A dimmed line under the label. */
+  note?: string
 }
 
-// A themeable checkbox (`.ui-check`): checked takes a --surface fill with a
-// --text border and check, so it flips with the theme (same as the napps').
-export function check(opts: CheckOpts = {}): HTMLInputElement {
+function box(opts: CheckOpts, type: "checkbox" | "radio"): HTMLInputElement {
   const c = document.createElement("input")
-  c.type = "checkbox"
-  c.className = `ui-check${opts.class ? ` ${opts.class}` : ""}`
+  c.type = type
+  c.className = `ui-check${type === "radio" ? " ui-radio" : ""}${opts.class && !opts.label ? ` ${opts.class}` : ""}`
   if (opts.checked) c.checked = true
   if (opts.title) c.title = opts.title
   if (opts.onChange) c.addEventListener("change", () => opts.onChange!(c.checked))
   return c
 }
 
-// Same visual as check(), round — for one-of-N picks.
-export function radio(opts: CheckOpts & { name: string }): HTMLInputElement {
-  const r = check(opts)
-  r.type = "radio"
+// The box and its text as one <label> (`.ui-check-label`).
+function labeled(input: HTMLInputElement, opts: CheckOpts): HTMLLabelElement {
+  const l = document.createElement("label")
+  l.className = `ui-check-label${opts.class ? ` ${opts.class}` : ""}`
+  const text = document.createElement("span")
+  text.className = "ui-check-text"
+  text.textContent = opts.label!
+  if (opts.note) {
+    const n = document.createElement("span")
+    n.className = "ui-check-note"
+    n.textContent = opts.note
+    text.append(n)
+  }
+  l.append(input, text)
+  return l
+}
+
+// A themeable checkbox (`.ui-check`): checked takes a --surface fill with a
+// --text border and check, so it flips with the theme (same as the napps').
+// With a label, the box comes with its text as one <label>.
+export function check(opts: CheckOpts & { label: string }): HTMLLabelElement
+export function check(opts?: CheckOpts): HTMLInputElement
+export function check(opts: CheckOpts = {}): HTMLElement {
+  const c = box(opts, "checkbox")
+  return opts.label ? labeled(c, opts) : c
+}
+
+// Same visual as check(), round — for one-of-N picks. radios() builds the group.
+export function radio(opts: CheckOpts & { name: string; label: string }): HTMLLabelElement
+export function radio(opts: CheckOpts & { name: string }): HTMLInputElement
+export function radio(opts: CheckOpts & { name: string }): HTMLElement {
+  const r = box(opts, "radio")
   r.name = opts.name
-  r.classList.add("ui-radio")
-  return r
+  return opts.label ? labeled(r, opts) : r
+}
+
+export interface RadioItem<T extends string = string> {
+  value: T
+  /** Shown text; the value if not given. */
+  label?: string
+  title?: string
+  note?: string
+}
+
+export interface RadiosOpts<T extends string = string> {
+  name: string
+  options: Array<T | RadioItem<T>>
+  value?: T
+  onChange?: (value: T) => void
+  class?: string
+}
+
+export type Radios<T extends string = string> = HTMLDivElement & { value: T | undefined }
+
+// One of N, labelled, as a group (`.ui-radios`): `.value` reads and sets the
+// pick, onChange reports it. A row that wraps; a class of the context's can
+// stack it.
+export function radios<T extends string = string>(opts: RadiosOpts<T>): Radios<T> {
+  const group = document.createElement("div") as Radios<T>
+  group.className = `ui-radios${opts.class ? ` ${opts.class}` : ""}`
+  group.setAttribute("role", "radiogroup")
+  const inputs = new Map<T, HTMLInputElement>()
+  for (const o of opts.options) {
+    const it: RadioItem<T> = typeof o === "string" ? { value: o } : o
+    const l = radio({
+      name: opts.name,
+      label: it.label ?? it.value,
+      note: it.note,
+      title: it.title,
+      checked: it.value === opts.value,
+      onChange: () => opts.onChange?.(it.value)
+    })
+    inputs.set(it.value, l.control as HTMLInputElement)
+    group.append(l)
+  }
+  Object.defineProperty(group, "value", {
+    get: () => [...inputs].find(([, i]) => i.checked)?.[0],
+    set: (v: T) => {
+      for (const [k, i] of inputs) i.checked = k === v
+    }
+  })
+  return group
 }
 
 // Small uppercase letter-spaced caption (`.ui-overline`) — control captions,
@@ -312,8 +489,8 @@ export function item(opts: ItemOpts, ...controls: HTMLElement[]): HTMLDivElement
 // Rows that open: rowList() holds them, row() is a line that opens to whatever
 // is appended to it. They read like item rows, with a +/– at the end. A list's
 // rows share a details name, so one opens at a time, and while one is open
-// the list shows only it (CSS, .ui-rows). Append rows, and any other lines,
-// to the list yourself.
+// the list shows only it (CSS, .ui-rows). A row goes on the end of its list
+// itself; other lines you append.
 let rowListSerial = 0
 
 export function rowList(cls?: string): HTMLDivElement {
@@ -350,6 +527,7 @@ export function row(list: HTMLElement, ...summary: Array<string | Node>): HTMLDe
   const line = document.createElement("summary")
   line.append(...summary)
   el.appendChild(line)
+  list.append(el)
   return el
 }
 
@@ -380,8 +558,8 @@ export function addControl(opts: AddControlOpts): HTMLDivElement {
     form.addEventListener("submit", e => {
       e.preventDefault()
       const err = opts.onAdd(inp.value)
-      error.textContent = err || ""
-      if (!err) inp.value = ""
+      error.textContent = typeof err === "string" ? err : ""
+      if (typeof err !== "string") inp.value = ""
       inp.focus()
     })
     wrap.replaceChildren(form, error)
@@ -389,4 +567,94 @@ export function addControl(opts: AddControlOpts): HTMLDivElement {
   }
   wrap.appendChild(button({ label: opts.label, variant: "outline", onClick: open }))
   return wrap
+}
+
+export interface ListOpts<T> {
+  items?: T[]
+  /** The row's label; String(item) if not given. */
+  label?: (item: T) => string
+  /** The label's tooltip; the label if not given. */
+  title?: (item: T) => string
+  /** The controls after the label: the context's pick. `row` is the element, for a class or a data attribute. */
+  controls?: (item: T, row: HTMLDivElement) => HTMLElement[]
+  /** The two-step add control under the rows. onAdd refuses with an error; otherwise it takes the value in with add(). */
+  add?: AddControlOpts
+  /** A dimmed line while there are no rows. */
+  empty?: string
+  class?: string
+}
+
+export type List<T> = HTMLDivElement & {
+  add(item: T): HTMLDivElement
+  delete(item: T): void
+  /** The items, in order; assign to replace them all. */
+  items: T[]
+}
+
+// A list of things (`.ui-list`): the rows column, the add control under it,
+// and the operations, with each row built by item() from the label and the
+// controls the context gives. Items are keyed by identity.
+export function list<T>(opts: ListOpts<T> = {}): List<T> {
+  const root = document.createElement("div") as List<T>
+  root.className = `ui-list${opts.class ? ` ${opts.class}` : ""}`
+  const rows = itemList()
+  const entries = new Map<T, HTMLDivElement>()
+  const empty = document.createElement("div")
+  empty.className = "ui-list-empty"
+  empty.textContent = opts.empty ?? ""
+  const settle = () => (empty.hidden = !opts.empty || entries.size > 0)
+  const add = (entry: T) => {
+    const label = opts.label ? opts.label(entry) : String(entry)
+    const r = item({ label, title: opts.title ? opts.title(entry) : undefined })
+    if (opts.controls) r.append(...opts.controls(entry, r))
+    entries.get(entry)?.remove()
+    entries.set(entry, r)
+    rows.append(r)
+    settle()
+    return r
+  }
+  root.add = add
+  root.delete = (entry: T) => {
+    entries.get(entry)?.remove()
+    entries.delete(entry)
+    settle()
+  }
+  Object.defineProperty(root, "items", {
+    get: () => [...entries.keys()],
+    set: (items: T[]) => {
+      for (const r of entries.values()) r.remove()
+      entries.clear()
+      for (const entry of items) add(entry)
+      settle()
+    }
+  })
+  root.append(rows, empty)
+  if (opts.add) root.append(addControl(opts.add))
+  root.items = opts.items ?? []
+  return root
+}
+
+// ─── glue ─────────────────────────────────────────────────────────
+// Plain elements for what sits between the parts: el("p", "", "text"),
+// el("div", "my-class", child, child).
+export function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  cls?: string,
+  ...children: Array<Node | string>
+): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag)
+  if (cls) e.className = cls
+  e.append(...children)
+  return e
+}
+
+// The two layouts every screen needs: stack() a column with a gap (grid),
+// bar() a row of controls (flex, wrapping). Layout is the parent's; these are
+// the parent.
+export function stack(...children: Array<Node | string>): HTMLDivElement {
+  return el("div", "ui-stack", ...children)
+}
+
+export function bar(...children: Array<Node | string>): HTMLDivElement {
+  return el("div", "ui-bar", ...children)
 }

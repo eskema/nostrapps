@@ -123,6 +123,31 @@ window.napp.fx.satsFromBolt11(invoice)
 // Relay health (NIP-66)
 window.napp.relays.health(urls)
 
+// UI kit, with `requires: ["ui"]`: the launcher's controls as elements
+window.napp.ui.button({ label, variant, icon, onClick })
+window.napp.ui.chip({ label, active, icon, onClick })
+window.napp.ui.tabs({ items, active, onChange }) // .select(value), .value
+window.napp.ui.tab({ label, active, onClick })
+window.napp.ui.icon(name)
+window.napp.ui.icons // the glyphs, by name; add your own
+window.napp.ui.details({ summary, open })
+window.napp.ui.input({ placeholder, value })
+window.napp.ui.field({ label, control, note })
+window.napp.ui.check({ label, note, checked, onChange })
+window.napp.ui.radio({ name, label, checked, onChange })
+window.napp.ui.radios({ name, options, value, onChange }) // .value
+window.napp.ui.overline(text)
+window.napp.ui.ring(word)
+window.napp.ui.list({ items, label, controls, add, empty }) // .add(item), .delete(item), .items
+window.napp.ui.itemList()
+window.napp.ui.item({ label }, ...controls)
+window.napp.ui.rowList()
+window.napp.ui.row(list, ...summary)
+window.napp.ui.addControl({ label, placeholder, onAdd })
+window.napp.ui.el(tag, class, ...children)
+window.napp.ui.stack(...children)
+window.napp.ui.bar(...children)
+
 window.napp.close()
 window.napp.link(url)
 window.napp.log(message)
@@ -201,10 +226,15 @@ history.pushState({ action: { name: "profile", payload: pubkey } }, "")
 
 Declare required domains in `requires`. The launcher asks for permission on first launch and stores the grant. Sensitive operations such as signing, clipboard access, and file saving prompt separately.
 
-The `ui` domain injects `/napp-ui.css`, including launcher buttons, inputs,
-disclosures, checks, icons, fonts, and `--surface`/`--text` theme variables.
-Napps without `ui` are unaffected. `network` controls direct connections from
-the app's own origin; Nostr bridge calls do not require direct relay access.
+The `ui` domain injects `/napp-ui.css` and `/napp-ui.js`: the launcher's
+buttons, inputs, disclosures, checks, icons, fonts and `--surface`/`--text`
+theme variables, and the helpers that build them as `window.napp.ui`. The
+stylesheet lands before the napp's own, so the napp can override it; its
+classes (`btn btn-primary`, `ui-input`, `ui-details`, …) are documented in it
+for markup that doesn't go through the helpers, and `/styles/` on the launcher
+shows every element with its call and its markup. Napps without `ui` are
+unaffected. `network` controls direct connections from the app's own origin;
+Nostr bridge calls do not require direct relay access.
 
 ## Runtime
 

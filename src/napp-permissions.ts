@@ -5,7 +5,7 @@
 // A share link opens several apps at once; promptSharedSpace lists them on one
 // screen with a single set of grants for every app the link runs.
 import { openDialog } from "./dialog.js"
-import { check, button, input, radio, tab } from "./system-napps/ui.js"
+import { button, check, input, radio, tabs } from "./system-napps/ui.js"
 import { nameEl } from "./napp-name.js"
 import type { NappPolicy } from "./types.js"
 
@@ -137,29 +137,25 @@ export const NEW_SPACE = "__new__"
 function placementRow(p: { spaces: Array<{ id: string; name: string }>; current: string }) {
   const el = document.createElement("div")
   el.className = "napp-perms-place"
-  const tabs = document.createElement("div")
-  tabs.className = "napp-perms-place-tabs"
   let chosen = p.current
+  const where = tabs({
+    class: "napp-perms-place-tabs",
+    items: [...p.spaces, { id: NEW_SPACE, name: "+ new space" }].map(s => ({
+      value: s.id,
+      label: s.name
+    })),
+    active: chosen,
+    onChange: id => (chosen = id)
+  })
   const box = check({
     checked: true,
     onChange: on => {
-      tabs.hidden = !on
+      where.hidden = !on
       out.onChange()
     }
   })
   const out = { el, read: () => (box.checked ? chosen : null), onChange: () => {} }
-  for (const s of [...p.spaces, { id: NEW_SPACE, name: "+ new space" }]) {
-    const t: HTMLButtonElement = tab({
-      label: s.name,
-      active: s.id === chosen,
-      onClick: () => {
-        chosen = s.id
-        for (const other of tabs.children) other.classList.toggle("active", other === t)
-      }
-    })
-    tabs.appendChild(t)
-  }
-  el.append(permRow(box, "open after install"), tabs)
+  el.append(permRow(box, "open after install"), where)
   return out
 }
 
@@ -441,17 +437,16 @@ function actionRow<T>(resolve: (v: T | null) => void, label: string, value: () =
 // Exported because it is the shape for any labelled checkbox, not just a grant
 // — the uploader's "protected" reads as one of these.
 export function permRow(box: HTMLInputElement, title: string, desc?: string): HTMLLabelElement {
+  // The kit's labelled check, given a box made earlier (the caller keeps it),
+  // as a full-width row with a rule above.
   const row = document.createElement("label")
-  row.className = "napp-perms-row"
-  const text = document.createElement("div")
-  text.className = "napp-perms-text"
-  const l = document.createElement("div")
-  l.className = "napp-perms-label"
-  l.textContent = title
-  text.append(l)
+  row.className = "ui-check-label napp-perms-row"
+  const text = document.createElement("span")
+  text.className = "ui-check-text"
+  text.textContent = title
   if (desc) {
-    const d = document.createElement("div")
-    d.className = "napp-perms-desc"
+    const d = document.createElement("span")
+    d.className = "ui-check-note"
     d.textContent = desc
     text.append(d)
   }

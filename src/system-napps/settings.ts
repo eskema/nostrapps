@@ -145,22 +145,14 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
 
     // The global switch: answer every relay auth challenge without asking.
     // Off (the default) → per-relay confirmation toasts, remembered here below.
-    const autoRow = document.createElement("label")
-    autoRow.className = "relay-auth-auto-row"
-    const text = document.createElement("div")
-    text.className = "napp-perms-text"
-    const label = document.createElement("div")
-    label.className = "napp-perms-label"
-    label.textContent = "always authenticate"
-    text.append(label)
-    autoRow.append(
+    relaysEl.appendChild(
       check({
+        label: "always authenticate",
+        class: "relay-auth-auto-row",
         checked: ctx.relayAuth.getAuto(),
         onChange: on => ctx.relayAuth.setAuto(on) // notify → renderRelays
-      }),
-      text
+      })
     )
-    relaysEl.appendChild(autoRow)
 
     // Remembered per-relay decisions from the confirmation toasts.
     if (decisions.length === 0) {

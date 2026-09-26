@@ -1,0 +1,645 @@
+/* The kit: the launcher's controls, and napps' with `requires: ["ui"]`. The
+   launcher imports this file; the build hands it to napps as /napp-ui.css, the
+   fonts inlined and the icon glyphs as classes, with system-napps/ui.ts as
+   /napp-ui.js, the helpers that build these elements (window.napp.ui).
+   Appearance is the class's; layout (width, margins, placement) is the
+   parent's. */
+
+:root {
+  color-scheme: light dark;
+  /* Serif is the voice — the base, not an accent. Sans is the exception,
+     declared where it is wanted (.ui-overline, .ui-ring); mono is for machine
+     text (ids, relays, logs, code). */
+  font-family: "Source Serif 4 Variable", Georgia, ui-serif, serif;
+  --font-sans: "Source Sans 3 Variable", system-ui, -apple-system, sans-serif;
+  --font-serif: "Source Serif 4 Variable", Georgia, ui-serif, serif;
+  --font-mono: "Source Code Pro Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --surface: #ffffff;
+  --text: #111111;
+  --btn-radius: 4px;
+  --btn-pad-y: 0.35rem;
+  --btn-pad-x: 0.7rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #333;
+    --text: #ececec;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="light"] {
+  --surface: #ffffff;
+  --text: #111111;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --surface: #333;
+  --text: #ececec;
+  color-scheme: dark;
+}
+
+/* ─── Buttons ─────────────────────────────────────────────────────
+   `.btn` and a variant: btn-primary | btn-outline | btn-danger | btn-warning |
+   btn-ghost | btn-link. button() in ui.ts.
+     <button class="btn btn-primary">publish</button> */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  border: 1px solid transparent;
+  border-radius: var(--btn-radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--text);
+  color: var(--surface);
+  border-color: var(--text);
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.btn-outline {
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: var(--text);
+  color: var(--surface);
+  border-color: var(--text);
+}
+
+.btn-danger {
+  color: #e33;
+  border-color: color-mix(in srgb, #e33 40%, transparent);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #e33;
+  color: white;
+  border-color: #e33;
+}
+
+.btn-warning {
+  background: #f59e0b;
+  color: var(--surface);
+  border-color: #f59e0b;
+  font-weight: 600;
+}
+
+.btn-warning:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* Link: looks like inline text, not a button — no padding/border/background,
+   dimmed until hover. */
+.btn-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  opacity: 0.6;
+}
+
+.btn-link:hover:not(:disabled) {
+  opacity: 1;
+  background: transparent;
+}
+
+/* Chip: a selectable .btn. chip() in ui.ts sets the variant — primary while
+   active, ghost otherwise — and wraps the text in .btn-chip-label so a long
+   name truncates instead of widening the row.
+     <button class="btn btn-ghost btn-chip"><span class="btn-chip-label">name</span></button> */
+.btn-chip {
+  max-width: 12rem;
+  font-size: 1rem;
+  font-weight: 400;
+  gap: 0.3rem;
+}
+
+.btn-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Tab ─────────────────────────────────────────────────────────
+   Text only, dimmed; the active one gets an underline and a bit of horizontal
+   padding. Its own primitive rather than a .btn variant — the flat, borderless
+   look fights the button backgrounds. tab() in ui.ts; toggle .active on it.
+     <button class="ui-tab active">all</button> */
+.ui-tab {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit; /* a <button>: the page's voice doesn't reach it on its own */
+  font-size: 0.75em;
+  font-weight: 700;
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+  opacity: 0.4;
+  transition:
+    padding 0.2s ease-in-out,
+    opacity 0.2s ease-in-out;
+  border-bottom: 1px solid transparent;
+}
+
+.ui-tab:hover {
+  opacity: 1;
+}
+
+.ui-tab.active {
+  opacity: 1;
+  padding: 0 0.5rem;
+  border-bottom: 1px solid currentColor;
+}
+
+/* ─── Icon ────────────────────────────────────────────────────────
+   icon(name) in ui.ts: an inline <svg>, 1em, stroked in currentColor, so it
+   sits next to text and follows its color. For markup without the helper, the
+   napp stylesheet carries each glyph as a mask class:
+     <span class="ui-icon ui-icon-plus"></span> */
+.ui-icon {
+  flex-shrink: 0;
+  vertical-align: -0.125em;
+}
+
+/* ─── Input ───────────────────────────────────────────────────────
+   A borderless text field on a tinted fill. input() in ui.ts.
+     <input class="ui-input" /> */
+.ui-input {
+  padding: 0.35rem 0.6rem;
+  font-family: var(--font-mono);
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: inherit;
+}
+
+.ui-input:focus {
+  outline: none;
+}
+
+/* ─── Disclosure ──────────────────────────────────────────────────
+   A collapsible <details>: bold dimmed summary, a +/– at its end, a rule
+   below. details() in ui.ts returns it with the summary in place; append the
+   content to it.
+     <details class="ui-details"><summary>relays</summary>…</details> */
+.ui-details {
+  margin: 0.5rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  transition: all 0.2s ease-in-out;
+  /* As a grid/flex item, allow shrinking below content size so nowrap content
+     inside (e.g. .ui-item-label urls) crops with an ellipsis instead of
+     forcing horizontal scroll. */
+  min-width: 0;
+}
+
+.ui-details[open] {
+  padding-bottom: 1rem;
+}
+
+.ui-details > summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  cursor: pointer;
+  font-size: 1.2rem;
+  font-weight: 700;
+  user-select: none;
+  padding: 0.4rem 0.6rem;
+  padding-left: 0;
+  opacity: 0.4;
+}
+
+.ui-details[open] > summary {
+  margin-bottom: 0.5rem;
+}
+
+.ui-details > summary::after {
+  content: "+";
+}
+
+.ui-details[open] > summary::after {
+  content: "–";
+}
+
+.ui-details > summary:hover {
+  opacity: 1;
+}
+
+/* ─── Overline ────────────────────────────────────────────────────
+   Small, thin, uppercase, letter-spaced sans: control captions, metadata
+   badges, counts. overline() in ui.ts.
+     <span class="ui-overline">read</span> */
+.ui-overline {
+  font-family: var(--font-sans); /* its own voice, wherever it sits */
+  font-size: 0.65rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+  user-select: none;
+}
+
+/* ─── Ring ────────────────────────────────────────────────────────
+   A word set around a circle, slowly turning: the overline's voice on a
+   circular path, orange, glyphs only. ring() in ui.ts draws it; its size
+   follows the font-size (the box is em-sized by the helper), placement is the
+   context's. */
+.ui-ring {
+  font-size: 0.65rem; /* the overline's */
+  color: #f97316;
+  overflow: visible;
+  transform-origin: center;
+  animation: ui-ring-spin 12s linear infinite;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ui-ring text {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  fill: currentColor;
+}
+
+@keyframes ui-ring-spin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-ring {
+    animation: none;
+  }
+}
+
+/* ─── Title ───────────────────────────────────────────────────────
+   The window title's voice: black weight, uppercase, tracked. Size is the
+   context's.
+     <h2 class="ui-title">relays</h2> */
+.ui-title {
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ─── Check ───────────────────────────────────────────────────────
+   A checkbox that follows the theme: checked, it takes a --surface fill with a
+   --text border and a --text check (a mask). check() and radio() in ui.ts.
+     <input type="checkbox" class="ui-check" />
+     <input type="radio" class="ui-check ui-radio" name="one" /> */
+.ui-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.ui-radio {
+  border-radius: 999px;
+}
+
+.ui-check::after {
+  content: "";
+  width: 0.7rem;
+  height: 0.7rem;
+  background-color: var(--text);
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMuNSA4LjVsMyAzIDYtNyIvPjwvc3ZnPg==")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMuNSA4LjVsMyAzIDYtNyIvPjwvc3ZnPg==")
+    center / contain no-repeat;
+  transform: scale(0);
+  transition: transform 100ms ease;
+}
+.ui-check:checked {
+  background: var(--surface);
+  border-color: var(--text);
+}
+.ui-check:checked::after {
+  transform: scale(1);
+}
+
+/* ─── Item list ───────────────────────────────────────────────────
+   A column of hairline-separated rows: a small mono label that truncates with
+   an ellipsis, then the row's controls, which always fit — no horizontal
+   scroll. itemList() and item() in ui.ts; compose the controls per context,
+   there is no list editor on purpose.
+     <div class="ui-items">
+       <div class="ui-item">
+         <code class="ui-item-label">wss://…</code>
+         <input type="checkbox" class="ui-check" />
+         <button class="btn btn-danger">remove</button>
+       </div>
+     </div> */
+.ui-items {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ui-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+.ui-item:last-child {
+  border-bottom: 0;
+}
+.ui-item-label {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Rows that open ──────────────────────────────────────────────
+   Item rows as disclosures: small, a rule below, as tall as one holding a
+   .btn, a +/– at the end, semibold while open. The rows share a details name,
+   so one opens at a time, and while one is open the list shows only it.
+   rowList() and row() in ui.ts; rowList() also puts .ui-rows-unfolding on the
+   list for the moment a row closes, so the rest unfolds then and only then.
+     <div class="ui-rows">
+       <details class="ui-row" name="my-list">
+         <summary><span>row</span></summary>
+         …what it opens to
+       </details>
+     </div> */
+.ui-rows {
+  display: grid;
+  min-width: 0;
+}
+/* The rest of the list folds away while a row is open, and back after:
+   scaleY, with its height, padding and rule going to 0 alongside, so nothing
+   jumps when it's gone. The height cap is for that: lines other than the
+   open row are a row tall. */
+.ui-rows > * {
+  max-height: 3rem;
+  transition:
+    scale 150ms ease,
+    max-height 150ms ease,
+    padding 150ms ease,
+    border-width 150ms ease,
+    display 150ms allow-discrete;
+}
+.ui-rows > .ui-row[open] {
+  max-height: none;
+}
+.ui-rows:has(> .ui-row[open]) > :not(.ui-row[open]) {
+  display: none;
+  scale: 1 0;
+  max-height: 0;
+  padding-block: 0;
+  border-bottom-width: 0;
+  overflow: clip;
+}
+/* Only as a row closes (rowList() sets the class for that moment): a list
+   shown again after display: none would otherwise unfold every time. */
+@starting-style {
+  .ui-rows.ui-rows-unfolding > * {
+    scale: 1 0;
+    max-height: 0;
+    padding-block: 0;
+    border-bottom-width: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-rows > * {
+    transition: none;
+  }
+}
+.ui-row {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+.ui-row:last-of-type,
+.ui-rows > .ui-row[open] {
+  border-bottom: 0;
+}
+.ui-row > summary {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  /* A .btn: its line, its padding, its border. */
+  min-height: calc(0.8rem * 1.2 + 2 * var(--btn-pad-y) + 2px);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.ui-row > summary::-webkit-details-marker {
+  display: none;
+}
+.ui-row > summary::after {
+  grid-column: -2;
+  content: "+";
+  opacity: 0.4;
+}
+.ui-row[open] > summary {
+  font-weight: 600;
+}
+.ui-row[open] > summary::after {
+  content: "–";
+}
+
+/* ─── Add control ─────────────────────────────────────────────────
+   The two-step add affordance under a list: collapsed, a single outline
+   button; clicked, an input + add button in its place, an error line under
+   them. addControl() in ui.ts. Open, it is:
+     <div class="ui-add">
+       <form class="ui-add-form">
+         <input class="ui-input ui-add-input" /><button class="btn btn-outline">add</button>
+       </form>
+       <div class="ui-add-error"></div>
+     </div> */
+.ui-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+/* Collapsed state: the lone button keeps its natural width. */
+.ui-add > .btn {
+  align-self: flex-start;
+}
+.ui-add-form {
+  display: flex;
+  gap: 0.5rem;
+}
+.ui-add-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+}
+.ui-add-error {
+  color: #e33;
+}
+.ui-add-error:empty {
+  display: none;
+}
+
+/* ─── Tabs ────────────────────────────────────────────────────────
+   A row of tabs owning its selection. tabs() in ui.ts.
+     <div class="ui-tabs" role="tablist">
+       <button class="ui-tab active" role="tab" aria-selected="true">all</button>
+       <button class="ui-tab" role="tab" aria-selected="false">mine</button>
+     </div> */
+.ui-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+/* ─── Labelled check ──────────────────────────────────────────────
+   The box and its text as one <label>: the words toggle it too, a note sits
+   under them, dimmed. check({ label }) and radio({ label }) in ui.ts; radios()
+   puts a group of them in a row.
+     <label class="ui-check-label">
+       <input type="checkbox" class="ui-check" />
+       <span class="ui-check-text">read<span class="ui-check-note">what it means</span></span>
+     </label> */
+.ui-check-label {
+  display: inline-grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+.ui-check-label > .ui-check {
+  margin-top: 0.15em; /* on the first line of the text */
+}
+.ui-check-text {
+  display: grid;
+  gap: 0.1rem;
+}
+.ui-check-note {
+  opacity: 0.6;
+}
+.ui-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.2rem;
+}
+
+/* ─── Field ───────────────────────────────────────────────────────
+   The form line: an overline caption, the control under it filling the
+   width, a dimmed note under that. field() in ui.ts.
+     <label class="ui-field">
+       <span class="ui-overline">relay</span>
+       <input class="ui-input" />
+       <span class="ui-field-note">one url</span>
+     </label> */
+.ui-field {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.ui-field > .ui-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.ui-field-note {
+  opacity: 0.6;
+}
+
+/* ─── List ────────────────────────────────────────────────────────
+   The rows column with the add control under it and a line for when it is
+   empty. list() in ui.ts builds and runs it.
+     <div class="ui-list">
+       <div class="ui-items">…</div>
+       <div class="ui-list-empty" hidden>nothing yet</div>
+       <div class="ui-add">…</div>
+     </div> */
+.ui-list {
+  display: grid;
+  min-width: 0;
+}
+.ui-list-empty {
+  padding: 0.35rem 0;
+  opacity: 0.6;
+}
+
+/* ─── Stack, bar ──────────────────────────────────────────────────
+   The two layouts every screen needs: a column with a gap, a row of controls
+   that wraps. stack() and bar() in ui.ts.
+     <div class="ui-stack">…</div>
+     <div class="ui-bar">…</div> */
+.ui-stack {
+  display: grid;
+  gap: 0.6rem;
+  align-content: start;
+  min-width: 0;
+}
+.ui-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* The kit sets display on these, which would beat the hidden attribute. */
+:is(
+  .btn,
+  .ui-items,
+  .ui-rows,
+  .ui-add,
+  .ui-tabs,
+  .ui-check-label,
+  .ui-radios,
+  .ui-field,
+  .ui-list,
+  .ui-list-empty,
+  .ui-stack,
+  .ui-bar
+)[hidden] {
+  display: none;
+}

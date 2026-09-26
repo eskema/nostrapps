@@ -767,7 +767,7 @@ function setupDrag(
       translateY = 0
       holdReady = false
       if (holdTimer) clearTimeout(holdTimer)
-      holdTimer = setTimeout(() => {
+      holdTimer = window.setTimeout(() => {
         holdReady = true
         holdTimer = 0
       }, REORDER_HOLD_MS)
@@ -1003,7 +1003,7 @@ function setupDrag(
       // Schedule arm after the cursor has been still for SNAP_HOVER_MS.
       // The next applyFloatDrag tick (= next pointermove) will clear this
       // timer at the top, so it only ever fires when the cursor stops.
-      snapTimer = setTimeout(() => {
+      snapTimer = window.setTimeout(() => {
         snapTimer = 0
         if (pendingZone === zone) {
           snapZone = zone

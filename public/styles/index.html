@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nostrapps kit</title>
+    <!-- What a napp gets with `requires: ["ui"]`, loaded the way the launcher
+         injects it. The page is built with them; the CSS below only lays the
+         page out. -->
+    <link rel="stylesheet" href="/napp-ui.css" />
+    <script src="/napp-ui.js"></script>
+    <style>
+      body {
+        margin: 0 auto;
+        padding: 4rem 2rem 8rem;
+        max-width: 72rem;
+        background: var(--surface);
+        color: var(--text);
+      }
+      h1,
+      h2,
+      h3,
+      p,
+      pre {
+        margin: 0;
+      }
+      header {
+        display: grid;
+        gap: 1.5rem;
+        margin-bottom: 6rem;
+      }
+      .top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: baseline;
+        gap: 1rem;
+      }
+      h1 {
+        font-size: 2rem;
+      }
+      .lede {
+        max-width: 44rem;
+        opacity: 0.75;
+      }
+      .contents {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem 1.4rem;
+      }
+      .contents a {
+        color: inherit;
+        text-decoration: none;
+        opacity: 0.6;
+      }
+      .contents a:hover {
+        opacity: 1;
+      }
+      main {
+        display: grid;
+        gap: 7rem;
+      }
+      section {
+        display: grid;
+        gap: 2.5rem;
+        scroll-margin-top: 2rem;
+      }
+      /* A section opens with what the part is and how it's called. */
+      .intro {
+        display: grid;
+        gap: 1rem;
+        max-width: 44rem;
+      }
+      .intro h2 {
+        font-size: 1.4rem;
+      }
+      .intro p,
+      .about p {
+        opacity: 0.75;
+      }
+      code,
+      pre {
+        font-family: var(--font-mono);
+      }
+      code {
+        font-size: 0.85em;
+      }
+      pre.block {
+        padding: 0.9rem 1.1rem;
+        border-radius: 4px;
+        background: color-mix(in srgb, currentColor 5%, transparent);
+        font-size: 0.8rem;
+        line-height: 1.5;
+        white-space: pre;
+        overflow-x: auto;
+      }
+      /* An example: its name and what it's for, then one box holding the thing
+         itself and, under it, a row that opens to its code. */
+      .item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+        gap: 1rem 3rem;
+        padding: 1.75rem 0;
+        border-top: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+      }
+      .about {
+        display: grid;
+        gap: 0.4rem;
+        align-content: start;
+      }
+      .about h3 {
+        font-size: 1rem;
+        font-weight: 700;
+      }
+      .example {
+        display: grid;
+        align-content: start;
+        min-width: 0;
+        border-radius: 6px;
+        background: color-mix(in srgb, currentColor 3%, transparent);
+      }
+      .stage {
+        display: grid;
+        place-items: center;
+        min-height: 3rem;
+        padding: 2rem;
+      }
+      .stage.wide {
+        place-items: stretch;
+        align-content: start;
+      }
+      .stage :is(p, h3) {
+        margin: 0;
+      }
+      .code {
+        border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+      }
+      .code > summary {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        padding: 0.6rem 1rem;
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        opacity: 0.6;
+      }
+      .code > summary::-webkit-details-marker {
+        display: none;
+      }
+      .code > summary::after {
+        content: "+";
+      }
+      .code[open] > summary::after {
+        content: "–";
+      }
+      .code > summary:hover,
+      .code[open] > summary {
+        opacity: 1;
+      }
+      .code-body {
+        display: grid;
+        gap: 0.6rem;
+        padding: 0 1rem 1rem;
+      }
+      .code-body p {
+        opacity: 0.6;
+      }
+      /* The icon set: each glyph over its name. */
+      .glyphs {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+        gap: 1.5rem 1rem;
+      }
+      .glyph {
+        display: grid;
+        justify-items: center;
+        gap: 0.5rem;
+      }
+      .glyph .ui-icon {
+        font-size: 1.4rem;
+      }
+      /* The chips section's "a different limit", as a napp would write it. */
+      .no-limit {
+        max-width: none;
+      }
+      .swatch {
+        display: inline-block;
+        width: 0.8em;
+        height: 0.8em;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        vertical-align: -0.1em;
+        margin-right: 0.4em;
+      }
+      @media (max-width: 52rem) {
+        body {
+          padding: 2rem 1rem 5rem;
+        }
+        header {
+          margin-bottom: 4rem;
+        }
+        .top {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        main {
+          gap: 5rem;
+        }
+        .item {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        pre.block {
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="top">
+        <h1 class="ui-title">nostrapps kit</h1>
+        <div id="theme"></div>
+      </div>
+      <p class="lede">
+        The launcher's own buttons, fields, lists and type, for your napp. Each part below has a
+        name, what it's for and how it looks. Open <em>code</em> under it for the call that made it
+        and the same thing as plain markup.
+      </p>
+      <nav class="contents"></nav>
+    </header>
+    <main id="sections"></main>
+    <script>
+      const ui = napp.ui
+      const { el } = ui
+
+      // ── page machinery ──────────────────────────────────────────
+      // Each example is a function; it runs once to make what's on the stage,
+      // and its own source is the code shown, so the two can't drift. The
+      // markup is read back off the element it made.
+      const source = fn => {
+        const s = fn.toString().replace(/^\(\)\s*=>\s*/, "")
+        const block = s.startsWith("{")
+        const lines = block ? s.slice(1, -1).split("\n") : s.split("\n")
+        while (lines.length && !lines[0].trim()) lines.shift()
+        while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
+        const rest = lines.slice(block ? 0 : 1).filter(l => l.trim())
+        const indent = rest.length ? Math.min(...rest.map(l => l.match(/^ */)[0].length)) : 0
+        return lines.map((l, i) => (i === 0 && !block ? l : l.slice(indent))).join("\n")
+      }
+      const VOID = new Set(["input", "br", "img"])
+      const markup = (node, depth = 0) => {
+        const pad = "  ".repeat(depth)
+        if (node.nodeType === 3) return node.textContent.trim() ? pad + node.textContent.trim() : ""
+        const tag = node.tagName.toLowerCase()
+        if (tag === "svg") return `${pad}<svg class="${node.getAttribute("class")}">…</svg>`
+        let attrs = [...node.attributes]
+          .map(a => (a.value === "" ? ` ${a.name}` : ` ${a.name}="${a.value}"`))
+          .join("")
+        if (tag === "input" && node.checked) attrs += " checked"
+        const kids = [...node.childNodes].filter(n => n.nodeType === 1 || n.textContent.trim())
+        if (!kids.length) return `${pad}<${tag}${attrs}>${VOID.has(tag) ? "" : `</${tag}>`}`
+        if (kids.length === 1 && kids[0].nodeType === 3)
+          return `${pad}<${tag}${attrs}>${kids[0].textContent.trim()}</${tag}>`
+        return [
+          `${pad}<${tag}${attrs}>`,
+          ...kids.map(k => markup(k, depth + 1)).filter(Boolean),
+          `${pad}</${tag}>`
+        ].join("\n")
+      }
+      const block = text => el("pre", "block", text)
+
+      // item(name, what it's for, example, { wide, code, helper, open })
+      // code: false leaves the fold out; helper: false shows only the HTML.
+      const item = (
+        name,
+        about,
+        fn,
+        { wide = false, code = true, helper = true, open = false } = {}
+      ) => {
+        const made = fn()
+        const example = el("div", "example", el("div", wide ? "stage wide" : "stage", made))
+        if (code) {
+          const fold = el("details", "code")
+          fold.open = open
+          const body = el("div", "code-body")
+          if (helper) body.append(block(source(fn)))
+          body.append(el("p", "", "HTML output"), block(markup(made)))
+          fold.append(el("summary", "", "code"), body)
+          example.append(fold)
+        }
+        return el(
+          "div",
+          "item",
+          el(
+            "div",
+            "about",
+            el("h3", "", name),
+            ...[about].flat().map(a => (typeof a === "string" ? el("p", "", a) : a))
+          ),
+          example
+        )
+      }
+
+      // section(id, title, intro paragraphs, the call's shape or "", ...items)
+      const contents = document.querySelector(".contents")
+      const section = (id, title, paragraphs, api, ...items) => {
+        const intro = el("div", "intro", el("h2", "ui-title", title))
+        for (const p of paragraphs) intro.append(typeof p === "string" ? el("p", "", p) : p)
+        if (api) intro.append(block(api))
+        const s = el("section", "", intro, el("div", "items", ...items))
+        s.id = id
+        document.getElementById("sections").append(s)
+        const link = el("a", "", title)
+        link.href = `#${id}`
+        contents.append(link)
+      }
+
+      // ── theme switch ────────────────────────────────────────────
+      // The launcher sets the theme on a napp; on this page, these tabs do.
+      document.getElementById("theme").replaceWith(
+        ui.bar(
+          ui.overline("theme"),
+          ui.tabs({
+            items: ["auto", "light", "dark"],
+            active: "auto",
+            onChange: t => {
+              if (t === "auto") delete document.documentElement.dataset.theme
+              else document.documentElement.dataset.theme = t
+              showTokens()
+            }
+          })
+        )
+      )
+
+      // ── getting started ─────────────────────────────────────────
+      section(
+        "start",
+        "getting started",
+        [
+          "Ask for the kit in your napp's metadata.json. The launcher then adds its stylesheet to your page, before your own styles so yours still win, and puts the helpers on window.napp.ui before your scripts run.",
+          block(`{
+  "id": "my-napp",
+  "title": "My napp",
+  "requires": ["ui"]
+}`),
+          "Every helper makes an ordinary element and hands it back: put it anywhere, keep it to change it later. The helpers decide how things look; where they go is up to you. This page calls them as ui.button(…), after one line:",
+          block("const ui = window.napp.ui")
+        ],
+        "",
+        item(
+          "your first button",
+          "A primary button that changes its label when pressed. Put it in the page with document.body.append(…).",
+          () =>
+            ui.button({
+              label: "say hello",
+              variant: "primary",
+              onClick: e => (e.target.textContent = "hello!")
+            })
+        ),
+        item(
+          "without the script",
+          "The helpers only put classes on elements, so plain HTML with the same classes looks the same. Every example's code shows its HTML output.",
+          () => {
+            const box = ui.el("div")
+            box.innerHTML = '<button class="btn btn-outline">plain markup</button>'
+            return box.firstChild
+          },
+          { helper: false, open: true }
+        )
+      )
+
+      // ── the basics ──────────────────────────────────────────────
+      section(
+        "basics",
+        "the basics",
+        [
+          "Three small helpers for everything between the controls. The rest of this page uses them, so they come first."
+        ],
+        `ui.el(tag, class, ...children)
+ui.stack(...children)
+ui.bar(...children)`,
+        item(
+          "el: any element",
+          "The tag, a class or an empty string, then what goes inside: text, or other elements.",
+          () => ui.el("p", "", "Hello, ", ui.el("strong", "", "nostr"))
+        ),
+        item(
+          "stack: a column",
+          "Things one under the other with an even gap. The usual shape of a screen.",
+          () =>
+            ui.stack(ui.el("p", "", "first"), ui.el("p", "", "second"), ui.el("p", "", "third")),
+          { wide: true }
+        ),
+        item(
+          "bar: a row",
+          "Controls side by side, wrapping when the row runs out of room. The actions under a form.",
+          () =>
+            ui.bar(
+              ui.button({ label: "publish", variant: "primary" }),
+              ui.button({ label: "discard" })
+            )
+        ),
+        item(
+          "together: a draft",
+          "A title, the text, and its actions, in one stack.",
+          () =>
+            ui.stack(
+              ui.el("h3", "ui-title", "draft"),
+              ui.el("p", "", "Trying out the kit in my first napp."),
+              ui.bar(
+                ui.button({ label: "publish", variant: "primary" }),
+                ui.button({ label: "discard" })
+              )
+            ),
+          { wide: true }
+        )
+      )
+
+      // ── type ────────────────────────────────────────────────────
+      section(
+        "type",
+        "type",
+        [
+          "Serif is the voice of the launcher, and of a napp that asks for the kit. Two other voices are named where they're wanted: sans for small captions, mono for what machines read."
+        ],
+        "",
+        item("body text", "Serif, at the page's size. Nothing to add: it's the default.", () =>
+          ui.el("p", "", "Your relays decide where your notes are published and read from.")
+        ),
+        item(
+          "title",
+          "The class ui-title, on any element: black, uppercase, spaced. A window's name, a section heading.",
+          () => ui.el("h3", "ui-title", "relays")
+        ),
+        item(
+          "overline",
+          "Small uppercase sans for captions, counts and the labels on controls.",
+          () => ui.overline("3 connected")
+        ),
+        item(
+          "machine text",
+          "Keys, addresses, ids. The font is --font-mono; set it on your own elements.",
+          () => {
+            const key = ui.el("span", "", "npub1…")
+            key.style.fontFamily = "var(--font-mono)"
+            return key
+          }
+        ),
+        item(
+          "stamp",
+          "A word round a circle, slowly turning. Marks something that won't be kept, like a temporary window.",
+          () => ui.ring("temporary")
+        )
+      )
+
+      // ── theme ───────────────────────────────────────────────────
+      const tokenValues = new Map()
+      const showTokens = () => {
+        const cs = getComputedStyle(document.documentElement)
+        for (const [name, span] of tokenValues) {
+          const v = cs.getPropertyValue(name).trim()
+          span.lastChild.textContent = name.startsWith("--font")
+            ? v.split(",")[0].replace(/"/g, "")
+            : v
+          if (span.firstChild.className === "swatch") span.firstChild.style.background = v
+        }
+      }
+      section(
+        "theme",
+        "colors",
+        [
+          "Two colors carry everything: --surface for what's behind, --text for what's on it. The launcher sets both to its theme and changes them live, so a napp that uses them follows light and dark by itself. Tints are the text color mixed thin:",
+          block(`.card {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+}`)
+        ],
+        "",
+        item(
+          "the values",
+          "What the kit sets, as they are right now. Switch the theme at the top to watch them change.",
+          () =>
+            ui.list({
+              items: [
+                "--surface",
+                "--text",
+                "--font-serif",
+                "--font-sans",
+                "--font-mono",
+                "--btn-radius",
+                "--btn-pad-y",
+                "--btn-pad-x"
+              ],
+              controls: name => {
+                const value = el(
+                  "span",
+                  "",
+                  el("span", name === "--surface" || name === "--text" ? "swatch" : ""),
+                  el("code", "")
+                )
+                tokenValues.set(name, value)
+                return [value]
+              }
+            }),
+          { wide: true, code: false }
+        )
+      )
+      showTokens()
+
+      // ── buttons ─────────────────────────────────────────────────
+      section(
+        "buttons",
+        "buttons",
+        [
+          "The variant says what pressing it means; the label says what it does. Leave out the variant for the default."
+        ],
+        `ui.button({ label, variant, icon, title, onClick, disabled, type })
+variant: "primary" | "outline" | "danger" | "warning" | "ghost" | "link"`,
+        item("primary", "The main action of a screen: publish, save. One per screen.", () =>
+          ui.button({ label: "publish", variant: "primary" })
+        ),
+        item("outline", "The default, for any other action: cancel, edit, view.", () =>
+          ui.button({ label: "cancel" })
+        ),
+        item("danger", "Removes or destroys something: remove, delete, erase.", () =>
+          ui.button({ label: "delete note", variant: "danger" })
+        ),
+        item("warning", "Goes ahead with something risky the user should notice: overwrite.", () =>
+          ui.button({ label: "overwrite", variant: "warning" })
+        ),
+        item("ghost", "A quiet action that shouldn't draw the eye: reset to defaults, more.", () =>
+          ui.button({ label: "reset to defaults", variant: "ghost" })
+        ),
+        item("link", "Reads as text. For an action inside a line of other things.", () =>
+          ui.button({ label: "show more", variant: "link" })
+        ),
+        item("with an icon", "The icon goes before the label.", () =>
+          ui.button({ icon: "plus", label: "new note", variant: "primary" })
+        ),
+        item(
+          "icon only",
+          "Give it a title: it's the tooltip, and the name screen readers read out.",
+          () => ui.button({ icon: "reload", title: "reload" })
+        ),
+        item(
+          "disabled",
+          "While an action runs, or before it can. Set .disabled on it later to change that.",
+          () => ui.button({ label: "publishing…", disabled: true })
+        )
+      )
+
+      // ── chips ───────────────────────────────────────────────────
+      section(
+        "chips",
+        "chips",
+        [
+          "A chip picks one of several open things, like the windows in a space. The one in front is filled."
+        ],
+        "ui.chip({ label, active, icon, title, onClick })",
+        item("active", "The one in front.", () => ui.chip({ label: "notes", active: true })),
+        item("with an icon", "The icon goes before the name.", () =>
+          ui.chip({ label: "relays", icon: "window" })
+        ),
+        item(
+          "long names",
+          "A chip is at most 12rem wide, about 20 letters. A longer name ends in an ellipsis, so pass the full name as title: it shows on hover.",
+          () =>
+            ui.chip({
+              label: "a window with a very long name indeed",
+              title: "a window with a very long name indeed"
+            })
+        ),
+        item(
+          "a different limit",
+          [
+            "Give the chip a class and set its max-width in your own stylesheet. none lets it grow with the name.",
+            block(".no-limit {\n  max-width: none;\n}")
+          ],
+          () => ui.chip({ label: "a window with a very long name indeed", class: "no-limit" })
+        )
+      )
+
+      // ── tabs ────────────────────────────────────────────────────
+      section(
+        "tabs",
+        "tabs",
+        [
+          "Tabs switch between views of the same thing. tabs() keeps track of which one is selected and tells you when that changes; select(value) moves it without telling you, and value reads it."
+        ],
+        "ui.tabs({ items, active, onChange })",
+        item(
+          "switching a feed",
+          "Press a tab: the line under it follows.",
+          () => {
+            const says = {
+              following: "notes from people you follow",
+              global: "notes from every relay you read",
+              mine: "your own notes"
+            }
+            const shown = ui.el("p", "", says.following)
+            const feed = ui.tabs({
+              items: ["following", "global", "mine"],
+              active: "following",
+              onChange: tab => (shown.textContent = says[tab])
+            })
+            return ui.stack(feed, shown)
+          },
+          { wide: true }
+        ),
+        item(
+          "labels apart from values",
+          "An item can be { value, label } when what you show isn't what you want back.",
+          () =>
+            ui.tabs({
+              items: [
+                { value: "all", label: "all" },
+                { value: "napp", label: "napps" },
+                { value: "napplet", label: "napplets" }
+              ],
+              active: "napp"
+            })
+        )
+      )
+
+      // ── icons ───────────────────────────────────────────────────
+      section(
+        "icons",
+        "icons",
+        [
+          "Small line glyphs that take the size and color of the text around them. Pass the name to icon(), or to button({ icon })."
+        ],
+        "ui.icon(name)\nui.icons",
+        item(
+          "the set",
+          "Every glyph, with the name you pass.",
+          () =>
+            ui.el(
+              "div",
+              "glyphs",
+              ...Object.keys(ui.icons).map(name =>
+                ui.el("div", "glyph", ui.icon(name), ui.overline(name))
+              )
+            ),
+          { wide: true, code: false }
+        ),
+        item("next to text", "It sits on the line like a letter.", () =>
+          ui.el("span", "", ui.icon("check"), " saved")
+        ),
+        item(
+          "your own",
+          "Add a glyph to ui.icons: the inside of a 16 by 16 svg, drawn with lines.",
+          () => {
+            ui.icons.star =
+              '<path d="M8 2.5l1.7 3.6 3.9.5-2.8 2.7.7 3.9L8 11.3l-3.5 1.9.7-3.9L2.4 6.6l3.9-.5z"/>'
+            return ui.button({ icon: "star", label: "favorite" })
+          }
+        ),
+        item(
+          "in plain markup",
+          "Without the script, a span with the classes ui-icon and ui-icon-<name> shows the same glyph.",
+          () => ui.el("span", "ui-icon ui-icon-trash")
+        )
+      )
+
+      // ── inputs ──────────────────────────────────────────────────
+      section(
+        "inputs",
+        "inputs and fields",
+        [
+          "input() is a text box: no border, a light tint, mono text. Its width comes from where you put it. field() puts a caption over it and a note under it, which is the shape of a line in a form."
+        ],
+        "ui.input({ type, placeholder, value })\nui.field({ label, control, note })",
+        item("a search box", "An input on its own, for a toolbar.", () =>
+          ui.input({ type: "search", placeholder: "search notes" })
+        ),
+        item(
+          "a form line",
+          "The caption says what goes in, the note says what happens to it. Clicking the caption focuses the box.",
+          () =>
+            ui.field({
+              label: "display name",
+              control: ui.input({ placeholder: "your name" }),
+              note: "shown next to your notes"
+            }),
+          { wide: true }
+        )
+      )
+
+      // ── checks and radios ───────────────────────────────────────
+      section(
+        "checks",
+        "checks and radios",
+        [
+          "check() is a checkbox and radios() a choice of one. Give either a label and the words come with the box: clicking them toggles it too. onChange gets the new state."
+        ],
+        "ui.check({ label, note, checked, onChange })\nui.radios({ name, options, value, onChange })",
+        item("with a label", "The usual way: a box and what it turns on.", () =>
+          ui.check({ label: "read from this relay", checked: true })
+        ),
+        item("with a note", "When the label needs a word more about what it does.", () =>
+          ui.check({
+            label: "always authenticate",
+            note: "answer every relay's login request without asking"
+          })
+        ),
+        item(
+          "on its own",
+          "For a row that already says what it's about, like a relay in a list. The title explains it on hover.",
+          () => ui.check({ checked: true, title: "read from this relay" })
+        ),
+        item("one of several", "radios() makes the group. value reads or sets the pick.", () =>
+          ui.radios({
+            name: "notify",
+            options: ["everything", "mentions", "nothing"],
+            value: "mentions"
+          })
+        ),
+        item(
+          "one of several, explained",
+          "Options can carry a label and a note, like checks.",
+          () =>
+            ui.radios({
+              name: "publish",
+              options: [
+                { value: "all", label: "all my relays", note: "every relay in your list" },
+                { value: "write", label: "write relays", note: "only the ones marked write" }
+              ],
+              value: "write"
+            }),
+          { wide: true }
+        )
+      )
+
+      // ── details ─────────────────────────────────────────────────
+      section(
+        "details",
+        "folding things away",
+        [
+          "details() hides content under a heading until it's opened. For what people need now and then: advanced settings, a list of files. Append what it holds to it."
+        ],
+        "ui.details({ summary, open })",
+        item(
+          "advanced settings",
+          "Closed until someone looks.",
+          () => {
+            const advanced = ui.details({ summary: "advanced" })
+            advanced.append(ui.check({ label: "always authenticate" }))
+            return advanced
+          },
+          { wide: true }
+        )
+      )
+
+      // ── lists ───────────────────────────────────────────────────
+      section(
+        "lists",
+        "lists",
+        [
+          "list() is a column of things people add to and remove from: relays, muted words, servers. You say what a row shows and which controls it has. The list makes the rows, the add button, the line for when it's empty, and gives you add(item), delete(item) and items to change it."
+        ],
+        "ui.list({ items, label, controls, add, empty })",
+        item(
+          "relays",
+          "Each row: the address, whether to read from it, and remove. Adding checks the address first.",
+          () => {
+            const relays = ui.list({
+              items: ["wss://relay.example", "wss://nos.example"],
+              label: url => url.replace("wss://", ""),
+              controls: url => [
+                ui.check({ checked: true, title: "read from this relay" }),
+                ui.button({ label: "remove", variant: "danger", onClick: () => relays.delete(url) })
+              ],
+              add: {
+                label: "add a relay",
+                placeholder: "wss://",
+                onAdd: url =>
+                  url.startsWith("wss://")
+                    ? void relays.add(url)
+                    : "a relay address starts with wss://"
+              },
+              empty: "no relays yet"
+            })
+            return relays
+          },
+          { wide: true }
+        ),
+        item(
+          "muted words",
+          "Plain strings, one control per row. Unmute them all to see the empty line.",
+          () => {
+            const muted = ui.list({
+              items: ["gm", "airdrop"],
+              controls: word => [ui.button({ label: "unmute", onClick: () => muted.delete(word) })],
+              add: {
+                label: "mute a word",
+                placeholder: "a word",
+                onAdd: word => (word.trim() ? void muted.add(word.trim()) : "type a word")
+              },
+              empty: "nothing muted"
+            })
+            return muted
+          },
+          { wide: true }
+        ),
+        item(
+          "files, to read",
+          "Items can be anything: label picks the text. No add, so no button.",
+          () =>
+            ui.list({
+              items: [
+                { name: "index.html", size: "2 kb" },
+                { name: "app.js", size: "14 kb" },
+                { name: "style.css", size: "3 kb" }
+              ],
+              label: file => file.name,
+              controls: file => [ui.overline(file.size)]
+            }),
+          { wide: true }
+        )
+      )
+
+      // ── rows that open ──────────────────────────────────────────
+      section(
+        "rows",
+        "rows that open",
+        [
+          "Rows that open to more. One opens at a time, and while it's open the others step aside. row() adds itself to the end of its list; append what it opens to."
+        ],
+        "ui.rowList()\nui.row(list, ...summary)",
+        item(
+          "backups",
+          "Each backup's name and date; opened, what to do with it.",
+          () => {
+            const backups = ui.rowList()
+            for (const [name, when] of [
+              ["my-space", "today"],
+              ["before the move", "last week"]
+            ]) {
+              const backup = ui.row(backups, name, ui.overline(when))
+              backup.append(
+                ui.bar(
+                  ui.button({ label: "restore", variant: "primary" }),
+                  ui.button({ label: "delete", variant: "danger" })
+                )
+              )
+            }
+            return backups
+          },
+          { wide: true }
+        )
+      )
+
+      // ── put together ────────────────────────────────────────────
+      section(
+        "together",
+        "put together",
+        ["A relay settings screen, from the parts above."],
+        "",
+        item(
+          "a settings screen",
+          "A title, tabs for the two lists, the list, a folded option, and the actions.",
+          () => {
+            const relays = ui.list({
+              items: ["wss://relay.example", "wss://nos.example"],
+              label: url => url.replace("wss://", ""),
+              controls: url => [
+                ui.button({ label: "remove", variant: "danger", onClick: () => relays.delete(url) })
+              ],
+              add: {
+                label: "add a relay",
+                placeholder: "wss://",
+                onAdd: url => void relays.add(url)
+              },
+              empty: "no relays yet"
+            })
+            const advanced = ui.details({ summary: "advanced" })
+            advanced.append(
+              ui.check({
+                label: "always authenticate",
+                note: "answer every relay's login request without asking"
+              })
+            )
+            return ui.stack(
+              ui.el("h3", "ui-title", "relays"),
+              ui.tabs({ items: ["read", "write"], active: "read" }),
+              relays,
+              advanced,
+              ui.bar(
+                ui.button({ label: "save", variant: "primary", icon: "save" }),
+                ui.button({ label: "cancel" })
+              )
+            )
+          },
+          { wide: true, open: true }
+        )
+      )
+    </script>
+  </body>
+</html>

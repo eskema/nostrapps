@@ -40,17 +40,8 @@ import { hasBytes } from "../nsite/heal.js"
 
 // Addressable app kinds shown in Discover: nsites, napps, and named napplets.
 const DISCOVER_KINDS = [NSITE_NAMED_KIND, NAPP_NAMED_KIND, NAPPLET_NAMED_KIND]
-import {
-  addControl,
-  button,
-  check,
-  details,
-  item,
-  itemList,
-  overline,
-  tab,
-  type ButtonVariant
-} from "./ui.js"
+import { button, check, details, list, overline, tabs, type ButtonVariant } from "./ui.js"
+import type { List } from "./ui.js"
 
 const DEFAULT_RELAYS = NAPP_RELAYS
 
@@ -77,28 +68,21 @@ export function mount(
   // A segmented control bound to typeFilter; re-applies both tabs' filters on
   // change. Each pane renders its own instance (kept in sync via typeFilter).
   function buildTypeSegments(): HTMLElement {
-    const seg = document.createElement("div")
-    seg.className = "apps-typeseg"
-    const opts: Array<["all" | AppType, string]> = [
-      ["all", "all"],
-      ["nsite", "nsites"],
-      ["napp", "napps"],
-      ["napplet", "napplets"]
-    ]
-    const btns: HTMLButtonElement[] = opts.map(([val, label]) =>
-      tab({
-        label,
-        active: typeFilter === val,
-        onClick: () => {
-          typeFilter = val
-          btns.forEach((x, i) => x.classList.toggle("active", opts[i][0] === val))
-          applyInstalledFilter()
-          applyFilter()
-        }
-      })
-    )
-    for (const b of btns) seg.appendChild(b)
-    return seg
+    return tabs<"all" | AppType>({
+      class: "apps-typeseg",
+      items: [
+        { value: "all" },
+        { value: "nsite", label: "nsites" },
+        { value: "napp", label: "napps" },
+        { value: "napplet", label: "napplets" }
+      ],
+      active: typeFilter,
+      onChange: val => {
+        typeFilter = val
+        applyInstalledFilter()
+        applyFilter()
+      }
+    })
   }
 
   // ─── Discover tab state ───
@@ -701,7 +685,7 @@ export function mount(
   let _listEl: HTMLElement | null = null
   // The discover cards, by napp address — kept and reconciled, see renderList.
   const discoverCards = new Map<string, { el: HTMLElement; sig: string }>()
-  let _relayListEl: HTMLElement | null = null
+  let _relayListEl: List<string> | null = null
   // The relay panel's <summary> doubles as the status line: a title with the
   // enabled-relay count plus an overline badge with the event count / loading
   // state. Both are updated in place by updateStatus().
@@ -1118,28 +1102,34 @@ export function mount(
     updateStatus()
   }
 
-  // Each relay is a .ui-item row composed from the design-system parts:
-  // url label · event count (overline) · enable checkbox · remove.
+  // The relay list: a row per relay, url · event count (overline) · enable
+  // checkbox · remove, with the add control under it.
+  function buildRelayList(): List<string> {
+    return list<string>({
+      class: "apps-relays-list",
+      label: url => url.replace(/^wss?:\/\//, ""),
+      title: url => url,
+      controls: (url, row) => {
+        const count = overline(relayCountLabel(url), "apps-relay-count")
+        count.title = "napps seen on this relay (stale = missing the newest version)"
+        row.dataset.relay = url
+        row.classList.toggle("disabled", disabled.has(url))
+        return [
+          count,
+          check({
+            checked: !disabled.has(url),
+            title: "search this relay",
+            onChange: on => toggleRelay(url, on)
+          }),
+          button({ label: "remove", variant: "danger", onClick: () => removeRelay(url) })
+        ]
+      },
+      add: { label: "add a relay", placeholder: "wss://relay.example.com", onAdd: addRelay }
+    })
+  }
+
   function renderRelayRows() {
-    if (!_relayListEl) return
-    _relayListEl.replaceChildren()
-    for (const url of relays) {
-      const count = overline(relayCountLabel(url), "apps-relay-count")
-      count.title = "napps seen on this relay (stale = missing the newest version)"
-      const row = item(
-        { label: url.replace(/^wss?:\/\//, ""), title: url },
-        count,
-        check({
-          checked: !disabled.has(url),
-          title: "search this relay",
-          onChange: on => toggleRelay(url, on)
-        }),
-        button({ label: "remove", variant: "danger", onClick: () => removeRelay(url) })
-      )
-      row.dataset.relay = url
-      if (disabled.has(url)) row.classList.add("disabled")
-      _relayListEl.appendChild(row)
-    }
+    if (_relayListEl) _relayListEl.items = relays
   }
 
   function renderDiscover() {
@@ -1167,7 +1157,7 @@ export function mount(
     relaysPanel.querySelector("summary")!.appendChild(sum)
     discoverPane.insertBefore(relaysPanel, _listEl)
 
-    _relayListEl = itemList("apps-relays-list")
+    _relayListEl = buildRelayList()
     renderRelayRows()
 
     const relaysActions = document.createElement("div")
@@ -1186,15 +1176,7 @@ export function mount(
       })
     )
 
-    relaysPanel.append(
-      _relayListEl,
-      addControl({
-        label: "add a relay",
-        placeholder: "wss://relay.example.com",
-        onAdd: addRelay
-      }),
-      relaysActions
-    )
+    relaysPanel.append(_relayListEl, relaysActions)
 
     // Re-seed the search box from the persisted filter so switching away to the
     // Installed tab and back keeps the input in sync with the (still-filtered) list.

@@ -131,6 +131,138 @@ type NappUtils = {
     relays?: string[]
   ): Promise<{ published: number; failed: number; relays: Record<string, unknown> }>
 }
+// The kit, with `requires: ["ui"]`: the launcher's controls as elements wearing
+// its classes. Appearance is the class's; layout (width, margins, placement)
+// is the parent's.
+type NappUiButtonOpts = {
+  label?: string
+  onClick?: (e: MouseEvent) => void
+  variant?: "primary" | "outline" | "danger" | "warning" | "ghost" | "link"
+  title?: string
+  type?: "button" | "submit"
+  disabled?: boolean
+  // a glyph before the label; alone, the title names the button for assistive tech
+  icon?: string
+  class?: string
+}
+type NappUiCheckOpts = {
+  checked?: boolean
+  title?: string
+  onChange?: (checked: boolean) => void
+  class?: string
+  // text beside the box, as one <label> with it; the box is its .control
+  label?: string
+  // a dimmed line under the label
+  note?: string
+}
+type NappUiTabs<T extends string> = HTMLDivElement & {
+  select(value: T): void // move the selection without reporting it
+  readonly value: T | undefined
+}
+type NappUiList<T> = HTMLDivElement & {
+  add(item: T): HTMLDivElement
+  delete(item: T): void
+  items: T[] // in order; assign to replace them all
+}
+type NappUi = {
+  button(opts?: NappUiButtonOpts): HTMLButtonElement
+  // selectable: primary while active, ghost otherwise; the label truncates
+  chip(opts: {
+    label: string
+    active?: boolean
+    icon?: string
+    onClick?: (e: MouseEvent) => void
+    title?: string
+    class?: string
+  }): HTMLButtonElement
+  // a text tab, underlined while active; toggle .active on it to move the selection
+  tab(opts: {
+    label: string
+    active?: boolean
+    onClick?: (e: MouseEvent) => void
+    title?: string
+    class?: string
+  }): HTMLButtonElement
+  // a row of tabs that owns the selection and reports the value when it changes
+  tabs<T extends string>(opts: {
+    items: Array<T | { value: T; label?: string; title?: string; class?: string }>
+    active?: T
+    onChange?: (value: T) => void
+    class?: string
+  }): NappUiTabs<T>
+  // an inline svg, 1em, in currentColor; the names are the keys of `icons`
+  icon(name: string): SVGElement
+  // the glyphs icon() draws, the body of a 16×16 viewBox each; add your own
+  icons: Record<string, string>
+  // a <details> with its <summary> in place; append the content to it
+  details(opts: { summary: string; open?: boolean; class?: string }): HTMLDetailsElement
+  input(opts?: {
+    type?: string
+    placeholder?: string
+    value?: string
+    autocomplete?: string
+    spellcheck?: boolean
+    class?: string
+  }): HTMLInputElement
+  // a form line: overline caption, the control filling the width, a note under it
+  field(opts: {
+    label: string
+    control: HTMLElement
+    note?: string
+    class?: string
+  }): HTMLLabelElement
+  check(opts: NappUiCheckOpts & { label: string }): HTMLLabelElement
+  check(opts?: NappUiCheckOpts): HTMLInputElement
+  radio(opts: NappUiCheckOpts & { name: string; label: string }): HTMLLabelElement
+  radio(opts: NappUiCheckOpts & { name: string }): HTMLInputElement
+  // one of N, labelled, as a group; .value reads and sets the pick
+  radios<T extends string>(opts: {
+    name: string
+    options: Array<T | { value: T; label?: string; title?: string; note?: string }>
+    value?: T
+    onChange?: (value: T) => void
+    class?: string
+  }): HTMLDivElement & { value: T | undefined }
+  // a small tracked uppercase caption
+  overline(text: string, cls?: string): HTMLSpanElement
+  // a word set round a circle, turning; sized by the font-size it sits in
+  ring(word: string, cls?: string): SVGElement
+  // a column of rows: a truncating mono label, then the controls given
+  itemList(cls?: string): HTMLDivElement
+  item(
+    opts: { label: string; title?: string; class?: string },
+    ...controls: HTMLElement[]
+  ): HTMLDivElement
+  // rows that open one at a time; append rows to the list, a row's content to the row
+  rowList(cls?: string): HTMLDivElement
+  row(list: HTMLElement, ...summary: Array<string | Node>): HTMLDetailsElement
+  // a button that becomes an input + add; onAdd returns the error to show, or nothing
+  addControl(opts: {
+    label: string
+    placeholder?: string
+    class?: string
+    onAdd: (value: string) => string | void
+  }): HTMLDivElement
+  // rows + add control + operations; the row's label and controls are yours, the structure the kit's
+  list<T>(opts?: {
+    items?: T[]
+    label?: (item: T) => string
+    title?: (item: T) => string
+    controls?: (item: T, row: HTMLDivElement) => HTMLElement[]
+    add?: { label: string; placeholder?: string; onAdd: (value: string) => string | void }
+    empty?: string
+    class?: string
+  }): NappUiList<T>
+  // plain elements for the glue between the parts
+  el<K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    cls?: string,
+    ...children: Array<Node | string>
+  ): HTMLElementTagNameMap[K]
+  // a column with a gap; a row of controls that wraps
+  stack(...children: Array<Node | string>): HTMLDivElement
+  bar(...children: Array<Node | string>): HTMLDivElement
+}
 type Napp = {
   instance: string
   registerAction(
@@ -148,6 +280,7 @@ type Napp = {
   relays: { health(urls: string[]): Promise<NappRelayHealth[]> }
   feeds: NappFeeds
   utils: NappUtils
+  ui: NappUi
   nip19: {
     decode(value: string): unknown
     npubEncode(hex: string): string

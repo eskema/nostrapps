@@ -47,11 +47,12 @@ async function handleFetch(req, url) {
   // Signing companion lazy-imported by bridge.js (napp.utils.signWithKey /
   // generateKey) — generated from @nostr/tools/pure, served like bridge.js.
   if (path === "/nostr-crypto.js") return passthrough(req, LOCKED_CSP)
-  // Launcher-owned shared stylesheet (opt-in via metadata `requires: ["ui"]`),
-  // served from the launcher origin for every napp subdomain like bridge.js.
-  // Its fonts are inlined as data URIs inside it (a separate /fonts/ request is
+  // The kit (opt-in via metadata `requires: ["ui"]`, injected below), served
+  // from the launcher origin for every napp subdomain like bridge.js. The
+  // stylesheet's fonts are inlined as data URIs (a separate /fonts/ request is
   // fetched in CORS mode, which fails the napp-subdomain passthrough).
   if (path === "/napp-ui.css") return passthrough(req, LOCKED_CSP)
+  if (path === "/napp-ui.js") return passthrough(req, LOCKED_CSP)
 
   if (url.host.startsWith("dev-") || url.host.startsWith("temp-")) {
     try {
@@ -302,12 +303,15 @@ function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
   // Injected at the top of <head>, so the shared stylesheet lands BEFORE the
   // napp's own styles and the napp can still override it. __nappletDomains must
   // precede napplet-bridge.js (which reads it). bridge.js owns window.nostr /
-  // window.napp; napplet-bridge.js owns window.napplet.
+  // window.napp; napplet-bridge.js owns window.napplet; napp-ui.js puts the
+  // kit's helpers on window.napp.ui, so it follows bridge.js.
   const headInject =
     domainsScript +
     '<script src="/napplet-bridge.js"></script>' +
     '<script src="/bridge.js"></script>' +
-    (wrapperUi ? '<link rel="stylesheet" href="/napp-ui.css">' : "")
+    (wrapperUi
+      ? '<link rel="stylesheet" href="/napp-ui.css"><script src="/napp-ui.js"></script>'
+      : "")
   const readyTag =
     '<script>window.parent.postMessage({ __nostrapps: "napp-ready", instanceId: window.name }, "*")</script>'
 

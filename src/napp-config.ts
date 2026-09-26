@@ -214,7 +214,7 @@ function configRow(
   row.appendChild(head)
   if (p.description) {
     const d = document.createElement("div")
-    d.className = "napp-perms-desc"
+    d.className = "ui-field-note"
     d.textContent = p.description
     row.appendChild(d)
   }

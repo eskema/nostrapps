@@ -37,7 +37,7 @@ import { resolveCardIcon } from "../nsite/icon.js"
 import { permRow, unsupportedRequires } from "../napp-permissions.js"
 import { slug } from "../nsite/local.js"
 import { computeNappId } from "../persistence.js"
-import { addControl, button, check, details, item, itemList, overline } from "./ui.js"
+import { button, check, details, item, itemList, overline } from "./ui.js"
 import { code, detailField, renderAppCard } from "./card.js"
 
 // A staged file. The blob hash is what the manifest carries, so hashing here —
@@ -147,29 +147,67 @@ export function mount(
   const filesList = itemList("upload-files-list")
   filesSec.el.appendChild(filesList)
 
+  // A row per target: host · on/off · remove. Off ones dim (.disabled).
   const serversSec = section("blossom servers", "upload-servers")
-  const serversList = itemList("upload-servers-list")
-  serversSec.el.append(
-    serversList,
-    addControl({
-      label: "add a server",
-      placeholder: "https://blossom.example.com",
-      onAdd: addServer
-    })
-  )
+  const serversList = list<string>({
+    class: "upload-servers-list",
+    label: url => host(url),
+    title: url => url,
+    controls: (url, row) => {
+      row.classList.toggle("disabled", offServers.has(url))
+      return [
+        check({
+          checked: !offServers.has(url),
+          title: "upload blobs here",
+          onChange: on => toggle(offServers, url, on, renderServers)
+        }),
+        button({
+          label: "remove",
+          variant: "danger",
+          onClick: () => {
+            servers = servers.filter(s => s !== url)
+            offServers.delete(url)
+            renderServers()
+          }
+        })
+      ]
+    },
+    add: { label: "add a server", placeholder: "https://blossom.example.com", onAdd: addServer }
+  })
+  serversSec.el.append(serversList)
 
   const relaysSec = section("relays", "upload-relays")
-  const relaysList = itemList("upload-relays-list")
+  const relaysList = list<string>({
+    class: "upload-relays-list",
+    label: url => host(url),
+    title: url => url,
+    controls: (url, row) => {
+      row.classList.toggle("disabled", offRelays.has(url))
+      return [
+        check({
+          checked: !offRelays.has(url),
+          title: "publish the event here",
+          onChange: on => toggle(offRelays, url, on, renderRelays)
+        }),
+        button({
+          label: "remove",
+          variant: "danger",
+          onClick: () => {
+            relays = relays.filter(r => r !== url)
+            offRelays.delete(url)
+            renderRelays()
+          }
+        })
+      ]
+    },
+    add: { label: "add a relay", placeholder: "wss://relay.example.com", onAdd: addRelay }
+  })
   const relaysActions = document.createElement("div")
   relaysActions.className = "upload-section-actions"
   relaysActions.appendChild(
     button({ label: "reset to defaults", variant: "ghost", onClick: () => void loadRelays() })
   )
-  relaysSec.el.append(
-    relaysList,
-    addControl({ label: "add a relay", placeholder: "wss://relay.example.com", onAdd: addRelay }),
-    relaysActions
-  )
+  relaysSec.el.append(relaysList, relaysActions)
 
   const eventSec = section("event", "upload-event")
   const jsonEl = document.createElement("pre")
@@ -264,28 +302,7 @@ export function mount(
   }
 
   function renderServers() {
-    serversList.replaceChildren()
-    for (const url of servers) {
-      const row = item(
-        { label: host(url), title: url },
-        check({
-          checked: !offServers.has(url),
-          title: "upload blobs here",
-          onChange: on => toggle(offServers, url, on, renderServers)
-        }),
-        button({
-          label: "remove",
-          variant: "danger",
-          onClick: () => {
-            servers = servers.filter(s => s !== url)
-            offServers.delete(url)
-            renderServers()
-          }
-        })
-      )
-      if (offServers.has(url)) row.classList.add("disabled")
-      serversList.appendChild(row)
-    }
+    serversList.items = servers
     serversSec.badge.textContent = servers.length
       ? `${onServers().length}/${servers.length}`
       : "none"
@@ -293,28 +310,7 @@ export function mount(
   }
 
   function renderRelays() {
-    relaysList.replaceChildren()
-    for (const url of relays) {
-      const row = item(
-        { label: host(url), title: url },
-        check({
-          checked: !offRelays.has(url),
-          title: "publish the event here",
-          onChange: on => toggle(offRelays, url, on, renderRelays)
-        }),
-        button({
-          label: "remove",
-          variant: "danger",
-          onClick: () => {
-            relays = relays.filter(r => r !== url)
-            offRelays.delete(url)
-            renderRelays()
-          }
-        })
-      )
-      if (offRelays.has(url)) row.classList.add("disabled")
-      relaysList.appendChild(row)
-    }
+    relaysList.items = relays
     relaysSec.badge.textContent = `${onRelays().length}/${relays.length}`
     render()
   }
