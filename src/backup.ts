@@ -11,12 +11,13 @@
 //     "perm <method> <decision>", "size <w> [h]", "config <key> <value>"]
 //   ["space", "id <id>", "name <name>", "current", "pack", "saved-pack"]
 //   ["window" | "saved", "space <id>", "a <address>" | "system <id>", "petname <name>",
-//     "pos <l> <t> <w> [h]", "z <n>", "minimized", "pinned", "user-sized",
-//     "param <key> <value>"]
+//     "pos <l> <t> <w> [h]", "stage <w> <h>", "z <n>", "minimized", "pinned",
+//     "user-sized", "param <key> <value>"]
 //
 // A bare key is a flag; with several values the last one takes the rest. A
 // config field per setting (the form only holds plain values), a param field
-// per list item (the apps napp's discover relays).
+// per list item (the apps napp's discover relays). A window's pos is pixels on
+// a stage of that size, and scales to the one it's restored on.
 // Records stand alone: tag order only orders spaces, and windows within one.
 // Apps and their environment, not content: a window's actions, napp storage and
 // secret config stay out. So do local and dev apps, which have no address.
@@ -163,6 +164,7 @@ function windowTag(
   if (w.petname) tag.push(`petname ${w.petname}`)
   const p = w.position
   if (p) tag.push(["pos", p.left, p.top, p.width, p.height].filter(v => v != null).join(" "))
+  if (p?.stage) tag.push(`stage ${p.stage.width} ${p.stage.height}`)
   const s = w.status
   if (s?.zIndex) tag.push(`z ${s.zIndex}`)
   if (s?.minimized) tag.push("minimized")
@@ -276,6 +278,7 @@ export interface ParsedWindow {
   system: string | null
   petname: string | null
   pos: number[] | null
+  stage: number[] | null
   z: number
   minimized: boolean
   pinned: boolean
@@ -342,6 +345,7 @@ export function parseBackup(content: string): ParsedBackup {
           system: one("system"),
           petname: one("petname"),
           pos: numbers(one("pos")),
+          stage: numbers(one("stage")),
           z: Number(one("z")) || 0,
           minimized: f.has("minimized"),
           pinned: f.has("pinned"),
@@ -557,10 +561,12 @@ export async function restoreBackup(
     let serial = 1
     const place = (w: ParsedWindow): NappWindowState | null => {
       const [left, top, width, height] = w.pos ?? []
+      const [sw, sh] = w.stage ?? []
+      const stage = sw > 0 && sh > 0 ? { stage: { width: sw, height: sh } } : {}
       const common = {
         status: { minimized: w.minimized, pinned: w.pinned, userSized: w.userSized, zIndex: w.z },
         ...(w.pos && w.pos.length >= 3
-          ? { position: { left, top, width, ...(height ? { height } : {}) } }
+          ? { position: { left, top, width, ...(height ? { height } : {}), ...stage } }
           : {}),
         ...(Object.keys(w.params).length ? { params: w.params } : {})
       }

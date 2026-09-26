@@ -1805,15 +1805,13 @@ async function restoreAll() {
   const release = holdLoading()
   await nextPaint()
   // Stage bounds are in flux while windows mount (scrollbar appears once one
-  // lands below the fold) — hold the observer's rescale until we're done, or
-  // every reload shrinks the layout by the transient delta. See host.ts.
+  // lands below the fold): no repacking until they settle. See host.ts.
   setStageSettling(true)
   try {
     await restoreAllInner()
   } finally {
     release()
-    // Two frames: one for layout, one for the scrollbar/spacer to settle,
-    // then refs re-baseline against the final bounds.
+    // Two frames: one for layout, one for the scrollbar/spacer to settle.
     requestAnimationFrame(() => requestAnimationFrame(() => setStageSettling(false)))
   }
 }

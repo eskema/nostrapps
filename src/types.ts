@@ -75,6 +75,9 @@ export type Position = {
   top: number
   width: number
   height?: number
+  // The stage's inner size these pixels were set against. Restored on a stage
+  // of another size, the window scales from it.
+  stage?: { width: number; height: number }
 }
 
 export type NappWindow = {

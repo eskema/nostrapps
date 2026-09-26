@@ -10,6 +10,7 @@ import type {
   SystemNappDef,
   PackCell,
   GridRect,
+  Position,
   SystemCtx
 } from "../types.js"
 
@@ -2144,6 +2145,7 @@ export function launchSystem(
     systemActions.set(instanceId, (name, payload) => action(name, payload))
   }
   ensureStageObserver(stageEl)
+  scaleFromSaved(win.root, opts.position)
   clampToStage(win.root, stageEl)
   // The height is decided once, here: what the napp asks for, or a measurement
   // of what it mounted with. Committed inline, so from now on the window is a
@@ -2261,6 +2263,7 @@ function mount(
   openWindows.set(instanceId, win)
   resetInstanceRuntimeState(instanceId, "Window remounted before action registered")
   ensureStageObserver(stageEl)
+  scaleFromSaved(win.root, position)
   clampToStage(win.root, stageEl)
   captureWindowGeom(win.root)
   return win
@@ -2348,6 +2351,7 @@ export function launchNapplet(
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
   ensureStageObserver(stageEl)
+  scaleFromSaved(win.root, position)
   clampToStage(win.root, stageEl)
   captureWindowGeom(win.root)
   return win
@@ -2452,6 +2456,7 @@ export function mountWithLoading(
   openWindows.set(instanceId, win)
   resetInstanceRuntimeState(instanceId, "Loading window created")
   ensureStageObserver(stageEl)
+  scaleFromSaved(win.root, position)
   clampToStage(win.root, stageEl)
   captureWindowGeom(win.root)
   return win
@@ -3320,15 +3325,17 @@ export function getStageBounds(stage: HTMLElement) {
 // the window's notifyState) and never re-read from a render, so it survives any
 // number of resizes without drift. Windows scale fully (no size floor) so they
 // keep their relative layout and never overlap a neighbour on a smaller stage.
-type GeomRef = {
-  left: number
-  top: number
-  width: number
-  height?: number
-  innerW: number
-  innerH: number
-}
+type Stage = { width: number; height: number }
+type GeomRef = Position & { stage: Stage }
 const windowGeomRef = new WeakMap<HTMLElement, GeomRef>()
+// The stage size a window's inline pixels are for right now, which is what gets
+// saved with them. Not the reference's: a rescale moves the pixels on. A hidden
+// window isn't rescaled, and a static (mobile) one keeps the pixels it came with.
+const placedOn = new WeakMap<HTMLElement, Stage>()
+
+export function placedStage(root: HTMLElement): Stage | undefined {
+  return placedOn.get(root)
+}
 
 export function captureWindowGeom(root: HTMLElement) {
   const stage = root.parentElement
@@ -3344,9 +3351,19 @@ export function captureWindowGeom(root: HTMLElement) {
     // maximized window reports as the CSS-inset full size.
     width: parseFloat(root.style.width) || root.offsetWidth || 0,
     height: Number.isFinite(h) && h > 0 ? h : undefined,
-    innerW: iw,
-    innerH: ih
+    stage: { width: iw, height: ih }
   })
+  placedOn.set(root, { width: iw, height: ih })
+}
+
+// A window restored with the stage it was saved against: that's its reference,
+// so it lands in proportion on this one.
+function scaleFromSaved(root: HTMLElement, position?: Position) {
+  const stage = position?.stage
+  if (!position || !stage || !(stage.width > 0 && stage.height > 0)) return
+  windowGeomRef.set(root, { ...position, stage })
+  placedOn.set(root, stage)
+  rescaleWindowGeom(root)
 }
 
 export function rescaleWindowGeom(root: HTMLElement) {
@@ -3358,9 +3375,9 @@ export function rescaleWindowGeom(root: HTMLElement) {
     return
   }
   const { width: iw, height: ih, padL, padT } = getStageBounds(stage)
-  if (iw <= 0 || ih <= 0 || ref.innerW <= 0 || ref.innerH <= 0) return
-  const sx = iw / ref.innerW
-  const sy = ih / ref.innerH
+  if (iw <= 0 || ih <= 0 || ref.stage.width <= 0 || ref.stage.height <= 0) return
+  const sx = iw / ref.stage.width
+  const sy = ih / ref.stage.height
   root.style.left = `${Math.round(padL + (ref.left - padL) * sx)}px`
   root.style.top = `${Math.round(padT + (ref.top - padT) * sy)}px`
   root.style.width = `${Math.round(ref.width * sx)}px`
@@ -3373,6 +3390,7 @@ export function rescaleWindowGeom(root: HTMLElement) {
   if (ref.height != null) {
     root.style.height = `${Math.round(ref.height * sy)}px`
   }
+  placedOn.set(root, { width: iw, height: ih })
 }
 
 // Browsers don't include a scroll container's padding-bottom in the scrollable
@@ -3467,28 +3485,20 @@ function clampToStage(root: HTMLElement, stage: HTMLElement, opts: { pullIn?: bo
 }
 
 // Restore mounts windows one by one, and the stage's bounds only settle once
-// the last one is in (scrollbar, bar heights). Rescaling against those
-// transient bounds is how windows shrank a little on every reload — while
-// settling, the observer only re-baselines the geometry refs; the release
-// re-captures them once against the final bounds.
+// the last one is in (scrollbar, bar heights). A grid band crossed on the way
+// is no reason to repack: while settling, windows only rescale.
 let stageSettling = false
 export function setStageSettling(on: boolean) {
   stageSettling = on
-  if (!on) for (const win of openWindows.values()) captureWindowGeom(win.root)
 }
 
 let stageObserver: ResizeObserver | null = null
 function ensureStageObserver(stageEl: HTMLElement) {
   if (stageObserver) return
   stageObserver = new ResizeObserver(() => {
-    if (stageSettling) {
-      for (const win of openWindows.values()) captureWindowGeom(win.root)
-      setStageBottomSpacer(stageEl, measureMaxWindowBottom(stageEl))
-      return
-    }
     const grid = gridForWidth(getStageBounds(stageEl).width)
     const stepped = grid.cols !== lastPackGrid.cols || grid.rows !== lastPackGrid.rows
-    if (stageEl.classList.contains("pack-mode") && stepped) {
+    if (!stageSettling && stageEl.classList.contains("pack-mode") && stepped) {
       // The grid changed band (e.g. 4×3 → 3×3). If we've laid windows out at
       // this grid before, restore that exact layout; otherwise pack fresh.
       const snap = packLayouts.get(gridKey(grid))

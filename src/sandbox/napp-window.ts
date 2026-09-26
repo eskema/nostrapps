@@ -6,6 +6,7 @@ import {
   capturePackSnapshot,
   captureWindowGeom,
   invalidatePackLayouts,
+  placedStage,
   syncStageBottomSpacer,
   TILE_GAP
 } from "./host.js"
@@ -307,7 +308,8 @@ export function createNappWindow({
         width: parseFloat(root.style.width) || 0,
         // omit when there's no inline height — keeps system-napp auto-sizing
         // intact across reload/restore until the user explicitly resizes.
-        height: Number.isFinite(h) && h > 0 ? h : undefined
+        height: Number.isFinite(h) && h > 0 ? h : undefined,
+        stage: placedStage(root)
       },
       status: {
         minimized: root.classList.contains("minimized"),
