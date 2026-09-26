@@ -26,6 +26,7 @@ import { nappNameEl } from "../napp-name.js"
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
 import { getStore, isDeleted, safeQueryEvents } from "../store.js"
+import { feedsMode, subscribeStore } from "../store-subs.js"
 import { createNappWindow, fitWindowHeight } from "./napp-window.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
@@ -4023,6 +4024,150 @@ function mergeFeedEvent(list: NostrEvent[], event: NostrEvent, limit: number): N
   return next.length > limit ? next.slice(0, limit) : next
 }
 
+// ─── feeds from a store subscription (trial, store-subs.ts) ─────
+// The usual result set merges in what the feed's own relays saved as new, so
+// an event another door saved first (another feed, a napp, another tab) waits
+// for the next store query. The store one is fed by a store subscription
+// instead: whatever lands in the store and matches.
+function eventList(events: NostrEvent[]): string {
+  const shown = events.slice(0, 10).map(e => `k${e.kind} ${e.id.slice(0, 8)}`)
+  return shown.join(", ") + (events.length > 10 ? ` and ${events.length - 10} more` : "")
+}
+
+type FeedResults = { requery: () => void; add: (event: NostrEvent) => void; close: () => void }
+
+let feedsModeLogged = false
+function feedResults(
+  label: string,
+  filter: Filter,
+  signal: AbortSignal,
+  post: (events: NostrEvent[]) => void
+): FeedResults {
+  if (feedsMode && !feedsModeLogged) {
+    feedsModeLogged = true
+    hostLog(
+      "launcher",
+      `feeds: ${feedsMode} mode (localStorage nostrapps:feeds: store, compare or usual)`
+    )
+  }
+  if (feedsMode === "store") return storeResultSet(filter, signal, post)
+  if (feedsMode === "compare") return comparedResultSets(label, filter, signal, post)
+  return { ...feedResultSet(filter, signal, post), close() {} }
+}
+
+// The feed's own relays' events come in through the store like everyone's,
+// so add is the subscription's alone.
+function storeResultSet(
+  filter: Filter,
+  signal: AbortSignal,
+  post: (events: NostrEvent[]) => void
+): FeedResults {
+  const results = feedResultSet(filter, signal, post)
+  const close = subscribeStore(filter, results.add, results.requery)
+  signal.addEventListener("abort", close, { once: true })
+  return { requery: results.requery, add() {}, close }
+}
+
+// The napp gets the usual result set, a store one runs beside it, and an
+// event only one of them has goes to the logs window once it's still missing
+// from the other after a second quiet spell.
+function comparedResultSets(
+  label: string,
+  filter: Filter,
+  signal: AbortSignal,
+  post: (events: NostrEvent[]) => void
+): FeedResults {
+  const limit = filter.limit ?? 100
+  let usual: NostrEvent[] = []
+  let fromStore: NostrEvent[] = []
+  let suspects = new Set<string>()
+  const reported = new Set<string>()
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  // in `list`, not in `other`, and new enough that `other` would hold it
+  const lacking = (list: NostrEvent[], other: NostrEvent[]) => {
+    const ids = new Set(other.map(e => e.id))
+    const floor = other.length >= limit ? other[other.length - 1].created_at : -Infinity
+    return list.filter(e => !ids.has(e.id) && e.created_at > floor)
+  }
+  const report = (events: NostrEvent[], what: string) => {
+    const sure = events.filter(e => suspects.has(e.id) && !reported.has(e.id))
+    if (!sure.length) return
+    for (const e of sure) reported.add(e.id)
+    hostLog("launcher", `feed ${label}: ${sure.length} ${what}: ${eventList(sure)}`)
+  }
+  const check = () => {
+    if (signal.aborted) return
+    const missed = lacking(fromStore, usual)
+    const extra = lacking(usual, fromStore)
+    report(missed, "in the store subscription, not the feed")
+    report(extra, "in the feed, not the store subscription")
+    suspects = new Set([...missed, ...extra].map(e => e.id))
+    if ([...suspects].some(id => !reported.has(id))) settle()
+  }
+  const settle = () => {
+    clearTimeout(timer)
+    if (!signal.aborted) timer = setTimeout(check, 3000)
+  }
+
+  const results = feedResultSet(filter, signal, events => {
+    usual = events
+    post(events)
+    settle()
+  })
+  const shadow = storeResultSet(filter, signal, events => {
+    fromStore = events
+    settle()
+  })
+  return {
+    requery() {
+      results.requery()
+      shadow.requery()
+    },
+    add: results.add,
+    close: shadow.close
+  }
+}
+
+// A stream feed hands the napp what its relays send, and its cache paint. The
+// store subscription adds what landed in the store by another door and isn't
+// covered already, or, in compare mode, logs what it would have added.
+function storeStream(
+  label: string,
+  filter: Filter,
+  signal: AbortSignal,
+  covered: (event: NostrEvent) => boolean,
+  push: (event: NostrEvent) => void
+): () => void {
+  if (!feedsMode) return () => {}
+  let pending: NostrEvent[] = []
+  let timer: ReturnType<typeof setTimeout> | undefined
+  // the feed's relays may still send it: logged once it's quiet and they haven't
+  const check = () => {
+    if (signal.aborted) return
+    const missed = pending.filter(e => !covered(e))
+    pending = []
+    if (missed.length)
+      hostLog(
+        "launcher",
+        `feed ${label}: ${missed.length} in the store subscription, not the feed: ${eventList(missed)}`
+      )
+  }
+  const close = subscribeStore(
+    filter,
+    event => {
+      if (covered(event)) return
+      if (feedsMode === "store") return push(event)
+      pending.push(event)
+      clearTimeout(timer)
+      timer = setTimeout(check, 3000)
+    },
+    () => {}
+  )
+  signal.addEventListener("abort", close, { once: true })
+  return close
+}
+
 async function startOutboxFeed(
   instanceId: string,
   callbackId: string,
@@ -4035,7 +4180,9 @@ async function startOutboxFeed(
 
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
   let synced = authors.map(() => false)
-  const results = feedResultSet(filter, controller.signal, events =>
+  const more = authors.length > 1 ? `+${authors.length - 1}` : ""
+  const label = `outbox-${(authors[0] ?? "").slice(0, 6)}${more}`
+  const results = feedResults(label, filter, controller.signal, events =>
     win?.postMessage(
       { __nostrapps: "napp-feed-callback", callbackId, events, synced: synced.every(v => v) },
       "*"
@@ -4063,6 +4210,7 @@ async function startOutboxFeed(
     outboxCurrent.onsync = outboxCurrent.onsync.filter(listener => listener !== onSync)
     outboxCurrent.onbefore = outboxCurrent.onbefore.filter(listener => listener !== onBefore)
     outboxCurrent.onnew = outboxCurrent.onnew.filter(listener => listener !== onNew)
+    results.close()
   }
 
   outboxCurrent.onsync.push(onSync)
@@ -4182,11 +4330,16 @@ async function startStreamFeed(
   label: string
 ) {
   const controller = new AbortController()
-  trackFeedRequest(instanceId, callbackId, { controller })
+  let closeStoreSub = () => {}
+  trackFeedRequest(instanceId, callbackId, { controller, cleanup: () => closeStoreSub() })
 
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
   let synced = false
   let queue: NostrEvent[] = []
+  // what the napp was handed, so the store subscription only adds what it lacks,
+  // and nothing older than a full cache paint's oldest: that's the next page's
+  const handed = new Set<string>()
+  let floor = -Infinity
   let flushTimer: ReturnType<typeof setTimeout> | null = null
 
   const post = (events: NostrEvent[]) => {
@@ -4206,10 +4359,24 @@ async function startStreamFeed(
     if (flushTimer === null && !controller.signal.aborted) flushTimer = setTimeout(flush, 100)
   }
 
+  closeStoreSub = storeStream(
+    label,
+    filter,
+    controller.signal,
+    event => handed.has(event.id) || event.created_at < floor,
+    event => {
+      handed.add(event.id)
+      queue.push(event)
+      schedule()
+    }
+  )
+
   // One cache paint so the napp still opens instantly on what we already
   // have. The only store read in this function, and a failure is survivable.
   try {
     const cached = await safeQueryEvents(filter)
+    for (const e of cached) handed.add(e.id)
+    if (filter.limit && cached.length >= filter.limit) floor = cached[cached.length - 1].created_at
     if (cached.length) post(cached)
   } catch (err) {
     console.warn("[feed] cache paint skipped — store unavailable", err)
@@ -4236,6 +4403,7 @@ async function startStreamFeed(
     if (!matchFilter(filter, event)) return
     // Posted before it's saved, so the store's deletion check is asked here.
     if (await isDeleted(event)) return
+    handed.add(event.id)
     queue.push(event)
     schedule()
     void writeBehind(event)
@@ -4276,14 +4444,18 @@ async function startInboxFeed(
   filter: Filter
 ) {
   const controller = new AbortController()
-  trackFeedRequest(instanceId, callbackId, { controller })
 
   const win = openWindows.get(instanceId)?.iframe?.contentWindow
 
   let synced = false
-  const results = feedResultSet(filter, controller.signal, events =>
-    win?.postMessage({ __nostrapps: "napp-feed-callback", callbackId, events, synced }, "*")
+  const results = feedResults(
+    `inbox-${pubkeys[0].substring(0, 6)}`,
+    filter,
+    controller.signal,
+    events =>
+      win?.postMessage({ __nostrapps: "napp-feed-callback", callbackId, events, synced }, "*")
   )
+  trackFeedRequest(instanceId, callbackId, { controller, cleanup: results.close })
   results.requery()
 
   try {

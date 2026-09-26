@@ -4,6 +4,7 @@ import type { Filter } from "@nostr/tools/filter"
 import type { NostrEvent } from "@nostr/tools/core"
 import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
 import { isHex64 } from "./utils.js"
+import { storeRemoved, storeSaved } from "./store-subs.js"
 
 // The redstore wasm is single-threaded: any panic inside it (a malformed
 // event hitting the binary codec, a bad author in a query) aborts with
@@ -33,6 +34,9 @@ export function getStore(): RedEventStore {
     facade = new Proxy({} as RedEventStore, {
       get(_, prop) {
         if (prop === "saveEvent") return guardedSave
+        if (prop === "deleteEvents") return deleteEvents
+        if (prop === "deleteEventsFilters") return deleteEventsFilters
+        if (prop === "deleteReplaceable") return deleteReplaceable
         const v = (instance as any)[prop]
         return typeof v === "function" ? v.bind(instance) : v
       },
@@ -101,7 +105,28 @@ async function guardedSave(
     await loadDeletions()
     recordDeletion(event)
   } else if (await isDeleted(event)) return false
-  return instance.saveEvent(event, opts)
+  const saved = await instance.saveEvent(event, opts)
+  if (saved) storeSaved(event)
+  return saved
+}
+
+// Removals, told to store subscriptions (store-subs.ts) unless the store
+// found nothing to delete.
+async function deleteEvents(ids: string[]): Promise<string[]> {
+  const deleted = await instance.deleteEvents(ids)
+  if (!Array.isArray(deleted) || deleted.length) storeRemoved()
+  return deleted
+}
+
+async function deleteEventsFilters(filters: Filter[]): Promise<string[]> {
+  const deleted = await instance.deleteEventsFilters(filters)
+  if (!Array.isArray(deleted) || deleted.length) storeRemoved()
+  return deleted
+}
+
+async function deleteReplaceable(kind: number, author: string) {
+  await instance.deleteReplaceable(kind, author)
+  storeRemoved()
 }
 
 // bfcache keeps a navigated-away page's dedicated worker ALIVE (heartbeating,
