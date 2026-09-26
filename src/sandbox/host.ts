@@ -2154,6 +2154,7 @@ export function launchSystem(
     if (def.height) win.root.style.height = `${def.height}px`
     else fitWindowHeight(win.root)
   }
+  if (!opts.position) fitFreshWindow(win.root, stageEl)
   captureWindowGeom(win.root)
   return win
 }
@@ -2265,6 +2266,7 @@ function mount(
   ensureStageObserver(stageEl)
   scaleFromSaved(win.root, position)
   clampToStage(win.root, stageEl)
+  if (!position) fitFreshWindow(win.root, stageEl)
   captureWindowGeom(win.root)
   return win
 }
@@ -2353,6 +2355,7 @@ export function launchNapplet(
   ensureStageObserver(stageEl)
   scaleFromSaved(win.root, position)
   clampToStage(win.root, stageEl)
+  if (!position) fitFreshWindow(win.root, stageEl)
   captureWindowGeom(win.root)
   return win
 }
@@ -2458,6 +2461,7 @@ export function mountWithLoading(
   ensureStageObserver(stageEl)
   scaleFromSaved(win.root, position)
   clampToStage(win.root, stageEl)
+  if (!position) fitFreshWindow(win.root, stageEl)
   captureWindowGeom(win.root)
   return win
 }
@@ -3482,6 +3486,24 @@ function clampToStage(root: HTMLElement, stage: HTMLElement, opts: { pullIn?: bo
     scrollsY || !pullIn ? Math.max(minTop, top) : Math.max(minTop, Math.min(maxTop, top))
   if (newLeft !== left) root.style.left = `${newLeft}px`
   if (newTop !== top) root.style.top = `${newTop}px`
+}
+
+// A fresh window lands where nextPosition cascades it, at the size its napp was
+// last given, which may not fit there: a full-height one hangs below the fold.
+// All of it goes in the stage's visible area, moved up or left first, cut down
+// only where it's bigger than that area. A saved window keeps its place, and a
+// packed one is placed by the pack.
+function fitFreshWindow(root: HTMLElement, stage: HTMLElement) {
+  if (root.dataset.packNew || getComputedStyle(root).position !== "absolute") return
+  const { width: maxW, height: maxH, padL, padT } = getStageBounds(stage)
+  if (maxW <= 0 || maxH <= 0) return
+  if (root.offsetWidth > maxW) root.style.width = `${maxW}px`
+  if (root.offsetHeight > maxH) root.style.height = `${maxH}px`
+  const viewTop = stage.scrollTop + padT
+  const left = Math.min(parseFloat(root.style.left) || 0, padL + maxW - root.offsetWidth)
+  const top = Math.min(parseFloat(root.style.top) || 0, viewTop + maxH - root.offsetHeight)
+  root.style.left = `${Math.max(padL, left)}px`
+  root.style.top = `${Math.max(viewTop, top)}px`
 }
 
 // Restore mounts windows one by one, and the stage's bounds only settle once
