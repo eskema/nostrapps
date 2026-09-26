@@ -2530,7 +2530,9 @@ async function resolvePlacementForInstall(
   if (persist.hasPolicy(nappId)) return { openIn: launch ? currentSpaceId : null }
   const granted = await promptNappPolicy({
     ...opts,
-    ...(launch ? { placement: { spaces: persist.listSpaces(), current: currentSpaceId } } : {})
+    ...(launch
+      ? { placement: { spaces: persist.listSpaces(), current: currentSpaceId } }
+      : { mode: "install" as const })
   })
   if (!granted) return null
   persist.setPolicy(nappId, granted)

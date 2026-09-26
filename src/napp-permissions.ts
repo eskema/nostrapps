@@ -82,6 +82,8 @@ export interface PolicyPromptOpts {
   declaredDomains: string[]
   // Existing policy when editing; absent on a fresh grant.
   current?: NappPolicy
+  // "install" without placement: an install that opens nothing (a restore),
+  // so its one button says install, not open.
   mode?: "install" | "edit"
   // An install: where the app opens once granted — the spaces to pick from,
   // the current one preselected, or a new one — or nowhere, installed only.
@@ -109,8 +111,10 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<GrantedPolicy 
       wrap.className = "napp-perms"
       const section = policySection(opts)
       const place = opts.placement ? placementRow(opts.placement) : null
-      const actions = actionRow(resolve, edit ? "Save" : "Open", () =>
-        place ? { ...section.read(), spaceId: place.read() } : section.read()
+      const actions = actionRow(
+        resolve,
+        edit ? "Save" : opts.mode === "install" ? "Install" : "Open",
+        () => (place ? { ...section.read(), spaceId: place.read() } : section.read())
       )
       if (place) {
         // "Open" is the wrong word for an install that opens nothing.
