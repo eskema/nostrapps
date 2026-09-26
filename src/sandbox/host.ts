@@ -113,7 +113,7 @@ import {
   goLive,
   relayRankOf
 } from "../outbox.js"
-import { relayHealth } from "../relay-health.js"
+import { relayHealth, relayUrl } from "../relay-health.js"
 import { debounce, HEX64, isHex64 } from "../utils.js"
 
 const BOOT_TIMEOUT_MS = 10_000
@@ -4309,14 +4309,15 @@ async function startOutboxFeed(
 // event froze every feed in every napp. Same shape the napplet surface has
 // always used (nappletOutboxSubscribe).
 //
-// Used by napp.feeds.outbox and the multi-pubkey inbox path only. profile /
-// following / single-pubkey inbox stay on the store-requery delivery below:
-// the installed napps were written against "each callback carries the full
-// current result set" and may re-render wholesale.
+// Used by napp.feeds.outbox, napp.feeds.relay and the multi-pubkey inbox path
+// only. profile / following / single-pubkey inbox stay on the store-requery
+// delivery below: the installed napps were written against "each callback
+// carries the full current result set" and may re-render wholesale.
 //
-// `open` resolves the feed's relays and opens the subscription — the two
-// callers differ only in that (outbox relays per author vs. recipients' read
-// relays).
+// `open` resolves the feed's relays and opens the subscription — the callers
+// differ only in that (outbox relays per author, recipients' read relays, the
+// relays a napp named). A relaysOnly feed is what those relays return and
+// nothing from the store: no cache paint, no store subscription.
 async function startStreamFeed(
   instanceId: string,
   callbackId: string,
@@ -4327,7 +4328,8 @@ async function startStreamFeed(
     onevent: (event: NostrEvent) => void
     oneose: () => void
   }) => Promise<SubCloser | undefined>,
-  label: string
+  label: string,
+  opts: { relaysOnly?: boolean } = {}
 ) {
   const controller = new AbortController()
   let closeStoreSub = () => {}
@@ -4359,29 +4361,32 @@ async function startStreamFeed(
     if (flushTimer === null && !controller.signal.aborted) flushTimer = setTimeout(flush, 100)
   }
 
-  closeStoreSub = storeStream(
-    label,
-    filter,
-    controller.signal,
-    event => handed.has(event.id) || event.created_at < floor,
-    event => {
-      handed.add(event.id)
-      queue.push(event)
-      schedule()
-    }
-  )
+  if (!opts.relaysOnly) {
+    closeStoreSub = storeStream(
+      label,
+      filter,
+      controller.signal,
+      event => handed.has(event.id) || event.created_at < floor,
+      event => {
+        handed.add(event.id)
+        queue.push(event)
+        schedule()
+      }
+    )
 
-  // One cache paint so the napp still opens instantly on what we already
-  // have. The only store read in this function, and a failure is survivable.
-  try {
-    const cached = await safeQueryEvents(filter)
-    for (const e of cached) handed.add(e.id)
-    if (filter.limit && cached.length >= filter.limit) floor = cached[cached.length - 1].created_at
-    if (cached.length) post(cached)
-  } catch (err) {
-    console.warn("[feed] cache paint skipped — store unavailable", err)
+    // One cache paint so the napp still opens instantly on what we already
+    // have. The only store read in this function, and a failure is survivable.
+    try {
+      const cached = await safeQueryEvents(filter)
+      for (const e of cached) handed.add(e.id)
+      if (filter.limit && cached.length >= filter.limit)
+        floor = cached[cached.length - 1].created_at
+      if (cached.length) post(cached)
+    } catch (err) {
+      console.warn("[feed] cache paint skipped — store unavailable", err)
+    }
+    if (controller.signal.aborted) return
   }
-  if (controller.signal.aborted) return
 
   let writeBehindFailed = false
   const writeBehind = async (event: NostrEvent) => {
@@ -4774,6 +4779,31 @@ async function dispatch(
             : pool.subscribeMany([...FALLBACK_RELAYS], filter, p)
         },
         `outbox-${pubkeys[0].substring(0, 6)}${pubkeys.length > 1 ? `+${pubkeys.length - 1}` : ""}`
+      )
+      return
+    }
+    case "napp.feeds.relay": {
+      // Only the relays named: the store can't say which relay an event came
+      // from, so none of it is mixed in.
+      const relays = [
+        ...new Set(
+          (Array.isArray(params.relays) ? params.relays : [params.relays])
+            .filter((u: unknown) => typeof u === "string")
+            .map(relayUrl)
+            .filter(Boolean) as string[]
+        )
+      ].slice(0, 20)
+      if (relays.length === 0) return
+      const filter: Filter = { kinds: intKinds(params.kinds), limit: params.limit || 100 }
+      if (params.since) filter.since = params.since
+      if (params.until) filter.until = params.until
+      startStreamFeed(
+        instanceId!,
+        params.callbackId,
+        filter,
+        async p => pool.subscribeMany(relays, filter, p),
+        `relay-${new URL(relays[0]).host}${relays.length > 1 ? `+${relays.length - 1}` : ""}`,
+        { relaysOnly: true }
       )
       return
     }

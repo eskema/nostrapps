@@ -75,6 +75,12 @@ type NappFeeds = {
     cb: (events: NappNostrEvent[], synced: boolean) => void,
     opts?: object
   ): NappFeedHandle
+  relay(
+    relays: string[],
+    kinds: number[],
+    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    opts?: object
+  ): NappFeedHandle
 }
 type NappUtils = {
   loadRelayList(pubkey: string): Promise<NappListResult<NappRelayItem>>

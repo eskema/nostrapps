@@ -150,9 +150,12 @@ Napps can use the feed helpers for live event streams:
 window.napp.feeds.profile(pubkey, kinds, callback, { since, until, limit })
 window.napp.feeds.following(source, kinds, callback, options)
 window.napp.feeds.inbox(pubkey, kinds, callback, options)
+window.napp.feeds.outbox(pubkeys, kinds, callback, options)
+window.napp.feeds.relay(relays, kinds, callback, options)
 ```
 
-Each returns a handle with `close()`.
+Each returns a handle with `close()`. `relay` reads only the relays given, up
+to 20, and nothing from the launcher's cache.
 
 ## Actions
 

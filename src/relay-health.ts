@@ -51,7 +51,7 @@ let timer: ReturnType<typeof setTimeout> | null = null
 
 // A relay url, normalized, or null: normalizeURL makes a url of anything
 // ("not a url" → wss://not%20a%20url/), so the host has to look like one.
-function norm(url: string): string | null {
+export function relayUrl(url: string): string | null {
   try {
     const u = normalizeURL(url)
     const { protocol, hostname } = new URL(u)
@@ -99,7 +99,7 @@ function byRelay(events: NostrEvent[]): Map<string, NostrEvent[]> {
   const out = new Map<string, NostrEvent[]>()
   for (const e of events) {
     const d = e.tags.find(t => t[0] === "d")?.[1]
-    const url = d && norm(d)
+    const url = d && relayUrl(d)
     if (!url) continue
     let list = out.get(url)
     if (!list) out.set(url, (list = []))
@@ -176,7 +176,7 @@ function health(url: string): RelayHealth {
 // What is known right now, without waiting. Relays not known yet (or known a
 // while ago) are queued for the next batch.
 export function relayHealthNow(url: string): RelayHealth | null {
-  const u = norm(url)
+  const u = relayUrl(url)
   if (!u) return null
   want(u)
   return health(u)
@@ -185,7 +185,7 @@ export function relayHealthNow(url: string): RelayHealth | null {
 // Ask about these relays and wait for the answer, up to `waitMs`; whatever
 // hasn't come back by then is returned as it stands (unknown, at first).
 export async function relayHealth(urls: string[], waitMs = 6000): Promise<RelayHealth[]> {
-  const list = [...new Set(urls.map(norm).filter((u): u is string => !!u))]
+  const list = [...new Set(urls.map(relayUrl).filter((u): u is string => !!u))]
   for (const u of list) want(u)
   if (queue.size) {
     if (timer) clearTimeout(timer)
