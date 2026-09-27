@@ -524,7 +524,6 @@ export function mount(
       app.icon,
       app.event?.id,
       app.installedAt,
-      app.singleton,
       app.temporary,
       app.actions?.join(","),
       app.requires?.join(","),

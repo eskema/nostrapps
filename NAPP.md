@@ -12,23 +12,21 @@ Local and uploaded napps use `metadata.json` next to `index.html`:
   "title": "Relays",
   "icon": "/icon.svg",
   "description": "Edit your relay lists",
-  "singleton": true,
   "requires": ["ui"],
   "actions": ["profile", "view:0"]
 }
 ```
 
-`id` becomes the `d` tag. `requires` becomes `requires` tags. `actions` becomes `action` tags. `singleton` limits an app to one window.
+`id` becomes the `d` tag. `requires` becomes `requires` tags. `actions` becomes `action` tags.
 
-| Field         | Published as  | Meaning                                      |
-| ------------- | ------------- | -------------------------------------------- |
-| `id`          | `d`           | Required identifier and origin basis.        |
-| `title`       | `title`       | Display name.                                |
-| `icon`        | `icon`        | Icon URL or path.                            |
-| `description` | `description` | One-line card description.                   |
-| `singleton`   | `singleton`   | Reuse one window instead of opening another. |
-| `requires`    | `requires`    | Capability domains requested by the app.     |
-| `actions`     | `action`      | Action patterns handled by the app.          |
+| Field         | Published as  | Meaning                                  |
+| ------------- | ------------- | ---------------------------------------- |
+| `id`          | `d`           | Required identifier and origin basis.    |
+| `title`       | `title`       | Display name.                            |
+| `icon`        | `icon`        | Icon URL or path.                        |
+| `description` | `description` | One-line card description.               |
+| `requires`    | `requires`    | Capability domains requested by the app. |
+| `actions`     | `action`      | Action patterns handled by the app.      |
 
 ## Launcher bridge
 

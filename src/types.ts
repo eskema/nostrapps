@@ -200,7 +200,6 @@ export type InstalledApp = {
   icon: string
   title: string
   petname: string
-  singleton: boolean
   actions: string[]
   // "modes" the app advertises (["mode", "<mode>"] manifest tags, or a
   // `modes` array in metadata.json). Absent/empty implies ["normal"].
@@ -264,9 +263,8 @@ export interface SystemNappDef {
   id: string
   title: string
   slash?: string
-  singleton?: boolean
   // Actions it takes, like an app's ("view" is every view:<kind>), as a
-  // fallback: only when no app handles one. Singletons only.
+  // fallback: only when no app handles one.
   actions?: string[]
   // The height its window opens at. Without one the window is measured against
   // what the napp mounted with — right for a panel that shows all it has, wrong
@@ -349,7 +347,6 @@ export interface NsiteResult {
   files: NsiteFile[]
   title: string | null
   manifest?: NostrEvent | null
-  singleton?: boolean
 }
 
 export type SystemLaunchOpts = {
@@ -358,7 +355,6 @@ export type SystemLaunchOpts = {
   params?: any
   position?: Position
   status?: Status
-  singleton?: true
   onStateChange?: (state: NappWindowState) => void
   onReorder?: () => void
   onClose?: (instanceId: string) => void
@@ -370,7 +366,7 @@ export type LaunchOpts = {
   params?: any
   position?: Position
   status?: Status
-  // Ephemeral (e.g. auxiliary dispatch): skip singleton reuse and never touch
+  // Ephemeral (e.g. auxiliary dispatch): never touch
   // persistence — the window lives and dies with this session.
   transient?: boolean
   onProgress?: (msg: string) => void

@@ -494,28 +494,10 @@ function legacyNappOriginFor(nappId: string): string {
 }
 
 export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchOpts = {}) {
-  const storedSingleton = singletonForNappId(nappId)
-
-  if (storedSingleton === null) throw new Error(`failed to launch uninstalled app ${nappId}`)
-
-  // Transient (auxiliary) windows are always fresh ephemeral instances: no
-  // singleton reuse (which could surface a persisted window) and no
-  // persistence below.
-  const singleton = opts.transient ? false : storedSingleton
-
-  if (singleton) {
-    const existing = findOpenWindowByNappId(nappId)
-    if (existing) {
-      // Single instance: if it lives in another (hidden) space, adopt it into
-      // the active one so launching surfaces it where you are.
-      adoptWindow(existing)
-      existing.focus?.()
-      return existing
-    }
-  }
+  if (!getInstalledApp(nappId)) throw new Error(`failed to launch uninstalled app ${nappId}`)
 
   const origin = nappOriginFor(nappId)
-  const win = mount(stageEl, nappId, singleton, origin, currentSigner, opts)
+  const win = mount(stageEl, nappId, origin, currentSigner, opts)
   if (!opts.transient) {
     const st = win.getState()
     console.debug("[launch] trackOpened", {
@@ -532,11 +514,6 @@ export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchO
   }
 
   return win
-}
-
-function singletonForNappId(nappId: string): boolean | null {
-  const app = getInstalledApp(nappId)
-  return app ? app.singleton : null
 }
 
 function currentTheme(): "light" | "dark" {
@@ -2060,17 +2037,8 @@ export function reloadIframesByNappId(nappId: string): number {
   return count
 }
 
-const systemSingletons = new Map<string, string>() // sysId -> instanceId
 // instanceId -> the action handler of a system napp that takes actions
 const systemActions = new Map<string, (name: string, payload: unknown) => unknown>()
-
-// The space currently holding the live (singleton) system napp, or null if it
-// isn't mounted anywhere. Used to navigate to a system napp's home space.
-export function spaceOfLiveSystem(sysId: string): string | null {
-  const id = systemSingletons.get(sysId)
-  const win = id ? openWindows.get(id) : undefined
-  return win ? win.root.dataset.space || null : null
-}
 
 export function launchSystem(
   stageEl: HTMLElement,
@@ -2080,30 +2048,9 @@ export function launchSystem(
   opts: SystemLaunchOpts = {}
 ) {
   console.debug("[sandbox] launchSystem", { sysId, def, opts })
-  const singleton = def.singleton !== false
-  if (singleton) {
-    const existing = systemSingletons.get(sysId)
-    if (existing && openWindows.has(existing)) {
-      console.debug("[sandbox] launchSystem: reusing existing singleton", {
-        sysId,
-        instanceId: existing
-      })
-      // A system napp is a single instance. If it currently lives in another
-      // (hidden) space, adopt it into the active one so invoking it always
-      // surfaces it where you are, rather than focusing a display:none window.
-      const win = openWindows.get(existing)!
-      adoptWindow(win)
-      // Fit it here, before whatever is about to be routed into it lands — from
-      // then on that content scrolls rather than resizing the window.
-      if (!win.root.style.height) fitWindowHeight(win.root)
-      focusInstance(existing)
-      return win
-    }
-  }
 
   let win: NappWindow | null = null
-  const instanceId =
-    opts.instanceId || singleton ? `system:${sysId}` : `system:${sysId}:${instanceIdSerial++}`
+  const instanceId = opts.instanceId || `system:${sysId}:${instanceIdSerial++}`
   const bodyElement = document.createElement("div")
   bodyElement.className = `system-napp-content system-napp-${sysId}`
 
@@ -2130,7 +2077,6 @@ export function launchSystem(
       systemActions.delete(instanceId)
       openWindows.delete(instanceId)
       clearInstanceRuntimeState(instanceId)
-      if (singleton) systemSingletons.delete(sysId)
       opts.onClose?.(instanceId)
     },
     onReorder: opts.onReorder,
@@ -2142,7 +2088,6 @@ export function launchSystem(
   flagFreshInPack(stageEl, win, !!opts.position)
   stageEl.appendChild(win.root)
   openWindows.set(instanceId, win)
-  if (singleton) systemSingletons.set(sysId, instanceId)
   if (handle && handle.action) {
     const action = handle.action
     systemActions.set(instanceId, (name, payload) => action(name, payload))
@@ -2165,13 +2110,12 @@ export function launchSystem(
 function mount(
   stageEl: HTMLElement,
   nappId: string,
-  singleton: boolean,
   origin: string,
   signer: Signer | SignerGetter,
   opts: LaunchOpts = {}
 ) {
   const {
-    instanceId = singleton ? nappId : opts.instanceId ? opts.instanceId : `${instanceIdSerial++}`,
+    instanceId = opts.instanceId ? opts.instanceId : `${instanceIdSerial++}`,
     petname,
     onProgress = () => {},
     onStateChange,

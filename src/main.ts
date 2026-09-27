@@ -36,8 +36,6 @@ import {
   placeInFreeSpot,
   hasOpenWindow,
   allInstanceIds,
-  spaceOfLiveSystem,
-  findOpenWindowByNappId,
   loadEvent,
   resolveViewPayload,
   applyNappPolicy,
@@ -764,7 +762,7 @@ async function runNappAction(
 
 // Launch an ephemeral auxiliary window: cursor-anchored, sized from the
 // app's `initial_size` metadata, and never written to localStorage (the
-// transient flag skips singleton reuse + persistence in host.launch, and
+// transient flag skips persistence in host.launch, and
 // these opts never call persist.updateOpen).
 async function launchAuxiliary(nappId: string): Promise<NappWindow> {
   const size = persist.getInstalledApp(nappId)?.initialSize
@@ -1000,21 +998,8 @@ function launchSystemNapp(
   return win
 }
 
-// Which space "owns" a system napp — where it's live, else its persisted
-// placement. A system napp is a single instance, so it lives in one space.
-function ownerSpaceOfSystem(sysId: string): string | null {
-  return spaceOfLiveSystem(sysId) ?? persist.findSpaceOfSystemNapp(sysId)
-}
-
-// Top-level invocation (slash command, suggestion): if the system napp already
-// lives in another space, switch there and focus it instead of duplicating or
-// moving it; otherwise open/focus it in the current space.
+// Top-level invocation (slash command, suggestion): open it in the current space.
 async function invokeSystemNapp(sysId: string) {
-  const owner = ownerSpaceOfSystem(sysId)
-  if (owner && owner !== currentSpaceId) {
-    await switchSpace(owner)
-    renderSpacesBar()
-  }
   const win = launchSystemNapp(sysId)
   win?.focus?.()
   return win
@@ -2797,8 +2782,7 @@ async function installDevApp() {
       actions: metadata.actions || [],
       requires: metadata.requires || [],
       modes: metadata.modes,
-      initialSize: persist.initialSizeFromMeta(metadata),
-      singleton: metadata.singleton
+      initialSize: persist.initialSizeFromMeta(metadata)
     })
     handlers.addApp(nappId, metadata.actions || [])
 
@@ -2857,8 +2841,7 @@ async function installDevAppFromUrl(rawUrl: string) {
       actions: metadata.actions || [],
       requires: metadata.requires || [],
       modes: metadata.modes,
-      initialSize: persist.initialSizeFromMeta(metadata),
-      singleton: metadata.singleton
+      initialSize: persist.initialSizeFromMeta(metadata)
     })
     handlers.addApp(nappId, metadata.actions || [])
 
@@ -3130,21 +3113,14 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       actions: metadata?.actions || [],
       requires: metadata?.requires || [],
       modes: metadata?.modes,
-      initialSize: persist.initialSizeFromMeta(metadata),
-      singleton: metadata.singleton
+      initialSize: persist.initialSizeFromMeta(metadata)
     })
     handlers.addApp(nappId, metadata?.actions || [])
 
-    // Was a window for this napp already open before the re-boot? launch()
-    // reuses it (singleton) without reloading its iframe — which would keep
-    // showing the OLD files/metadata (e.g. a freshly added ui-wrapper) until a
-    // manual reload. Detect the reuse and reload the page ourselves.
-    const preExisting = findOpenWindowByNappId(nappId)
     const win = await launch(stage, nappId, {
       ...makeLaunchOpts(),
       petname
     })
-    if (preExisting && win === preExisting) win.reload()
     syncDOM(win)
     win.focus()
     setStatus(`Launched ${petname}`)
@@ -3462,7 +3438,7 @@ function nappIdFor(target: { pubkey: string; dTag: string; kind?: number }): str
 // id: a second window of the same temp is just a launch.
 async function bootTempApp(nappId: string, input: string, fetched: NsiteResult, petname: string) {
   if (sharedTemps.has(nappId)) return
-  const { files, title, manifest, singleton } = fetched
+  const { files, title, manifest } = fetched
   setStatus(`Booting ${petname}…`)
   persist.rememberEphemeralOrigin(nappId)
   if (!(manifest && isNappletKind(manifest.kind))) {
@@ -3483,7 +3459,6 @@ async function bootTempApp(nappId: string, input: string, fetched: NsiteResult, 
     requires: requiresFromEvent(manifest),
     modes: persist.modesFromEventTags(manifest?.tags ?? []),
     initialSize: persist.initialSizeFromEventTags(manifest?.tags ?? []),
-    singleton,
     temporary: true,
     event: manifest
   })

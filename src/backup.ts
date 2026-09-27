@@ -573,7 +573,7 @@ export async function restoreBackup(
       if (w.system) {
         return {
           nappId: `__${w.system}__`,
-          instanceId: `system:${w.system}`,
+          instanceId: `system:${w.system}:${serial++}`,
           petname: w.petname || w.system,
           system: true,
           systemId: w.system,
@@ -584,7 +584,7 @@ export async function restoreBackup(
       if (!app) return null
       return {
         nappId: app.nappId,
-        instanceId: app.singleton ? app.nappId : String(serial++),
+        instanceId: String(serial++),
         petname: w.petname || app.petname,
         ...common
       }

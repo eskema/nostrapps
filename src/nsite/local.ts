@@ -76,7 +76,6 @@ export async function collectLocalFolder(
       id: string
       title?: string
       icon?: string
-      singleton?: boolean
       actions: string[]
       requires?: string[]
       modes?: unknown

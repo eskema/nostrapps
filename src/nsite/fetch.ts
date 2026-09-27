@@ -77,9 +77,8 @@ export async function fetchNsite(
   healNapp({ manifest, relays, servers, files: healFiles })
 
   const title = getTag(manifest, "title") || null
-  const singleton = manifest.tags.some((t: string[]) => t[0] === "singleton")
 
-  return { nappId, files, title, manifest, singleton }
+  return { nappId, files, title, manifest }
 }
 
 // ─── helpers ──────────────────────────────────────────────────────

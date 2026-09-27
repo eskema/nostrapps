@@ -15,7 +15,6 @@ import type { NostrEvent } from "@nostr/tools/pure"
 export const id = "uploader"
 export const title = "Uploader"
 export const slash = "/upload"
-export const singleton = false
 // The folder it was opened with is read after mount, so there's nothing to
 // measure then — and a publish form is never small anyway.
 export const height = START_HEIGHT
@@ -61,7 +60,6 @@ interface Plan {
   icon: string | null
   actions: string[]
   requires: string[]
-  singleton: boolean
   modes: string[]
   initialSize: { width: number; height: number } | null
   /** The files that become path tags — a napplet ships only its index.html. */
@@ -456,8 +454,6 @@ export function mount(
     for (const m of plan.modes) tags.push(["mode", m])
     if (plan.initialSize)
       tags.push(["initial_size", String(plan.initialSize.width), String(plan.initialSize.height)])
-    // Valueless flag tag — storeInstalledEvent reads its mere presence.
-    if (plan.singleton) tags.push(["singleton"])
     tags.push(["d", plan.dTag])
 
     eventTemplate = {
@@ -552,10 +548,6 @@ export function mount(
       icon: napplet ? meta!.icon : metadata?.icon || null,
       actions: !napplet && Array.isArray(metadata?.actions) ? metadata.actions : [],
       requires: [...requires],
-      // One window at a time. A napplet has no way to declare it (its metadata
-      // is read from <meta> tags, which have no singleton spelling), so it's
-      // nsite-only — same as actions.
-      singleton: !napplet && metadata?.singleton === true,
       // Presentation modes — nsite-only, like actions.
       modes:
         !napplet && Array.isArray(metadata?.modes)

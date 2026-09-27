@@ -668,7 +668,6 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string, install
     icon: event.tags.find(t => t[0] === "icon")?.[1] || "",
     title,
     petname: petname || existing?.petname || title || nappId,
-    singleton: event.tags.some(t => t[0] === "singleton"),
     actions: event.tags.filter(t => t[0] === "action" && t[1]).map(t => t[1]),
     modes: modesFromEventTags(event.tags),
     initialSize: initialSizeFromEventTags(event.tags),
@@ -685,7 +684,6 @@ export function storeInstalledLocalApp(app: {
   title?: string | null
   icon?: string | null
   petname?: string | null
-  singleton?: boolean
   actions?: string[]
   requires?: string[]
   modes?: unknown
@@ -701,7 +699,6 @@ export function storeInstalledLocalApp(app: {
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
     actions: app.actions || [],
     requires: sanitizeRequires(app.requires),
-    singleton: !!app.singleton,
     modes: sanitizeModes(app.modes),
     initialSize: sanitizeInitialSize(app.initialSize),
     ...(app.html ? { html: app.html } : {}),
@@ -1111,7 +1108,6 @@ export interface DevAppData {
   title: string
   icon: string
   petname: string
-  singleton: boolean
   actions: string[]
   requires?: string[]
   modes?: NappMode[]
@@ -1130,7 +1126,6 @@ export function storeDevApp(app: {
   title?: string | null
   icon?: string | null
   petname?: string | null
-  singleton?: boolean
   actions?: string[]
   requires?: string[]
   modes?: unknown
@@ -1143,7 +1138,6 @@ export function storeDevApp(app: {
     title: sanitizeString(app.title),
     icon: sanitizeString(app.icon),
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
-    singleton: !!app.singleton,
     actions: app.actions || [],
     requires: sanitizeRequires(app.requires),
     modes: sanitizeModes(app.modes),
