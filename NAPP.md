@@ -179,8 +179,12 @@ There is no restriction on what actions are allowed, but these are some of the c
 | `wiki-term`          | a `d`-tag NIP-54 normalized string  | the resolved `kind:30818` event |
 
 `view` may receive an `nevent`, `naddr`, or resolved event. A specific
-`view:<kind-number>` always receives a resolved event. Pass
-`{ instance: "..." }` as the third argument to target one running window, or
+`view:<kind-number>` always receives a resolved event: the launcher resolves
+`nevent`/`naddr`/`nostr:` references (or the event as JSON) to the full event
+before delivery, and drops the dispatch when the event can't be fetched. A
+generic `view` is resolved the same way when possible; an unresolvable
+reference is delivered as-is, so generic handlers must still accept strings.
+Pass `{ instance: "..." }` as the third argument to target one running window, or
 `{ auxiliary: true }` to use auxiliary handlers.
 
 The app can also receive action state through `popstate`:

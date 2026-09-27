@@ -1869,9 +1869,13 @@ function rejectInstanceDispatches(instanceId: string, reason: string) {
   }
 }
 
-// A string payload for a view:<kind> action is a nip19 code to resolve — or,
-// leniently, the event itself as JSON (a napp handing over what it had stored).
+// A string payload for a `view` / `view:<kind>` action is a reference to
+// resolve — a nip19 code, a `nostr:` URI, hex id, or, leniently, the event
+// itself as JSON (a napp handing over what it had stored).
 // Null when neither yields an event.
+export function isViewAction(name: string): boolean {
+  return name === "view" || name.startsWith("view:")
+}
 export async function resolveViewPayload(payload: string): Promise<unknown | null> {
   const s = payload.trim()
   if (s.startsWith("{")) {
@@ -1891,16 +1895,18 @@ export async function callIframe(
   actionName: string,
   actionPayload: unknown
 ): Promise<unknown> {
-  // resolve nevent/naddr (or JSON) payload for view:* actions
-  if (actionName.startsWith("view:") && typeof actionPayload === "string") {
+  // resolve references (nevent/naddr/URI/JSON) for view actions before delivery
+  if (isViewAction(actionName) && typeof actionPayload === "string") {
     const event = await resolveViewPayload(actionPayload)
     if (event) actionPayload = event
-    else {
+    else if (actionName.startsWith("view:")) {
       console.warn(
         `Stopped routing of ${actionName}->${actionPayload} to ${instanceId}: couldn't find event`
       )
       return
     }
+    // Generic `view`: an unresolvable reference goes through as-is — its
+    // handlers accept raw strings and report the miss themselves.
   }
 
   // A system napp has no iframe: it takes the action right here.
@@ -5168,27 +5174,30 @@ async function fetchEvent(params: {
   let identifier: string | undefined
   let relayHints: string[] = params.relays || []
 
+  // References arrive as pasted: padded, or as NIP-21 `nostr:` URIs.
+  const code = params.code.trim().replace(/^nostr:/i, "")
+
   let isReplaceable = false
-  if (params.code.startsWith("nevent1")) {
-    const { data } = decode(params.code)
+  if (code.startsWith("nevent1")) {
+    const { data } = decode(code)
     const ptr = data as { id: string; relays?: string[]; author?: string; kind?: number }
     id = ptr.id
     if (ptr.relays) relayHints.push(...ptr.relays)
     author = ptr.author || params.author
     kind = ptr.kind
-  } else if (params.code.startsWith("naddr1")) {
+  } else if (code.startsWith("naddr1")) {
     isReplaceable = true
-    const { data } = decode(params.code)
+    const { data } = decode(code)
     const ptr = data as { identifier: string; pubkey: string; kind: number; relays?: string[] }
     identifier = ptr.identifier
     author = ptr.pubkey
     kind = ptr.kind
     if (ptr.relays) relayHints.push(...ptr.relays)
-  } else if (params.code.startsWith("note1")) {
+  } else if (code.startsWith("note1")) {
     // Bare note reference — the decoded data IS the hex event id.
-    id = decode(params.code).data as string
+    id = decode(code).data as string
   } else {
-    id = params.code
+    id = code
     author = params.author
   }
 

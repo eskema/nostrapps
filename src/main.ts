@@ -38,6 +38,7 @@ import {
   allInstanceIds,
   loadEvent,
   resolveViewPayload,
+  isViewAction,
   applyNappPolicy,
   closeNappletSubs,
   launchNapplet,
@@ -815,10 +816,13 @@ async function pickHandler(
   candidates: string[],
   openCandidates: NappWindowState[]
 ): Promise<[nappId: string, instanceId: string | undefined]> {
-  if (actionName.startsWith("view:") && typeof payload === "string") {
+  if (isViewAction(actionName) && typeof payload === "string") {
     const event = await resolveViewPayload(payload)
     if (event) payload = event
-    else throw new Error(`Stopped routing of ${actionName}->${payload}: couldn't find event`)
+    else if (actionName.startsWith("view:")) {
+      throw new Error(`Stopped routing of ${actionName}->${payload}: couldn't find event`)
+    }
+    // Generic `view`: an unresolvable reference still goes to the picker as-is.
   }
 
   if (candidates.length === 0) {
