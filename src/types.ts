@@ -183,7 +183,7 @@ export type NappPolicy = {
 
 // nsite = kind 35128; napp = kind 35130; napplet = a
 // self-contained kind-35129 app. The three flavors the launcher runs.
-export type AppType = "nsite" | "napp" | "napplet"
+export type AppType = "nsite" | "napp" | "napplet" | "invalid"
 
 // How an app presents itself. "normal" = a regular window; "auxiliary" =
 // eligible for ephemeral floating-menu dispatch via napp.action(...,

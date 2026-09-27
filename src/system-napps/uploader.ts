@@ -25,7 +25,7 @@ export const height = START_HEIGHT
 // shows as a failed row.
 const DEFAULT_BLOSSOM = ["https://relay.nostrapps.com"]
 
-import type { AppType, SystemCtx } from "../types.js"
+import type { SystemCtx } from "../types.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
@@ -36,14 +36,14 @@ import { guessMime } from "../nsite/mime.js"
 import { resolveCardIcon } from "../nsite/icon.js"
 import { permRow, unsupportedRequires } from "../napp-permissions.js"
 import { slug } from "../nsite/local.js"
-import { classifyEvent, computeNappId } from "../persistence.js"
+import { computeNappId } from "../persistence.js"
 import { addControl, button, check, details, item, itemList, overline } from "./ui.js"
 import { code, detailField, renderAppCard } from "./card.js"
 
 // A staged file. The blob hash is what the manifest carries, so hashing here —
 // not waiting for a server to tell us — lets the whole event be previewed, and
 // the targets edited, before anything leaves the machine.
-interface Entry {
+type Entry = {
   path: string
   file: File
   hash: string
@@ -52,8 +52,9 @@ interface Entry {
 }
 
 // What's being published, resolved from the files alone.
-interface Plan {
+type Plan = {
   napplet: boolean
+  napp: boolean
   dTag: string
   title: string | null
   description: string | null
@@ -338,20 +339,6 @@ export function mount(
       `${files.length} · ${fmtSize(total)}` + (skipped ? ` · ${skipped} skipped` : "")
   }
 
-  // The tier the rest of the app names this: napplet by kind, and an nsite that
-  // declares capabilities is a napp, not an nsite. Same classifier the Apps
-  // window filters by, fed the tags this publish will carry.
-  function flavor(): AppType {
-    return classifyEvent({
-      kind: plan!.napplet
-        ? NAPPLET_NAMED_KIND
-        : plan!.actions.length || plan!.requires.length
-          ? NAPP_NAMED_KIND
-          : NSITE_NAMED_KIND,
-      tags: [...plan!.actions.map(a => ["action", a]), ...plan!.requires.map(r => ["requires", r])]
-    })
-  }
-
   // Blob URLs minted for the preview icon, revoked when it's replaced.
   const iconUrls: string[] = []
   function dropIconUrls() {
@@ -383,7 +370,7 @@ export function mount(
     const card = renderAppCard({
       nappId: plan.dTag,
       title: plan.title || plan.dTag,
-      type: flavor(),
+      type: plan!.napplet ? "napplet" : plan!.napp ? "napp" : "nsite",
       description: plan.description,
       iconUrl: previewIcon(),
       authorPubkey: ctx.account.getPubkey(),
@@ -457,11 +444,7 @@ export function mount(
     tags.push(["d", plan.dTag])
 
     eventTemplate = {
-      kind: plan.napplet
-        ? NAPPLET_NAMED_KIND
-        : plan.actions.length || plan.requires.length
-          ? NAPP_NAMED_KIND
-          : NSITE_NAMED_KIND,
+      kind: plan.napplet ? NAPPLET_NAMED_KIND : plan.napp ? NAPP_NAMED_KIND : NSITE_NAMED_KIND,
       created_at: Math.floor(Date.now() / 1000),
       tags,
       content: "",
@@ -503,7 +486,9 @@ export function mount(
         if (path + entry.name === "metadata.json") {
           try {
             metadata = JSON.parse(await file.text())
-          } catch {}
+          } catch (err) {
+            console.error("failed to read metadata.json:", err)
+          }
         }
       } else if (entry.kind === "directory") {
         await readDir(entry, path + entry.name + "/")
@@ -541,6 +526,7 @@ export function mount(
 
     plan = {
       napplet,
+      napp: !!metadata,
       dTag,
       // Napplet metadata comes from the html; nsite metadata from metadata.json.
       title: napplet ? meta!.title : metadata?.title || metadata?.name || null,

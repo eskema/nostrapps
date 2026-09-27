@@ -630,7 +630,7 @@ export function mount(
     const event: NostrEvent = {
       id: "0".repeat(64),
       pubkey: pubkey || "0".repeat(64),
-      kind: 35128,
+      kind: 35130,
       created_at: Math.floor(Date.now() / 1000),
       content: "",
       sig: "",
@@ -657,7 +657,7 @@ export function mount(
     const opts = (): AppCardOpts => ({
       nappId,
       title: "Mockup",
-      type: classifyEvent(event),
+      type: classifyEvent(event.kind),
       temporary: true,
       description,
       iconUrl: resolveCardIcon(event).url,
@@ -1354,7 +1354,7 @@ function renderCard(
       } else if (action === "install") {
         const raw = naddrEncode({
           pubkey: evt.pubkey,
-          kind: evt.kind, // 35128 nsite → install(); 35129 napplet → installNapplet()
+          kind: evt.kind, // 35130 napp → install(); 35129 napplet → installNapplet()
           identifier: dTag,
           relays: relayHints
         })
@@ -1408,7 +1408,7 @@ function renderCard(
   card = renderAppCard({
     nappId,
     title: title || `(${dTag})`,
-    type: classifyEvent(evt),
+    type: classifyEvent(evt.kind),
     description: tag("description") || tag("summary"),
     iconSha,
     iconMime,

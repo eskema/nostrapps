@@ -623,9 +623,6 @@ export function computeNappId(event: { kind: number; pubkey: string; tags: strin
   }
   const dTag = event.tags.find(t => t[0] === "d")?.[1]
   const base = `${event.pubkey.slice(0, 16)}~${dTag || ""}`
-  // NIP-5D napplets (kinds 5129/15129/35129) get their own namespace so a
-  // pubkey can publish both a 35128 nsite and a napplet under the same d tag
-  // without colliding.
   if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) {
     return `napplet~${base}`
   }
@@ -1027,17 +1024,16 @@ export function getInstalledApp(nappId: string): InstalledApp | undefined {
   if (dev) return { nappId, ...dev }
 }
 
-// The three app tiers. napplet = a NIP-5D capability app (its own kinds). napp =
-// kind 35130. nsite = kind 35128 without capabilities.
-export function classifyEvent(event: { kind: number; tags: string[][] }): AppType {
-  if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) return "napplet"
-  if (event.kind === 35130) return "napp"
-  return "nsite"
+export function classifyEvent(kind: number): AppType {
+  if (kind === 5129 || kind === 15129 || kind === 35129) return "napplet"
+  if (kind === 35130) return "napp"
+  if (kind === 35128) return "nsite"
+  return "invalid"
 }
 
 export function classifyInstalled(app: InstalledApp): AppType {
   if (app.nappId.startsWith("napplet~") || app.event?.kind === 35129) return "napplet"
-  if (app.event) return classifyEvent(app.event)
+  if (app.event) return classifyEvent(app.event.kind)
   // dev/local/temp: no manifest event — classify from the stored declarations.
   const caps = (app.actions?.length ?? 0) > 0 || (app.requires?.length ?? 0) > 0
   return caps ? "napp" : "nsite"

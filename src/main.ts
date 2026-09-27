@@ -36,7 +36,6 @@ import {
   placeInFreeSpot,
   hasOpenWindow,
   allInstanceIds,
-  loadEvent,
   resolveViewPayload,
   isViewAction,
   applyNappPolicy,
@@ -126,7 +125,6 @@ import {
 } from "./system-napps/index.js"
 import { pool } from "@nostr/gadgets/global"
 import { bareNostrUser, loadNostrUser } from "@nostr/gadgets/metadata"
-import { EventTemplate } from "@nostr/tools"
 import type { NostrEvent } from "@nostr/tools/pure"
 import { naddrEncode } from "@nostr/tools/nip19"
 import * as relayAuth from "./relay-auth.js"
@@ -3428,7 +3426,7 @@ async function openSharedSpace(link: ShareLink, spaceId: string): Promise<boolea
 // The id an install would give an address: napplets have their own namespace.
 function nappIdFor(target: { pubkey: string; dTag: string; kind?: number }): string {
   return persist.computeNappId({
-    kind: target.kind ?? NSITE_NAMED_KIND,
+    kind: target.kind ?? NAPP_NAMED_KIND,
     pubkey: target.pubkey,
     tags: [["d", target.dTag]]
   })
