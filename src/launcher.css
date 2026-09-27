@@ -1,27 +1,5 @@
 @import "./ui.css";
 
-/* The kit (ui.css) sets the voice, --surface/--text and the button tokens;
-   these are the launcher's own. */
-:root {
-  --danger: #d64545;
-  --good: #2f9e44;
-  --warn: #f59e0b;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --danger: #ff6b6b;
-    --good: #69db7c;
-    --warn: #fbbf24;
-  }
-}
-
-:root[data-theme="dark"] {
-  --danger: #ff6b6b;
-  --good: #69db7c;
-  --warn: #fbbf24;
-}
-
 body {
   margin: 0;
   display: grid;
@@ -48,11 +26,11 @@ header {
 }
 
 h1 {
-  margin: 0.4rem;
+  margin: var(--space-xs);
   flex-shrink: 0;
   font-family: var(--font-mono);
   /* font-family: var(--font-serif); */
-  font-size: 0.8rem;
+  font-size: var(--text-s);
   font-weight: 600;
   line-height: 0.8;
   user-select: none;
@@ -91,7 +69,7 @@ h1 span {
   width: 1rem;
   height: 1rem;
   padding: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-s);
   line-height: 1rem;
   color: color-mix(in srgb, currentColor 30%, transparent);
   background: transparent;
@@ -112,8 +90,8 @@ h1 span {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.2rem 0;
+  gap: var(--space-m);
+  padding: var(--space-xxs) 0;
   /* padding: 0.2rem 0.5rem; */
   /* min-height: 1.7rem; */
   /* border-bottom: 1px dotted color-mix(in srgb, currentColor 40%, transparent); */
@@ -131,7 +109,7 @@ h1 span {
 .spaces-windows {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: var(--space-xs);
   flex: 1;
   min-width: 0;
   overflow-x: auto;
@@ -153,7 +131,7 @@ h1 span {
 }
 
 #spaces-bar .btn {
-  font-size: 0.8rem;
+  font-size: var(--text-s);
 }
 
 /* List of spaces + new-space, right. */
@@ -161,14 +139,14 @@ h1 span {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  grid-gap: 0.4rem;
-  margin-right: 0.3rem;
+  grid-gap: var(--space-xs);
+  margin-right: var(--space-xs);
 }
 
 .spaces-list {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: var(--space-l);
 }
 
 /* Space tabs are the draggable ones (main.ts spaceReorder). */
@@ -189,7 +167,7 @@ h1 span {
 /* Current space's name at the very start of the bar (double-click to rename). */
 .spaces-current-name {
   flex-shrink: 0;
-  padding: 0 0.4rem;
+  padding: 0 var(--space-xs);
   font-weight: 800;
   white-space: nowrap;
   user-select: none;
@@ -218,12 +196,12 @@ body.space-dragging * {
 .spaces-controls .btn,
 .spaces-right > .btn,
 .spaces-windows .btn {
-  padding: 0.2rem;
+  padding: var(--space-xxs);
 }
 
 #spaces-bar .spaces-controls .btn,
 #spaces-bar .spaces-right > .btn {
-  font-size: 1rem;
+  font-size: var(--text-m);
 }
 
 button {
@@ -251,8 +229,8 @@ button {
   background: transparent;
   /* background-color: var(--surface); */
   color: var(--text);
-  font-size: 1rem;
-  padding: 0 0.8rem;
+  font-size: var(--text-m);
+  padding: 0 var(--space-m);
 }
 
 .headerbar button:not(.btn):hover,
@@ -275,7 +253,7 @@ button {
   padding: 0;
   display: grid;
   place-items: center;
-  font-size: 1rem;
+  font-size: var(--text-m);
   line-height: 1;
   /* .btn's 700 reshapes the ☾/◐ glyph fallback — back to sans at normal weight
      so the moon matches its old rendering. Named, not inherited: the page is
@@ -297,106 +275,6 @@ button {
   border-bottom: 1px solid currentColor;
 } */
 
-#account {
-  /* align-items: center; */
-  align-content: center;
-  display: grid;
-  /* align-items: center; */
-  gap: 0.2rem;
-  /* font-size: 0.875rem; */
-  flex-shrink: 0;
-}
-
-#pubkey-short {
-  font-size: 0.8rem;
-  font-weight: 800;
-  line-height: 1;
-  user-select: none;
-  word-break: break-all;
-  max-width: 1.8rem;
-  display: inline-block;
-  margin: 0.4rem;
-}
-
-#main-menu {
-  box-sizing: border-box;
-  position: absolute;
-  top: 2.4rem;
-  right: 0;
-  z-index: 200;
-  display: grid;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.8rem;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  /* background: var(--text); */
-  justify-content: end;
-  /* border: 1px solid color-mix(in srgb, currentColor 20%, transparent); */
-  /* border-radius: 6px; */
-  /* box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); */
-  /* min-width: 14rem; */
-  width: 100%;
-  height: calc(100vh - 2.4rem);
-}
-
-#main-menu[hidden] {
-  display: none;
-}
-
-.menu-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  font-size: 0.85rem;
-}
-
-.menu-label {
-  flex-shrink: 0;
-  opacity: 0.7;
-  min-width: 4.5rem;
-}
-
-.theme-options {
-  display: inline-flex;
-  gap: 0.4rem;
-  margin-bottom: 1rem;
-  justify-content: end;
-  width: 100%;
-}
-
-.theme-options button {
-  /* padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px; */
-  /* background: var(--text); */
-  /* color: var(--surface); */
-  border-radius: 50%;
-  color: color-mix(in srgb, var(--text) 50%, transparent);
-}
-
-.theme-options button:hover {
-  /* background: color-mix(in srgb, var(--text) 25%, transparent); */
-  color: var(--text);
-}
-
-.theme-options button.active {
-  background: var(--text);
-  color: var(--surface);
-}
-
-/* #menu-account-row #account-action {
-  width: 100%;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-} */
-
 #launch-form {
   display: flex;
   /* gap: 0.5rem; */
@@ -415,9 +293,9 @@ button {
   width: 100%;
   /* line-height: 1.5; */
   box-sizing: border-box;
-  padding: 0.4rem;
+  padding: var(--space-xs);
   font-family: var(--font-mono);
-  font-size: 1rem;
+  font-size: var(--text-m);
   border: none;
   /* border-bottom: 1px solid color-mix(in srgb, currentColor 50%, transparent); */
   /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
@@ -442,27 +320,24 @@ button {
   color: inherit;
   /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
   border-top: none;
-  border-radius: 0 0 4px 4px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  border-radius: 0 0 var(--radius-s) var(--radius-s);
+  box-shadow: var(--shadow-dropdown);
   max-height: min(70vh, 640px);
   overflow-y: auto;
 }
 
-#suggestions.sugg-none::after {
-  content: "No saved entries yet";
-  display: block;
-  padding: 0.5rem 0.6rem;
-  font-size: 0.8rem;
-  opacity: 0.6;
+#suggestions > .sugg-none {
+  padding: var(--space-xs) var(--space-s);
+  font-size: var(--text-s);
 }
 
 .suggestion {
   display: flex;
   align-items: baseline; /* the trailing author line and label sit on the title's baseline */
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
+  gap: var(--space-s);
+  padding: var(--space-xs) var(--space-s);
+  font-size: var(--text-s);
   cursor: pointer;
 }
 
@@ -480,7 +355,7 @@ button {
 .sugg-main {
   display: flex;
   align-items: baseline;
-  gap: 0.55rem;
+  gap: var(--space-s);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -511,12 +386,7 @@ button {
 /* App rows read like the Apps card: the icon next to the title, and "<type>
    from <author>" trailing the row — mono and dimmer for the name. */
 .sugg-icon {
-  width: 1.25rem;
-  height: 1.25rem;
-  flex-shrink: 0;
   align-self: center;
-  border-radius: 4px;
-  object-fit: cover;
 }
 
 .sugg-author {
@@ -531,11 +401,8 @@ button {
 }
 
 .suggestion .source {
-  font-size: 0.7rem;
-  opacity: 0.5;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   flex-shrink: 0;
+  opacity: 0.5;
 }
 
 /* Space badge trailing every open-window row — the input is a global,
@@ -547,15 +414,15 @@ button {
   display: inline-block;
   flex-shrink: 0;
   line-height: 1.2;
-  padding: 0.05rem 0.35rem;
+  padding: 0.05rem var(--space-xs);
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: var(--btn-radius);
+  border-radius: var(--radius-s);
   font-weight: 700;
   opacity: 0.75;
 }
 
 .sugg-space .ui-icon {
-  margin-right: 0.2rem;
+  margin-right: var(--space-xxs);
 }
 
 .sugg-space-current {
@@ -574,110 +441,8 @@ button {
 .suggestion .sugg-forget {
   flex-shrink: 0;
   align-self: center;
-  padding: 0 0.2rem;
+  padding: 0 var(--space-xxs);
   line-height: 1;
-}
-
-#load-local {
-  /* background: transparent;
-  color: inherit; */
-  /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
-}
-
-#log-container {
-  display: grid;
-  position: relative;
-  transition: all 0.2s ease-in-out;
-  /* display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  margin-top: 0.4rem; */
-}
-
-#log-container.log-expanded {
-  padding-top: 1.4rem;
-  padding-bottom: 0.4rem;
-  /* background: yellow; */
-}
-
-#log {
-  /* flex: 1; */
-  min-width: 0;
-  /* font-size: 0.8rem; */
-  font-family: var(--font-mono);
-  opacity: 1;
-  padding: 0.4rem 3.4rem;
-  /* line-height: 1; */
-  min-height: 1.2em;
-  transition: all 0.2s ease-in-out;
-}
-
-#log-container.log-collapsed #log {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 0.62rem;
-  line-height: 1;
-  opacity: 0.8;
-  /* z-index: -1; */
-}
-
-#log-container.log-expanded #log {
-  max-height: 160px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  font-size: 1rem;
-  /* z-index: 1; */
-  /* background: black; */
-  /* line-height: 2; */
-  /* background: color-mix(in srgb, currentColor 5%, transparent); */
-  /* padding: 0.35rem 0.5rem; */
-  /* border-radius: 4px; */
-}
-
-#log-toggle {
-  position: absolute;
-  padding: 0 0.8rem;
-  /* padding-right: 2.2rem; */
-  /* padding-left: 3.6rem; */
-  /* font-size: 0.75rem; */
-  background: transparent;
-  /* background: red; */
-  /* font-family: var(--font-mono); */
-  /* font-size: 1rem; */
-  /* line-height: .8; */
-  /* color: inherit; */
-  /* border: 1px solid color-mix(in srgb, currentColor 20%, transparent); */
-  /* border-radius: 4px; */
-  cursor: pointer;
-  /* flex-shrink: 0; */
-  /* opacity: .6; */
-  transition: all 0.2s ease-in-out;
-  width: 100%;
-  /* line-height: 1.35;
-  min-height: 1.2em; */
-  z-index: 1;
-  text-align: right;
-  top: 0;
-}
-
-#log-container #log-toggle:hover {
-  opacity: 1;
-  /* background: blue; */
-  /* transform: translateY(-.2rem); */
-}
-
-#log-container.log-expanded #log-toggle {
-  /* text-align: center; */
-  /* background: black; */
-  /* opacity: .5; */
-  /* transform: translateY(-.2rem); */
-}
-
-#log-container.log-collapsed #log-toggle {
-  /* background: blue; */
-  /* opacity: .5; */
-  /* transform: translateY(-.2rem); */
 }
 
 #stage {
@@ -694,7 +459,7 @@ button {
   /* Inner gutter so windows never touch the edge. clampToStage in host.js
      reads this padding from computed style and uses it as the bound for
      window left/top. */
-  padding: 0.5rem 0.5rem 1rem 1.5rem;
+  padding: var(--space-s) var(--space-s) var(--space-l) var(--space-xl);
   box-sizing: border-box;
 }
 
@@ -720,8 +485,8 @@ button {
   box-sizing: border-box;
   background: var(--surface);
   /* border: 1px solid color-mix(in srgb, currentColor 20%, transparent); */
-  border-radius: 4px;
-  box-shadow: 0 0 0.6rem rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow-window);
   min-width: 240px;
   overflow: hidden;
   transition: max-height 220ms ease-in-out;
@@ -733,17 +498,9 @@ button {
    are dimmed above) so it's clear which window is focused. Animates via the
    box-shadow transition on .napp-window and the opacity transition on .napp-title. */
 .napp-window.focused {
-  box-shadow: 0 0.4rem 0.8rem rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-window-front);
   transform: translateY(-1px);
   /* box-shadow: none; */
-}
-
-html[data-theme="dark"] .napp-window {
-  box-shadow: 0 0 0.6rem rgba(0, 0, 0, 0.4);
-}
-
-html[data-theme="dark"] .napp-window.focused {
-  box-shadow: 0 0.2rem 0.8rem rgba(0, 0, 0, 0.6);
 }
 
 /* Windows belonging to a non-active space: hidden, but kept mounted so their
@@ -808,9 +565,9 @@ html[data-theme="dark"] .napp-window.focused {
   justify-items: start;
   /* flex-wrap: nowrap; */
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-s);
   min-height: 28px;
-  padding: 0 0.35rem 0 0.75rem;
+  padding: 0 var(--space-xs) 0 var(--space-m);
   box-sizing: border-box;
   /* background: color-mix(in srgb, currentColor 8%, transparent); */
   /* border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
@@ -841,7 +598,7 @@ html[data-theme="dark"] .napp-window.focused {
 
 .napp-title {
   min-width: 0;
-  font-size: 1rem;
+  font-size: var(--text-m);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -863,9 +620,9 @@ html[data-theme="dark"] .napp-window.focused {
 
 .napp-title[data-instance]::after {
   content: " " attr(data-instance);
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   opacity: 0.45;
-  margin-left: 0.4rem;
+  margin-left: var(--space-xs);
 }
 
 .napp-window.focused .napp-title {
@@ -877,8 +634,8 @@ html[data-theme="dark"] .napp-window.focused {
      keep enough box to see the caret. */
   min-width: 4ch;
   background: color-mix(in srgb, currentColor 12%, transparent);
-  padding: 0 0.25rem;
-  border-radius: 3px;
+  padding: 0 var(--space-xxs);
+  border-radius: var(--radius-xs);
   outline: none;
   cursor: text;
   user-select: text;
@@ -904,12 +661,12 @@ html[data-theme="dark"] .napp-window.focused {
   width: 20px;
   height: 20px;
   padding: 0;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   line-height: 1;
   background: transparent;
   color: inherit;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
@@ -1033,7 +790,7 @@ html[data-theme="dark"] .napp-window.focused {
   position: absolute;
   background: color-mix(in srgb, #6b46ff 18%, transparent);
   border: 2px dashed color-mix(in srgb, #6b46ff 70%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-l);
   pointer-events: none;
   z-index: 9000;
   transition:
@@ -1050,7 +807,7 @@ html[data-theme="dark"] .napp-window.focused {
   position: absolute;
   background: color-mix(in srgb, currentColor 8%, transparent);
   border: 1.5px dashed color-mix(in srgb, currentColor 45%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-s);
   pointer-events: none;
   z-index: 9000;
   transition:
@@ -1126,14 +883,14 @@ body.popover-open .napp-body iframe {
     z-index: 200;
     justify-content: center;
     margin-right: 0;
-    padding: 0.2rem 0.5rem;
+    padding: var(--space-xxs) var(--space-s);
     background: var(--surface);
     /* border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); */
   }
 
   .spaces-tab.active {
     opacity: 1;
-    padding: 0 0.5rem;
+    padding: 0 var(--space-s);
     border-top: 1px solid currentColor;
     border-bottom: none;
   }
@@ -1147,7 +904,7 @@ body.popover-open .napp-body iframe {
        width (some windows carry a wider inline/desktop width). */
     min-width: 0 !important;
     max-width: 100% !important;
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-s) 0;
     border-radius: 0;
     border-left: 0;
     border-right: 0;
@@ -1164,15 +921,15 @@ body.popover-open .napp-body iframe {
   }
   .napp-header {
     min-height: 40px;
-    padding: 0 0.5rem 0 1rem;
+    padding: 0 var(--space-s) 0 var(--space-l);
   }
   .napp-btn {
     width: 32px;
     height: 32px;
-    font-size: 1rem;
+    font-size: var(--text-m);
   }
   .napp-title {
-    font-size: 0.9rem;
+    font-size: var(--text-s);
   }
 
   /* Over every other window while it's dragged. Both need !important: the
@@ -1220,7 +977,7 @@ body.popover-open .napp-body iframe {
   width: auto; /* the UA's fit-content would shrink the scrim to the cards */
   height: auto;
   margin: 0;
-  padding: 1rem;
+  padding: var(--space-l);
   border: none;
   background: rgba(0, 0, 0, 0.45);
   color: inherit;
@@ -1236,7 +993,7 @@ body.popover-open .napp-body iframe {
 
 .app-dialog-cards {
   display: grid;
-  gap: 0.6rem;
+  gap: var(--space-s);
   align-content: start;
   max-width: 28rem;
   max-height: 85vh;
@@ -1247,18 +1004,18 @@ body.popover-open .napp-body iframe {
 .app-dialog-body,
 .app-dialog-queue {
   background: var(--surface);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
 }
 
 .app-dialog-body {
   display: grid;
-  gap: 1rem;
-  padding: 1.5rem;
+  gap: var(--space-l);
+  padding: var(--space-xl);
 }
 
 .app-dialog-title {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-m);
 }
 
 .app-dialog-content {
@@ -1275,28 +1032,17 @@ body.popover-open .napp-body iframe {
   overflow-wrap: anywhere;
 }
 
-.app-dialog-content code {
-  font-family: var(--font-mono);
-  padding: 0.1rem 0.35rem;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-  border-radius: 4px;
-}
-
-/* A payload preview (what is about to hit the clipboard) — same chip look as
-   the inline <code>, but a block that wraps its unbroken string. */
+/* A payload preview (what is about to hit the clipboard, an event's
+   content): a .ui-code-block under the sentence. */
 .app-dialog-content .app-dialog-detail-code {
-  display: block;
-  margin-top: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.85em;
-  word-break: break-all;
+  margin-top: var(--space-s);
 }
 
 /* The relays an event is about to be published to — a compact monospace list
    with the wss:// scheme stripped (it adds noise, never signal). */
 .app-dialog-content .app-dialog-relay-list {
-  margin: 0.35rem 0 0;
-  padding-left: 1.2rem;
+  margin: var(--space-xs) 0 0;
+  padding-left: var(--space-l);
   display: grid;
   gap: 0.15rem;
   font-family: var(--font-mono);
@@ -1312,7 +1058,7 @@ body.popover-open .napp-body iframe {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: var(--space-s);
   margin: 0;
   padding: 0;
 }
@@ -1320,7 +1066,7 @@ body.popover-open .napp-body iframe {
 /* ─── Napp permission screen (install / edit) ─────────────────────────── */
 .napp-perms {
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-s);
 }
 
 /* Icon (when there is one) and name in a row — flex, so the name takes the
@@ -1328,14 +1074,7 @@ body.popover-open .napp-body iframe {
 .napp-perms-head {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-}
-
-.napp-perms-icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 6px;
-  object-fit: cover;
+  gap: var(--space-s);
 }
 
 /* Semibold, unless the share screens give it the title's voice (.ui-title):
@@ -1346,7 +1085,7 @@ body.popover-open .napp-body iframe {
 .napp-perms-name {
   display: flex;
   align-items: baseline;
-  gap: 0.4rem;
+  gap: var(--space-xs);
   flex: 1;
   min-width: 0;
 }
@@ -1377,14 +1116,14 @@ body.popover-open .napp-body iframe {
 .napp-perms-unsupported {
   margin: 0;
   color: var(--danger);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
 }
 
 /* A grantable row: the kit's labelled check (box left, title + description
    stacked), as a full-width row with a rule above. */
 .napp-perms-row {
   display: grid;
-  padding: 0.4rem 0;
+  padding: var(--space-xs) 0;
   border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
 }
 
@@ -1395,14 +1134,14 @@ body.popover-open .napp-body iframe {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.6rem;
+  gap: var(--space-s);
+  margin-top: var(--space-s);
   position: sticky;
   bottom: 0;
-  padding: 0.6rem 0 1.5rem;
-  margin-bottom: -1.5rem;
+  padding: var(--space-s) 0 var(--space-xl);
+  margin-bottom: calc(-1 * var(--space-xl));
   background: var(--surface);
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
 
 /* The install screen's "open after install" toggle: a grant row, with the space
@@ -1411,7 +1150,7 @@ body.popover-open .napp-body iframe {
 .napp-perms-place {
   display: grid;
   grid-template-columns: auto 1fr;
-  column-gap: 0.6rem;
+  column-gap: var(--space-s);
 }
 
 .napp-perms-place > .napp-perms-row {
@@ -1421,13 +1160,13 @@ body.popover-open .napp-body iframe {
 
 .napp-perms-place-tabs {
   grid-column: 2;
-  gap: 0.25rem 0.5rem;
+  gap: var(--space-xxs) var(--space-s);
 }
 
 /* One app's section of a permission screen (the single-app screen has one). */
 .napp-perms-app {
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-s);
 }
 
 /* The share-link screen stacks a section per app. */
@@ -1435,22 +1174,22 @@ body.popover-open .napp-body iframe {
    title / description / control; booleans put the check on the title line. */
 .napp-config-row {
   display: grid;
-  gap: 0.25rem;
-  padding: 0.5rem 0;
+  gap: var(--space-xxs);
+  padding: var(--space-s) 0;
   border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
 }
 .napp-config-head {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-s);
 }
 .napp-config-head > span:only-child {
   grid-column: 1 / -1;
 }
 .napp-config-section {
   font-weight: 600;
-  margin-top: 0.5rem;
+  margin-top: var(--space-s);
 }
 .napp-config select.ui-input {
   width: 100%;
@@ -1461,15 +1200,15 @@ body.popover-open .napp-body iframe {
    introduce itself and offers to settle them. */
 .app-dialog-queue {
   display: grid;
-  gap: 0.4rem;
-  padding: 0.5rem 0.7rem;
+  gap: var(--space-xs);
+  padding: var(--space-s) var(--space-m);
 }
 
 .app-dialog-queue-head {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-s);
   cursor: pointer;
   user-select: none;
 }
@@ -1481,7 +1220,7 @@ body.popover-open .napp-body iframe {
 .app-dialog-queue-count::before {
   content: "▸";
   display: inline-block;
-  margin-right: 0.4rem;
+  margin-right: var(--space-xs);
   opacity: 0.7;
 }
 
@@ -1500,7 +1239,7 @@ body.popover-open .napp-body iframe {
   grid-auto-flow: column;
   grid-template-columns: 1fr;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 /* The display above would otherwise win over the UA's [hidden]. */
 .app-dialog-queue-group[hidden] {
@@ -1525,16 +1264,16 @@ body.popover-open .napp-body iframe {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0;
-  border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
+  border-top: 1px solid var(--rule);
 }
 
 .app-dialog-queue-line {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: baseline;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 
 /* The badges hold their line; the name takes the squeeze. */
@@ -1550,7 +1289,7 @@ body.popover-open .napp-body iframe {
 
 /* The ghost button's padding tightened to the row it sits in. */
 .app-dialog-queue-drop {
-  padding: 0.2rem 0.35rem;
+  padding: var(--space-xxs) var(--space-xs);
   opacity: 0.6;
 }
 
@@ -1576,14 +1315,14 @@ body.popover-open .napp-body iframe {
   grid-template-columns: auto 1fr;
   align-items: center;
   font-weight: 600;
-  padding-bottom: 0.6rem;
+  padding-bottom: var(--space-s);
   border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
 .share-title-lead {
   overflow: hidden;
   white-space: nowrap;
   max-width: 6rem;
-  margin-right: 0.4rem;
+  margin-right: var(--space-xs);
   transition:
     max-width 250ms ease,
     margin-right 250ms ease,
@@ -1594,12 +1333,7 @@ body.popover-open .napp-body iframe {
   margin-right: 0;
   opacity: 0;
 }
-/* The list screens (open, share) show icons at the launcher input's size. */
-.share-app .napp-perms-icon {
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: 4px;
-}
+
 .share-title-row .ui-input {
   min-width: 0;
   width: 100%;
@@ -1614,7 +1348,7 @@ body.popover-open .napp-body iframe {
    list as it was. */
 .share-created .share-title-row .ui-input {
   background: transparent;
-  padding: 0.35rem 0;
+  padding: var(--space-xs) 0;
   font-weight: 800;
   cursor: default;
 }
@@ -1663,8 +1397,8 @@ body.popover-open .napp-body iframe {
    payload below it, in a textarea the user can pull taller. */
 .share-actions {
   display: grid;
-  gap: 0.4rem;
-  padding-left: 1.6rem;
+  gap: var(--space-xs);
+  padding-left: var(--space-xl);
   transition:
     padding-left 250ms ease,
     opacity 250ms ease;
@@ -1680,7 +1414,7 @@ body.popover-open .napp-body iframe {
 }
 .share-action {
   display: grid;
-  gap: 0.25rem;
+  gap: var(--space-xxs);
   transition: font-size 250ms ease;
 }
 .share-created .share-action,
@@ -1707,7 +1441,7 @@ body.popover-open .napp-body iframe {
   cursor: default;
 }
 .share-action-name {
-  margin-right: 0.5rem;
+  margin-right: var(--space-xs);
 }
 /* An editable block: as tall as its text, wrapping the unbroken ones. */
 .share-payload {
@@ -1739,12 +1473,12 @@ body.popover-open .napp-body iframe {
 .share-app {
   padding-top: 0;
   border-top: none;
-  padding-bottom: 0.6rem;
+  padding-bottom: var(--space-s);
   border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
 .share-status {
   display: grid;
-  gap: 0.2rem;
+  gap: var(--space-xxs);
   color: var(--danger);
 }
 .share-status[hidden] {
@@ -1760,8 +1494,8 @@ body.popover-open .napp-body iframe {
   width: 100%;
   box-sizing: border-box;
   height: calc(1.4em + 1rem);
-  margin: 0.6rem 0;
-  padding: 0.5rem 0.6rem;
+  margin: var(--space-s) 0;
+  padding: var(--space-s) var(--space-s);
   overflow: auto;
   resize: vertical;
   user-select: all;
@@ -1778,7 +1512,7 @@ body.popover-open .napp-body iframe {
 /* The link's there: taller, and more room before the list. */
 .share-url.ready {
   height: calc(1.4em * 2.3 + 1rem);
-  margin-bottom: 0.9rem;
+  margin-bottom: var(--space-l);
 }
 .share-url-text {
   transition: opacity 250ms ease;
@@ -1796,9 +1530,9 @@ body.popover-open .napp-body iframe {
   }
   to {
     height: calc(1.4em + 1rem);
-    margin: 0.6rem 0;
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
+    margin: var(--space-s) 0;
+    padding-top: var(--space-s);
+    padding-bottom: var(--space-s);
     color: var(--text);
   }
 }
@@ -1829,13 +1563,13 @@ body.popover-open .napp-body iframe {
   margin: 0;
   inset: auto;
   border: none;
-  padding: 0.5rem;
+  padding: var(--space-s);
   max-width: 24rem;
   max-height: 80vh;
   overflow: auto;
   background: var(--surface);
-  border-radius: 12px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-popover);
   color: inherit;
   font-family: inherit;
 }
@@ -1865,7 +1599,7 @@ body.popover-open .napp-body iframe {
   bottom: 3rem; /* above the spaces bar */
   z-index: 400000; /* above maximized windows (300000) and the dialog scrim (350000) */
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-s);
   max-width: min(22rem, calc(100vw - 1.6rem));
 }
 
@@ -1875,48 +1609,45 @@ body.popover-open .napp-body iframe {
 .toast-group {
   background: var(--surface);
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-  border-radius: 12px;
-  padding: 0.6rem 0.7rem;
+  border-radius: var(--radius-xl);
+  padding: var(--space-s) var(--space-m);
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-s);
   color: var(--text);
 }
 
 .toast-text {
   display: grid;
   gap: 0.15rem;
-  font-size: 0.82rem;
+  font-size: var(--text-s);
 }
 
-.toast-text code {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  font-weight: 600;
+.toast-text .ui-code {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .toast-hint {
   opacity: 0.65;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
 }
 
 .toast-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 
 .toast-group {
   grid-template-columns: 1fr auto;
   align-items: center;
-  font-size: 0.82rem;
+  font-size: var(--text-s);
   font-weight: 600;
 }
 
 .toasts-list {
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-s);
   max-height: 25rem; /* ~3 cards */
   overflow-y: auto;
 }
@@ -1925,7 +1656,7 @@ body.popover-open .napp-body iframe {
    full-width row. */
 .relay-auth-auto-row {
   display: grid;
-  padding: 0.4rem 0;
+  padding: var(--space-xs) 0;
 }
 
 /* The ceiling a window opens under: it holds while the height is being
@@ -1940,7 +1671,7 @@ body.popover-open .napp-body iframe {
 /* ─── system napps ─────────────────────────────────────────────── */
 
 .napp-body-system {
-  padding: 0.6rem 0.8rem;
+  padding: var(--space-s) var(--space-m);
   overflow: auto;
   color: var(--text);
   /* font-size: 0.85rem; */
@@ -1949,7 +1680,7 @@ body.popover-open .napp-body iframe {
 .system-napp-content {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: var(--space-s);
 }
 
 /* logs */
@@ -1958,27 +1689,26 @@ body.popover-open .napp-body iframe {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.2rem;
+  gap: var(--space-xxs);
 }
 
 .logs-view li {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.5rem;
+  gap: var(--space-xs);
   align-items: baseline;
 }
 
 .logs-view time {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   opacity: 0.55;
   white-space: nowrap;
 }
 
-.logs-view pre {
+.logs-view .ui-code {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1995,7 +1725,7 @@ body.popover-open .napp-body iframe {
 
 .apps-panel {
   display: grid;
-  grid-gap: 1rem;
+  grid-gap: var(--space-l);
   grid-template-rows: auto 1fr;
   flex: 1;
   min-height: 0;
@@ -2030,7 +1760,7 @@ body.popover-open .napp-body iframe {
   overflow-y: auto;
   scrollbar-width: none; /* Firefox */
   align-content: start; /* pack rows at the top, don't stretch to fill height */
-  gap: 0.75rem;
+  gap: var(--space-m);
 }
 
 /* `display` on the class would override the [hidden] attribute's display:none,
@@ -2064,74 +1794,25 @@ body.popover-open .napp-body iframe {
   display: none;
 }
 
-.apps-tabs {
-  display: flex;
-  gap: 0.5rem;
-  /* border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); */
-}
-
-.apps-tab {
-  flex: 1;
-  /* text-transform: uppercase; */
-  /* letter-spacing: 0.05rem; */
-
-  padding: 0.5rem;
-  font-family: inherit; /* a <button>: the page's voice doesn't reach it on its own */
-  /* font-style: italic; */
-  font-size: 1rem;
-  /* font-weight: 500; */
-  background: transparent;
-  color: color-mix(in srgb, currentColor 50%, transparent);
-  border: none;
-  /* border-bottom: 2px solid transparent; */
-  cursor: pointer;
-  border-radius: 12px;
-  transition: all 0.15s ease-in-out;
-}
-
-.apps-tab:hover {
-  color: color-mix(in srgb, currentColor 75%, transparent);
-  background: color-mix(in srgb, currentColor 15%, transparent);
-}
-
-.apps-tab.active {
-  color: var(--surface);
-  border-bottom-color: var(--text);
-  font-weight: 700;
-  background: var(--text);
-  flex: 1.2;
-  /* background: color-mix(in srgb, currentColor 50%, transparent); */
-}
-
-.apps-naddr {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-
 .apps-detail-section {
-  margin: 0.3rem 0;
+  margin: var(--space-xs) 0;
 }
 
 .apps-detail-files {
   /* font-size: 0.75rem; */
   margin: 0.15rem 0;
-  padding-left: 1.2rem;
+  padding-left: var(--space-l);
 }
 
 .apps-detail-files li {
-  margin-top: 1rem;
+  margin-top: var(--space-l);
   /* margin: 0.1rem 0; */
   /* line-height: 2; */
 }
 
-.apps-detail-files code {
-  margin-right: 0.5rem;
+.apps-detail-files .ui-code {
+  margin-right: var(--space-xs);
   pointer-events: none;
-  font-size: 1rem;
 }
 
 .apps-detail-files-links-btn {
@@ -2149,11 +1830,11 @@ body.popover-open .napp-body iframe {
   line-height: 1;
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--space-xs);
 }
 
 .apps-detail-files-links a {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
   /* display: inline-block; */
 }
@@ -2185,12 +1866,7 @@ body.popover-open .napp-body iframe {
 .perm-list {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-}
-
-.perm-empty {
-  opacity: 0.6;
-  font-style: italic;
+  gap: var(--space-s);
 }
 
 /* A section-wide action above its list (settings' "forget all"), sitting at
@@ -2203,23 +1879,23 @@ body.popover-open .napp-body iframe {
 .perm-group {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.5rem;
+  gap: var(--space-xxs);
+  padding: var(--space-s);
   border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius-m);
 }
 
 .perm-group-head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-s);
   justify-content: space-between;
 }
 
 /* Holds a nappNameEl now — "<title> from <author>" prose, not an id, so no
    mono. */
 .perm-napp-id {
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   opacity: 0.85;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2230,13 +1906,11 @@ body.popover-open .napp-body iframe {
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
+  gap: var(--space-s);
+  font-size: var(--text-s);
 }
 
 .perm-method {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2244,27 +1918,13 @@ body.popover-open .napp-body iframe {
 }
 
 .perm-decision {
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.75rem;
-  padding: 0.05rem 0.4rem;
-  /* border-radius: 999px; */
-}
-
-.perm-allow {
-  /* background: color-mix(in srgb, #38a169 25%, transparent); */
-  color: color-mix(in srgb, #38a169 85%, transparent);
-}
-
-.perm-deny {
-  /* background: color-mix(in srgb, #e53e3e 25%, transparent); */
-  color: color-mix(in srgb, #e53e3e 65%, transparent);
+  padding: 0.05rem var(--space-xs);
 }
 
 /* suggestions: slash commands */
 .sugg-slash {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  font-size: var(--text-s);
   opacity: 0.85;
 }
 
@@ -2272,7 +1932,7 @@ body.popover-open .napp-body iframe {
 
 .apps-list {
   display: grid;
-  grid-gap: 0.5rem;
+  grid-gap: var(--space-s);
 }
 
 /* ─── Apps card ──────────────────────────────────────────────────
@@ -2305,12 +1965,12 @@ body.popover-open .napp-body iframe {
     "warn warn"
     "author author";
   grid-template-columns: auto 1fr;
-  grid-gap: 0 1rem;
-  padding: 1rem 0.4rem;
+  grid-gap: 0 var(--space-l);
+  padding: var(--space-l) var(--space-xs);
   /* padding-top: 1rem; */
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-s);
 
-  border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border-top: 1px solid var(--rule);
 }
 
 .apps-detail-overlay .apps-card,
@@ -2351,51 +2011,17 @@ body.popover-open .napp-body iframe {
   display: none;
 }
 
-/* The icon's plate is the card's own pseudo-element, in the same cell as the
-   image, so it's there before any icon is and the image can fade in over it
-   (.loaded is set by the card on the img's load). The img paints on top. */
-.apps-card::before {
-  content: "";
-  grid-area: icon;
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-}
-
 .apps-card-icon {
-  box-sizing: border-box;
-  width: 48px;
-  height: 48px;
   grid-area: icon;
-  border-radius: 8px;
-  padding: 4px;
-  opacity: 0;
-  transition: opacity 0.4s ease;
 }
 
-.apps-card-icon.loaded {
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .apps-card-icon {
-    transition: none;
-  }
-}
-
-.apps-detail-overlay .apps-card::before,
-.upload-head .apps-card::before,
 .apps-detail-overlay .apps-card-icon,
 .upload-head .apps-card-icon {
-  width: 96px;
-  height: 96px;
+  width: var(--app-icon-xl);
+  height: var(--app-icon-xl);
 }
 
 .apps-title {
-  font-weight: 700;
-  font-size: 2rem;
-  margin: 0;
   grid-area: title;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2405,18 +2031,13 @@ body.popover-open .napp-body iframe {
   /* width: 100%; */
 }
 
-.apps-detail-overlay .apps-title,
-.upload-head .apps-title {
-  font-size: 3rem;
-}
-
 .apps-author {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  grid-gap: 0.5rem;
+  grid-gap: var(--space-xs);
   align-items: center;
   grid-area: author;
-  margin: 0.5rem 0;
+  margin: var(--space-s) 0;
   justify-self: start;
 
   /* align-self: end; */
@@ -2426,13 +2047,13 @@ body.popover-open .napp-body iframe {
    .ui-tab rows, so only the layout lives here. */
 .apps-typeseg {
   justify-content: center;
-  margin-bottom: 0.4rem;
+  margin-bottom: var(--space-xs);
 }
 
 .apps-detail-overlay .apps-author,
 .upload-head .apps-author {
-  margin-top: 2rem;
-  padding: 0.5rem 0;
+  margin-top: var(--space-xxl);
+  padding: var(--space-s) 0;
   border-top: 1px dotted color-mix(in srgb, var(--text) 100%, transparent);
   /* border-bottom: 1px dotted color-mix(in srgb, var(--text) 100%, transparent); */
 }
@@ -2443,7 +2064,7 @@ body.popover-open .napp-body iframe {
 
 .apps-author:not(.apps-author-label)::before,
 .apps-author-label {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -2457,7 +2078,7 @@ body.popover-open .napp-body iframe {
   object-fit: cover;
   display: block;
   border-radius: 100%;
-  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border: 1px solid var(--rule);
 }
 
 .apps-author-name {
@@ -2485,28 +2106,20 @@ body.popover-open .napp-body iframe {
   grid-area: date;
   justify-self: end;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: var(--text-xxs);
 }
 
 .apps-handlers {
   grid-area: handlers;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.4rem;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
   /* margin: .4rem 0; */
   /* justify-self: end; */
 }
 
 .apps-handler {
-  /* font-family: var(--font-mono); */
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05rem;
-  /* padding: 0.12rem 0.4rem; */
-  /* border-radius: 999px; */
-  /* border: 1px solid color-mix(in srgb, currentColor 18%, transparent); */
-  opacity: 0.6;
   white-space: normal;
   /* Whole names: a break inside one only when it can't fit a line at all
      (break-all/anywhere let the column shrink to a letter). */
@@ -2516,8 +2129,6 @@ body.popover-open .napp-body iframe {
 /* A required NAP domain the launcher can't provide — red and struck through
    in the detail requires list (the list card names it in the badge instead). */
 .apps-handler.is-unsupported {
-  color: var(--danger);
-  opacity: 1;
   text-decoration: line-through;
 }
 
@@ -2526,9 +2137,9 @@ body.popover-open .napp-body iframe {
 .apps-unsupported {
   grid-area: warn;
   justify-self: start;
-  margin-top: 0.4rem;
+  margin-top: var(--space-xs);
   color: var(--danger);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   text-align: left;
 }
 
@@ -2537,7 +2148,7 @@ body.popover-open .napp-body iframe {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.4rem;
+  gap: var(--space-xs);
   grid-area: actions;
   justify-self: end;
   align-self: center;
@@ -2546,7 +2157,7 @@ body.popover-open .napp-body iframe {
 .apps-description {
   grid-area: about;
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-m);
   hyphens: auto;
   /* word-break: break-all; */
 }
@@ -2567,12 +2178,12 @@ body.popover-open .napp-body iframe {
 .apps-detail-images {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 0.5rem;
+  gap: var(--space-s);
 }
 
 .apps-detail-image {
   width: 100%;
-  border-radius: 8px;
+  border-radius: var(--radius-l);
 }
 
 /* Released date + id read as one block — no gap between the two lines. */
@@ -2580,20 +2191,19 @@ body.popover-open .napp-body iframe {
   display: grid;
   line-height: 1;
 }
-.apps-detail-id .apps-detail-value,
-.apps-detail-released .apps-detail-value {
-  font-size: 0.6rem;
+.apps-detail-id .apps-detail-value {
+  font-size: var(--text-xxs);
   opacity: 0.6;
 }
 
 .apps-detail-btns {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: var(--space-s);
+  margin-bottom: var(--space-l);
 }
 
 .apps-detail-label {
-  margin-right: 0.5rem;
+  margin-right: var(--space-xs);
   font-weight: 700;
 }
 
@@ -2638,114 +2248,40 @@ body.popover-open .napp-body iframe {
 }
 
 .apps-detail-reseed {
-  margin-top: 0.35rem;
+  margin-top: var(--space-xs);
 }
 
 .apps-detail-info {
   display: grid;
   align-content: start;
-  gap: 0.4rem;
-}
-
-/* The overline's voice without its class: the same small tracked uppercase,
-   in the places that set their own size, color or pill. Sans is the point —
-   the page is serif, and tracked uppercase serif at this size turns to mush.
-   Fold these into .ui-overline when their sizing can be reconciled. */
-.suggestion .source,
-.perm-decision,
-.apps-handler,
-.apps-chip-category,
-.settings-account-type {
-  font-family: var(--font-sans);
-}
-
-/* Discover card: everything past the head collapses into this <details>, so
-   each card stays as compact as an Installed-tab card until expanded. */
-.apps-card-more > summary {
-  cursor: pointer;
-  width: fit-content;
-  opacity: 0.6;
-  font-weight: 600;
-  user-select: none;
-}
-
-.apps-card-more > summary:hover {
-  opacity: 1;
-}
-
-.apps-card-more[open] > summary {
-  margin-bottom: 0.5rem;
-}
-
-/* Space the stacked detail sections without relying on each element's own
-   margins (block flow keeps the native disclosure marker intact). */
-.apps-card-more > :not(summary) {
-  margin-top: 0.4rem;
-}
-
-/* Shared with the App Info window (appinfo.ts); the card itself no longer uses
-   a meta wrapper, but appinfo still tags its meta row .apps-meta. */
-.apps-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.72rem;
-  opacity: 0.65;
-}
-
-.apps-kind {
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 0.05rem 0.4rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-}
-
-.apps-source {
-  font-size: 0.75rem;
-  text-decoration: none;
-  align-self: flex-start;
-  opacity: 0.65;
-  color: inherit;
-}
-
-.apps-source:hover {
-  opacity: 1;
-  text-decoration: underline;
+  gap: var(--space-xs);
 }
 
 /* ─── store toolbar / search / relays config ────────────────── */
 .apps-toolbar {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-xs);
   align-items: stretch;
-  padding-bottom: 0.2rem;
-  margin-bottom: 0.2rem;
+  padding-bottom: var(--space-xxs);
+  margin-bottom: var(--space-xxs);
 }
 
 /* Appearance from .ui-input; only the toolbar layout lives here. */
 .apps-search {
   flex: 1;
   min-width: 0;
-  margin-bottom: 0.4rem;
+  margin-bottom: var(--space-xs);
 }
 
 /* Relay editor: a .ui-details below the search whose summary doubles as the
    status line — "relays (N)" plus an overline badge (event count / loading).
    The panel body, rows, add control, and checkbox all come from the design
-   system (.ui-items / .ui-item / .ui-add / .ui-check); only the summary row
-   layout, the disabled dimming, and the count badge tweak live here. */
+   system (.ui-items / .ui-item / .ui-add / .ui-check, the summary a
+   .ui-summary); only the disabled dimming and the count badge tweak live
+   here. */
 .apps-relays {
   border-bottom: none;
-}
-
-.apps-relays-sum {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  min-width: 0;
 }
 
 .apps-relays .ui-item.disabled .ui-item-label,
@@ -2760,54 +2296,18 @@ body.popover-open .napp-body iframe {
 .apps-relays-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.3rem;
+  gap: var(--space-xs);
 }
 
 .apps-empty {
-  padding: 1rem 0.5rem;
+  padding: var(--space-l) var(--space-s);
   text-align: center;
   opacity: 0.55;
-  font-style: italic;
-}
-
-/* ─── store filter chips & installed state ──────────────────── */
-.apps-filters {
-  display: flex;
-  gap: 0.3rem;
-}
-
-.apps-filters button {
-  flex: 1;
-  padding: 0.3rem 0.5rem;
-  font-size: 0.78rem;
-  background: transparent;
-  color: inherit;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-  text-transform: lowercase;
-}
-
-.apps-filters button:hover {
-  background: color-mix(in srgb, currentColor 10%, transparent);
-}
-
-.apps-filters button.active {
-  background: var(--text);
-  color: var(--surface);
-  border-color: var(--text);
-}
-
-.apps-empty.apps-empty-thin {
-  padding: 0.4rem 0.5rem;
-  font-style: normal;
-  text-align: left;
-  font-size: 0.78rem;
 }
 
 .sugg-divider {
   height: 1px;
-  margin: 0.25rem 0;
+  margin: var(--space-xxs) 0;
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
@@ -2820,25 +2320,19 @@ body.popover-open .napp-body iframe {
 }
 
 /* Detail rows of categories (`l` tags) and hashtags (`t` tags): plain words
-   in a wrapping row, no pills. Categories in the card's handler voice —
-   uppercase, tracked, dimmed — hashtags in mono with their #. */
+   in a wrapping row, no pills. Categories are badges, like the card's
+   handlers; hashtags in mono with their #. */
 .apps-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 
 .apps-chip {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-all;
-}
-
-.apps-chip-category {
-  text-transform: uppercase;
-  letter-spacing: 0.05rem;
-  opacity: 0.6;
 }
 
 .apps-chip-tag {
@@ -2850,10 +2344,10 @@ body.popover-open .napp-body iframe {
   background: none;
   border: none;
   color: color-mix(in srgb, currentColor 40%, transparent);
-  font-size: 1rem;
+  font-size: var(--text-m);
   letter-spacing: 0.1em;
   cursor: pointer;
-  padding: 0.1rem 0.3rem;
+  padding: 0.1rem var(--space-xs);
   line-height: 1;
 }
 
@@ -2869,9 +2363,9 @@ body.popover-open .napp-body iframe {
   inset: auto;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-menu);
 }
 
 .apps-card-menu .btn {
@@ -2880,13 +2374,13 @@ body.popover-open .napp-body iframe {
 }
 
 .apps-card-menu .btn-danger {
-  background: #e33;
+  background: var(--danger);
   color: white;
-  border-color: #e33;
+  border-color: var(--danger);
 }
 
 .apps-card-menu .btn-danger:hover:not(:disabled) {
-  background: #e33;
+  background: var(--danger);
   color: white;
   opacity: 0.85;
 }
@@ -2894,12 +2388,12 @@ body.popover-open .napp-body iframe {
 /* ─── action-handler picker (body content inside .app-dialog) ─────── */
 .handler-panel {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-l);
 }
 
 .handler-request {
   display: grid;
-  gap: 0.35rem;
+  gap: var(--space-xs);
 }
 
 .handler-action {
@@ -2907,39 +2401,26 @@ body.popover-open .napp-body iframe {
   grid-auto-flow: column;
   justify-content: start;
   align-items: baseline;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 
 .handler-request-label {
   opacity: 0.6;
 }
 
-.handler-action-name {
-  font-family: var(--font-mono);
-  font-size: 0.9rem;
-}
-
 .handler-payload {
   max-height: 12rem;
   overflow: auto;
-  margin: 0;
-  padding: 0.65rem;
-  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, currentColor 5%, transparent);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  white-space: pre-wrap;
 }
 
 .handler-candidates h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
+  margin: 0 0 var(--space-s);
+  font-size: var(--text-m);
 }
 
 .handler-list {
   display: grid;
-  gap: 0.45rem;
+  gap: var(--space-xs);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2950,7 +2431,7 @@ body.popover-open .napp-body iframe {
 .handler-item {
   width: 100%;
   justify-content: space-between;
-  gap: 0.65rem;
+  gap: var(--space-s);
 }
 
 .handler-pet {
@@ -2967,16 +2448,9 @@ body.popover-open .napp-body iframe {
   opacity: 0.55;
 }
 
-.handler-empty {
-  padding: 0.7rem;
-  border: 1px dashed color-mix(in srgb, currentColor 22%, transparent);
-  border-radius: 8px;
-  opacity: 0.72;
-}
-
 .handler-open-instances h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
+  margin: 0 0 var(--space-s);
+  font-size: var(--text-m);
 }
 
 /* ─── settings: account section ────────────────────────────────── */
@@ -3003,7 +2477,7 @@ body.popover-open .napp-body iframe {
   padding-top: 0;
 }
 .system-napp-settings {
-  padding-top: 0.6rem;
+  padding-top: var(--space-s);
 }
 .settings-panel > .ui-details > summary:hover {
   color: var(--text);
@@ -3014,13 +2488,13 @@ body.popover-open .napp-body iframe {
 .settings-build-row {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  margin-top: 0.4rem;
+  gap: var(--space-s);
+  margin-top: var(--space-xs);
 }
 
 .settings-build {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   opacity: 0.5;
   user-select: text;
   margin-right: auto;
@@ -3041,7 +2515,7 @@ body.popover-open .napp-body iframe {
   border-bottom: 0;
 }
 .backup-new .btn {
-  margin-left: 0.5rem;
+  margin-left: var(--space-s);
 }
 
 /* The backups list is a rowList(): "new backup" first, then a row per backup,
@@ -3049,7 +2523,7 @@ body.popover-open .napp-body iframe {
 /* What goes in, or went in: headings no heavier than the rows under them,
    and the last section ends without a rule. */
 .backup-body {
-  padding-top: 0.35rem;
+  padding-top: var(--space-xs);
 }
 .backup-body .napp-perms-name {
   font-weight: 400;
@@ -3059,7 +2533,7 @@ body.popover-open .napp-body iframe {
 }
 .backup-version-date,
 .backup-version-status {
-  font-size: 0.8rem;
+  font-size: var(--text-s);
   opacity: 0.6;
 }
 .backup-version-date {
@@ -3082,13 +2556,13 @@ body.popover-open .napp-body iframe {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-s);
 }
 .backup-version-actions {
   display: grid;
   grid-auto-flow: column;
   justify-content: start;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 /* .btn sets display, which would beat the UA [hidden] rule. */
 .backup-version-actions .btn[hidden] {
@@ -3120,7 +2594,7 @@ body.popover-open .napp-body iframe {
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 
 /* The login block (loginControls in login.ts) — one per way in: extension,
@@ -3128,12 +2602,12 @@ body.popover-open .napp-body iframe {
    prompt a napp raises. */
 .login-options {
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-s);
 }
 
 .login-section {
   display: grid;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 
 /* Connect buttons stay content-width and left-aligned; forms and errors span
@@ -3150,24 +2624,18 @@ body.popover-open .napp-body iframe {
 }
 
 .settings-account-type {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  opacity: 0.6;
-  padding: 0.05rem 0.4rem;
-  /* border-radius: 999px; */
-  /* border: 1px solid color-mix(in srgb, currentColor 25%, transparent); */
+  padding: 0.05rem var(--space-xs);
 }
 
 .login-bunker-form {
   display: grid;
-  gap: 0.4rem;
+  gap: var(--space-xs);
 }
 
 .login-bunker-actions {
   display: grid;
   grid-auto-flow: column;
-  gap: 0.3rem;
+  gap: var(--space-xs);
   justify-content: end;
 }
 
@@ -3182,15 +2650,15 @@ body.popover-open .napp-body iframe {
 /* The prompt: the same options under a line naming the napp, then "later"
    on its own row the way the dialog's own action menus sit. */
 .login-dialog .login-options {
-  margin-top: 0.6rem;
+  margin-top: var(--space-s);
 }
 
 .login-dialog-actions {
   display: grid;
   grid-auto-flow: column;
-  gap: 0.3rem;
+  gap: var(--space-xs);
   justify-content: end;
-  margin-top: 0.8rem;
+  margin-top: var(--space-m);
 }
 
 /* ─── how a napp is named (napp-name.ts) ──────────────────────────
@@ -3239,7 +2707,7 @@ body.popover-open .napp-body iframe {
    head, and the outcome-row colouring live here. */
 .upload-panel {
   display: grid;
-  gap: 0.6rem;
+  gap: var(--space-s);
   align-content: start;
   min-width: 0;
 }
@@ -3266,22 +2734,12 @@ body.popover-open .napp-body iframe {
 /* Appearance from .napp-perms-row, the grant dialog's own row — only the space
    above it, since the head's gap is metadata-tight. */
 .upload-head .upload-protected {
-  margin-top: 0.6rem;
+  margin-top: var(--space-s);
 }
 
 /* The panel's own gap spaces the sections; the disclosure's margin would add to it. */
 .upload-panel .ui-details {
   margin: 0;
-}
-
-/* Section summary: title + an overline badge (count, size, state). */
-.upload-sum {
-  display: grid;
-  grid-auto-flow: column;
-  justify-content: start;
-  align-items: baseline;
-  gap: 0.6rem;
-  min-width: 0;
 }
 
 /* Unchecked target, and a file the manifest won't carry (a napplet publishes
@@ -3295,21 +2753,12 @@ body.popover-open .napp-body iframe {
   display: grid;
   grid-auto-flow: column;
   justify-content: end;
-  gap: 0.3rem;
+  gap: var(--space-xs);
 }
 
-/* A raw event dump, not UI text — small enough that a whole manifest's tags
-   read as one block. */
+/* The event about to be published, a .ui-code-block: a manifest's tags run
+   long, so it scrolls. */
 .upload-json {
-  margin: 0;
-  padding: 0.5rem;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: color-mix(in srgb, currentColor 5%, transparent);
-  border-radius: var(--btn-radius);
   max-height: 16rem;
   overflow-y: auto;
 }

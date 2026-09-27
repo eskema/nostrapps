@@ -21,7 +21,6 @@ import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { resolveCardIcon } from "../nsite/icon.js"
 import {
   authorDisplayNames,
-  code,
   detailField,
   PLACEHOLDER_SRC,
   renderAppCard,
@@ -40,7 +39,18 @@ import { hasBytes } from "../nsite/heal.js"
 
 // Addressable app kinds shown in Discover: nsites, napps, and named napplets.
 const DISCOVER_KINDS = [NSITE_NAMED_KIND, NAPP_NAMED_KIND, NAPPLET_NAMED_KIND]
-import { button, check, details, list, overline, tabs, type ButtonVariant } from "./ui.js"
+import {
+  badge,
+  button,
+  type ButtonVariant,
+  check,
+  code,
+  details,
+  empty,
+  list,
+  overline,
+  tabs
+} from "./ui.js"
 import type { List } from "./ui.js"
 
 const DEFAULT_RELAYS = NAPP_RELAYS
@@ -114,10 +124,7 @@ export function mount(
 
   container.innerHTML = `
     <div class="apps-panel">
-      <div class="apps-tabs">
-        <button type="button" class="apps-tab installed-tab active">installed</button>
-        <button type="button" class="apps-tab discover-tab">discover</button>
-      </div>
+      <div class="apps-tabs"></div>
       <div class="apps-content">
         <div class="apps-pane apps-pane-installed"></div>
         <div class="apps-pane apps-pane-discover" hidden></div>
@@ -130,8 +137,14 @@ export function mount(
   const installedPane = container.querySelector(".apps-pane-installed") as HTMLElement
   const discoverPane = container.querySelector(".apps-pane-discover") as HTMLElement
   const detailOverlay = container.querySelector(".apps-detail-overlay") as HTMLElement
-  const installedTab = container.querySelector(".installed-tab") as HTMLElement
-  const discoverTab = container.querySelector(".discover-tab") as HTMLElement
+  const sections = tabs<"installed" | "discover">({
+    segmented: true,
+    class: "apps-tabs",
+    items: ["installed", "discover"],
+    active: "installed",
+    onChange: tab => switchTab(tab)
+  })
+  container.querySelector(".apps-tabs")!.replaceWith(sections)
 
   // Clicking a card lays the app-info detail over the whole panel (absolute,
   // inset:0) instead of replacing the list — closing it just hides the overlay,
@@ -157,6 +170,7 @@ export function mount(
     // The list card names unsupported requires in its badge; in detail the
     // requires chips below carry that (red), so the line would be redundant.
     card.querySelector(".apps-unsupported")?.remove()
+    card.querySelector(".apps-title")?.classList.replace("ui-heading", "ui-heading-xxl")
     // Requires — lumped in with the action chips, detail view only (too noisy
     // in the list).
     const reqs = req.event ? requiresOf(req.event) : []
@@ -169,12 +183,13 @@ export function mount(
         card.appendChild(chips)
       }
       for (const r of reqs) {
-        const c = document.createElement("span")
         // Unsupported requirements are flagged red — the launcher can't provide
         // them, so those features won't work.
-        c.className = unsupported.has(r) ? "apps-handler is-unsupported" : "apps-handler"
-        c.textContent = r
-        chips.appendChild(c)
+        chips.appendChild(
+          unsupported.has(r)
+            ? badge(r, { tone: "danger", class: "apps-handler is-unsupported" })
+            : badge(r, { class: "apps-handler" })
+        )
       }
     }
     detailOverlay.appendChild(card)
@@ -199,8 +214,7 @@ export function mount(
   function switchTab(tab: string) {
     currentTab = tab
     closeDetail() // leaving a tab dismisses any open detail overlay
-    installedTab.classList.toggle("active", tab === "installed")
-    discoverTab.classList.toggle("active", tab === "discover")
+    sections.select(tab as "installed" | "discover")
     if (tab === "installed") {
       if (!installedBuilt) {
         renderInstalled()
@@ -222,13 +236,8 @@ export function mount(
   // The window body is the scroller. Clicking a section — the other one or the
   // one already showing — starts it at the top.
   const scrollTop = () => container.closest(".napp-body-system")?.scrollTo({ top: 0 })
-  installedTab.addEventListener("click", () => {
-    switchTab("installed")
-    scrollTop()
-  })
-  discoverTab.addEventListener("click", () => {
-    switchTab("discover")
-    scrollTop()
+  sections.addEventListener("click", e => {
+    if ((e.target as Element).closest(".ui-segment")) scrollTop()
   })
 
   // ─── Installed tab ─────────────────────────────────────────────
@@ -590,10 +599,7 @@ export function mount(
     } else if (existing) {
       existing.textContent = msg
     } else {
-      const empty = document.createElement("div")
-      empty.className = "apps-empty"
-      empty.textContent = msg
-      listEl.appendChild(empty)
+      listEl.appendChild(empty(msg, "apps-empty"))
     }
   }
 
@@ -740,7 +746,7 @@ export function mount(
       const { sha } = resolveCardIcon(evt)
       if (!sha) continue
       const img = listEl.querySelector(
-        `.apps-card[data-napp-id="${CSS.escape(nappId)}"] .apps-card-icon`
+        `.apps-card[data-napp-id="${CSS.escape(nappId)}"] .apps-card-icon img`
       ) as HTMLImageElement | null
       if (!img || img.dataset.iconLoaded === "1") continue
       img.dataset.iconLoaded = "1"
@@ -801,10 +807,7 @@ export function mount(
     if (existing) {
       existing.textContent = msg
     } else {
-      const empty = document.createElement("div")
-      empty.className = "apps-empty"
-      empty.textContent = msg
-      _listEl.appendChild(empty)
+      _listEl.appendChild(empty(msg, "apps-empty"))
     }
   }
 
@@ -1147,14 +1150,13 @@ export function mount(
 
     // System disclosure whose summary doubles as the status line (relays-napp
     // style): "relays (N)" + an overline badge with event count / loading.
-    const relaysPanel = details({ summary: "", class: "apps-relays" })
-    const sum = document.createElement("span")
-    sum.className = "apps-relays-sum"
     _relaysTitleEl = document.createElement("span")
     _relaysTitleEl.textContent = "relays"
     _relaysStatusEl = overline("", "apps-relays-status")
-    sum.append(_relaysTitleEl, _relaysStatusEl)
-    relaysPanel.querySelector("summary")!.appendChild(sum)
+    const relaysPanel = details({
+      summary: [_relaysTitleEl, _relaysStatusEl],
+      class: "apps-relays"
+    })
     discoverPane.insertBefore(relaysPanel, _listEl)
 
     _relayListEl = buildRelayList()
@@ -1752,7 +1754,7 @@ function detailInfo(
       section.appendChild(
         chipGroup(
           "categories",
-          cats.map(c => detailChip("apps-chip-category", formatCategory(c), c))
+          cats.map(c => badge(formatCategory(c), { title: c, class: "apps-chip" }))
         )
       )
     }
@@ -1809,9 +1811,7 @@ async function renderFiles(evt: any, list: HTMLElement, ctx?: SystemCtx) {
   for (const t of pathTags as string[][]) {
     const sha = t[2]
     const li = document.createElement("li")
-    const pathCode = document.createElement("code")
-    pathCode.textContent = t[1]
-    li.appendChild(pathCode)
+    li.appendChild(code(t[1]))
 
     // The per-file links are folded behind a "links" button: clicking it builds
     // the blossom links for this file and swaps itself out for them.

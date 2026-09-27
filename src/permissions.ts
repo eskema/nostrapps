@@ -1,5 +1,6 @@
 import { openDialog } from "./dialog.js"
 import { nappNameEl } from "./napp-name.js"
+import { code, codeBlock } from "./system-napps/ui.js"
 
 const STORAGE_KEY = "nostrapps:permissions"
 
@@ -97,9 +98,9 @@ export function subscribe(fn: () => void) {
 }
 
 // A detail can be a plain sentence, a sentence plus a `code` payload — the
-// payload renders as a wrapping code block, matching the <code> chips the rest
-// of the dialog uses (a url or key would otherwise overflow the card) — or a
-// prebuilt node for richer layouts (event previews, relay lists).
+// payload renders as a code block, which wraps (a url or key would otherwise
+// overflow the card) — or a prebuilt node for richer layouts (event previews,
+// relay lists).
 export type ApprovalDetail = string | { text: string; code?: string } | Node
 
 // ─── asking, with limits ─────────────────────────────────────────
@@ -187,9 +188,7 @@ export async function requireApproval(nappId: string, method: string, detail?: A
 function permissionBody(nappId: string, method: string, detail?: ApprovalDetail): Node {
   const wrap = document.createElement("div")
   const p = document.createElement("p")
-  const meth = document.createElement("code")
-  meth.textContent = method
-  p.append(nappNameEl(nappId), " wants to use ", meth)
+  p.append(nappNameEl(nappId), " wants to use ", code(method))
   wrap.appendChild(p)
   // Some methods can say what they are actually about to do — a filename is a
   // far better basis for a decision than a method name.
@@ -200,12 +199,8 @@ function permissionBody(nappId: string, method: string, detail?: ApprovalDetail)
       const d = document.createElement("p")
       d.textContent = typeof detail === "string" ? detail : detail.text
       wrap.appendChild(d)
-      if (typeof detail !== "string" && detail.code) {
-        const c = document.createElement("code")
-        c.className = "app-dialog-detail-code"
-        c.textContent = detail.code
-        wrap.appendChild(c)
-      }
+      if (typeof detail !== "string" && detail.code)
+        wrap.appendChild(codeBlock(detail.code, "app-dialog-detail-code"))
     }
   }
   return wrap

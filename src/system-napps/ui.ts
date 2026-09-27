@@ -8,19 +8,29 @@
 //   • chip({ label, active, icon, onClick, … }) → a `.btn .btn-chip` (selectable)
 //   • tab({ label, active, onClick, … })        → a `.ui-tab` text tab
 //   • icon(name)                                → an inline `<svg>` (currentColor)
-//   • details({ summary, open, … })             → a `.ui-details` disclosure
+//   • appIcon({ src, size, fade })              → a `.ui-app-icon`, a napp's picture on a plate
+//   • details({ summary, open, … }, …children)  → a `.ui-details` disclosure; summary: text,
+//     or parts in a line; fold: `.ui-fold`, the small one under content
+//   • code(text)                                → a `.ui-code`, code in a line
+//   • codeBlock(text)                           → a `.ui-code-block`, code in lines on a tinted plate
 //   • input({ type, placeholder, … })           → a `.ui-input` text field
 //   • check({ checked, onChange, … })           → a `.ui-check` checkbox
-//   • overline(text)                            → a `.ui-overline` caption/badge
+//   • overline(text)                            → a `.ui-overline` caption
+//   • badge(text, { tone })                     → a `.ui-badge` small-caps label
 //   • ring(word)                                → a `.ui-ring` word set round a circle, turning
 //   • class `ui-title` on any text              → the window title's voice
+//   • class `ui-heading` on a heading           → bold, as written, xl; or `ui-heading-xxl`
 //   • itemList() + item({ label }, …controls)   → `.ui-items` / `.ui-item` rows
 //   • rowList() + row(list, …summary)           → `.ui-rows` / `.ui-row` rows that open
 //   • addControl({ label, onAdd, … })           → the two-step "add an item" form
+//   • empty(text)                               → a `.ui-empty` line for when there's nothing
+//   • notice(text, { tone })                    → a `.ui-notice`, a glyph and a line to heed
+//   • class `ui-links` on a row of <a>          → dimmed links, lit on hover
 // And a layer over them that owns the state and the structure, so a screen is
 // a few calls:
 //   • button({ icon, … })                       → a glyph before the label, or alone
-//   • tabs({ items, active, onChange })         → `.ui-tabs`, a row owning its selection
+//   • tabs({ items, active, onChange })         → `.ui-tabs`, a row owning its selection;
+//     segmented: `.ui-segments`, a window's sections
 //   • check({ label, note, … })                 → the box and its text as one <label>
 //   • radios({ name, options, value, onChange }) → `.ui-radios`, one of N, labelled
 //   • field({ label, control, note })           → `.ui-field`, the form line
@@ -69,7 +79,8 @@ export const icons: Record<string, string> = {
   close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
   check: '<path d="M3 8.5l3 3 7-7"/>',
-  link: '<path d="M6.5 9.5l3-3"/><path d="M7.3 4.7l1.2-1.2a2.4 2.4 0 0 1 3.4 3.4l-1.2 1.2"/><path d="M8.7 11.3l-1.2 1.2a2.4 2.4 0 0 1-3.4-3.4l1.2-1.2"/>'
+  link: '<path d="M6.5 9.5l3-3"/><path d="M7.3 4.7l1.2-1.2a2.4 2.4 0 0 1 3.4 3.4l-1.2 1.2"/><path d="M8.7 11.3l-1.2 1.2a2.4 2.4 0 0 1-3.4-3.4l1.2-1.2"/>',
+  warn: '<path d="M8 2.5 14 13H2z"/><path d="M8 6.5v3M8 11.3v.1"/>'
 }
 
 export function icon(name: string): SVGElement {
@@ -85,6 +96,35 @@ export function icon(name: string): SVGElement {
   svg.classList.add("ui-icon")
   svg.innerHTML = icons[name] || ""
   return svg
+}
+
+export type AppIconSize = "s" | "m" | "l" | "xl"
+
+export interface AppIconOpts {
+  src?: string
+  /** s: in a line of text, m: beside a name (default), l: on a card, xl: on its detail. */
+  size?: AppIconSize
+  /** Ease the picture in once it has loaded, for icons that come in late. */
+  fade?: boolean
+  class?: string
+}
+
+export type AppIcon = HTMLSpanElement & { img: HTMLImageElement }
+
+// A napp's picture (`.ui-app-icon`): a rounded square on a faint plate that
+// holds its place until the image lands. The <img> is .img: set its src later,
+// or listen for its error to drop the icon.
+export function appIcon(opts: AppIconOpts = {}): AppIcon {
+  const plate = document.createElement("span") as AppIcon
+  plate.className = `ui-app-icon ui-app-icon-${opts.size || "m"}${opts.fade ? " fade" : ""}${opts.class ? ` ${opts.class}` : ""}`
+  const img = document.createElement("img")
+  img.alt = ""
+  img.addEventListener("load", () => img.classList.add("loaded"))
+  img.addEventListener("error", () => img.classList.remove("loaded"))
+  if (opts.src) img.src = opts.src
+  plate.append(img)
+  plate.img = img
+  return plate
 }
 
 // Create a styled <button>. Variant drives appearance; layout stays on the
@@ -165,6 +205,8 @@ export interface TabsOpts<T extends string = string> {
   items: Array<T | TabItem<T>>
   active?: T
   onChange?: (value: T) => void
+  /** Blocks sharing the row, the selected one filled: a window's sections. */
+  segmented?: boolean
   class?: string
 }
 
@@ -178,7 +220,7 @@ export type Tabs<T extends string = string> = HTMLDivElement & {
 // value, once, when it changes. Built from tab(); the row is `.ui-tabs`.
 export function tabs<T extends string = string>(opts: TabsOpts<T>): Tabs<T> {
   const row = document.createElement("div") as Tabs<T>
-  row.className = `ui-tabs${opts.class ? ` ${opts.class}` : ""}`
+  row.className = `${opts.segmented ? "ui-segments" : "ui-tabs"}${opts.class ? ` ${opts.class}` : ""}`
   row.setAttribute("role", "tablist")
   const buttons = new Map<T, HTMLButtonElement>()
   let current = opts.active
@@ -202,6 +244,7 @@ export function tabs<T extends string = string>(opts: TabsOpts<T>): Tabs<T> {
         opts.onChange?.(t.value)
       }
     })
+    if (opts.segmented) b.className = b.className.replace(/^ui-tab\b/, "ui-segment")
     b.setAttribute("role", "tab")
     b.setAttribute("aria-selected", String(t.value === current))
     b.dataset.value = t.value
@@ -214,25 +257,29 @@ export function tabs<T extends string = string>(opts: TabsOpts<T>): Tabs<T> {
 }
 
 export interface DetailsOpts {
-  /** Summary label — the always-visible disclosure header. */
-  summary: string
+  /** The always-visible header: text, or parts in a line (a title, then a
+   *  count or a status badge). Keep the parts to update them in place. */
+  summary: string | Node | Array<string | Node>
   /** Start expanded (default collapsed). */
   open?: boolean
+  /** The small one under content (`.ui-fold`): a rule above, a dimmed summary. */
+  fold?: boolean
   /** Extra classes for context. */
   class?: string
 }
 
-// A collapsible disclosure (<details>/<summary>) styled like the apps-store
-// file/info sections. Returns the <details> with its <summary> already in place
-// — append your content to it. For a live count, update the summary later:
+// A collapsible disclosure (<details>/<summary>): the summary, then the
+// children, which can also be appended later. Parts of a summary go in a
+// `.ui-summary` line; a text one can be reset later with
 // `d.querySelector("summary")!.textContent = …`.
-export function details(opts: DetailsOpts): HTMLDetailsElement {
+export function details(opts: DetailsOpts, ...children: Array<Node | string>): HTMLDetailsElement {
   const d = document.createElement("details")
-  d.className = `ui-details${opts.class ? ` ${opts.class}` : ""}`
+  d.className = `${opts.fold ? "ui-fold" : "ui-details"}${opts.class ? ` ${opts.class}` : ""}`
   if (opts.open) d.open = true
   const s = document.createElement("summary")
-  s.textContent = opts.summary
-  d.appendChild(s)
+  if (typeof opts.summary === "string") s.textContent = opts.summary
+  else s.append(el("span", "ui-summary", ...[opts.summary].flat()))
+  d.append(s, ...children)
   return d
 }
 
@@ -395,6 +442,23 @@ export function overline(text: string, cls?: string): HTMLSpanElement {
   s.className = `ui-overline${cls ? ` ${cls}` : ""}`
   s.textContent = text
   return s
+}
+
+export interface BadgeOpts {
+  /** Colors it for a state and takes the dimming off. */
+  tone?: "good" | "danger"
+  title?: string
+  class?: string
+}
+
+// A short label in small sans capitals, dimmed (`.ui-badge`): a state, a type,
+// what a napp handles.
+export function badge(text: string, opts: BadgeOpts = {}): HTMLSpanElement {
+  const b = document.createElement("span")
+  b.className = ["ui-badge", opts.tone, opts.class].filter(Boolean).join(" ")
+  b.textContent = text
+  if (opts.title) b.title = opts.title
+  return b
 }
 
 // A word set around a circle (`.ui-ring`), slowly turning — the overline's
@@ -599,10 +663,8 @@ export function list<T>(opts: ListOpts<T> = {}): List<T> {
   root.className = `ui-list${opts.class ? ` ${opts.class}` : ""}`
   const rows = itemList()
   const entries = new Map<T, HTMLDivElement>()
-  const empty = document.createElement("div")
-  empty.className = "ui-list-empty"
-  empty.textContent = opts.empty ?? ""
-  const settle = () => (empty.hidden = !opts.empty || entries.size > 0)
+  const none = empty(opts.empty ?? "")
+  const settle = () => (none.hidden = !opts.empty || entries.size > 0)
   const add = (entry: T) => {
     const label = opts.label ? opts.label(entry) : String(entry)
     const r = item({ label, title: opts.title ? opts.title(entry) : undefined })
@@ -628,10 +690,48 @@ export function list<T>(opts: ListOpts<T> = {}): List<T> {
       settle()
     }
   })
-  root.append(rows, empty)
+  root.append(rows, none)
   if (opts.add) root.append(addControl(opts.add))
   root.items = opts.items ?? []
   return root
+}
+
+// The line for when a list or a section has nothing yet (`.ui-empty`). It takes
+// the size of where it sits.
+export function empty(text: string, cls?: string): HTMLDivElement {
+  const e = document.createElement("div")
+  e.className = `ui-empty${cls ? ` ${cls}` : ""}`
+  e.textContent = text
+  return e
+}
+
+// Code in a line (`.ui-code`): the mono voice at 0.85em of the text around
+// it. For a row's label, a method in a sentence, an id.
+export function code(text: string, cls?: string): HTMLElement {
+  return el("code", `ui-code${cls ? ` ${cls}` : ""}`, text)
+}
+
+// Code or data in lines, on a tinted plate (`.ui-code-block`): a <pre> whose
+// long lines wrap. A height cap is the context's.
+export function codeBlock(text: string, cls?: string): HTMLPreElement {
+  return el("pre", `ui-code-block${cls ? ` ${cls}` : ""}`, text)
+}
+
+export interface NoticeOpts {
+  /** Colors the glyph: warn (default), danger, good. */
+  tone?: "warn" | "danger" | "good"
+  /** The glyph; warn, or check for good, if not given. */
+  icon?: string
+  class?: string
+}
+
+// A line to heed (`.ui-notice`): a glyph in the tone's color, the text beside
+// it, wrapping under itself.
+export function notice(text: string, opts: NoticeOpts = {}): HTMLDivElement {
+  const tone = opts.tone || "warn"
+  const n = el("div", `ui-notice ${tone}${opts.class ? ` ${opts.class}` : ""}`)
+  n.append(icon(opts.icon || (tone === "good" ? "check" : "warn")), el("span", "", text))
+  return n
 }
 
 // ─── glue ─────────────────────────────────────────────────────────

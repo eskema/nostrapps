@@ -117,6 +117,7 @@ import {
 } from "../outbox.js"
 import { relayHealth, relayUrl } from "../relay-health.js"
 import { debounce, HEX64, isHex64 } from "../utils.js"
+import { code, codeBlock } from "../system-napps/ui.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -4974,29 +4975,24 @@ function getEventSummary(evt: any): { kind: string; preview: string; tagCount: n
 }
 
 // First line of an event approval: "Sign a kind <1> event with 2 tags."
-// The kind renders as an inline chip, matching the "Napp x wants to use y" line.
+// The kind renders as code, matching the "Napp x wants to use y" line.
 function eventIntro(
   verb: string,
   summary: { kind: string; tagCount: number }
 ): HTMLParagraphElement {
   const p = document.createElement("p")
-  const kind = document.createElement("code")
-  kind.textContent = summary.kind
-  p.append(`${verb} a kind `, kind, ` event`)
+  p.append(`${verb} a kind `, code(summary.kind), ` event`)
   if (summary.tagCount > 0)
     p.append(` with ${summary.tagCount} tag${summary.tagCount === 1 ? "" : "s"}`)
   p.append(".")
   return p
 }
 
-// The event content out of the sentence flow, as a wrapping monospace block
-// (same chip look as the other approval payloads).
+// The event content out of the sentence flow, as a code block (same as the
+// other approval payloads).
 function eventContentBlock(preview: string): HTMLElement | null {
   if (!preview) return null
-  const c = document.createElement("code")
-  c.className = "app-dialog-detail-code"
-  c.textContent = preview
-  return c
+  return codeBlock(preview, "app-dialog-detail-code")
 }
 
 function stripRelayScheme(url: string): string {

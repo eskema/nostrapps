@@ -13,7 +13,7 @@ import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
 import { loginControls } from "../login.js"
 import { nappNameEl } from "../napp-name.js"
-import { button, check, details, item, itemList } from "./ui.js"
+import { badge, button, check, code, details, empty, item, itemList } from "./ui.js"
 import { backupSection } from "./backup-section.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): void } = {}) {
@@ -24,7 +24,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
         <div class="settings-account">
           <div class="settings-account-connected" hidden>
             <nostr-name class="settings-pubkey" style="cursor:pointer"></nostr-name>
-            <span class="settings-account-type"></span>
+            <span class="ui-badge settings-account-type"></span>
             <button type="button" class="btn btn-outline settings-disconnect-btn">disconnect</button>
           </div>
           <div class="settings-account-disconnected"></div>
@@ -157,10 +157,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     // Remembered per-relay decisions from the confirmation toasts.
     if (decisions.length === 0) {
       if (!ctx.relayAuth.getAuto()) {
-        const empty = document.createElement("div")
-        empty.className = "perm-empty"
-        empty.textContent = "No per-relay auth decisions stored yet."
-        relaysEl.appendChild(empty)
+        relaysEl.appendChild(empty("No per-relay auth decisions stored yet."))
       }
       return
     }
@@ -169,9 +166,10 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     // widening the panel.
     const list = itemList()
     for (const { url, decision } of decisions) {
-      const d = document.createElement("span")
-      d.className = `perm-decision perm-${decision}`
-      d.textContent = decision
+      const d = badge(decision, {
+        tone: decision === "allow" ? "good" : "danger",
+        class: "perm-decision"
+      })
       const f = button({
         label: "forget",
         variant: "outline",
@@ -189,10 +187,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     const entries = Object.entries(all)
     permSummary.textContent = `permissions (${entries.length})`
     if (entries.length === 0) {
-      const empty = document.createElement("div")
-      empty.className = "perm-empty"
-      empty.textContent = "no permission was granted yet"
-      decisionsEl.appendChild(empty)
+      decisionsEl.appendChild(empty("no permission was granted yet"))
       return
     }
     decisionsEl.appendChild(listAction("forget all", () => perms.forgetAllDecisions()))
@@ -217,12 +212,11 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
       for (const [method, decision] of Object.entries(methods) as [string, string][]) {
         const row = document.createElement("div")
         row.className = "perm-row"
-        const m = document.createElement("code")
-        m.className = "perm-method"
-        m.textContent = method
-        const d = document.createElement("span")
-        d.className = `perm-decision perm-${decision}`
-        d.textContent = decision
+        const m = code(method, "perm-method")
+        const d = badge(decision, {
+          tone: decision === "allow" ? "good" : "danger",
+          class: "perm-decision"
+        })
         const f = button({
           label: "forget",
           variant: "outline",
@@ -242,18 +236,13 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     const snapshot = handlers.snapshotActionMap()
     actionsSummary.textContent = `actions (${snapshot.length})`
     if (snapshot.length === 0) {
-      const empty = document.createElement("div")
-      empty.className = "perm-empty"
-      empty.textContent = "No actions registered in memory yet."
-      handlersEl.appendChild(empty)
+      handlersEl.appendChild(empty("No actions registered in memory yet."))
       return
     }
     for (const [action, nappIds] of snapshot) {
       const row = document.createElement("div")
       row.className = "perm-row"
-      const name = document.createElement("code")
-      name.className = "perm-method"
-      name.textContent = action
+      const name = code(action, "perm-method")
       const targets = document.createElement("span")
       targets.className = "perm-napp-id"
       for (const id of nappIds) {

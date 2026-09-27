@@ -36,9 +36,20 @@ import { guessMime } from "../nsite/mime.js"
 import { resolveCardIcon } from "../nsite/icon.js"
 import { permRow, unsupportedRequires } from "../napp-permissions.js"
 import { slug } from "../nsite/local.js"
-import { computeNappId } from "../persistence.js"
-import { button, check, details, item, itemList, overline } from "./ui.js"
-import { code, detailField, renderAppCard } from "./card.js"
+import { classifyEvent, computeNappId } from "../persistence.js"
+import {
+  badge,
+  button,
+  check,
+  code,
+  codeBlock,
+  details,
+  item,
+  itemList,
+  list,
+  overline
+} from "./ui.js"
+import { detailField, renderAppCard } from "./card.js"
 
 // A staged file. The blob hash is what the manifest carries, so hashing here —
 // not waiting for a server to tell us — lets the whole event be previewed, and
@@ -93,15 +104,8 @@ function fmtSize(n: number): string {
 // A section whose summary doubles as its status line: title + an overline badge
 // (count, size, state) — the same shape as the store's relay editor.
 function section(label: string, cls: string, open = false) {
-  const el = details({ summary: "", open, class: cls })
-  const sum = document.createElement("span")
-  sum.className = "upload-sum"
-  const name = document.createElement("span")
-  name.textContent = label
   const badge = overline("")
-  sum.append(name, badge)
-  el.querySelector("summary")!.appendChild(sum)
-  return { el, badge }
+  return { el: details({ summary: [label, badge], open, class: cls }), badge }
 }
 
 export function mount(
@@ -210,8 +214,7 @@ export function mount(
   relaysSec.el.append(relaysList, relaysActions)
 
   const eventSec = section("event", "upload-event")
-  const jsonEl = document.createElement("pre")
-  jsonEl.className = "upload-json"
+  const jsonEl = codeBlock("", "upload-json")
   eventSec.el.appendChild(jsonEl)
 
   const protectedCb = check({ onChange: () => render() })
@@ -375,6 +378,7 @@ export function mount(
       search: "",
       buttons: published ? [installBtn, publishBtn] : [publishBtn]
     })
+    card.querySelector(".apps-title")?.classList.replace("ui-heading", "ui-heading-xxl")
     // Requires ride with the action chips, red when this launcher can't provide
     // them — same as the detail view, which is why no warning line is passed.
     if (plan.requires.length) {
@@ -386,10 +390,11 @@ export function mount(
         card.appendChild(chips)
       }
       for (const r of plan.requires) {
-        const c = document.createElement("span")
-        c.className = unsupported.has(r) ? "apps-handler is-unsupported" : "apps-handler"
-        c.textContent = r
-        chips.appendChild(c)
+        chips.appendChild(
+          unsupported.has(r)
+            ? badge(r, { tone: "danger", class: "apps-handler is-unsupported" })
+            : badge(r, { class: "apps-handler" })
+        )
       }
     }
     // The napp id as Apps spells it — <pubkey>~<d tag> — which needs the

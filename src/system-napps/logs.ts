@@ -10,6 +10,7 @@ export const height = START_HEIGHT
 
 import type { SystemCtx } from "../types.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
+import { el } from "./ui.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
   container.innerHTML = `<ul class="logs-view"></ul>`
@@ -36,9 +37,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       const d = new Date(entry.at)
       time.dateTime = d.toISOString()
       time.textContent = fmtTime(entry.at)
-      const pre = document.createElement("pre")
-      pre.textContent = entry.msg
-      li.append(time, pre)
+      li.append(time, el("pre", "ui-code", entry.msg))
       list.appendChild(li)
       rows.set(entry.seq, li)
     }

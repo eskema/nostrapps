@@ -5,7 +5,7 @@
 // A share link opens several apps at once; promptSharedSpace lists them on one
 // screen with a single set of grants for every app the link runs.
 import { openDialog } from "./dialog.js"
-import { button, check, input, radio, tabs } from "./system-napps/ui.js"
+import { appIcon, type AppIconSize, button, check, input, radio, tabs } from "./system-napps/ui.js"
 import { nameEl } from "./napp-name.js"
 import type { NappPolicy } from "./types.js"
 
@@ -211,7 +211,7 @@ export function promptSharedSpace(opts: {
         const el = document.createElement("div")
         el.className = "napp-perms-app share-app"
         const type = app.installed ? [app.type, "installed"].filter(Boolean).join(" · ") : app.type
-        const head = sectionHead({ ...app, type })
+        const head = sectionHead({ ...app, type, iconSize: "s" })
         head.querySelector(".napp-perms-name")?.classList.add("ui-title")
         el.appendChild(head)
         if (app.actions.length) el.appendChild(frozenActions(app.actions))
@@ -351,27 +351,27 @@ export function sectionHead(opts: {
   type?: string
   author?: string | null
   chooseType?: boolean
+  /** The icon's size: m beside the name (default), s on the list screens. */
+  iconSize?: AppIconSize
 }): HTMLElement {
   const head = document.createElement("div")
   head.className = "napp-perms-head"
   const iconSrc = opts.iconBlob ? URL.createObjectURL(opts.iconBlob) : opts.icon
   if (iconSrc) {
-    const img = document.createElement("img")
-    img.className = "napp-perms-icon"
-    img.alt = ""
-    // Revoke once the bitmap is decoded (it survives the revoke). There's no
-    // placeholder to fall back to, so an icon that won't load drops out and
-    // leaves the name on its own rather than showing a broken-image glyph.
+    const icon = appIcon({ size: opts.iconSize || "m" })
+    // Revoke once the bitmap is decoded (it survives the revoke). An icon that
+    // won't load drops out and leaves the name on its own rather than showing
+    // a broken-image glyph.
     const release = () => {
       if (opts.iconBlob) URL.revokeObjectURL(iconSrc)
     }
-    img.addEventListener("load", release)
-    img.addEventListener("error", () => {
+    icon.img.addEventListener("load", release)
+    icon.img.addEventListener("error", () => {
       release()
-      img.remove()
+      icon.remove()
     })
-    img.src = iconSrc
-    head.appendChild(img)
+    icon.img.src = iconSrc
+    head.appendChild(icon)
   }
   const name = document.createElement("div")
   name.className = "napp-perms-name"

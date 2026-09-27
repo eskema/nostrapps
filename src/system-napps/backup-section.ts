@@ -35,7 +35,7 @@ import { openDialog } from "../dialog.js"
 import { nameEl, nappNameEl, nappNameText } from "../napp-name.js"
 import { requireAccount } from "../login.js"
 import { sectionHead } from "../napp-permissions.js"
-import { button, check, details, input, row as openRow, rowList } from "./ui.js"
+import { button, check, details, empty, input, row as openRow, rowList } from "./ui.js"
 
 type Row = { row: HTMLElement; tick: HTMLInputElement; name: HTMLElement; note: HTMLElement }
 type Part = { el: HTMLElement; tick: HTMLInputElement; list: HTMLElement; rows: Map<string, Row> }
@@ -56,10 +56,8 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
   const createBody = document.createElement("div")
   createBody.className = "napp-perms backup-body"
   create.appendChild(createBody)
-  const empty = document.createElement("div")
-  empty.className = "perm-empty"
-  empty.textContent = "no backups found"
-  backups.append(create, empty)
+  const none = empty("no backups found")
+  backups.append(create, none)
   wrap.appendChild(backups)
   const rows = new Map<string, Version>()
   // Backups on the relays that aren't kept here: after erasing everything,
@@ -467,7 +465,7 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
       }
       if (r.publish) r.publish.hidden = !!line.v.published
     })
-    empty.hidden = ordered.length > 0
+    none.hidden = ordered.length > 0
   }
 
   function part(label: string, on: boolean): Part {

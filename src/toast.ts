@@ -2,7 +2,7 @@
 // right. Like openDialog, actions resolve a value, but several can show at
 // once: the list scrolls (sized for ~3 cards). Toasts sharing a `group` get one
 // bar pinned above the list whose actions settle every toast in the group.
-import { button } from "./system-napps/ui.js"
+import { button, code } from "./system-napps/ui.js"
 import type { DialogAction } from "./dialog.js"
 
 export interface ToastGroup<T> {
@@ -72,11 +72,7 @@ function card<T>(item: Item<T>): HTMLDivElement {
   const title = document.createElement("div")
   title.textContent = opts.title
   text.appendChild(title)
-  if (opts.code) {
-    const code = document.createElement("code")
-    code.textContent = opts.code
-    text.appendChild(code)
-  }
+  if (opts.code) text.appendChild(code(opts.code))
   if (opts.hint) {
     const hint = document.createElement("div")
     hint.className = "toast-hint"

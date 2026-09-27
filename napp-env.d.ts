@@ -188,14 +188,50 @@ type NappUi = {
     items: Array<T | { value: T; label?: string; title?: string; class?: string }>
     active?: T
     onChange?: (value: T) => void
+    // blocks sharing the row, the selected one filled: a window's sections
+    segmented?: boolean
     class?: string
   }): NappUiTabs<T>
   // an inline svg, 1em, in currentColor; the names are the keys of `icons`
   icon(name: string): SVGElement
   // the glyphs icon() draws, the body of a 16×16 viewBox each; add your own
   icons: Record<string, string>
-  // a <details> with its <summary> in place; append the content to it
-  details(opts: { summary: string; open?: boolean; class?: string }): HTMLDetailsElement
+  // a napp's picture on a plate: s in a line of text, m beside a name (default),
+  // l on a card, xl on its detail; .img is the <img>; fade eases it in once loaded
+  appIcon(opts?: {
+    src?: string
+    size?: "s" | "m" | "l" | "xl"
+    fade?: boolean
+    class?: string
+  }): HTMLSpanElement & { img: HTMLImageElement }
+  // a short label in small sans capitals, dimmed; a tone colors it
+  badge(
+    text: string,
+    opts?: { tone?: "good" | "danger"; title?: string; class?: string }
+  ): HTMLSpanElement
+  // the line for when a list or a section has nothing yet; it takes the size of where it sits
+  empty(text: string, cls?: string): HTMLDivElement
+  // a line to heed: a glyph in the tone's color (warn by default), the text beside it
+  notice(
+    text: string,
+    opts?: { tone?: "warn" | "danger" | "good"; icon?: string; class?: string }
+  ): HTMLDivElement
+  // a <details>: its <summary>, then the children (or append them later); the
+  // summary is text, or parts in a line (a title, then a count or a badge);
+  // fold is the small one under content, a rule above and a dimmed summary
+  details(
+    opts: {
+      summary: string | Node | Array<string | Node>
+      open?: boolean
+      fold?: boolean
+      class?: string
+    },
+    ...children: Array<Node | string>
+  ): HTMLDetailsElement
+  // code in a line, a <code>: mono at 0.85em of the text around it
+  code(text: string, cls?: string): HTMLElement
+  // code or data in lines on a tinted plate, a <pre>; long lines wrap
+  codeBlock(text: string, cls?: string): HTMLPreElement
   input(opts?: {
     type?: string
     placeholder?: string

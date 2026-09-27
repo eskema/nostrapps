@@ -126,11 +126,17 @@ window.napp.relays.health(urls)
 // UI kit, with `requires: ["ui"]`: the launcher's controls as elements
 window.napp.ui.button({ label, variant, icon, onClick })
 window.napp.ui.chip({ label, active, icon, onClick })
-window.napp.ui.tabs({ items, active, onChange }) // .select(value), .value
+window.napp.ui.tabs({ items, active, onChange, segmented }) // .select(value), .value
 window.napp.ui.tab({ label, active, onClick })
 window.napp.ui.icon(name)
 window.napp.ui.icons // the glyphs, by name; add your own
-window.napp.ui.details({ summary, open })
+window.napp.ui.appIcon({ src, size, fade }) // .img
+window.napp.ui.badge(text, { tone })
+window.napp.ui.empty(text)
+window.napp.ui.notice(text, { tone })
+window.napp.ui.details({ summary, open, fold }, ...children)
+window.napp.ui.code(text)
+window.napp.ui.codeBlock(text)
 window.napp.ui.input({ placeholder, value })
 window.napp.ui.field({ label, control, note })
 window.napp.ui.check({ label, note, checked, onChange })
@@ -228,13 +234,14 @@ Declare required domains in `requires`. The launcher asks for permission on firs
 
 The `ui` domain injects `/napp-ui.css` and `/napp-ui.js`: the launcher's
 buttons, inputs, disclosures, checks, icons, fonts and `--surface`/`--text`
-theme variables, and the helpers that build them as `window.napp.ui`. The
-stylesheet lands before the napp's own, so the napp can override it; its
-classes (`btn btn-primary`, `ui-input`, `ui-details`, …) are documented in it
-for markup that doesn't go through the helpers, and `/styles/` on the launcher
-shows every element with its call and its markup. Napps without `ui` are
-unaffected. `network` controls direct connections from the app's own origin;
-Nostr bridge calls do not require direct relay access.
+theme variables, the tokens for colors, corners, shadows, type sizes,
+spacing, dimming and hairlines, and the helpers that build them as
+`window.napp.ui`. The stylesheet lands before the napp's own, so the napp can
+override it; its classes (`btn btn-primary`, `ui-input`, `ui-details`, …) are
+documented in it for markup that doesn't go through the helpers. The
+nostrapps ui kit napp shows every element with its call and its HTML. Napps
+without `ui` are unaffected. `network` controls direct connections from the
+app's own origin; Nostr bridge calls do not require direct relay access.
 
 ## Runtime
 

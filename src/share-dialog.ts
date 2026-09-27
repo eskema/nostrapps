@@ -100,7 +100,8 @@ export function openShareDialog(opts: {
           title: w.title,
           icon: w.icon,
           iconBlob: w.iconBlob,
-          type: w.type || "app"
+          type: w.type || "app",
+          iconSize: "s"
         })
         const state = headEl.querySelector<HTMLElement>(".napp-perms-type")!
         state.classList.add("share-state")

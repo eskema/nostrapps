@@ -1,7 +1,7 @@
 import type { InstalledApp, NappWindowState } from "../types.js"
 import { nappNameText } from "../napp-name.js"
 import { formatPayload } from "../utils.js"
-import { button } from "./ui.js"
+import { button, code, codeBlock, empty } from "./ui.js"
 
 export interface HandlerBodyOpts {
   actionName: string
@@ -27,8 +27,8 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
   const lbl = document.createElement("span")
   lbl.className = "handler-request-label"
   lbl.textContent = "action:"
-  actionLine.append(lbl, el("code", "handler-action-name", o.actionName || "(none)"))
-  request.append(actionLine, el("pre", "handler-payload", formatPayload(o.payload)))
+  actionLine.append(lbl, code(o.actionName || "(none)"))
+  request.append(actionLine, codeBlock(formatPayload(o.payload), "handler-payload"))
   root.appendChild(request)
 
   const appLabel = (app: InstalledApp | undefined, nappId: string) =>
@@ -59,7 +59,7 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
   candidatesEl.className = "handler-candidates"
   candidatesEl.appendChild(el("h3", "", "Open new app"))
   if (o.candidates.length === 0) {
-    candidatesEl.appendChild(el("div", "handler-empty", "No installed app declares this action."))
+    candidatesEl.appendChild(empty("No installed app declares this action."))
   } else {
     const byId = new Map(o.apps.list().map(app => [app.nappId, app]))
     const list = document.createElement("ul")

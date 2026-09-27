@@ -3,6 +3,7 @@ import "@fontsource-variable/source-sans-3/wght-italic.css"
 import "@fontsource-variable/source-serif-4"
 import "@fontsource-variable/source-serif-4/wght-italic.css"
 import "@fontsource-variable/source-code-pro"
+import "@fontsource-variable/source-code-pro/wght-italic.css"
 import {
   launch as launchNsite,
   focusInstance,
@@ -47,7 +48,7 @@ import {
   readNappFiles,
   setNappLogSink
 } from "./sandbox/host.js"
-import { button, chip, icon, tab } from "./system-napps/ui.js"
+import { appIcon, badge, button, chip, empty, icon, tab } from "./system-napps/ui.js"
 import { nappNameText } from "./napp-name.js"
 import { openDialog } from "./dialog.js"
 import {
@@ -1030,6 +1031,9 @@ const suggSections: Record<Section, HTMLDivElement> = {
 }
 const suggDividers = [0, 1, 2].map(() => document.createElement("div"))
 for (const d of suggDividers) d.className = "sugg-divider"
+// Nothing saved to suggest yet: the kit's empty line, after the sections.
+const suggNone = empty("No saved entries yet", "sugg-none")
+suggNone.hidden = true
 suggestions.append(
   suggSections.system,
   suggDividers[0],
@@ -1037,7 +1041,8 @@ suggestions.append(
   suggDividers[1],
   suggSections.apps,
   suggDividers[2],
-  suggSections.recent
+  suggSections.recent,
+  suggNone
 )
 
 type Row = {
@@ -1461,7 +1466,7 @@ function applyFilter() {
   suggDividers[0].hidden = !(shown.system && shown.open)
   suggDividers[1].hidden = !((shown.system || shown.open) && shown.apps)
   suggDividers[2].hidden = !((shown.system || shown.open || shown.apps) && shown.recent)
-  suggestions.classList.toggle("sugg-none", !SECTIONS.some(s => shown[s]))
+  suggNone.hidden = SECTIONS.some(s => shown[s])
 }
 
 function buildRow(item: SuggestionItem, sig: string): Row {
@@ -1548,10 +1553,7 @@ function buildRow(item: SuggestionItem, sig: string): Row {
   // they were (a link, a space); app rows trail with their author line or space
   // instead.
   if (item.source === "system" || item.source === "action" || item.source === "recent") {
-    const source = document.createElement("span")
-    source.className = "source"
-    source.textContent = item.kind || item.source
-    el.appendChild(source)
+    el.appendChild(badge(item.kind || item.source, { class: "source" }))
   }
   if (item.link) {
     // Forget: on mousedown like the row (a click would land after the input's
@@ -1573,11 +1575,8 @@ function buildRow(item: SuggestionItem, sig: string): Row {
   // no icon — there's no placeholder.
   item.icon?.then(src => {
     if (!src || !el.isConnected) return
-    const img = document.createElement("img")
-    img.className = "sugg-icon"
-    img.alt = ""
-    img.addEventListener("error", () => img.remove())
-    img.src = src
+    const img = appIcon({ src, size: "s", class: "sugg-icon" })
+    img.img.addEventListener("error", () => img.remove())
     if (title) title.after(img)
     else main.prepend(img)
   })

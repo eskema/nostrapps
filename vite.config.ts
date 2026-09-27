@@ -17,9 +17,8 @@ const CSS_HEAD = `/* napp-ui.css: the nostrapps kit, for napps that declare \`re
 
 const JS_HEAD = `// napp-ui.js: the nostrapps kit's helpers as window.napp.ui, for napps that
 // declare \`requires: ["ui"]\`. Generated from the launcher's
-// src/system-napps/ui.ts by its build. Types: napp-env.d.ts. Every element is
-// shown with its call and its markup at /styles/. Outside the launcher there
-// is no bridge, so the script makes window.napp itself.
+// src/system-napps/ui.ts by its build. Types: napp-env.d.ts. Outside the
+// launcher there is no bridge, so the script makes window.napp itself.
 `
 
 // The kit as napps get it: src/ui.css as /napp-ui.css, the launcher's fonts
@@ -28,15 +27,16 @@ const JS_HEAD = `// napp-ui.js: the nostrapps kit's helpers as window.napp.ui, f
 // into a napp that declares `requires: ["ui"]`. Served in dev, written to
 // dist/ by the build.
 function nappUi(): Plugin {
-  const font = (family: string, pkg: string) => {
-    // The latin subset, variable weight, as the launcher loads it.
+  const font = (family: string, pkg: string, style: "normal" | "italic" = "normal") => {
+    // The latin subset, variable weight, as the launcher loads it. Upright and
+    // italic both, so italic text is the real face, never slanted by the browser.
     const file = here(
-      `node_modules/@fontsource-variable/${pkg}/files/${pkg}-latin-wght-normal.woff2`
+      `node_modules/@fontsource-variable/${pkg}/files/${pkg}-latin-wght-${style}.woff2`
     )
     const data = readFileSync(file).toString("base64")
     return `@font-face {
   font-family: "${family}";
-  font-style: normal;
+  font-style: ${style};
   font-display: swap;
   font-weight: 200 900;
   src: url("data:font/woff2;base64,${data}") format("woff2");
@@ -53,8 +53,11 @@ function nappUi(): Plugin {
     return (
       CSS_HEAD +
       font("Source Sans 3 Variable", "source-sans-3") +
+      font("Source Sans 3 Variable", "source-sans-3", "italic") +
       font("Source Serif 4 Variable", "source-serif-4") +
+      font("Source Serif 4 Variable", "source-serif-4", "italic") +
       font("Source Code Pro Variable", "source-code-pro") +
+      font("Source Code Pro Variable", "source-code-pro", "italic") +
       "\n" +
       readFileSync(here("src/ui.css"), "utf8") +
       `
@@ -91,12 +94,6 @@ ${names.map(n => `.ui-icon-${n}`).join(",\n")} {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const path = (req.url || "").split("?")[0]
-        // The kit's page, public/styles/index.html: the dev server doesn't
-        // resolve a directory to its index (nginx does), so point it there.
-        if (path === "/styles" || path === "/styles/") {
-          req.url = "/styles/index.html"
-          return next()
-        }
         if (path !== "/napp-ui.css" && path !== "/napp-ui.js") return next()
         res.setHeader("Content-Type", path.endsWith(".css") ? "text/css" : "text/javascript")
         res.setHeader("Cache-Control", "no-store")

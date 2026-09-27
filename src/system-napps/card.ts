@@ -1,7 +1,7 @@
 import "nostr-web-components" // registers <nostr-picture> / <nostr-name>
 import { bareNostrUser } from "@nostr/gadgets/metadata"
 import type { AppType } from "../types.js"
-import { ring } from "./ui.js"
+import { appIcon, badge, ring } from "./ui.js"
 
 // ─── Unified app card ────────────────────────────────────────────
 // The one card shape the app shows for a napp: the Apps window renders it in
@@ -57,17 +57,11 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
   // Flat structure: icon, title, author/label, date, meta extras, handlers and
   // actions are all direct children of .apps-card.
 
-  // Icon — always present (even when empty) so the layout slot is stable.
-  const icon = document.createElement("img")
-  icon.className = "apps-card-icon"
-  icon.alt = ""
+  // Icon — always present (even when empty) so the layout slot is stable: the
+  // kit's plate is there from the start and the picture fades in over it.
+  const plate = appIcon({ size: "l", fade: true, class: "apps-card-icon" })
+  const icon = plate.img
   icon.loading = "lazy" // defer off-screen blob fetches; loadCardIcons sets src later
-  // Fades in once a real icon has loaded (.loaded, see the CSS); the plate
-  // behind it is the card's own, so it's there from the start. The attribute,
-  // not .src: the getter re-encodes the placeholder's data URI.
-  icon.addEventListener("load", () =>
-    icon.classList.toggle("loaded", icon.getAttribute("src") !== PLACEHOLDER_SRC)
-  )
   if (o.iconSha) {
     icon.dataset.iconSha = o.iconSha
     if (o.iconMime) icon.dataset.iconMime = o.iconMime
@@ -80,10 +74,10 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
   } else {
     icon.src = PLACEHOLDER_SRC
   }
-  card.appendChild(icon)
+  card.appendChild(plate)
 
   const h = document.createElement("h3")
-  h.className = "apps-title"
+  h.className = "ui-heading apps-title"
   h.textContent = o.title
   card.appendChild(h)
 
@@ -144,10 +138,7 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
     const chips = document.createElement("div")
     chips.className = "apps-handlers"
     for (const a of o.actions) {
-      const chip = document.createElement("span")
-      chip.className = "apps-handler"
-      chip.textContent = a
-      chips.appendChild(chip)
+      chips.appendChild(badge(a, { class: "apps-handler" }))
     }
     card.appendChild(chips)
   }
@@ -179,12 +170,6 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
 // ─── app metadata fields ─────────────────────────────────────────
 // The Apps detail's field shape, shared so anything showing the same fact
 // elsewhere (the uploader's napp id) renders it identically.
-
-export function code(text: string): HTMLElement {
-  const c = document.createElement("code")
-  c.textContent = text
-  return c
-}
 
 // A field, addressable via .apps-detail-<key> (e.g. .apps-detail-id). The
 // .apps-detail-label is added only when a label is given; the value always gets
