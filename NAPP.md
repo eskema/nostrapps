@@ -165,7 +165,18 @@ window.napp.registerAction("profile", (name, pubkey) => {
 })
 ```
 
-Use `window.napp.action()` to delegate work to another app. `view`, `profile`, `feed`, and `relay` are common action names. `view:<kind-number>` receives a resolved event.
+Use `window.napp.action()` to delegate work to another app.
+
+There is no restriction on what actions are allowed, but these are some of the common ones:
+
+| Action               | Payload                             | Returns                         |
+| -------------------- | ----------------------------------- | ------------------------------- |
+| `view`               | `nevent`/`naddr` **or** full event  |                                 |
+| `view:<kind-number>` | full event object (always resolved) |                                 |
+| `profile`            | `pubkey` as hex                    |                                 |
+| `feed`               | list of pubkey strings              |                                 |
+| `relay`              | list of relay URLs                  |                                 |
+| `wiki-term`          | a `d`-tag NIP-54 normalized string  | the resolved `kind:30818` event |
 
 `view` may receive an `nevent`, `naddr`, or resolved event. A specific
 `view:<kind-number>` always receives a resolved event. Pass
