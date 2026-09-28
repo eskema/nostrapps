@@ -25,6 +25,8 @@
 //   • addControl({ label, onAdd, … })           → the two-step "add an item" form
 //   • empty(text)                               → a `.ui-empty` line for when there's nothing
 //   • notice(text, { tone })                    → a `.ui-notice`, a glyph and a line to heed
+//   • busy(el, on)                              → `.ui-busy` on it: it breathes while something works
+//   • spinner()                                 → a `.ui-spinner`, a ring turning, 1em
 //   • class `ui-links` on a row of <a>          → dimmed links, lit on hover
 // And a layer over them that owns the state and the structure, so a screen is
 // a few calls:
@@ -732,6 +734,24 @@ export function notice(text: string, opts: NoticeOpts = {}): HTMLDivElement {
   const n = el("div", `ui-notice ${tone}${opts.class ? ` ${opts.class}` : ""}`)
   n.append(icon(opts.icon || (tone === "good" ? "check" : "warn")), el("span", "", text))
   return n
+}
+
+// Something working on it (`.ui-busy`): it breathes until done, and says so to
+// assistive tech. busy(el, false) when it's done.
+export function busy<T extends HTMLElement>(el: T, on = true): T {
+  el.classList.toggle("ui-busy", on)
+  if (on) el.setAttribute("aria-busy", "true")
+  else el.removeAttribute("aria-busy")
+  return el
+}
+
+// A ring turning (`.ui-spinner`), 1em in the text's color: next to text as it
+// is, bigger through its font-size.
+export function spinner(cls?: string): HTMLSpanElement {
+  const s = el("span", `ui-spinner${cls ? ` ${cls}` : ""}`)
+  s.setAttribute("role", "status")
+  s.setAttribute("aria-label", "loading")
+  return s
 }
 
 // ─── glue ─────────────────────────────────────────────────────────

@@ -134,6 +134,8 @@ window.napp.ui.appIcon({ src, size, fade }) // .img
 window.napp.ui.badge(text, { tone })
 window.napp.ui.empty(text)
 window.napp.ui.notice(text, { tone })
+window.napp.ui.busy(el, on)
+window.napp.ui.spinner()
 window.napp.ui.details({ summary, open, fold }, ...children)
 window.napp.ui.code(text)
 window.napp.ui.codeBlock(text)
@@ -235,7 +237,7 @@ Declare required domains in `requires`. The launcher asks for permission on firs
 The `ui` domain injects `/napp-ui.css` and `/napp-ui.js`: the launcher's
 buttons, inputs, disclosures, checks, icons, fonts and `--surface`/`--text`
 theme variables, the tokens for colors, corners, shadows, type sizes,
-spacing, dimming and hairlines, and the helpers that build them as
+spacing, motion, dimming and hairlines, and the helpers that build them as
 `window.napp.ui`. The stylesheet lands before the napp's own, so the napp can
 override it; its classes (`btn btn-primary`, `ui-input`, `ui-details`, …) are
 documented in it for markup that doesn't go through the helpers. The

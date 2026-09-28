@@ -216,6 +216,10 @@ type NappUi = {
     text: string,
     opts?: { tone?: "warn" | "danger" | "good"; icon?: string; class?: string }
   ): HTMLDivElement
+  // something working on it: it breathes, with aria-busy, until busy(el, false)
+  busy<T extends HTMLElement>(el: T, on?: boolean): T
+  // a ring turning, 1em in the text's color; bigger through its font-size
+  spinner(cls?: string): HTMLSpanElement
   // a <details>: its <summary>, then the children (or append them later); the
   // summary is text, or parts in a line (a title, then a count or a badge);
   // fold is the small one under content, a rule above and a dimmed summary

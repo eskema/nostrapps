@@ -489,7 +489,7 @@ button {
   box-shadow: var(--shadow-window);
   min-width: 240px;
   overflow: hidden;
-  transition: max-height 220ms ease-in-out;
+  transition: max-height var(--duration-move) var(--ease);
   /* transform 220ms ease-in-out, */
   /* box-shadow 220ms ease-in-out; */
 }
@@ -576,9 +576,9 @@ button {
   flex-shrink: 0;
   touch-action: none;
   transition:
-    background-color 200ms ease-in-out,
-    color 200ms ease-in-out,
-    border-color 200ms ease-in-out;
+    background-color var(--duration-quick) var(--ease),
+    color var(--duration-quick) var(--ease),
+    border-color var(--duration-quick) var(--ease);
 }
 
 .napp-header:active {
@@ -607,8 +607,8 @@ button {
      of which window is active (see .napp-window.focused .napp-title). */
   opacity: 0.5;
   transition:
-    color 200ms ease-in-out,
-    opacity 200ms ease-in-out;
+    color var(--duration-quick) var(--ease),
+    opacity var(--duration-quick) var(--ease);
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -706,18 +706,7 @@ button {
 }
 
 .napp-loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid color-mix(in srgb, currentColor 15%, transparent);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: napp-spin 0.7s linear infinite;
-}
-
-@keyframes napp-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  font-size: var(--text-xl);
 }
 
 .napp-resize-handle {
@@ -794,10 +783,10 @@ button {
   pointer-events: none;
   z-index: 9000;
   transition:
-    left 80ms ease,
-    top 80ms ease,
-    width 80ms ease,
-    height 80ms ease;
+    left 80ms var(--ease),
+    top 80ms var(--ease),
+    width 80ms var(--ease),
+    height 80ms var(--ease);
 }
 
 /* Pack-mode drop placeholder — shows where the dragged window will land
@@ -811,10 +800,10 @@ button {
   pointer-events: none;
   z-index: 9000;
   transition:
-    left 90ms ease-out,
-    top 90ms ease-out,
-    width 90ms ease-out,
-    height 90ms ease-out;
+    left 90ms var(--ease),
+    top 90ms var(--ease),
+    width 90ms var(--ease),
+    height 90ms var(--ease);
 }
 
 /* Animation applied while bestFitPack is reshuffling. Removed once the
@@ -824,12 +813,12 @@ button {
    not additive across rules. */
 .napp-window.packing {
   transition:
-    max-height 220ms ease-in-out,
-    box-shadow 220ms ease-in-out,
-    left 220ms ease-out,
-    top 220ms ease-out,
-    width 220ms ease-out,
-    height 220ms ease-out;
+    max-height var(--duration-move) var(--ease),
+    box-shadow var(--duration-move) var(--ease),
+    left var(--duration-move) var(--ease),
+    top var(--duration-move) var(--ease),
+    width var(--duration-move) var(--ease),
+    height var(--duration-move) var(--ease);
 }
 
 body.napp-dragging,
@@ -1102,8 +1091,8 @@ body.popover-open .napp-body iframe {
   margin-left: auto;
   white-space: nowrap;
   transition:
-    color 250ms ease,
-    opacity 250ms ease;
+    color var(--duration-quick) var(--ease),
+    opacity var(--duration-quick) var(--ease);
 }
 
 .napp-perms-reqs {
@@ -1324,9 +1313,9 @@ body.popover-open .napp-body iframe {
   max-width: 6rem;
   margin-right: var(--space-xs);
   transition:
-    max-width 250ms ease,
-    margin-right 250ms ease,
-    opacity 250ms ease;
+    max-width var(--duration-move) var(--ease),
+    margin-right var(--duration-move) var(--ease),
+    opacity var(--duration-quick) var(--ease);
 }
 .share-created .share-title-lead {
   max-width: 0;
@@ -1340,9 +1329,9 @@ body.popover-open .napp-body iframe {
   box-sizing: border-box;
   font: inherit;
   transition:
-    background 250ms ease,
-    padding 250ms ease,
-    font-weight 250ms ease;
+    background var(--duration-quick) var(--ease),
+    padding var(--duration-move) var(--ease),
+    font-weight var(--duration-quick) var(--ease);
 }
 /* Keeps its vertical padding, so the line stays as tall and as far from the
    list as it was. */
@@ -1358,7 +1347,7 @@ body.popover-open .napp-body iframe {
   grid-template-columns: 1.6rem 1fr;
   align-items: center;
   cursor: pointer;
-  transition: grid-template-columns 250ms ease;
+  transition: grid-template-columns var(--duration-move) var(--ease);
 }
 .share-created .share-head {
   grid-template-columns: 0rem 1fr;
@@ -1368,9 +1357,9 @@ body.popover-open .napp-body iframe {
 .share-action-head .ui-check {
   overflow: hidden;
   transition:
-    width 250ms ease,
-    opacity 250ms ease,
-    border-width 250ms ease;
+    width var(--duration-move) var(--ease),
+    opacity var(--duration-quick) var(--ease),
+    border-width var(--duration-move) var(--ease);
 }
 .share-created .ui-check {
   width: 0;
@@ -1400,8 +1389,8 @@ body.popover-open .napp-body iframe {
   gap: var(--space-xs);
   padding-left: var(--space-xl);
   transition:
-    padding-left 250ms ease,
-    opacity 250ms ease;
+    padding-left var(--duration-move) var(--ease),
+    opacity var(--duration-quick) var(--ease);
 }
 /* Its window is out: grayed, untouchable. */
 .share-actions.share-off {
@@ -1415,7 +1404,7 @@ body.popover-open .napp-body iframe {
 .share-action {
   display: grid;
   gap: var(--space-xxs);
-  transition: font-size 250ms ease;
+  transition: font-size var(--duration-move) var(--ease);
 }
 .share-created .share-action,
 .share-action.frozen {
@@ -1434,7 +1423,7 @@ body.popover-open .napp-body iframe {
   justify-content: start;
   align-items: center;
   cursor: pointer;
-  transition: grid-template-columns 250ms ease;
+  transition: grid-template-columns var(--duration-move) var(--ease);
 }
 .share-created .share-action-head {
   grid-template-columns: 0rem auto auto;
@@ -1453,9 +1442,9 @@ body.popover-open .napp-body iframe {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   transition:
-    background 250ms ease,
-    padding 250ms ease,
-    opacity 250ms ease;
+    background var(--duration-quick) var(--ease),
+    padding var(--duration-move) var(--ease),
+    opacity var(--duration-quick) var(--ease);
 }
 /* Frozen: the block reads as text where it stands. */
 .share-created .share-payload,
@@ -1503,11 +1492,11 @@ body.popover-open .napp-body iframe {
   line-height: 1.4;
   word-break: break-all;
   transition:
-    height 600ms ease,
-    margin-bottom 600ms ease;
+    height var(--duration-enter) var(--ease),
+    margin-bottom var(--duration-enter) var(--ease);
   /* backwards, not both: once it has opened, the height and margin are the
      rule's own again, free to transition to .ready */
-  animation: share-url-in 400ms ease backwards;
+  animation: share-url-in var(--duration-enter) var(--ease) backwards;
 }
 /* The link's there: taller, and more room before the list. */
 .share-url.ready {
@@ -1515,7 +1504,7 @@ body.popover-open .napp-body iframe {
   margin-bottom: var(--space-l);
 }
 .share-url-text {
-  transition: opacity 250ms ease;
+  transition: opacity var(--duration-quick) var(--ease);
 }
 .share-url-text.out {
   opacity: 0;
@@ -1538,7 +1527,7 @@ body.popover-open .napp-body iframe {
 }
 /* What appears once the link exists eases in. */
 .share-in {
-  animation: share-in 300ms ease both;
+  animation: share-in var(--duration-enter) var(--ease) both;
 }
 @keyframes share-in {
   from {
@@ -1548,13 +1537,6 @@ body.popover-open .napp-body iframe {
   to {
     opacity: 1;
     transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .napp-perms-dialog *,
-  .napp-perms-dialog *::after {
-    transition: none !important;
-    animation: none !important;
   }
 }
 
@@ -2672,31 +2654,6 @@ body.popover-open .napp-body iframe {
 /* Appearance comes from .btn .btn-danger; this keeps only its grid placement. */
 .settings-reset-btn {
   justify-self: start;
-}
-
-/* Erasing: the wipe runs until the reload, so the button breathes meanwhile. */
-.settings-reset-btn.is-erasing {
-  animation: settings-erasing 1.6s ease-in-out infinite;
-}
-
-.settings-reset-btn.is-erasing:disabled {
-  cursor: progress;
-}
-
-@keyframes settings-erasing {
-  from,
-  to {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .settings-reset-btn.is-erasing {
-    animation: none;
-  }
 }
 
 /* ─── uploader ─────────────────────────────────────────────────── */

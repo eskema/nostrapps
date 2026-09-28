@@ -13,7 +13,7 @@ import {
 import { moveBefore } from "../dom.js"
 import { getWindowSize, rememberWindowSize } from "../persistence.js"
 import { isInstanceSerial } from "../utils.js"
-import { icon } from "../system-napps/ui.js"
+import { icon, spinner } from "../system-napps/ui.js"
 
 // A window's starter height, and the ceiling a content-sized one fits within
 // until the user resizes it. The `max-height` on .napp-window:not(.user-sized)
@@ -159,10 +159,10 @@ export function createNappWindow({
   if (bodyElement) {
     body.appendChild(bodyElement)
   } else if (loading) {
-    const spinner = document.createElement("div")
-    spinner.className = "napp-loading"
-    spinner.innerHTML = '<div class="napp-loading-spinner"></div>'
-    body.appendChild(spinner)
+    const holder = document.createElement("div")
+    holder.className = "napp-loading"
+    holder.append(spinner("napp-loading-spinner"))
+    body.appendChild(holder)
   } else {
     const iframe = document.createElement("iframe")
     iframe.sandbox = sandbox
@@ -872,7 +872,7 @@ function setupDrag(
           item.style.transition = "none"
           item.style.transform = `translateY(${dy2}px)`
           void item.offsetWidth
-          item.style.transition = "transform 180ms ease"
+          item.style.transition = "transform var(--duration-move) var(--ease)"
           item.style.transform = ""
         }
       }

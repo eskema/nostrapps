@@ -13,7 +13,7 @@ import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
 import { loginControls } from "../login.js"
 import { nappNameEl } from "../napp-name.js"
-import { badge, button, check, code, details, empty, item, itemList } from "./ui.js"
+import { badge, busy, button, check, code, details, empty, item, itemList } from "./ui.js"
 import { backupSection } from "./backup-section.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): void } = {}) {
@@ -85,7 +85,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     )
     if (!ok) return
     resetBtn.textContent = "erasing"
-    resetBtn.classList.add("is-erasing")
+    // The wipe runs until the reload, so the button breathes meanwhile.
+    busy(resetBtn)
     resetBtn.setAttribute("disabled", "")
     ctx.factoryReset?.()
   })

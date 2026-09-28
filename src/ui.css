@@ -59,6 +59,13 @@
   --dim-l: 0.4;
   /* The hairline, as a border color: between rows, under a section. */
   --rule: color-mix(in srgb, currentColor 8%, transparent);
+  /* Motion: how long a change takes. quick: color and opacity, a hover, a
+     state. move: size and place, a fold, a window. enter: something coming
+     in. One easing for all of them. */
+  --duration-quick: 120ms;
+  --duration-move: 240ms;
+  --duration-enter: 420ms;
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
   /* App icons: in a line of text, beside a name, on a card, on its detail. */
   --app-icon-s: 1.25rem;
   --app-icon-m: 2rem;
@@ -99,6 +106,16 @@
   color-scheme: dark;
 }
 
+/* With reduced motion a change lands at once: the durations drop to next to
+   nothing (not 0, so transitionend still fires). A loop has its own stop. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-quick: 0.01ms;
+    --duration-move: 0.01ms;
+    --duration-enter: 0.01ms;
+  }
+}
+
 /* ─── Buttons ─────────────────────────────────────────────────────
    `.btn` and a variant: btn-primary | btn-outline | btn-danger | btn-warning |
    btn-ghost | btn-link. button() in ui.ts.
@@ -121,10 +138,10 @@
   user-select: none;
   flex-shrink: 0;
   transition:
-    background-color 120ms ease,
-    color 120ms ease,
-    border-color 120ms ease,
-    opacity 120ms ease;
+    background-color var(--duration-quick) var(--ease),
+    color var(--duration-quick) var(--ease),
+    border-color var(--duration-quick) var(--ease),
+    opacity var(--duration-quick) var(--ease);
 }
 
 .btn:disabled {
@@ -227,8 +244,8 @@
   cursor: pointer;
   opacity: var(--dim-l);
   transition:
-    padding 0.2s ease-in-out,
-    opacity 0.2s ease-in-out;
+    padding var(--duration-move) var(--ease),
+    opacity var(--duration-quick) var(--ease);
   border-bottom: 1px solid transparent;
 }
 
@@ -314,15 +331,10 @@
 }
 .ui-app-icon.fade > img {
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transition: opacity var(--duration-enter) var(--ease);
 }
 .ui-app-icon.fade > img.loaded {
   opacity: 1;
-}
-@media (prefers-reduced-motion: reduce) {
-  .ui-app-icon.fade > img {
-    transition: none;
-  }
 }
 
 /* ─── Disclosure ──────────────────────────────────────────────────
@@ -332,7 +344,7 @@
 .ui-details {
   margin: var(--space-s) 0;
   border-bottom: 1px solid var(--rule);
-  transition: all 0.2s ease-in-out;
+  transition: padding-bottom var(--duration-move) var(--ease);
   /* As a grid/flex item, allow shrinking below content size so nowrap content
      inside (e.g. .ui-item-label urls) crops with an ellipsis instead of
      forcing horizontal scroll. */
@@ -563,8 +575,8 @@
   place-content: center;
   flex-shrink: 0;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
+    background-color var(--duration-quick) var(--ease),
+    border-color var(--duration-quick) var(--ease);
 }
 .ui-radio {
   border-radius: 50%;
@@ -580,7 +592,7 @@
   mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTMuNSA4LjVsMyAzIDYtNyIvPjwvc3ZnPg==")
     center / contain no-repeat;
   transform: scale(0);
-  transition: transform 100ms ease;
+  transition: transform var(--duration-quick) var(--ease);
 }
 .ui-check:checked {
   background: var(--surface);
@@ -650,11 +662,11 @@
 .ui-rows > * {
   max-height: 3rem;
   transition:
-    scale 150ms ease,
-    max-height 150ms ease,
-    padding 150ms ease,
-    border-width 150ms ease,
-    display 150ms allow-discrete;
+    scale var(--duration-move) var(--ease),
+    max-height var(--duration-move) var(--ease),
+    padding var(--duration-move) var(--ease),
+    border-width var(--duration-move) var(--ease),
+    display var(--duration-move) allow-discrete;
 }
 .ui-rows > .ui-row[open] {
   max-height: none;
@@ -675,11 +687,6 @@
     max-height: 0;
     padding-block: 0;
     border-bottom-width: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ui-rows > * {
-    transition: none;
   }
 }
 .ui-row {
@@ -787,7 +794,11 @@
   border-radius: var(--radius-xl);
   cursor: pointer;
   user-select: none;
-  transition: all 0.15s ease-in-out;
+  transition:
+    color var(--duration-quick) var(--ease),
+    background-color var(--duration-quick) var(--ease),
+    font-weight var(--duration-quick) var(--ease),
+    flex-grow var(--duration-move) var(--ease);
 }
 .ui-segment:hover {
   color: color-mix(in srgb, currentColor 75%, transparent);
@@ -908,6 +919,61 @@
   color: var(--good);
 }
 
+/* ─── Busy ────────────────────────────────────────────────────────
+   Something working on it: it breathes until done. A button while its
+   action runs, a status while it loads. busy(el) in ui.ts, busy(el, false)
+   when it's done. With reduced motion it holds dimmed instead.
+     <button class="btn btn-danger ui-busy" aria-busy="true">reset</button> */
+.ui-busy,
+.ui-busy:disabled {
+  cursor: progress;
+}
+.ui-busy {
+  animation: ui-breathe 1.6s ease-in-out infinite;
+}
+@keyframes ui-breathe {
+  from,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ─── Spinner ─────────────────────────────────────────────────────
+   A ring turning, 1em in the text's color: next to text as it is, bigger
+   through its font-size. spinner() in ui.ts. With reduced motion it
+   breathes instead of turning.
+     <span class="ui-spinner" role="status" aria-label="loading"></span> */
+.ui-spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em; /* on the line as an icon sits */
+  border: 0.1em solid color-mix(in srgb, currentColor 15%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: ui-spin 0.7s linear infinite;
+}
+@keyframes ui-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-busy {
+    animation: none;
+    opacity: var(--dim-m);
+  }
+  .ui-spinner {
+    animation: ui-breathe 1.6s ease-in-out infinite;
+  }
+}
+
 /* ─── Links ───────────────────────────────────────────────────────
    A row of links that wraps: in the text's color, dimmed, lit on hover. Class
    only; the links are plain <a>.
@@ -958,6 +1024,7 @@
   .ui-segments,
   .ui-summary,
   .ui-notice,
+  .ui-spinner,
   .ui-links,
   .ui-stack,
   .ui-bar

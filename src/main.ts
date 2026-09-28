@@ -2223,7 +2223,7 @@ function flipReorder(list: HTMLElement, exclude: HTMLElement, mutate: () => void
     }
     el.style.transform = `translateX(${dx}px)`
     void el.offsetWidth // force reflow so the next change animates from here
-    el.style.transition = "transform 150ms ease-in-out"
+    el.style.transition = "transform var(--duration-move) var(--ease)"
     el.style.transform = ""
     el.addEventListener("transitionend", () => (el.style.transition = ""), { once: true })
   }
