@@ -36,6 +36,7 @@ import {
   clearPackNew,
   placeInFreeSpot,
   hasOpenWindow,
+  findOpenSystemWindow,
   allInstanceIds,
   resolveViewPayload,
   isViewAction,
@@ -966,6 +967,12 @@ function launchSystemNapp(
 ) {
   const def = systemRegistry[sysId]
   if (!def) throw new Error(`Unknown system napp: ${sysId}`)
+  // One window per system napp: reuse the live one, whichever space holds it.
+  // Not a manifest property (that's gone) — launcher furniture opens once.
+  if (persistent) {
+    const live = findOpenSystemWindow(sysId)
+    if (live) return live
+  }
   console.debug("[launch] launchSystemNapp", { sysId, title: def.title, params })
   const launchOpts = persistent
     ? makeSystemLaunchOpts(sysId)
@@ -1001,8 +1008,14 @@ function launchSystemNapp(
   return win
 }
 
-// Top-level invocation (slash command, suggestion): open it in the current space.
+// Top-level invocation (slash command, suggestion): if a space already holds
+// the system napp, switch there and focus it; otherwise open it here.
 async function invokeSystemNapp(sysId: string) {
+  const owner = persist.findSpaceOfSystemNapp(sysId)
+  if (owner && owner !== currentSpaceId) {
+    await switchSpace(owner)
+    renderSpacesBar()
+  }
   const win = launchSystemNapp(sysId)
   win?.focus?.()
   return win

@@ -1852,6 +1852,14 @@ export function findOpenWindowByNappId(nappId: string): NappWindow | null {
   return null
 }
 
+// The live window of a system napp, whichever space holds it.
+export function findOpenSystemWindow(sysId: string): NappWindow | null {
+  for (const win of openWindows.values()) {
+    if (win.systemId === sysId) return win
+  }
+  return null
+}
+
 // Launcher → iframe dispatch calls (action). Each call gets a
 // requestId; the iframe replies with that id once `window.napp.onAction`
 // has run.
