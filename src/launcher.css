@@ -2733,9 +2733,3 @@ body.popover-open .napp-body iframe {
 .upload-results[hidden] {
   display: none;
 }
-
-.upload-results .ui-item.is-fail .ui-item-label,
-.upload-results .ui-item.is-fail .ui-overline {
-  color: var(--danger);
-  opacity: 1;
-}

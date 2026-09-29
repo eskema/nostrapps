@@ -205,8 +205,11 @@ type Ui = {
     segmented?: boolean
     class?: string
   }): UiTabs<T>
-  // an inline svg, 1em, in currentColor; the names are the keys of `icons`
-  icon(name: string): SVGElement
+  // an inline svg, 1em, in currentColor; the names are the keys of `icons`.
+  // flush puts its ink at that edge instead of its box, for an icon that ends a
+  // line under text; iconInk says how far each glyph sits in, add yours there
+  icon(name: string, opts?: { flush?: "start" | "end" }): SVGElement
+  iconInk: Record<string, [number, number]>
   // the glyphs icon() draws, the body of a 16×16 viewBox each; add your own
   icons: Record<string, string>
   // a napp's picture on a plate: s in a line of text, m beside a name (default),
@@ -268,22 +271,27 @@ type Ui = {
   check(opts?: UiCheckOpts): HTMLInputElement
   radio(opts: UiCheckOpts & { name: string; label: string }): HTMLLabelElement
   radio(opts: UiCheckOpts & { name: string }): HTMLInputElement
-  // one of N, labelled, as a group; .value reads and sets the pick
+  // one of N, labelled, as a group; .value reads and sets the pick. label is a
+  // caption before them; collapse keeps it one overline line, caption and pick,
+  // until clicked, and folds it back once one is chosen
   radios<T extends string>(opts: {
     name: string
     options: Array<T | { value: T; label?: string; title?: string; note?: string }>
     value?: T
     onChange?: (value: T) => void
+    label?: string
+    collapse?: boolean
     class?: string
   }): HTMLDivElement & { value: T | undefined }
   // a small tracked uppercase caption
   overline(text: string, cls?: string): HTMLSpanElement
   // a word set round a circle, turning; sized by the font-size it sits in
   ring(word: string, cls?: string): SVGElement
-  // a column of rows: a truncating mono label, then the controls given
+  // a column of rows: a truncating mono label, then the controls given; a row
+  // that failed takes tone "danger"
   itemList(cls?: string): HTMLDivElement
   item(
-    opts: { label: string; title?: string; class?: string },
+    opts: { label: string; title?: string; tone?: "danger"; class?: string },
     ...controls: HTMLElement[]
   ): HTMLDivElement
   // rows that open one at a time; append rows to the list, a row's content to the row
@@ -315,6 +323,9 @@ type Ui = {
   // a column with a gap; a row of controls that wraps
   stack(...children: Array<Node | string>): HTMLDivElement
   bar(...children: Array<Node | string>): HTMLDivElement
+  // text-like content spaced as it reads: blocks a line apart, a heading close over
+  // what it heads; the flow spaces its children, they carry no margins
+  flow(...children: Array<Node | string>): HTMLDivElement
 }
 type Napp = {
   instance: string

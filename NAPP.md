@@ -128,7 +128,7 @@ window.napp.ui.button({ label, variant, icon, onClick })
 window.napp.ui.chip({ label, active, icon, onClick })
 window.napp.ui.tabs({ items, active, onChange, segmented }) // .select(value), .value
 window.napp.ui.tab({ label, active, onClick })
-window.napp.ui.icon(name)
+window.napp.ui.icon(name, { flush })
 window.napp.ui.icons // the glyphs, by name; add your own
 window.napp.ui.appIcon({ src, size, fade }) // .img
 window.napp.ui.badge(text, { tone })
@@ -143,18 +143,19 @@ window.napp.ui.input({ placeholder, value })
 window.napp.ui.field({ label, control, note })
 window.napp.ui.check({ label, note, checked, onChange })
 window.napp.ui.radio({ name, label, checked, onChange })
-window.napp.ui.radios({ name, options, value, onChange }) // .value
+window.napp.ui.radios({ name, options, value, onChange, label, collapse }) // .value
 window.napp.ui.overline(text)
 window.napp.ui.ring(word)
 window.napp.ui.list({ items, label, controls, add, empty }) // .add(item), .delete(item), .items
 window.napp.ui.itemList()
-window.napp.ui.item({ label }, ...controls)
+window.napp.ui.item({ label, tone }, ...controls)
 window.napp.ui.rowList()
 window.napp.ui.row(list, ...summary)
 window.napp.ui.addControl({ label, placeholder, onAdd })
 window.napp.ui.el(tag, class, ...children)
 window.napp.ui.stack(...children)
 window.napp.ui.bar(...children)
+window.napp.ui.flow(...children)
 
 window.napp.close()
 window.napp.link(url)

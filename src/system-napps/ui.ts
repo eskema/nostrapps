@@ -7,13 +7,17 @@
 //   • button({ variant, label, onClick, … })  → a `.btn .btn-<variant>`
 //   • chip({ label, active, icon, onClick, … }) → a `.btn .btn-chip` (selectable)
 //   • tab({ label, active, onClick, … })        → a `.ui-tab` text tab
-//   • icon(name)                                → an inline `<svg>` (currentColor)
+//   • icon(name, { flush })                     → an inline `<svg>` (currentColor); flush: its ink at the edge
 //   • appIcon({ src, size, fade })              → a `.ui-app-icon`, a napp's picture on a plate
 //   • details({ summary, open, … }, …children)  → a `.ui-details` disclosure; summary: text,
 //     or parts in a line; fold: `.ui-fold`, the small one under content
 //   • code(text)                                → a `.ui-code`, code in a line
 //   • codeBlock(text)                           → a `.ui-code-block`, code in lines on a tinted plate
-//   • input({ type, placeholder, … })           → a `.ui-input` text field
+//   • input({ type, placeholder, … })           → a `.ui-input` text field; states are
+//     attributes: required, aria-invalid, readonly
+//   • class `ui-writing` on a textarea          → somewhere to write, borderless, reading size
+//   • class `ui-compact` on a list              → its text, fields, rows and buttons a size down
+//   • class `ui-divided` on anything            → a hairline between its children
 //   • check({ checked, onChange, … })           → a `.ui-check` checkbox
 //   • overline(text)                            → a `.ui-overline` caption
 //   • badge(text, { tone })                     → a `.ui-badge` small-caps label
@@ -28,6 +32,7 @@
 //   • busy(el, on)                              → `.ui-busy` on it: it breathes while something works
 //   • spinner()                                 → a `.ui-spinner`, a ring turning, 1em
 //   • class `ui-links` on a row of <a>          → dimmed links, lit on hover
+//   • class `ui-quote` on quoted text           → a bar on the left, the text a little in
 // And a layer over them that owns the state and the structure, so a screen is
 // a few calls:
 //   • button({ icon, … })                       → a glyph before the label, or alone
@@ -38,6 +43,7 @@
 //   • field({ label, control, note })           → `.ui-field`, the form line
 //   • list({ items, label, controls, add })     → `.ui-list`: rows, add control, add/delete/items
 //   • el(tag, class, …children), stack(…), bar(…) → plain glue, a column, a row
+//   • flow(…children)                           → `.ui-flow`, text-like content spaced as it reads
 // Variants: primary | outline | danger | warning | ghost. Layout (align-self,
 // margins, placement) belongs on the parent/context, not the variant. CSS lives
 // in src/ui.css, the one file the launcher and the napps share.
@@ -81,11 +87,41 @@ export const icons: Record<string, string> = {
   close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
   check: '<path d="M3 8.5l3 3 7-7"/>',
+  chevron: '<path d="M4 6l4 4 4-4"/>',
   link: '<path d="M6.5 9.5l3-3"/><path d="M7.3 4.7l1.2-1.2a2.4 2.4 0 0 1 3.4 3.4l-1.2 1.2"/><path d="M8.7 11.3l-1.2 1.2a2.4 2.4 0 0 1-3.4-3.4l1.2-1.2"/>',
   warn: '<path d="M8 2.5 14 13H2z"/><path d="M8 6.5v3M8 11.3v.1"/>'
 }
 
-export function icon(name: string): SVGElement {
+// How far each glyph's ink sits in from the start and the end of its box, in
+// em, the stroke's round ends included: what flush-start and flush-end take
+// back so the ink meets the edge. An icon a napp adds can have its entry too.
+export const iconInk: Record<string, [number, number]> = {
+  tile: [0.0813, 0.0813],
+  pack: [0.0813, 0.0813],
+  grid: [0.0813, 0.0813],
+  plus: [0.175, 0.175],
+  save: [0.1437, 0.1437],
+  reset: [0.2062, 0.1437],
+  reload: [0.1437, 0.1563],
+  back: [0.175, 0.1437],
+  forward: [0.1437, 0.175],
+  move: [0.0813, 0.1437],
+  window: [0.0813, 0.0813],
+  close: [0.2375, 0.2375],
+  trash: [0.1437, 0.1437],
+  check: [0.1437, 0.1437],
+  chevron: [0.2062, 0.2062],
+  link: [0.1685, 0.1685],
+  warn: [0.0813, 0.0813]
+}
+
+export interface IconOpts {
+  /** The ink at that edge instead of the box: for an icon that ends (or
+   *  starts) a line and lines up with text above or below it. */
+  flush?: "start" | "end"
+}
+
+export function icon(name: string, opts: IconOpts = {}): SVGElement {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
   svg.setAttribute("viewBox", "0 0 16 16")
   svg.setAttribute("width", "1em")
@@ -96,6 +132,20 @@ export function icon(name: string): SVGElement {
   svg.setAttribute("stroke-linecap", "round")
   svg.setAttribute("stroke-linejoin", "round")
   svg.classList.add("ui-icon")
+  if (opts.flush) {
+    svg.classList.add(`flush-${opts.flush}`)
+    // The box narrows to the ink (CSS); the glyph keeps its size, cropped on
+    // the far side, where its box is empty.
+    svg.setAttribute(
+      "preserveAspectRatio",
+      opts.flush === "end" ? "xMinYMid slice" : "xMaxYMid slice"
+    )
+  }
+  const ink = iconInk[name]
+  if (ink) {
+    svg.style.setProperty("--ink-start", `${ink[0]}em`)
+    svg.style.setProperty("--ink-end", `${ink[1]}em`)
+  }
   svg.innerHTML = icons[name] || ""
   return svg
 }
@@ -402,6 +452,11 @@ export interface RadiosOpts<T extends string = string> {
   options: Array<T | RadioItem<T>>
   value?: T
   onChange?: (value: T) => void
+  /** A caption before the options, in the overline's voice. */
+  label?: string
+  /** One line until clicked, in the overline's voice: the caption and the
+   *  pick. Clicked, the options take the pick's place; choosing folds it back. */
+  collapse?: boolean
   class?: string
 }
 
@@ -412,9 +467,36 @@ export type Radios<T extends string = string> = HTMLDivElement & { value: T | un
 // stack it.
 export function radios<T extends string = string>(opts: RadiosOpts<T>): Radios<T> {
   const group = document.createElement("div") as Radios<T>
-  group.className = `ui-radios${opts.class ? ` ${opts.class}` : ""}`
+  group.className = ["ui-radios", opts.collapse && "collapse", opts.class].filter(Boolean).join(" ")
   group.setAttribute("role", "radiogroup")
+  if (opts.label) {
+    group.setAttribute("aria-label", opts.label)
+    group.append(overline(opts.label))
+  }
+  // Collapsed, the pick stands in for the options until it's clicked.
+  const pick = opts.collapse ? el("button", "ui-radios-value ui-overline") : null
   const inputs = new Map<T, HTMLInputElement>()
+  const names = new Map<T, string>()
+  const show = (v: T | undefined) => {
+    if (pick) pick.textContent = v === undefined ? "" : (names.get(v) ?? v)
+  }
+  if (pick) {
+    pick.type = "button"
+    pick.addEventListener("click", () => {
+      group.classList.add("open")
+      ;([...inputs.values()].find(i => i.checked) ?? inputs.values().next().value)?.focus()
+    })
+    // Choosing folds it back, the pick already chosen too (it fires no change).
+    group.addEventListener("click", e => {
+      if (e.target instanceof HTMLInputElement) group.classList.remove("open")
+    })
+    group.addEventListener("keydown", e => {
+      if (e.key !== "Escape" || !group.classList.contains("open")) return
+      group.classList.remove("open")
+      pick.focus()
+    })
+    group.append(pick)
+  }
   for (const o of opts.options) {
     const it: RadioItem<T> = typeof o === "string" ? { value: o } : o
     const l = radio({
@@ -423,15 +505,22 @@ export function radios<T extends string = string>(opts: RadiosOpts<T>): Radios<T
       note: it.note,
       title: it.title,
       checked: it.value === opts.value,
-      onChange: () => opts.onChange?.(it.value)
+      onChange: () => {
+        show(it.value)
+        opts.onChange?.(it.value)
+      }
     })
+    if (pick) l.querySelector(".ui-check-text")?.classList.add("ui-overline")
     inputs.set(it.value, l.control as HTMLInputElement)
+    names.set(it.value, it.label ?? it.value)
     group.append(l)
   }
+  show(opts.value)
   Object.defineProperty(group, "value", {
     get: () => [...inputs].find(([, i]) => i.checked)?.[0],
     set: (v: T) => {
       for (const [k, i] of inputs) i.checked = k === v
+      show(v)
     }
   })
   return group
@@ -537,12 +626,14 @@ export interface ItemOpts {
   label: string
   /** Tooltip; defaults to the label. */
   title?: string
+  /** A row that failed: its label and caption in the danger color. */
+  tone?: "danger"
   class?: string
 }
 
 export function item(opts: ItemOpts, ...controls: HTMLElement[]): HTMLDivElement {
   const row = document.createElement("div")
-  row.className = `ui-item${opts.class ? ` ${opts.class}` : ""}`
+  row.className = ["ui-item", opts.tone, opts.class].filter(Boolean).join(" ")
   const label = document.createElement("code")
   label.className = "ui-item-label"
   label.textContent = opts.label
@@ -777,4 +868,10 @@ export function stack(...children: Array<Node | string>): HTMLDivElement {
 
 export function bar(...children: Array<Node | string>): HTMLDivElement {
   return el("div", "ui-bar", ...children)
+}
+
+// Text-like content (`.ui-flow`): headings, paragraphs, code, lists, spaced
+// as they read, by the flow and not by margins of their own.
+export function flow(...children: Array<Node | string>): HTMLDivElement {
+  return el("div", "ui-flow", ...children)
 }

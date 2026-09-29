@@ -258,9 +258,8 @@ export function mount(
     ok: boolean,
     title: string
   ) {
-    const row = item({ label, title }, overline(state))
+    const row = item({ label, title, tone: ok ? undefined : "danger" }, overline(state))
     row.dataset.kind = kind
-    if (!ok) row.classList.add("is-fail")
     resultsEl.appendChild(row)
     resultsEl.hidden = false
   }

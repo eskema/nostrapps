@@ -19,6 +19,7 @@
   /* Colors: what's behind, what's on it, and what went well or wrong. */
   --surface: #ffffff;
   --text: #111111;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23111111' stroke-opacity='.6' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --danger: #d64545;
   --good: #2f9e44;
   --warn: #f59e0b;
@@ -80,6 +81,7 @@
   :root:not([data-theme="light"]) {
     --surface: #333;
     --text: #ececec;
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23ececec' stroke-opacity='.6' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     --danger: #ff6b6b;
     --good: #69db7c;
     --warn: #fbbf24;
@@ -92,12 +94,14 @@
 :root[data-theme="light"] {
   --surface: #ffffff;
   --text: #111111;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23111111' stroke-opacity='.6' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
   --surface: #333;
   --text: #ececec;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23ececec' stroke-opacity='.6' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --danger: #ff6b6b;
   --good: #69db7c;
   --warn: #fbbf24;
@@ -208,6 +212,11 @@
   opacity: 1;
   background: transparent;
 }
+/* A link that's on, a toggle pressed or open, stays lit. */
+.btn-link[aria-pressed="true"],
+.btn-link[aria-expanded="true"] {
+  opacity: 1;
+}
 
 /* Chip: a selectable .btn. chip() in ui.ts sets the variant — primary while
    active, ghost otherwise — and wraps the text in .btn-chip-label so a long
@@ -253,6 +262,10 @@
   opacity: 1;
 }
 
+.ui-tab:disabled {
+  cursor: default;
+}
+
 .ui-tab.active {
   opacity: 1;
   padding: 0 var(--space-s);
@@ -263,10 +276,31 @@
    icon(name) in ui.ts: an inline <svg>, 1em, stroked in currentColor, so it
    sits next to text and follows its color. For markup without the helper, the
    napp stylesheet carries each glyph as a mask class:
-     <span class="ui-icon ui-icon-plus"></span> */
+     <span class="ui-icon ui-icon-plus"></span>
+   A glyph sits a little in from its box. flush-start or flush-end puts its
+   ink at that edge instead: the box ends at the ink, narrower by that glyph's
+   own margin (--ink-start, --ink-end), the glyph its size, the empty margin
+   cropped rather than pushed out, so nothing overflows. For an icon that
+   ends a line under text, a +/– or a row. Inline, through icon(name, { flush }).
+     <span class="ui-icon ui-icon-close flush-end"></span> */
 .ui-icon {
   flex-shrink: 0;
   vertical-align: -0.125em;
+}
+.ui-icon.flush-start,
+.ui-icon.flush-end {
+  -webkit-mask-size: 1em 1em;
+  mask-size: 1em 1em;
+}
+.ui-icon.flush-start {
+  width: calc(1em - var(--ink-start, 0em));
+  -webkit-mask-position: right center;
+  mask-position: right center;
+}
+.ui-icon.flush-end {
+  width: calc(1em - var(--ink-end, 0em));
+  -webkit-mask-position: left center;
+  mask-position: left center;
 }
 
 /* ─── Input ───────────────────────────────────────────────────────
@@ -275,6 +309,7 @@
 .ui-input {
   padding: var(--space-xs) var(--space-s);
   font-family: var(--font-mono);
+  font-size: var(--text-s); /* a field doesn't take the page's size on its own */
   border: none;
   border-radius: var(--radius-s);
   background: color-mix(in srgb, currentColor 5%, transparent);
@@ -283,6 +318,51 @@
 
 .ui-input:focus {
   outline: none;
+}
+/* Its states are attributes. required: while empty, the placeholder in the
+   danger color. aria-invalid="true": a thin danger line round it, where a
+   publish or a save stopped. readonly: shown, not edited, its text without
+   the fill (it still scrolls and selects). */
+.ui-input:required::placeholder {
+  color: var(--danger);
+  opacity: var(--dim-s);
+}
+.ui-input[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+.ui-input[readonly] {
+  background: transparent;
+}
+/* A dropdown: the kit's chevron at its end instead of the browser's arrow,
+   the text clear of it. The chevron is an image, drawn in the text color of
+   each theme (--select-chevron), since an image can't take currentColor. */
+select.ui-input {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: calc(var(--space-s) + 0.8em + var(--space-xs));
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right var(--space-s) center;
+  background-size: 0.8em;
+  cursor: pointer;
+}
+
+/* ─── Writing ─────────────────────────────────────────────────────
+   Somewhere to write: a textarea without border, fill or handle, in the
+   page's voice at the reading size, set in from its edges. How big it is is
+   the context's. Class only.
+     <textarea class="ui-writing" placeholder="Write a note…"></textarea> */
+.ui-writing {
+  box-sizing: border-box;
+  padding: var(--space-l);
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-m);
+  line-height: 1.5;
 }
 
 /* ─── App icon ──────────────────────────────────────────────────
@@ -638,6 +718,42 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ─── Divided ─────────────────────────────────────────────────────
+   A hairline between the children of whatever it's on: rows of a napp's
+   own, say (the kit's item rows draw theirs already). Class only.
+     <div class="ui-divided">…</div> */
+.ui-divided > * + * {
+  border-top: 1px solid var(--rule);
+}
+
+/* ─── Compact ─────────────────────────────────────────────────────
+   A compact list: everything in it a size down and closer together, its
+   text, fields, rows and buttons. For long lists of small things, tags say.
+   Class only; on the list, or whatever holds its rows.
+     <div class="ui-items ui-compact">…</div> */
+.ui-compact,
+.ui-compact :is(.ui-input, .ui-item-label, .btn) {
+  font-size: var(--text-xs);
+}
+.ui-compact .ui-input {
+  padding: var(--space-xxs) var(--space-xs);
+}
+.ui-compact select.ui-input {
+  padding-right: calc(var(--space-xs) + 0.8em + var(--space-xs));
+  background-position: right var(--space-xs) center;
+}
+.ui-compact .ui-item {
+  gap: var(--space-xs);
+  padding-block: var(--space-xxs);
+}
+
+/* A row that failed, item({ tone: "danger" }): its label and caption in the
+   danger color, lit. */
+.ui-item.danger .ui-item-label,
+.ui-item.danger .ui-overline {
+  color: var(--danger);
+  opacity: 1;
+}
 
 /* ─── Rows that open ──────────────────────────────────────────────
    Item rows as disclosures: small, a rule below, as tall as one holding a
@@ -843,6 +959,49 @@
   gap: var(--space-s) var(--space-l);
 }
 
+/* Collapsed, radios({ collapse: true }): one line in the overline's voice,
+   the caption and the pick. Clicked, the options take the pick's place, the
+   chosen one lit; choosing folds it back.
+     <div class="ui-radios collapse" role="radiogroup">
+       <span class="ui-overline">kind</span>
+       <button class="ui-radios-value ui-overline">1 (note)</button>
+       <label class="ui-check-label">…</label>…
+     </div> */
+.ui-radios.collapse {
+  align-items: center;
+  gap: var(--space-xs) var(--space-s);
+}
+.ui-radios.collapse:not(.open) > .ui-check-label,
+.ui-radios.collapse.open > .ui-radios-value {
+  display: none;
+}
+.ui-radios.collapse > .ui-check-label {
+  align-items: center;
+  gap: var(--space-xs);
+}
+.ui-radios.collapse .ui-check {
+  width: 0.8rem;
+  height: 0.8rem;
+  margin-top: 0;
+}
+.ui-radios.collapse .ui-check::after {
+  width: 0.55rem;
+  height: 0.55rem;
+}
+.ui-radios.collapse .ui-check:checked + .ui-check-text {
+  opacity: 1;
+}
+.ui-radios-value {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.ui-radios-value:hover {
+  opacity: 1;
+}
+
 /* ─── Field ───────────────────────────────────────────────────────
    The form line: an overline caption, the control under it filling the
    width, a dimmed note under that. field() in ui.ts.
@@ -892,6 +1051,15 @@
   opacity: var(--dim-m);
 }
 
+/* ─── Quote ───────────────────────────────────────────────────────
+   Someone else's words: a bar on the left, the text a little in. A
+   blockquote, a quoted note, the note a reply answers. Class only.
+     <blockquote class="ui-quote">…</blockquote> */
+.ui-quote {
+  padding: var(--space-xxs) 0 var(--space-xxs) var(--space-m);
+  border-left: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+
 /* ─── Notice ──────────────────────────────────────────────────────
    A line to heed: a glyph in the tone's color, the text beside it, wrapping
    under itself. notice(text, { tone }) in ui.ts: warn (default) and danger
@@ -902,11 +1070,12 @@
 .ui-notice {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
+  align-items: baseline; /* its text's: it lines up with text beside it */
   gap: var(--space-xs);
 }
 /* As tall as a line, so the glyph sits in the first one however many follow. */
 .ui-notice > .ui-icon {
+  align-self: start;
   height: 1lh;
 }
 .ui-notice.warn > .ui-icon {
@@ -1008,6 +1177,27 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-s);
+}
+
+/* ─── Flow ────────────────────────────────────────────────────────
+   Text-like content spaced as it reads: blocks a line apart (m), a heading
+   close over what it heads (xs) with room before it (l), a rule with room
+   on both sides (l). The flow spaces its children, whatever they are, a
+   plain <p> included; they carry no margins. flow() in ui.ts.
+     <div class="ui-flow"><h2>…</h2><p>…</p><pre class="ui-code-block">…</pre></div> */
+.ui-flow > * {
+  margin: 0;
+}
+.ui-flow > * + * {
+  margin-top: var(--space-m);
+}
+.ui-flow > :where(h1, h2, h3, h4, h5, h6, .ui-heading, .ui-heading-xxl, .ui-title) + * {
+  margin-top: var(--space-xs);
+}
+.ui-flow > * + :where(h1, h2, h3, h4, h5, h6, .ui-heading, .ui-heading-xxl, .ui-title),
+.ui-flow > * + hr,
+.ui-flow > hr + * {
+  margin-top: var(--space-l);
 }
 
 /* The kit sets display on these, which would beat the hidden attribute. */

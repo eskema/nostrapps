@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite"
-import { icons } from "./src/system-napps/ui.ts"
+import { iconInk, icons } from "./src/system-napps/ui.ts"
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
@@ -75,7 +75,9 @@ ${names.map(n => `.ui-icon-${n}`).join(",\n")} {
       names
         .map(n => {
           const url = glyph(icons[n])
-          return `.ui-icon-${n} {\n  -webkit-mask-image: url("${url}");\n  mask-image: url("${url}");\n}\n`
+          const ink = iconInk[n]
+          const inset = ink ? `  --ink-start: ${ink[0]}em;\n  --ink-end: ${ink[1]}em;\n` : ""
+          return `.ui-icon-${n} {\n${inset}  -webkit-mask-image: url("${url}");\n  mask-image: url("${url}");\n}\n`
         })
         .join("")
     )
