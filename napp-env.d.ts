@@ -3,7 +3,7 @@ declare module "*?raw" {
   export default src
 }
 
-type NappNostrEvent = {
+type NostrEvent = {
   id: string
   pubkey: string
   created_at: number
@@ -13,40 +13,40 @@ type NappNostrEvent = {
   sig: string
 }
 
-type NappEventTemplate = Omit<NappNostrEvent, "id" | "pubkey" | "sig">
-type NappNip04 = {
+type EventTemplate = Omit<NostrEvent, "id" | "pubkey" | "sig">
+type Nip04 = {
   encrypt(pubkey: string, plaintext: string): Promise<string>
   decrypt(pubkey: string, ciphertext: string): Promise<string>
 }
-type NappNip44 = NappNip04
-type NappNostrSigner = {
+type Nip44 = Nip04
+type NostrSigner = {
   getPublicKey(): Promise<string>
-  signEvent(event: NappEventTemplate): Promise<NappNostrEvent>
-  nip04: NappNip04
-  nip44: NappNip44
+  signEvent(event: EventTemplate): Promise<NostrEvent>
+  nip04: Nip04
+  nip44: Nip44
 }
-type NappNostrDB = {
-  add(event: NappNostrEvent): Promise<void>
-  query(filters: unknown): Promise<NappNostrEvent[]>
+type NostrDB = {
+  add(event: NostrEvent): Promise<void>
+  query(filters: unknown): Promise<NostrEvent[]>
   count(filters: unknown): Promise<number>
-  event(id: string): Promise<NappNostrEvent | undefined>
+  event(id: string): Promise<NostrEvent | undefined>
   remove(ids: string[]): Promise<string[]>
   replaceable(kind: number, author: string, identifier?: string): Promise<NostrEvent | undefined>
   supports(): string[]
 }
-type NappListResult<T> = { event: NappNostrEvent | null; items: T[] }
+type ListResult<T> = { event: NostrEvent | null; items: T[] }
 // What window.napp.nip19.decode hands back for a nevent / naddr — accepted
 // directly by utils.loadEvent in place of the encoded code.
-type NappEventPointer = { id: string; relays?: string[]; author?: string; kind?: number }
-type NappAddressPointer = {
+type EventPointer = { id: string; relays?: string[]; author?: string; kind?: number }
+type AddressPointer = {
   identifier: string
   pubkey: string
   kind: number
   relays?: string[]
 }
-type NappRelayItem = { url: string; read: boolean; write: boolean }
-type NappFeedHandle = { close(): void }
-type NappRelayHealth = {
+type RelayItem = { url: string; read: boolean; write: boolean }
+type FeedHandle = { close(): void }
+type RelayHealth = {
   url: string
   // online: a monitor checked it in the last 2 hours; offline: checked this
   // week, not since; unknown: no monitor checked it this week
@@ -59,61 +59,61 @@ type NappRelayHealth = {
   // place in the launcher's ranking across the user's follows, 0 first
   rank: number | null
 }
-type NappFeeds = {
+type Feeds = {
   profile(
     pubkey: string,
     kinds: number[],
-    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    cb: (events: NostrEvent[], synced: boolean) => void,
     opts?: object
-  ): NappFeedHandle
+  ): FeedHandle
   following(
     source: string,
     kinds: number[],
-    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    cb: (events: NostrEvent[], synced: boolean) => void,
     opts?: object
-  ): NappFeedHandle
+  ): FeedHandle
   inbox(
     pubkey: string | string[],
     kinds: number[],
-    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    cb: (events: NostrEvent[], synced: boolean) => void,
     opts?: object
-  ): NappFeedHandle
+  ): FeedHandle
   outbox(
     pubkeys: string | string[],
     kinds: number[],
-    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    cb: (events: NostrEvent[], synced: boolean) => void,
     opts?: object
-  ): NappFeedHandle
+  ): FeedHandle
   relay(
     relays: string[],
     kinds: number[],
-    cb: (events: NappNostrEvent[], synced: boolean) => void,
+    cb: (events: NostrEvent[], synced: boolean) => void,
     opts?: object
-  ): NappFeedHandle
+  ): FeedHandle
 }
-type NappUtils = {
-  loadRelayList(pubkey: string): Promise<NappListResult<NappRelayItem>>
-  loadFollowsList(pubkey: string): Promise<NappListResult<string>>
-  loadMuteList(pubkey: string): Promise<NappListResult<string>>
-  loadBookmarks(pubkey: string): Promise<NappListResult<string>>
-  loadPins(pubkey: string): Promise<NappListResult<string>>
-  loadBlossomServers(pubkey: string): Promise<NappListResult<string>>
-  loadEmojis(pubkey: string): Promise<NappListResult<string>>
-  loadFavoriteRelays(pubkey: string): Promise<NappListResult<string>>
-  loadBlockedRelays(pubkey: string): Promise<NappListResult<string>>
-  loadSearchRelays(pubkey: string): Promise<NappListResult<string>>
-  loadDmRelays(pubkey: string): Promise<NappListResult<string>>
-  loadWikiAuthors(pubkey: string): Promise<NappListResult<string>>
-  loadWikiRelays(pubkey: string): Promise<NappListResult<string>>
-  loadFavoriteFollowSets(pubkey: string): Promise<NappListResult<unknown>>
-  loadFavoriteScrolls(pubkey: string): Promise<NappListResult<unknown>>
-  loadProfileBadges(pubkey: string): Promise<NappListResult<unknown>>
-  loadSimpleGroups(pubkey: string): Promise<NappListResult<unknown>>
-  loadGitAuthors(pubkey: string): Promise<NappListResult<string>>
-  loadGitRepositories(pubkey: string): Promise<NappListResult<string>>
-  loadMediaFollows(pubkey: string): Promise<NappListResult<string>>
-  loadFavoritePodcasts(pubkey: string): Promise<NappListResult<string>>
-  loadAuthoredPodcasts(pubkey: string): Promise<NappListResult<string>>
+type Utils = {
+  loadRelayList(pubkey: string): Promise<ListResult<RelayItem>>
+  loadFollowsList(pubkey: string): Promise<ListResult<string>>
+  loadMuteList(pubkey: string): Promise<ListResult<string>>
+  loadBookmarks(pubkey: string): Promise<ListResult<string>>
+  loadPins(pubkey: string): Promise<ListResult<string>>
+  loadBlossomServers(pubkey: string): Promise<ListResult<string>>
+  loadEmojis(pubkey: string): Promise<ListResult<string>>
+  loadFavoriteRelays(pubkey: string): Promise<ListResult<string>>
+  loadBlockedRelays(pubkey: string): Promise<ListResult<string>>
+  loadSearchRelays(pubkey: string): Promise<ListResult<string>>
+  loadDmRelays(pubkey: string): Promise<ListResult<string>>
+  loadWikiAuthors(pubkey: string): Promise<ListResult<string>>
+  loadWikiRelays(pubkey: string): Promise<ListResult<string>>
+  loadFavoriteFollowSets(pubkey: string): Promise<ListResult<unknown>>
+  loadFavoriteScrolls(pubkey: string): Promise<ListResult<unknown>>
+  loadProfileBadges(pubkey: string): Promise<ListResult<unknown>>
+  loadSimpleGroups(pubkey: string): Promise<ListResult<unknown>>
+  loadGitAuthors(pubkey: string): Promise<ListResult<string>>
+  loadGitRepositories(pubkey: string): Promise<ListResult<string>>
+  loadMediaFollows(pubkey: string): Promise<ListResult<string>>
+  loadFavoritePodcasts(pubkey: string): Promise<ListResult<string>>
+  loadAuthoredPodcasts(pubkey: string): Promise<ListResult<string>>
   fetchFavoriteRelaysWithSets(pubkey: string): Promise<unknown[]>
   fetchEmojisWithSets(pubkey: string): Promise<unknown[]>
   fetchFavoriteFollowSetsWithSets(pubkey: string): Promise<unknown[]>
@@ -125,14 +125,14 @@ type NappUtils = {
   searchUserLocal(term: string): Promise<unknown[]>
   searchUser(term: string): Promise<unknown[]>
   loadEvent(
-    code: string | NappEventPointer | NappAddressPointer,
+    code: string | EventPointer | AddressPointer,
     relays?: string[],
     author?: string
-  ): Promise<NappNostrEvent | null>
-  loadEvents(ids: string[]): Promise<NappNostrEvent[]>
-  verifyEvent(event: NappNostrEvent): Promise<boolean>
+  ): Promise<NostrEvent | null>
+  loadEvents(ids: string[]): Promise<NostrEvent[]>
+  verifyEvent(event: NostrEvent): Promise<boolean>
   generateKey(): Promise<{ sk: string; pk: string }>
-  signWithKey(event: NappEventTemplate, sk: string): Promise<NappNostrEvent>
+  signWithKey(event: EventTemplate, sk: string): Promise<NostrEvent>
   saveFile(
     name: string,
     data: Blob | ArrayBuffer | ArrayBufferView,
@@ -140,14 +140,14 @@ type NappUtils = {
   ): Promise<{ name: string; size: number }>
   copyText(text: string): Promise<{ length: number }>
   publish(
-    event: NappNostrEvent,
+    event: NostrEvent,
     relays?: string[]
   ): Promise<{ published: number; failed: number; relays: Record<string, unknown> }>
 }
 // The kit, with `requires: ["ui"]`: the launcher's controls as elements wearing
 // its classes. Appearance is the class's; layout (width, margins, placement)
 // is the parent's.
-type NappUiButtonOpts = {
+type UiButtonOpts = {
   label?: string
   onClick?: (e: MouseEvent) => void
   variant?: "primary" | "outline" | "danger" | "warning" | "ghost" | "link"
@@ -158,7 +158,7 @@ type NappUiButtonOpts = {
   icon?: string
   class?: string
 }
-type NappUiCheckOpts = {
+type UiCheckOpts = {
   checked?: boolean
   title?: string
   onChange?: (checked: boolean) => void
@@ -168,17 +168,17 @@ type NappUiCheckOpts = {
   // a dimmed line under the label
   note?: string
 }
-type NappUiTabs<T extends string> = HTMLDivElement & {
+type UiTabs<T extends string> = HTMLDivElement & {
   select(value: T): void // move the selection without reporting it
   readonly value: T | undefined
 }
-type NappUiList<T> = HTMLDivElement & {
+type UiList<T> = HTMLDivElement & {
   add(item: T): HTMLDivElement
   delete(item: T): void
   items: T[] // in order; assign to replace them all
 }
-type NappUi = {
-  button(opts?: NappUiButtonOpts): HTMLButtonElement
+type Ui = {
+  button(opts?: UiButtonOpts): HTMLButtonElement
   // selectable: primary while active, ghost otherwise; the label truncates
   chip(opts: {
     label: string
@@ -204,7 +204,7 @@ type NappUi = {
     // blocks sharing the row, the selected one filled: a window's sections
     segmented?: boolean
     class?: string
-  }): NappUiTabs<T>
+  }): UiTabs<T>
   // an inline svg, 1em, in currentColor; the names are the keys of `icons`
   icon(name: string): SVGElement
   // the glyphs icon() draws, the body of a 16×16 viewBox each; add your own
@@ -264,10 +264,10 @@ type NappUi = {
     note?: string
     class?: string
   }): HTMLLabelElement
-  check(opts: NappUiCheckOpts & { label: string }): HTMLLabelElement
-  check(opts?: NappUiCheckOpts): HTMLInputElement
-  radio(opts: NappUiCheckOpts & { name: string; label: string }): HTMLLabelElement
-  radio(opts: NappUiCheckOpts & { name: string }): HTMLInputElement
+  check(opts: UiCheckOpts & { label: string }): HTMLLabelElement
+  check(opts?: UiCheckOpts): HTMLInputElement
+  radio(opts: UiCheckOpts & { name: string; label: string }): HTMLLabelElement
+  radio(opts: UiCheckOpts & { name: string }): HTMLInputElement
   // one of N, labelled, as a group; .value reads and sets the pick
   radios<T extends string>(opts: {
     name: string
@@ -305,7 +305,7 @@ type NappUi = {
     add?: { label: string; placeholder?: string; onAdd: (value: string) => string | void }
     empty?: string
     class?: string
-  }): NappUiList<T>
+  }): UiList<T>
   // plain elements for the glue between the parts
   el<K extends keyof HTMLElementTagNameMap>(
     tag: K,
@@ -330,10 +330,10 @@ type Napp = {
   close(): void
   link(url: string): void
   log(message: string): void
-  relays: { health(urls: string[]): Promise<NappRelayHealth[]> }
-  feeds: NappFeeds
-  utils: NappUtils
-  ui: NappUi
+  relays: { health(urls: string[]): Promise<RelayHealth[]> }
+  feeds: Feeds
+  utils: Utils
+  ui: Ui
   nip19: {
     decode(value: string): unknown
     npubEncode(hex: string): string
@@ -350,7 +350,7 @@ type Napp = {
 }
 
 interface Window {
-  nostr: NappNostrSigner
-  nostrdb: NappNostrDB
+  nostr: NostrSigner
+  nostrdb: NostrDB
   napp: Napp
 }
