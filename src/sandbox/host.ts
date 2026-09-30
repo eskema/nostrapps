@@ -78,7 +78,9 @@ import {
   neventEncode,
   noteEncode,
   nprofileEncode,
-  npubEncode
+  npubEncode,
+  type AddressPointer,
+  type EventPointer
 } from "@nostr/tools/nip19"
 import { verifyEvent } from "../verify.js"
 import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
@@ -5139,12 +5141,113 @@ const LOAD_EVENT_BACKOFF_MAX_MS = 2 * 60_000
 const loadEventInflight = new Map<string, Promise<NostrEvent | null>>()
 const loadEventMisses = new Map<string, { until: number; wait: number }>()
 
+// Whatever a napp had to hand over as "the reference to load": a nip19 code as
+// pasted (padded, or as a NIP-21 `nostr:` URI), a bare hex id — or, when it
+// already decoded the reference and has the pointer in hand, an EventPointer or
+// AddressPointer. `window.napp.nip19.decode` hands out exactly these two shapes.
+export type EventCode = string | EventPointer | AddressPointer
+
+type ResolvedCode = {
+  id?: string
+  kind?: number
+  author?: string
+  identifier?: string
+  relayHints: string[]
+  isReplaceable: boolean
+}
+
+// The pointer `code` names, with the caller's relays/author folded in as hints.
+// Throws only on a nip19 code that won't bech32-decode (the caller's promise
+// rejects, as it always has).
+function resolveCode(params: {
+  code: EventCode
+  relays?: string[]
+  author?: string
+}): ResolvedCode {
+  const code = params.code
+  const relayHints: string[] = Array.isArray(params.relays) ? [...params.relays] : []
+  // A napp hands these straight in, so keep only real relay URLs — pool.querySync
+  // would choke on anything else.
+  const addRelays = (relays: unknown) => {
+    if (!Array.isArray(relays)) return
+    for (const u of relays) if (typeof u === "string" && u) relayHints.push(u)
+  }
+  const out: ResolvedCode = { relayHints, isReplaceable: false }
+
+  if (code && typeof code === "object") {
+    // A pointer from window.napp.nip19: `identifier` is what tells an
+    // AddressPointer from an EventPointer (an naddr may carry an empty d tag).
+    if ("identifier" in code) {
+      out.isReplaceable = true
+      out.identifier = String(code.identifier ?? "")
+      out.author = code.pubkey
+      out.kind = code.kind
+      addRelays(code.relays)
+    } else {
+      out.id = code.id
+      out.kind = code.kind
+      out.author = code.author || params.author
+      addRelays(code.relays)
+    }
+    return out
+  }
+
+  const s = String(code ?? "").trim().replace(/^nostr:/i, "")
+  if (s.startsWith("nevent1")) {
+    const { data } = decode(s)
+    const ptr = data as { id: string; relays?: string[]; author?: string; kind?: number }
+    out.id = ptr.id
+    addRelays(ptr.relays)
+    out.author = ptr.author || params.author
+    out.kind = ptr.kind
+  } else if (s.startsWith("naddr1")) {
+    const { data } = decode(s)
+    const ptr = data as { identifier: string; pubkey: string; kind: number; relays?: string[] }
+    out.isReplaceable = true
+    out.identifier = ptr.identifier
+    out.author = ptr.pubkey
+    out.kind = ptr.kind
+    addRelays(ptr.relays)
+  } else if (s.startsWith("note1")) {
+    // Bare note reference — the decoded data IS the hex event id.
+    out.id = decode(s).data as string
+  } else {
+    out.id = s
+    out.author = params.author
+  }
+  return out
+}
+
+// One cache key per pointer. Built from what the code RESOLVES to, not from the
+// code itself: a napp asking with a nevent1 and another asking with the decoded
+// pointer want the same event and must share one lookup (and one backoff).
+function loadEventKey(params: {
+  code: EventCode
+  relays?: string[]
+  author?: string
+}): string {
+  try {
+    const r = resolveCode(params)
+    return JSON.stringify([
+      r.kind ?? null,
+      r.author ?? "",
+      r.identifier ?? null,
+      r.id ?? null,
+      r.relayHints
+    ])
+  } catch {
+    // Undecodable nip19 code — nothing but the raw text to key on. fetchEvent
+    // rejects for it anyway, so this key is never worth caching against.
+    return JSON.stringify(["raw", params?.code, params?.relays ?? [], params?.author ?? ""])
+  }
+}
+
 export function loadEvent(params: {
-  code: string
+  code: EventCode
   relays?: string[]
   author?: string
 }): Promise<NostrEvent | null> {
-  const key = JSON.stringify([params?.code, params?.relays ?? [], params?.author ?? ""])
+  const key = loadEventKey(params)
   const miss = loadEventMisses.get(key)
   if (miss && Date.now() < miss.until) return Promise.resolve(null)
   let p = loadEventInflight.get(key)
@@ -5168,42 +5271,18 @@ export function loadEvent(params: {
 }
 
 async function fetchEvent(params: {
-  code: string
+  code: EventCode
   relays?: string[]
   author?: string
 }): Promise<NostrEvent | null> {
-  let id: string | undefined
-  let kind: number | undefined
-  let author: string | undefined
-  let identifier: string | undefined
-  let relayHints: string[] = params.relays || []
-
-  // References arrive as pasted: padded, or as NIP-21 `nostr:` URIs.
-  const code = params.code.trim().replace(/^nostr:/i, "")
-
-  let isReplaceable = false
-  if (code.startsWith("nevent1")) {
-    const { data } = decode(code)
-    const ptr = data as { id: string; relays?: string[]; author?: string; kind?: number }
-    id = ptr.id
-    if (ptr.relays) relayHints.push(...ptr.relays)
-    author = ptr.author || params.author
-    kind = ptr.kind
-  } else if (code.startsWith("naddr1")) {
-    isReplaceable = true
-    const { data } = decode(code)
-    const ptr = data as { identifier: string; pubkey: string; kind: number; relays?: string[] }
-    identifier = ptr.identifier
-    author = ptr.pubkey
-    kind = ptr.kind
-    if (ptr.relays) relayHints.push(...ptr.relays)
-  } else if (code.startsWith("note1")) {
-    // Bare note reference — the decoded data IS the hex event id.
-    id = decode(code).data as string
-  } else {
-    id = code
-    author = params.author
-  }
+  const {
+    id,
+    kind,
+    author,
+    identifier,
+    relayHints,
+    isReplaceable
+  } = resolveCode(params)
 
   // Validate BEFORE any store/relay query. A malformed id/author (a note1 that
   // didn't decode, junk hex, …) panics redstore's wasm and — because its

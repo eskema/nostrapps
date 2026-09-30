@@ -35,6 +35,15 @@ type NappNostrDB = {
   supports(): string[]
 }
 type NappListResult<T> = { event: NappNostrEvent | null; items: T[] }
+// What window.napp.nip19.decode hands back for a nevent / naddr — accepted
+// directly by utils.loadEvent in place of the encoded code.
+type NappEventPointer = { id: string; relays?: string[]; author?: string; kind?: number }
+type NappAddressPointer = {
+  identifier: string
+  pubkey: string
+  kind: number
+  relays?: string[]
+}
 type NappRelayItem = { url: string; read: boolean; write: boolean }
 type NappFeedHandle = { close(): void }
 type NappRelayHealth = {
@@ -115,7 +124,11 @@ type NappUtils = {
   loadNostrUser(request: string | { pubkey: string; relays?: string[] }): Promise<unknown>
   searchUserLocal(term: string): Promise<unknown[]>
   searchUser(term: string): Promise<unknown[]>
-  loadEvent(code: string, relays?: string[], author?: string): Promise<NappNostrEvent | null>
+  loadEvent(
+    code: string | NappEventPointer | NappAddressPointer,
+    relays?: string[],
+    author?: string
+  ): Promise<NappNostrEvent | null>
   loadEvents(ids: string[]): Promise<NappNostrEvent[]>
   verifyEvent(event: NappNostrEvent): Promise<boolean>
   generateKey(): Promise<{ sk: string; pk: string }>

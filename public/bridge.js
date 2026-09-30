@@ -614,6 +614,8 @@
       // Remote NIP-50 search for kind:0 on the user's search relays.
       searchUser: term => rpc("napp.searchUser", term),
       // ── event fetching ────────────────────────────
+      // code: nip19 code / `nostr:` URI / bare hex id, or a decoded pointer
+      // ({id,…} for nevent, {identifier,pubkey,kind,…} for naddr)
       loadEvent: (code, relays, author) => rpc("napp.loadEvent", { code, relays, author }),
       // batched by-id fetch (one REQ over the id union); invalid ids dropped
       loadEvents: ids => rpc("napp.loadEvents", ids),
