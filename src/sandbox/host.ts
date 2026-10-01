@@ -119,7 +119,7 @@ import {
 } from "../outbox.js"
 import { relayHealth, relayUrl } from "../relay-health.js"
 import { debounce, HEX64, isHex64 } from "../utils.js"
-import { code, codeBlock } from "../system-napps/ui.js"
+import { authors, code, codeBlock } from "../system-napps/ui.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -5471,9 +5471,13 @@ async function publishEventToRelays(
   switch (event.kind) {
     case 0:
       loadNostrUser({ pubkey: event.pubkey, refreshStyle: event }).catch(() => {})
+      try {
+        authors.set(event.pubkey, JSON.parse(event.content)) // the kit's authors: repainted
+      } catch {}
       break
     case 3:
       loadFollowsList(event.pubkey, undefined, event).catch(() => {})
+      if (event.pubkey === getPubkey()) authors.viewer(event) // the viewer's petnames and follows
       break
     case 10000:
       loadMuteList(event.pubkey, undefined, event).catch(() => {})

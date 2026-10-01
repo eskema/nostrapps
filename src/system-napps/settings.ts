@@ -13,17 +13,28 @@ import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
 import { loginControls } from "../login.js"
 import { nappNameEl } from "../napp-name.js"
-import { badge, busy, button, check, code, details, empty, item, itemList } from "./ui.js"
+import {
+  author,
+  badge,
+  busy,
+  button,
+  check,
+  code,
+  details,
+  empty,
+  item,
+  itemList
+} from "./ui.js"
 import { backupSection } from "./backup-section.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): void } = {}) {
   container.innerHTML = `
     <div class="settings-panel">
-      <details class="ui-details settings-user" open>
+      <details class="ui-details sticky settings-user" open>
         <summary>user</summary>
         <div class="settings-account">
           <div class="settings-account-connected" hidden>
-            <nostr-name class="settings-pubkey" style="cursor:pointer"></nostr-name>
+            <span class="settings-pubkey"></span>
             <span class="ui-badge settings-account-type"></span>
             <button type="button" class="btn btn-outline settings-disconnect-btn">disconnect</button>
           </div>
@@ -58,11 +69,15 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
       startOutbox(pk).catch(() => {})
       connectedEl.hidden = false
       disconnectedEl.hidden = true
-      pubkeyEl.setAttribute("pubkey", pk)
-      pubkeyEl.onclick = e => {
-        e.stopPropagation()
-        dispatchAction("settings", "profile", pk).catch(() => {})
-      }
+      pubkeyEl.replaceChildren(
+        author(pk, {
+          picture: "s", // the row's size: it shares the line with a button
+          onClick: (_pubkey, e) => {
+            e.stopPropagation()
+            dispatchAction("settings", "profile", pk).catch(() => {})
+          }
+        })
+      )
       const type = ctx.account.getType?.()
       accountTypeEl.textContent = type === "nip46" ? "bunker" : "extension"
     } else {
@@ -100,13 +115,13 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   const panel = container.querySelector(".settings-panel") as HTMLElement
   const buildRow = container.querySelector(".settings-build-row") as HTMLElement
 
-  const permDetails = details({ summary: "permissions", class: "settings-permissions" })
+  const permDetails = details({ summary: "permissions", sticky: true, class: "settings-permissions" })
   const permSummary = permDetails.querySelector("summary") as HTMLElement
   const decisionsEl = document.createElement("div")
   decisionsEl.className = "perm-list"
   permDetails.appendChild(decisionsEl)
 
-  const actionsDetails = details({ summary: "actions", class: "settings-actions" })
+  const actionsDetails = details({ summary: "actions", sticky: true, class: "settings-actions" })
   const actionsSummary = actionsDetails.querySelector("summary") as HTMLElement
   const handlersEl = document.createElement("div")
   handlersEl.className = "perm-list"
@@ -114,7 +129,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
 
   // ─── relays (auth policy) section ───────────────────────────────
 
-  const relaysDetails = details({ summary: "relays", class: "settings-relays" })
+  const relaysDetails = details({ summary: "relays", sticky: true, class: "settings-relays" })
   const relaysSummary = relaysDetails.querySelector("summary") as HTMLElement
   const relaysEl = document.createElement("div")
   relaysEl.className = "perm-list"

@@ -1,7 +1,5 @@
-import "nostr-web-components" // registers <nostr-picture> / <nostr-name>
-import { bareNostrUser } from "@nostr/gadgets/metadata"
 import type { AppType } from "../types.js"
-import { appIcon, badge, ring } from "./ui.js"
+import { appIcon, author, badge, ring } from "./ui.js"
 
 // ─── Unified app card ────────────────────────────────────────────
 // The one card shape the app shows for a napp: the Apps window renders it in
@@ -10,11 +8,6 @@ import { appIcon, badge, ring } from "./ui.js"
 // napp with it. Its own module so none of those imports the others.
 
 export const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
-
-// Author display names by pubkey, filled as profiles land (apps.ts, in
-// loadAuthorNames): a card built afterwards shows the name at once, instead
-// of the short npub its <nostr-name> would flash first.
-export const authorDisplayNames = new Map<string, string>()
 
 export interface AppCardOpts {
   nappId: string
@@ -91,28 +84,22 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
   // The type reads inline as part of the author line — "<type> from <author>"
   // (or "<type> · <label>" for dev/local), same style as the "from" text.
   if (o.authorPubkey) {
-    const author = document.createElement("span")
-    author.className = "apps-author"
-    author.dataset.type = o.type // CSS ::before renders "<type> from "
-    if (o.onAuthorClick) {
-      author.style.cursor = "pointer"
-      author.addEventListener("click", e => {
-        e.stopPropagation()
-        o.onAuthorClick!()
+    const line = document.createElement("span")
+    line.className = "apps-author"
+    line.dataset.type = o.type // CSS ::before renders "<type> from "
+    // The kit's author: its picture shows on the detail, not on a card in a
+    // list (CSS). A link only where a click has somewhere to go.
+    line.append(
+      author(o.authorPubkey, {
+        picture: "s",
+        link: !!o.onAuthorClick,
+        onClick: (_pubkey, e) => {
+          e.stopPropagation()
+          o.onAuthorClick!()
+        }
       })
-    }
-    const pic = document.createElement("nostr-picture")
-    pic.className = "apps-author-pic"
-    pic.setAttribute("pubkey", o.authorPubkey)
-    const name = document.createElement("nostr-name")
-    name.className = "apps-author-name"
-    name.setAttribute("pubkey", o.authorPubkey)
-    // Text at once — the name if it's known, else the short npub: the element
-    // only fills its own in later, and an empty line would jump when it did.
-    name.textContent =
-      authorDisplayNames.get(o.authorPubkey) ?? bareNostrUser(o.authorPubkey).shortName
-    author.append(pic, name)
-    card.appendChild(author)
+    )
+    card.appendChild(line)
   } else {
     const label = document.createElement("span")
     label.className = "apps-author apps-author-label"

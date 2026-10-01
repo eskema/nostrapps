@@ -49,7 +49,17 @@ import {
   readNappFiles,
   setNappLogSink
 } from "./sandbox/host.js"
-import { appIcon, badge, button, chip, empty, icon, tab } from "./system-napps/ui.js"
+import {
+  appIcon,
+  author as authorEl,
+  authors as kitAuthors,
+  badge,
+  button,
+  chip,
+  empty,
+  icon,
+  tab
+} from "./system-napps/ui.js"
 import { nappNameText } from "./napp-name.js"
 import { openDialog } from "./dialog.js"
 import {
@@ -126,11 +136,12 @@ import {
   actionList
 } from "./system-napps/index.js"
 import { pool } from "@nostr/gadgets/global"
-import { bareNostrUser, loadNostrUser } from "@nostr/gadgets/metadata"
+import { loadNostrUser } from "@nostr/gadgets/metadata"
+import { loadFollowsList } from "@nostr/gadgets/lists"
 import type { NostrEvent } from "@nostr/tools/pure"
-import { naddrEncode } from "@nostr/tools/nip19"
+import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
 import * as relayAuth from "./relay-auth.js"
-import { buildUserIndex } from "./user-search.js"
+import { buildUserIndex, loadNostrUserIndexed } from "./user-search.js"
 import { verifyEvent } from "./verify.js"
 
 pool.trackRelays = true
@@ -395,6 +406,25 @@ setLoginStatusSink(setStatus)
 setNappLogSink((source, msg) =>
   pushLog(source, `[${source === "launcher" ? source : nappNameText(source)}] ${msg}`)
 )
+
+// The kit's author(): profiles through the loader that feeds the search
+// index, a click opens the profile, and the account's follow list gives the
+// petnames and who is followed.
+kitAuthors.use({
+  load: loadNostrUserIndexed,
+  npub: npubEncode,
+  open: pubkey => void handlers.dispatchAction("launcher", "profile", pubkey).catch(() => {})
+})
+function viewerFollows(pk: string | null) {
+  if (!pk) return kitAuthors.viewer(null)
+  loadFollowsList(pk)
+    .then(list => {
+      if (account.getPubkey() === pk) kitAuthors.viewer(list.event)
+    })
+    .catch(() => {})
+}
+account.subscribe(viewerFollows)
+viewerFollows(account.getPubkey())
 
 async function disconnect(): Promise<void> {
   if (account.getType() === "nip46") {
@@ -1064,7 +1094,6 @@ type Row = {
   sig: string // what the row was built from — a change means a rebuild
   base: string // the searchable text, minus the author's name
   search: string
-  nameEl: HTMLElement | null // the author's name, patched when it lands
 }
 const rows = new Map<string, Row>()
 
@@ -1336,10 +1365,10 @@ function prewarmSuggestions() {
   for (const app of apps) iconSrcFor(app)
 }
 
-// Authors by pubkey: the name for the "from <author>" line, and the text a
-// typed filter matches against. A row built before its author is in shows the
-// short npub; authorLanded patches the name in when the profile arrives.
-type Author = { display: string; search: string }
+// Authors by pubkey: the text a typed filter matches against. The name on the
+// "from <author>" line is the kit's author, which fills itself in; the profile
+// loaded here is handed to it, and authorLanded adds the name to the search.
+type Author = { search: string }
 const authors = new Map<string, Author | null>() // null: queued or in flight
 function authorFor(pubkey: string, front = false): Author | null {
   const known = authors.get(pubkey)
@@ -1353,8 +1382,8 @@ function authorFor(pubkey: string, front = false): Author | null {
     () =>
       loadNostrUser(pubkey)
         .then(u => {
+          kitAuthors.set(pubkey, u)
           const author = {
-            display: u.shortName,
             search: [u.metadata?.name, u.metadata?.display_name, u.metadata?.nip05, u.shortName]
               .filter(Boolean)
               .join(" ")
@@ -1369,13 +1398,12 @@ function authorFor(pubkey: string, front = false): Author | null {
   return null
 }
 
-// Patches the name into every row by that author, and into its search text so
-// a filter being typed can match it — no rebuild.
+// Puts the name into the search text of every row by that author, so a filter
+// being typed can match it — no rebuild.
 function authorLanded(pubkey: string, author: Author) {
   let any = false
   for (const row of rows.values()) {
     if (row.item.author !== pubkey) continue
-    if (row.nameEl) row.nameEl.textContent = author.display
     row.search = `${row.base} ${author.search}`
     any = true
   }
@@ -1485,7 +1513,7 @@ function applyFilter() {
 function buildRow(item: SuggestionItem, sig: string): Row {
   const el = document.createElement("div")
   el.className = "suggestion"
-  const row: Row = { item, el, sig, base: itemSearchText(item), search: "", nameEl: null }
+  const row: Row = { item, el, sig, base: itemSearchText(item), search: "" }
   const author = item.author ? authorFor(item.author, true) : null
   row.search = author ? `${row.base} ${author.search}` : row.base
 
@@ -1534,13 +1562,8 @@ function buildRow(item: SuggestionItem, sig: string): Row {
       trail = document.createElement("span")
       trail.className = "sugg-author"
       if (item.author) {
-        // The name from the cache, or the short npub until the profile lands
-        // (authorLanded patches it in).
-        const name = document.createElement("span")
-        name.className = "sugg-author-name"
-        name.textContent = author ? author.display : bareNostrUser(item.author).shortName
-        row.nameEl = name
-        trail.append(`${item.appType} from `, name)
+        // The kit's author, not a link: the row is what's clicked.
+        trail.append(`${item.appType} from `, authorEl(item.author, { link: false }))
       } else {
         trail.textContent = `${item.appType} · ${item.authorLabel}`
       }

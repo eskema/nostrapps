@@ -21,6 +21,15 @@ const JS_HEAD = `// napp-ui.js: the nostrapps kit's helpers as window.napp.ui, f
 // launcher there is no bridge, so the script makes window.napp itself.
 `
 
+// author() finds its profiles, npubs and the profile action through the
+// bridge, looked up when used: the bridge may land after this script.
+const AUTHORS = `__nappUi.authors.use({
+  load: pubkey => window.napp.utils.loadNostrUser(pubkey),
+  npub: pubkey => window.napp.nip19.npubEncode(pubkey),
+  open: pubkey => window.napp.action("profile", pubkey).catch(() => {})
+})
+`
+
 // The kit as napps get it: src/ui.css as /napp-ui.css, the launcher's fonts
 // inlined and the icon glyphs as classes, and src/system-napps/ui.ts as
 // /napp-ui.js, its exports on window.napp.ui. The service worker injects both
@@ -89,7 +98,7 @@ ${names.map(n => `.ui-icon-${n}`).join(",\n")} {
       globalName: "__nappUi",
       sourcemap: false
     })
-    return `${JS_HEAD}(() => {\n${code}(window.napp ||= {}).ui = __nappUi\n})()\n`
+    return `${JS_HEAD}(() => {\n${code}(window.napp ||= {}).ui = __nappUi\n${AUTHORS}})()\n`
   }
   return {
     name: "napp-ui",

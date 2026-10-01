@@ -3,10 +3,8 @@
 // prompt, toast and list that names an app says "<title> from <author>", the
 // same line the Apps card shows. (host.ts has a nappLabel of its own — that
 // one is the origin label, nothing to do with these.)
-import "nostr-web-components" // registers <nostr-name>
-import { bareNostrUser } from "@nostr/gadgets/metadata"
 import { getInstalledApp } from "./persistence.js"
-import { authorDisplayNames } from "./system-napps/card.js"
+import { author as authorEl, authors } from "./system-napps/ui.js"
 
 export interface NappName {
   title: string
@@ -39,8 +37,8 @@ export function nappName(nappId: string): NappName {
   }
 }
 
-// "<title> from <author>" as a node, so the author's name fills itself in when
-// the profile lands. The raw id rides along as the title attribute — the only
+// "<title> from <author>" as a node: the author is the kit's, so the name
+// fills itself in when the profile lands. The raw id rides along as the title attribute — the only
 // place it is still worth having.
 export function nappNameEl(nappId: string): HTMLElement {
   const { title, author, authorLabel } = nappName(nappId)
@@ -59,14 +57,9 @@ export function nameEl(title: string, author?: string | null): HTMLElement {
   const name = document.createElement("strong")
   name.textContent = title
   el.appendChild(name)
-  if (author) {
-    const who = document.createElement("nostr-name")
-    who.setAttribute("pubkey", author)
-    // Text at once — the name if it's known, else the short npub: the element
-    // only fills its own in later, and an empty gap would jump when it did.
-    who.textContent = authorDisplayNames.get(author) ?? bareNostrUser(author).shortName
-    el.append(" from ", who)
-  }
+  // The kit's author, not a link: this line sits in prompts and rows that have
+  // their own clicks.
+  if (author) el.append(" from ", authorEl(author, { link: false }))
   return el
 }
 
@@ -74,9 +67,6 @@ export function nameEl(title: string, author?: string | null): HTMLElement {
 // log). No live update: whatever the author's name is right now.
 export function nappNameText(nappId: string): string {
   const { title, author, authorLabel } = nappName(nappId)
-  if (author) {
-    const who = authorDisplayNames.get(author) ?? bareNostrUser(author).shortName
-    return `${title} from ${who}`
-  }
+  if (author) return `${title} from ${authors.name(author)}`
   return authorLabel ? `${title} (${authorLabel})` : title
 }

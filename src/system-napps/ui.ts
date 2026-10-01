@@ -9,6 +9,8 @@
 //   • tab({ label, active, onClick, … })        → a `.ui-tab` text tab
 //   • icon(name, { flush })                     → an inline `<svg>` (currentColor); flush: its ink at the edge
 //   • appIcon({ src, size, fade })              → a `.ui-app-icon`, a napp's picture on a plate
+//   • author(pubkey, { picture, petname, … })   → a `.ui-author`, a person: the name, a picture
+//     when asked for; it fills itself in. authors.use/set/viewer/name feed it
 //   • details({ summary, open, … }, …children)  → a `.ui-details` disclosure; summary: text,
 //     or parts in a line; fold: `.ui-fold`, the small one under content
 //   • code(text)                                → a `.ui-code`, code in a line
@@ -18,6 +20,9 @@
 //   • class `ui-writing` on a textarea          → somewhere to write, borderless, reading size
 //   • class `ui-compact` on a list              → its text, fields, rows and buttons a size down
 //   • class `ui-divided` on anything            → a hairline between its children
+//   • sticky(el, { top, bottom })               → `.ui-sticky`: stays in view as the rest scrolls,
+//     at the top or the bottom (or both), each at an offset. Class `ui-sticky`
+//     (+ bottom, --sticky-top/--sticky-bottom) for markup; details({ sticky }) for a summary
 //   • check({ checked, onChange, … })           → a `.ui-check` checkbox
 //   • overline(text)                            → a `.ui-overline` caption
 //   • badge(text, { tone })                     → a `.ui-badge` small-caps label
@@ -77,6 +82,7 @@ export const icons: Record<string, string> = {
   pack: '<path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>',
   grid: '<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M8 2v12M2 8h12"/>',
   plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+  minus: '<path d="M3.5 8h9"/>',
   save: '<path d="M8 2.5v6M5.5 6L8 8.5 10.5 6"/><path d="M3 11v1.5h10V11"/>',
   reset: '<path d="M13 13.5V9.5a4 4 0 0 0-4-4H4"/><path d="M7 2.5 4 5.5 7 8.5"/>',
   reload: '<path d="M3.2 8a4.8 4.8 0 1 0 1.5-3.5"/><path d="M3 3v2.7h2.7"/>',
@@ -100,6 +106,7 @@ export const iconInk: Record<string, [number, number]> = {
   pack: [0.0813, 0.0813],
   grid: [0.0813, 0.0813],
   plus: [0.175, 0.175],
+  minus: [0.175, 0.175],
   save: [0.1437, 0.1437],
   reset: [0.2062, 0.1437],
   reload: [0.1437, 0.1563],
@@ -150,11 +157,12 @@ export function icon(name: string, opts: IconOpts = {}): SVGElement {
   return svg
 }
 
-export type AppIconSize = "s" | "m" | "l" | "xl"
+export type AppIconSize = "xs" | "s" | "m" | "l" | "xl"
 
 export interface AppIconOpts {
   src?: string
-  /** s: in a line of text, m: beside a name (default), l: on a card, xl: on its detail. */
+  /** xs: an author's, in a line of text; s: in a row, m: beside a name
+   *  (default), l: on a card, xl: on its detail. */
   size?: AppIconSize
   /** Ease the picture in once it has loaded, for icons that come in late. */
   fade?: boolean
@@ -164,8 +172,9 @@ export interface AppIconOpts {
 export type AppIcon = HTMLSpanElement & { img: HTMLImageElement }
 
 // A napp's picture (`.ui-app-icon`): a rounded square on a faint plate that
-// holds its place until the image lands. The <img> is .img: set its src later,
-// or listen for its error to drop the icon.
+// holds its place until the image lands. The <img> is .img, in the plate from
+// the moment it is reached for: set its src then, or listen for its error to
+// drop the icon.
 export function appIcon(opts: AppIconOpts = {}): AppIcon {
   const plate = document.createElement("span") as AppIcon
   plate.className = `ui-app-icon ui-app-icon-${opts.size || "m"}${opts.fade ? " fade" : ""}${opts.class ? ` ${opts.class}` : ""}`
@@ -173,9 +182,16 @@ export function appIcon(opts: AppIconOpts = {}): AppIcon {
   img.alt = ""
   img.addEventListener("load", () => img.classList.add("loaded"))
   img.addEventListener("error", () => img.classList.remove("loaded"))
-  if (opts.src) img.src = opts.src
-  plate.append(img)
-  plate.img = img
+  // The <img> goes in with a picture: one given here, or the first time .img
+  // is reached for to set one. Until then the plate stands alone, with no
+  // empty image in it to draw a frame.
+  Object.defineProperty(plate, "img", {
+    get: () => {
+      if (img.parentNode !== plate) plate.append(img)
+      return img
+    }
+  })
+  if (opts.src) plate.img.src = opts.src
   return plate
 }
 
@@ -316,6 +332,9 @@ export interface DetailsOpts {
   open?: boolean
   /** The small one under content (`.ui-fold`): a rule above, a dimmed summary. */
   fold?: boolean
+  /** The summary stays at the top while the content scrolls under it; an
+   *  offset keeps it that far down, under something else that sticks. */
+  sticky?: boolean | { top: number | string }
   /** Extra classes for context. */
   class?: string
 }
@@ -326,9 +345,12 @@ export interface DetailsOpts {
 // `d.querySelector("summary")!.textContent = …`.
 export function details(opts: DetailsOpts, ...children: Array<Node | string>): HTMLDetailsElement {
   const d = document.createElement("details")
-  d.className = `${opts.fold ? "ui-fold" : "ui-details"}${opts.class ? ` ${opts.class}` : ""}`
+  d.className = [opts.fold ? "ui-fold" : "ui-details", opts.sticky && "sticky", opts.class]
+    .filter(Boolean)
+    .join(" ")
   if (opts.open) d.open = true
   const s = document.createElement("summary")
+  if (opts.sticky && typeof opts.sticky === "object") s.style.setProperty("--sticky-top", stickyLength(opts.sticky.top))
   if (typeof opts.summary === "string") s.textContent = opts.summary
   else s.append(el("span", "ui-summary", ...[opts.summary].flat()))
   d.append(s, ...children)
@@ -537,7 +559,7 @@ export function overline(text: string, cls?: string): HTMLSpanElement {
 
 export interface BadgeOpts {
   /** Colors it for a state and takes the dimming off. */
-  tone?: "good" | "danger"
+  tone?: "good" | "danger" | "warn"
   title?: string
   class?: string
 }
@@ -710,6 +732,7 @@ export function addControl(opts: AddControlOpts): HTMLDivElement {
     form.className = "ui-add-form"
     const inp = input({ placeholder: opts.placeholder, class: "ui-add-input", spellcheck: false })
     inp.setAttribute("autocomplete", "off")
+    inp.setAttribute("autocapitalize", "off") // an id, a url: as typed, on a phone too
     inp.addEventListener("input", () => (error.textContent = ""))
     form.append(inp, button({ label: "add", variant: "outline", type: "submit" }))
     form.addEventListener("submit", e => {
@@ -843,6 +866,267 @@ export function spinner(cls?: string): HTMLSpanElement {
   s.setAttribute("role", "status")
   s.setAttribute("aria-label", "loading")
   return s
+}
+
+// ─── author ───────────────────────────────────────────────────────
+// A person, the same wherever one is named (`.ui-author`): the name, a picture
+// before it when asked for, and after it, when asked for, the petname and a
+// check for someone followed. The name is, in this order: the profile's name,
+// the petname the viewer gave them, the profile's display name, the short
+// npub. It shows at once with what is known and fills itself in when the
+// profile lands: every element for a pubkey is filed under it, so one arrival
+// repaints exactly those. Lookups go out a few at a time, so a long list
+// doesn't fire one per row in a burst.
+//
+// The kit has no bridge and no codec of its own; `authors.use()` gives it
+// what it needs (the launcher at startup, napp-ui.js for napps). A context
+// that already holds profiles hands them over with `authors.set()`.
+
+export interface AuthorOpts {
+  /** A picture before the name: true for the one that sits in a line of text
+   *  (xs, 1rem), or an app icon size for a bigger one (s in a row). */
+  picture?: boolean | AppIconSize
+  /** After the name, dimmed: the viewer's petname for them, when it isn't
+   *  already the name shown. */
+  petname?: boolean
+  /** After the name: a check when the viewer follows them. */
+  follows?: boolean
+  /** Text before the name: a mention's "@". */
+  prefix?: string
+  /** false: a plain element, for a row that is itself the control. */
+  link?: boolean
+  /** What a click does, instead of opening the profile. */
+  onClick?: (pubkey: string, e: MouseEvent) => void
+  class?: string
+}
+
+export interface AuthorsConfig {
+  /** The profile for a pubkey: what loadNostrUser gives, or a kind 0's content.
+   *  null: the context looks profiles up itself and hands them over with set(). */
+  load?: ((pubkey: string) => Promise<unknown>) | null
+  /** The npub for a hex pubkey. */
+  npub?: (pubkey: string) => string
+  /** What a click on an author does: open the profile. */
+  open?: (pubkey: string) => void
+}
+
+interface AuthorInfo {
+  name: string
+  displayName: string
+  picture: string
+}
+
+const authorsConfig: AuthorsConfig = {}
+const authorInfo = new Map<string, AuthorInfo>() // what a profile gave
+const authorAsked = new Map<string, number>() // when a lookup last went out
+const authorEls = new Map<string, Set<WeakRef<HTMLElement>>>() // the elements to repaint
+const authorOpts = new WeakMap<HTMLElement, AuthorOpts>()
+let authorPetnames = new Map<string, string>() // the viewer's follows: pubkey → petname, "" for none
+const authorQueue: string[] = []
+let authorTimer = 0
+const AUTHOR_PER_TICK = 32
+const AUTHOR_TICK_MS = 120
+const AUTHOR_ASK_AGAIN = 5 * 60e3 // a profile not found is asked for again after this
+
+// An element that's gone takes its entry with it.
+const authorGone = new FinalizationRegistry<[string, WeakRef<HTMLElement>]>(([pubkey, ref]) => {
+  const set = authorEls.get(pubkey)
+  if (!set) return
+  set.delete(ref)
+  if (!set.size) authorEls.delete(pubkey)
+})
+
+function authorFrom(user: unknown): AuthorInfo {
+  const u = (user && typeof user === "object" ? user : {}) as Record<string, unknown>
+  const m = (u.metadata && typeof u.metadata === "object" ? u.metadata : u) as Record<
+    string,
+    unknown
+  >
+  const text = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "")
+  const picture = text(u.image) || text(m.picture)
+  return {
+    name: text(m.name),
+    displayName: text(m.display_name),
+    picture: /^(https?:\/\/|data:image\/)/i.test(picture) ? picture : ""
+  }
+}
+
+function authorNpub(pubkey: string): string {
+  try {
+    return authorsConfig.npub?.(pubkey) || pubkey
+  } catch {
+    return pubkey
+  }
+}
+
+function authorShort(pubkey: string): string {
+  const npub = authorNpub(pubkey)
+  return npub === pubkey ? `${pubkey.slice(0, 8)}…` : `${npub.slice(0, 8)}…${npub.slice(-4)}`
+}
+
+function authorName(pubkey: string): string {
+  const info = authorInfo.get(pubkey)
+  return (
+    info?.name || authorPetnames.get(pubkey) || info?.displayName || authorShort(pubkey)
+  )
+}
+
+function authorPaint(el: HTMLElement) {
+  const pubkey = el.dataset.pubkey || ""
+  const opts = authorOpts.get(el) || {}
+  const shown = authorName(pubkey)
+  const name = el.querySelector(".ui-author-name")
+  const text = (opts.prefix || "") + shown
+  if (name && name.textContent !== text) name.textContent = text
+  el.title = authorNpub(pubkey)
+  // The picture goes in once there is one and comes out again if it fails:
+  // the plate alone holds its place, never an empty or a broken image.
+  const picture = authorInfo.get(pubkey)?.picture
+  const plate = el.querySelector<AppIcon>(".ui-app-icon")
+  if (plate && picture && plate.dataset.failed !== picture) {
+    const img = plate.img
+    if (img.getAttribute("src") !== picture) {
+      img.referrerPolicy = "no-referrer"
+      img.loading = "lazy"
+      img.onerror = () => {
+        plate.dataset.failed = img.getAttribute("src") || ""
+        img.remove()
+      }
+      img.src = picture
+    }
+  }
+  const pet = el.querySelector<HTMLElement>(".ui-author-pet")
+  if (pet) {
+    const petname = authorPetnames.get(pubkey) || ""
+    pet.textContent = petname !== shown ? petname : ""
+    pet.hidden = !pet.textContent
+  }
+  const follows = el.querySelector<HTMLElement>(".ui-author-follows")
+  if (follows) follows.hidden = !authorPetnames.has(pubkey)
+}
+
+function authorRepaint(pubkey: string) {
+  for (const ref of authorEls.get(pubkey) || []) {
+    const el = ref.deref()
+    if (el) authorPaint(el)
+  }
+}
+
+function authorAsk(pubkey: string) {
+  if (!authorsConfig.load || authorInfo.has(pubkey)) return
+  const asked = authorAsked.get(pubkey)
+  if (asked && Date.now() - asked < AUTHOR_ASK_AGAIN) return
+  authorAsked.set(pubkey, Date.now())
+  authorQueue.push(pubkey)
+  if (!authorTimer) authorTimer = window.setTimeout(authorTick, 0)
+}
+
+function authorTick() {
+  authorTimer = 0
+  for (const pubkey of authorQueue.splice(0, AUTHOR_PER_TICK)) {
+    Promise.resolve()
+      .then(() => authorsConfig.load!(pubkey))
+      .then(user => authors.set(pubkey, user))
+      .catch(() => {})
+  }
+  if (authorQueue.length) authorTimer = window.setTimeout(authorTick, AUTHOR_TICK_MS)
+}
+
+export const authors = {
+  /** Give the kit its ways in: how to load a profile, encode an npub, open a profile. */
+  use(config: AuthorsConfig) {
+    Object.assign(authorsConfig, config)
+  },
+  /** A profile that landed some other way (a feed's own lookups, a kind 0 in
+   *  hand): what loadNostrUser gives, or a kind 0's content. Nothing in it
+   *  leaves what's held alone. */
+  set(pubkey: string, user: unknown) {
+    const info = authorFrom(user)
+    if (!info.name && !info.displayName && !info.picture) return
+    authorInfo.set(pubkey, info)
+    authorRepaint(pubkey)
+  },
+  /** The viewer's follow list, a kind 3 (or null, logged out): its petnames
+   *  name people the profile doesn't, and its p tags are who is followed. */
+  viewer(follows: { tags?: unknown } | null) {
+    authorPetnames = new Map()
+    const tags = Array.isArray(follows?.tags) ? follows.tags : []
+    for (const t of tags) {
+      if (!Array.isArray(t) || t[0] !== "p" || typeof t[1] !== "string") continue
+      const pubkey = t[1].toLowerCase()
+      if (!authorPetnames.has(pubkey))
+        authorPetnames.set(pubkey, typeof t[3] === "string" ? t[3].trim() : "")
+    }
+    for (const pubkey of authorEls.keys()) authorRepaint(pubkey)
+  },
+  /** The name as text, as known right now: for a toast, a title, a filter. */
+  name(pubkey: string): string {
+    authorAsk(pubkey)
+    return authorName(pubkey)
+  },
+  /** Whether the viewer follows them. */
+  follows(pubkey: string): boolean {
+    return authorPetnames.has(pubkey)
+  }
+}
+
+export function author(pubkey: string, opts: AuthorOpts = {}): HTMLElement {
+  const link = opts.link !== false
+  const a = document.createElement(link ? "a" : "span")
+  a.className = `ui-author${opts.class ? ` ${opts.class}` : ""}`
+  a.dataset.pubkey = pubkey
+  if (link) {
+    ;(a as HTMLAnchorElement).href = "#"
+    a.addEventListener("click", e => {
+      e.preventDefault()
+      if (opts.onClick) opts.onClick(pubkey, e as MouseEvent)
+      else authorsConfig.open?.(pubkey)
+    })
+  }
+  // the plate now, its picture when there is one (authorPaint)
+  if (opts.picture) a.append(appIcon({ size: opts.picture === true ? "xs" : opts.picture }))
+  a.append(el("span", "ui-author-name"))
+  if (opts.petname) a.append(code("", "ui-author-pet"))
+  if (opts.follows) {
+    const mark = el("span", "ui-author-follows", icon("check"))
+    mark.title = "you follow them"
+    a.append(mark)
+  }
+  authorOpts.set(a, opts)
+  const ref = new WeakRef<HTMLElement>(a)
+  let set = authorEls.get(pubkey)
+  if (!set) authorEls.set(pubkey, (set = new Set()))
+  set.add(ref)
+  authorGone.register(a, [pubkey, ref])
+  authorPaint(a)
+  authorAsk(pubkey)
+  return a
+}
+
+// ─── sticky ───────────────────────────────────────────────────────
+
+export interface StickyOpts {
+  /** Stick to the top, this far from it (a number is px, a string any CSS
+   *  length). The default when neither edge is given: the top, at 0. */
+  top?: number | string
+  /** Stick to the bottom, this far from it. With top too, it sticks at both. */
+  bottom?: number | string
+}
+
+function stickyLength(v: number | string): string {
+  return typeof v === "number" ? `${v}px` : v
+}
+
+// Keep an element in view while what's around it scrolls (`.ui-sticky`): at
+// the top, at the bottom, or both, each at an offset. Returns the element.
+export function sticky<T extends HTMLElement>(el: T, opts: StickyOpts = {}): T {
+  const bottom = opts.bottom != null
+  el.classList.add("ui-sticky")
+  el.classList.toggle("bottom", bottom)
+  el.classList.toggle("top", bottom && opts.top != null)
+  if (opts.top != null) el.style.setProperty("--sticky-top", stickyLength(opts.top))
+  if (bottom) el.style.setProperty("--sticky-bottom", stickyLength(opts.bottom!))
+  return el
 }
 
 // ─── glue ─────────────────────────────────────────────────────────

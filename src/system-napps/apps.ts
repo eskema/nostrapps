@@ -10,7 +10,6 @@ import { loadBlossomServers } from "@nostr/gadgets/lists"
 import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
 import { normalizeURL } from "@nostr/tools/utils"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
-import "nostr-web-components"
 
 import type { AppType, InstalledApp, SystemCtx } from "../types.js"
 import { classifyEvent, classifyInstalled, getNappletConfig } from "../persistence.js"
@@ -20,7 +19,6 @@ import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { resolveCardIcon } from "../nsite/icon.js"
 import {
-  authorDisplayNames,
   detailField,
   PLACEHOLDER_SRC,
   renderAppCard,
@@ -49,7 +47,8 @@ import {
   empty,
   list,
   overline,
-  tabs
+  tabs,
+  authors
 } from "./ui.js"
 import type { List } from "./ui.js"
 
@@ -1550,7 +1549,7 @@ function loadAuthorNames(listEl: HTMLElement | null, refilter: () => void) {
     loadNostrUser(pk)
       .then(u => {
         authorNamesInFlight.delete(pk)
-        authorDisplayNames.set(pk, u.shortName)
+        authors.set(pk, u) // the cards' authors show it at once
         const name = [u.metadata?.name, u.metadata?.display_name, u.metadata?.nip05, u.shortName]
           .filter(Boolean)
           .join(" ")

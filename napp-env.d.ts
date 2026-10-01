@@ -212,18 +212,52 @@ type Ui = {
   iconInk: Record<string, [number, number]>
   // the glyphs icon() draws, the body of a 16×16 viewBox each; add your own
   icons: Record<string, string>
-  // a napp's picture on a plate: s in a line of text, m beside a name (default),
-  // l on a card, xl on its detail; .img is the <img>; fade eases it in once loaded
+  // a napp's picture on a plate: xs an author's in a line of text, s in a row,
+  // m beside a name (default), l on a card, xl on its detail; .img is the <img>; fade eases it in once loaded
   appIcon(opts?: {
     src?: string
-    size?: "s" | "m" | "l" | "xl"
+    size?: "xs" | "s" | "m" | "l" | "xl"
     fade?: boolean
     class?: string
   }): HTMLSpanElement & { img: HTMLImageElement }
+  // a person, the same wherever one is named: the name (the profile's name,
+  // else the viewer's petname for them, else the display name, else the short
+  // npub), a picture before it when asked for (true: xs, in a line of text; or
+  // an appIcon size), and after it the petname and a check for someone
+  // followed. It fills itself in when the profile lands. A link to the profile
+  // action unless link is false or onClick says otherwise
+  author(
+    pubkey: string,
+    opts?: {
+      picture?: boolean | "xs" | "s" | "m" | "l" | "xl"
+      petname?: boolean
+      follows?: boolean
+      prefix?: string
+      link?: boolean
+      onClick?: (pubkey: string, e: MouseEvent) => void
+      class?: string
+    }
+  ): HTMLElement
+  authors: {
+    // how the kit loads a profile, encodes an npub, opens a profile; set for napps already.
+    // load: null for a napp that looks profiles up itself and hands them over with set()
+    use(config: {
+      load?: ((pubkey: string) => Promise<unknown>) | null
+      npub?: (pubkey: string) => string
+      open?: (pubkey: string) => void
+    }): void
+    // a profile in hand (what loadNostrUser gives, or a kind 0's content): repaints its authors
+    set(pubkey: string, user: unknown): void
+    // the viewer's follow list, a kind 3 (null: logged out): its petnames and who is followed
+    viewer(follows: { tags?: unknown } | null): void
+    // the name as text, as known right now
+    name(pubkey: string): string
+    follows(pubkey: string): boolean
+  }
   // a short label in small sans capitals, dimmed; a tone colors it
   badge(
     text: string,
-    opts?: { tone?: "good" | "danger"; title?: string; class?: string }
+    opts?: { tone?: "good" | "danger" | "warn"; title?: string; class?: string }
   ): HTMLSpanElement
   // the line for when a list or a section has nothing yet; it takes the size of where it sits
   empty(text: string, cls?: string): HTMLDivElement
@@ -238,12 +272,15 @@ type Ui = {
   spinner(cls?: string): HTMLSpanElement
   // a <details>: its <summary>, then the children (or append them later); the
   // summary is text, or parts in a line (a title, then a count or a badge);
-  // fold is the small one under content, a rule above and a dimmed summary
+  // fold is the small one under content, a rule above and a dimmed summary;
+  // sticky keeps the summary at the top while the content scrolls under it.
+  // (For anything else that should stay in view, the ui-sticky class.)
   details(
     opts: {
       summary: string | Node | Array<string | Node>
       open?: boolean
       fold?: boolean
+      sticky?: boolean | { top: number | string }
       class?: string
     },
     ...children: Array<Node | string>
@@ -314,6 +351,9 @@ type Ui = {
     empty?: string
     class?: string
   }): UiList<T>
+  // keep an element in view as the rest scrolls: at the top (the default, at 0), the bottom,
+  // or both, each at an offset (a number is px). Only that: its background is yours
+  sticky<T extends HTMLElement>(el: T, opts?: { top?: number | string; bottom?: number | string }): T
   // plain elements for the glue between the parts
   el<K extends keyof HTMLElementTagNameMap>(
     tag: K,

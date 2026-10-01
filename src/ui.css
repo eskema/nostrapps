@@ -67,7 +67,9 @@
   --duration-move: 240ms;
   --duration-enter: 420ms;
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
-  /* App icons: in a line of text, beside a name, on a card, on its detail. */
+  /* App icons: an author's in a line of text, in a row, beside a name, on a
+     card, on its detail. */
+  --app-icon-xs: 1rem;
   --app-icon-s: 1.25rem;
   --app-icon-m: 2rem;
   --app-icon-l: 48px;
@@ -366,8 +368,8 @@ select.ui-input {
 }
 
 /* ─── App icon ──────────────────────────────────────────────────
-   A napp's picture: a rounded square on a faint plate that holds its place
-   until the image lands, at one of four sizes. The big ones hold the picture
+   A napp's picture (or an author's): a rounded square on a faint plate that
+   holds its place until the image lands, at one of five sizes. The big ones hold the picture
    a little in; with fade, it eases in once loaded. appIcon() in ui.ts.
      <span class="ui-app-icon ui-app-icon-m"><img alt="" src="…" /></span> */
 .ui-app-icon {
@@ -380,7 +382,16 @@ select.ui-input {
 .ui-app-icon > img {
   width: 100%;
   height: 100%;
+  /* a picture that isn't square would otherwise size the plate's cell to
+     itself and hang out of it: it fills the square, cropped from its centre */
+  min-width: 0;
+  min-height: 0;
   object-fit: cover;
+}
+.ui-app-icon-xs {
+  width: var(--app-icon-xs);
+  height: var(--app-icon-xs);
+  border-radius: var(--radius-xs);
 }
 .ui-app-icon-s {
   width: var(--app-icon-s);
@@ -409,12 +420,66 @@ select.ui-input {
 .ui-app-icon-xl > img {
   border-radius: var(--radius-s);
 }
+/* An image without a picture draws nothing, not a frame. */
+.ui-app-icon > img:not([src]) {
+  display: none;
+}
 .ui-app-icon.fade > img {
   opacity: 0;
   transition: opacity var(--duration-enter) var(--ease);
 }
 .ui-app-icon.fade > img.loaded {
   opacity: 1;
+}
+
+/* ─── Author ──────────────────────────────────────────────────────
+   A person, the same wherever one is named: the name in serif 800, one line,
+   cut with an ellipsis where there's no room. A picture before it when asked
+   for, an app icon (xs in a line of text, s in a row); after it, when asked
+   for, the viewer's petname for them, dimmed, and a check for someone
+   followed. It sits on the baseline of the text around it. author(pubkey,
+   opts) in ui.ts builds it and fills it in when the profile lands; a link to
+   the profile, or a span with link: false.
+     <a class="ui-author" href="#">
+       <span class="ui-app-icon ui-app-icon-xs"><img alt="" /></span>
+       <span class="ui-author-name">name</span>
+       <code class="ui-code ui-author-pet">petname</code>
+     </a> */
+.ui-author {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-width: 0;
+  max-width: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+.ui-author > .ui-app-icon,
+.ui-author-follows {
+  align-self: center;
+}
+/* beside a picture taller than a line, the name sits at its middle */
+.ui-author:has(> :is(.ui-app-icon-m, .ui-app-icon-l, .ui-app-icon-xl)) {
+  align-items: center;
+}
+.ui-author-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+a.ui-author:hover > .ui-author-name {
+  text-decoration: underline;
+}
+.ui-author-pet,
+.ui-author-follows {
+  flex-shrink: 0;
+  font-weight: 400;
+  opacity: var(--dim-m);
+}
+.ui-author-follows {
+  display: inline-grid;
 }
 
 /* ─── Disclosure ──────────────────────────────────────────────────
@@ -461,6 +526,24 @@ select.ui-input {
 
 .ui-details > summary:hover {
   opacity: 1;
+}
+
+/* A disclosure whose summary stays at the top while its content scrolls
+   under it, details({ sticky: true }): opaque, so its dimming moves from
+   opacity to the text color, full on hover. --sticky-top on the summary
+   sets it lower, under something else that sticks (details({ sticky:
+   { top } })).
+     <details class="ui-details sticky"><summary>relays</summary>…</details> */
+.ui-details.sticky > summary {
+  position: sticky;
+  top: var(--sticky-top);
+  z-index: 1;
+  background: var(--surface);
+  opacity: 1;
+  color: color-mix(in srgb, var(--text) 40%, var(--surface));
+}
+.ui-details.sticky > summary:hover {
+  color: var(--text);
 }
 
 /* ─── Fold ────────────────────────────────────────────────────────
@@ -530,7 +613,8 @@ select.ui-input {
 
 /* ─── Badge ───────────────────────────────────────────────────────
    A short label in small sans capitals, dimmed: a state, a type, what a napp
-   handles. badge() in ui.ts; a tone colors it and takes the dimming off.
+   handles. badge() in ui.ts; a tone (good, danger, warn) colors it and takes
+   the dimming off.
      <span class="ui-badge">bunker</span>
      <span class="ui-badge good">allow</span> */
 .ui-badge {
@@ -546,6 +630,10 @@ select.ui-input {
 }
 .ui-badge.danger {
   color: var(--danger);
+  opacity: 1;
+}
+.ui-badge.warn {
+  color: var(--warn);
   opacity: 1;
 }
 
@@ -1179,6 +1267,40 @@ select.ui-input {
   gap: var(--space-s);
 }
 
+/* ─── Sticky ──────────────────────────────────────────────────────
+   Stays in view while what's around it scrolls: at the top of its scroller,
+   with .bottom at the bottom, with .top.bottom at both. An offset keeps it
+   that far from its edge, under or over something else that sticks:
+   --sticky-top and --sticky-bottom, read as top: and bottom: (not inherited,
+   so a sticky inside a sticky starts at 0). Only the sticking: a background,
+   an inset, a rule are the context's. sticky(el, { top, bottom }) in ui.ts;
+   details({ sticky }) for a disclosure's summary.
+     <div class="ui-bar ui-sticky">…</div>
+     <div class="ui-sticky" style="--sticky-top: 3rem">…</div>
+     <div class="ui-bar ui-sticky bottom"><button class="btn btn-primary">publish</button></div> */
+@property --sticky-top {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --sticky-bottom {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+.ui-sticky {
+  position: sticky;
+  top: var(--sticky-top);
+  z-index: 10;
+}
+.ui-sticky.bottom {
+  top: auto;
+  bottom: var(--sticky-bottom);
+}
+.ui-sticky.top.bottom {
+  top: var(--sticky-top);
+}
+
 /* ─── Flow ────────────────────────────────────────────────────────
    Text-like content spaced as it reads: blocks a line apart (m), a heading
    close over what it heads (xs) with room before it (l), a rule with room
@@ -1217,7 +1339,9 @@ select.ui-input {
   .ui-spinner,
   .ui-links,
   .ui-stack,
-  .ui-bar
+  .ui-bar,
+  .ui-author,
+  .ui-author-follows
 )[hidden] {
   display: none;
 }

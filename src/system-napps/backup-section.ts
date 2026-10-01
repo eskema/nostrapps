@@ -44,7 +44,7 @@ type Part = { el: HTMLElement; tick: HTMLInputElement; list: HTMLElement; rows: 
 type Version = { el: HTMLDetailsElement; status: HTMLElement; publish?: HTMLButtonElement }
 
 export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount(): void } {
-  const el = details({ summary: "backups", class: "settings-backup" })
+  const el = details({ summary: "backups", sticky: true, class: "settings-backup" })
   const wrap = document.createElement("div")
   wrap.className = "napp-perms"
   el.appendChild(wrap)

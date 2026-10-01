@@ -395,11 +395,6 @@ button {
   white-space: nowrap;
 }
 
-.sugg-author-name {
-  font-family: var(--font-mono);
-  opacity: 0.6;
-}
-
 .suggestion .source {
   flex-shrink: 0;
   opacity: 0.5;
@@ -2050,37 +2045,10 @@ body.popover-open .napp-body iframe {
   font-weight: 600;
 }
 
-.apps-content .apps-author-pic {
+/* The author is the kit's (.ui-author); its picture shows on the detail, not
+   on a card in a list. */
+.apps-content .apps-author .ui-app-icon {
   display: none;
-}
-
-.apps-author-pic::part(img) {
-  width: 1.4rem;
-  height: 1.4rem;
-  object-fit: cover;
-  display: block;
-  border-radius: 100%;
-  border: 1px solid var(--rule);
-}
-
-.apps-author-name {
-  /* font-size: 1rem;
-  line-height: 1; */
-  font-weight: 600;
-  font-family: var(--font-mono);
-  opacity: 0.6;
-  /* One line, held from the start: the name lands later and the row must not
-     grow when it does, nor wrap. */
-  min-width: 0;
-  min-height: 1.2em;
-  min-height: 1lh;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.apps-author-name:hover {
-  opacity: 1;
 }
 
 .apps-card .apps-date {
@@ -2443,26 +2411,15 @@ body.popover-open .napp-body iframe {
   gap: 0.5rem; */
 }
 
-/* Section headers stick to the top while their section scrolls under them.
-   Opaque, so the kit's dimmed look moves from opacity to the text color. The
-   window body's top padding moves into the panel, so a stuck header sits
-   flush with the top with nothing to cover above it. */
-.settings-panel > .ui-details > summary {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--surface);
-  opacity: 1;
-  color: color-mix(in srgb, var(--text) 40%, var(--surface));
-}
+/* Section headers stick to the top while their section scrolls under them
+   (details({ sticky }), the kit's). The window body's top padding moves into
+   the panel, so a stuck header sits flush with the top with nothing to cover
+   above it. */
 .napp-body-system:has(> .system-napp-settings) {
   padding-top: 0;
 }
 .system-napp-settings {
   padding-top: var(--space-s);
-}
-.settings-panel > .ui-details > summary:hover {
-  color: var(--text);
 }
 
 /* Build stamp — de-emphasized via opacity, not a smaller font. */
@@ -2557,21 +2514,6 @@ body.popover-open .napp-body iframe {
   gap: 0.5rem; */
 }
 
-.settings-pubkey {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  /* font-size: 0.8rem; */
-  opacity: 0.6;
-}
-
-.settings-pubkey:hover {
-  opacity: 1;
-}
-
-.settings-pubkey:empty {
-  display: none;
-}
-
 .settings-account-connected {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -2641,13 +2583,6 @@ body.popover-open .napp-body iframe {
   gap: var(--space-xs);
   justify-content: end;
   margin-top: var(--space-m);
-}
-
-/* ─── how a napp is named (napp-name.ts) ──────────────────────────
-   "<title> from <author>", inline in whatever sentence names it. The author
-   is a <nostr-name> that fills its own text in when the profile lands. */
-.napp-name nostr-name {
-  opacity: 0.75;
 }
 
 /* ─── settings: reset ──────────────────────────────────────────── */
