@@ -632,7 +632,7 @@ export function ring(word: string, cls?: string): SVGElement {
 
 // ─── item lists ───────────────────────────────────────────────────
 // The editable-list shape (relays napp look): itemList() is the column, item()
-// one hairline-separated row — a mono label that truncates plus whatever
+// one hairline-separated row — its text, cut with an ellipsis, plus whatever
 // controls the context needs on the right — and addControl() the deliberate
 // two-step add affordance. Compose per context; there is no monolithic list
 // component on purpose.
@@ -644,9 +644,11 @@ export function itemList(cls?: string): HTMLDivElement {
 }
 
 export interface ItemOpts {
-  /** Row label, rendered as truncating mono text. */
-  label: string
-  /** Tooltip; defaults to the label. */
+  /** The row's text, one line cut with an ellipsis. Its voice is what's in
+   *  it: text takes the row's, an element brings its own (code(url) for an
+   *  id or a url). */
+  label: string | HTMLElement
+  /** Tooltip; defaults to the label's text. */
   title?: string
   /** A row that failed: its label and caption in the danger color. */
   tone?: "danger"
@@ -656,10 +658,9 @@ export interface ItemOpts {
 export function item(opts: ItemOpts, ...controls: HTMLElement[]): HTMLDivElement {
   const row = document.createElement("div")
   row.className = ["ui-item", opts.tone, opts.class].filter(Boolean).join(" ")
-  const label = document.createElement("code")
-  label.className = "ui-item-label"
-  label.textContent = opts.label
-  label.title = opts.title || opts.label
+  const label = typeof opts.label === "string" ? el("span", "", opts.label) : opts.label
+  label.classList.add("ui-item-label")
+  label.title = opts.title || label.textContent || ""
   row.appendChild(label)
   for (const c of controls) row.appendChild(c)
   return row
@@ -751,8 +752,8 @@ export function addControl(opts: AddControlOpts): HTMLDivElement {
 
 export interface ListOpts<T> {
   items?: T[]
-  /** The row's label; String(item) if not given. */
-  label?: (item: T) => string
+  /** The row's text (see item()); String(item) if not given. */
+  label?: (item: T) => string | HTMLElement
   /** The label's tooltip; the label if not given. */
   title?: (item: T) => string
   /** The controls after the label: the context's pick. `row` is the element, for a class or a data attribute. */

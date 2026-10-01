@@ -771,13 +771,14 @@ a.ui-author:hover > .ui-author-name {
 }
 
 /* ─── Item list ───────────────────────────────────────────────────
-   A column of hairline-separated rows: a small mono label that truncates with
-   an ellipsis, then the row's controls, which always fit — no horizontal
-   scroll. itemList() and item() in ui.ts; compose the controls per context,
-   there is no list editor on purpose.
+   A column of hairline-separated rows: the row's text, one line cut with an
+   ellipsis, then its controls, which always fit — no horizontal scroll. The
+   text's voice is what's in it: an id or a url is code (.ui-code). itemList()
+   and item() in ui.ts; compose the controls per context, there is no list
+   editor on purpose.
      <div class="ui-items">
        <div class="ui-item">
-         <code class="ui-item-label">wss://…</code>
+         <code class="ui-item-label ui-code">wss://…</code>
          <input type="checkbox" class="ui-check" />
          <button class="btn btn-danger">remove</button>
        </div>
@@ -800,8 +801,6 @@ a.ui-author:hover > .ui-author-name {
 .ui-item-label {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-mono);
-  font-size: var(--text-s);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -1109,7 +1109,7 @@ export function mount(
   function buildRelayList(): List<string> {
     return list<string>({
       class: "apps-relays-list",
-      label: url => url.replace(/^wss?:\/\//, ""),
+      label: url => code(url.replace(/^wss?:\/\//, "")),
       title: url => url,
       controls: (url, row) => {
         const count = overline(relayCountLabel(url), "apps-relay-count")

@@ -192,7 +192,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
         class: "perm-forget",
         onClick: () => ctx.relayAuth.forget(url) // notify → renderRelays
       })
-      list.appendChild(item({ label: url }, d, f))
+      list.appendChild(item({ label: code(url) }, d, f))
     }
     relaysEl.appendChild(list)
   }

@@ -108,7 +108,7 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
   // A line (name, date) that opens to what the backup holds and what to do with it.
   function version(v: BackupVersion): Version {
     const label = document.createElement("span")
-    label.className = "ui-item-label backup-name"
+    label.className = "ui-item-label ui-code backup-name"
     label.textContent = v.name
     const when = document.createElement("span")
     when.className = "backup-version-date"
@@ -261,7 +261,7 @@ export function backupSection(ctx: SystemCtx): { el: HTMLDetailsElement; unmount
   // it then shows like any other.
   function relayRow(e: NostrEvent): Version {
     const label = document.createElement("span")
-    label.className = "ui-item-label backup-name"
+    label.className = "ui-item-label ui-code backup-name"
     label.textContent = nameOf(e)
     const when = document.createElement("span")
     when.className = "backup-version-date"

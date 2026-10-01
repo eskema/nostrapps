@@ -155,7 +155,7 @@ export function mount(
   const serversSec = section("blossom servers", "upload-servers")
   const serversList = list<string>({
     class: "upload-servers-list",
-    label: url => host(url),
+    label: url => code(host(url)),
     title: url => url,
     controls: (url, row) => {
       row.classList.toggle("disabled", offServers.has(url))
@@ -183,7 +183,7 @@ export function mount(
   const relaysSec = section("relays", "upload-relays")
   const relaysList = list<string>({
     class: "upload-relays-list",
-    label: url => host(url),
+    label: url => code(host(url)),
     title: url => url,
     controls: (url, row) => {
       row.classList.toggle("disabled", offRelays.has(url))
@@ -258,7 +258,7 @@ export function mount(
     ok: boolean,
     title: string
   ) {
-    const row = item({ label, title, tone: ok ? undefined : "danger" }, overline(state))
+    const row = item({ label: code(label), title, tone: ok ? undefined : "danger" }, overline(state))
     row.dataset.kind = kind
     resultsEl.appendChild(row)
     resultsEl.hidden = false
@@ -325,7 +325,7 @@ export function mount(
       const carried = !plan || plan.upload.includes(f)
       const row = item(
         {
-          label: f.path,
+          label: code(f.path),
           title: carried ? `${f.path}\n${f.mime}\n${f.hash}` : `${f.path} — not published`
         },
         overline(fmtSize(f.file.size))

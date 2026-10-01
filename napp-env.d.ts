@@ -324,11 +324,12 @@ type Ui = {
   overline(text: string, cls?: string): HTMLSpanElement
   // a word set round a circle, turning; sized by the font-size it sits in
   ring(word: string, cls?: string): SVGElement
-  // a column of rows: a truncating mono label, then the controls given; a row
-  // that failed takes tone "danger"
+  // a column of rows: the row's text cut with an ellipsis, then the controls
+  // given; the text's voice is what's in it (code(url) for an id or a url); a
+  // row that failed takes tone "danger"
   itemList(cls?: string): HTMLDivElement
   item(
-    opts: { label: string; title?: string; tone?: "danger"; class?: string },
+    opts: { label: string | HTMLElement; title?: string; tone?: "danger"; class?: string },
     ...controls: HTMLElement[]
   ): HTMLDivElement
   // rows that open one at a time; append rows to the list, a row's content to the row
@@ -344,7 +345,7 @@ type Ui = {
   // rows + add control + operations; the row's label and controls are yours, the structure the kit's
   list<T>(opts?: {
     items?: T[]
-    label?: (item: T) => string
+    label?: (item: T) => string | HTMLElement
     title?: (item: T) => string
     controls?: (item: T, row: HTMLDivElement) => HTMLElement[]
     add?: { label: string; placeholder?: string; onAdd: (value: string) => string | void }
