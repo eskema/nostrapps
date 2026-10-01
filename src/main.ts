@@ -7,6 +7,7 @@ import "@fontsource-variable/source-code-pro/wght-italic.css"
 import {
   launch as launchNsite,
   focusInstance,
+  revealInstance,
   launchSystem,
   mountWithLoading,
   wipe,
@@ -762,6 +763,9 @@ async function runNappAction(
         maybeRepack()
         instanceId = win.getState().instanceId
       }
+      // Whatever answers is seen: out from under a maximized window (the
+      // caller, usually).
+      revealInstance(instanceId)
       setStatus(
         `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}\n${formatPayload(payload)}`
       )

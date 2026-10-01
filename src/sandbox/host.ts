@@ -1772,6 +1772,24 @@ export function focusInstance(instanceId: string): boolean {
   return true
 }
 
+// A window an action opened or raised, brought into view: a maximized window
+// covers the viewport above every other, so the active space's maximized
+// windows come out of it (the one shown keeps its own), then it is focused.
+export function revealInstance(instanceId: string): boolean {
+  const target = openWindows.get(instanceId)
+  if (!target) return false
+  if (!target.root.classList.contains("space-inactive")) {
+    for (const [id, win] of openWindows) {
+      if (id === instanceId || win.root.classList.contains("space-inactive")) continue
+      if (!win.root.classList.contains("maximized")) continue
+      win.root.classList.remove("maximized")
+      win.notifyState()
+    }
+  }
+  target.focus?.()
+  return true
+}
+
 // Close only the given space's windows (used when resetting or destroying a
 // space — its windows are genuinely gone, unlike a plain switch which hides).
 export function teardownSpaceWindows(spaceId: string) {
