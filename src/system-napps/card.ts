@@ -7,15 +7,13 @@ import { appIcon, author, badge, ring } from "./ui.js"
 // `.apps-detail-overlay .apps-card`), and the uploader previews an unpublished
 // napp with it. Its own module so none of those imports the others.
 
-export const PLACEHOLDER_SRC = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'
-
 export interface AppCardOpts {
   nappId: string
   title: string
   type: AppType
   description?: string | null
-  iconSha?: string | null
-  iconMime?: string | null
+  // An icon that is a URL already (data:, http(s):, blob:). One behind a blossom
+  // sha goes in later, from loadCardIcons in apps.ts.
   iconUrl?: string | null
   authorPubkey?: string | null
   authorLabel?: string | null // plain text shown in place of author (e.g. "local")
@@ -50,22 +48,16 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
   // Flat structure: icon, title, author/label, date, meta extras, handlers and
   // actions are all direct children of .apps-card.
 
-  // Icon — always present (even when empty) so the layout slot is stable: the
-  // kit's plate is there from the start and the picture fades in over it.
+  // Icon — the kit's plate, always there so the layout slot is stable; the
+  // picture goes in once there is one and fades in over it. Not lazy: the
+  // fade, and loadCardIcons' wait on each server, go by the load event, which
+  // a lazy <img> holds back until it's near the viewport. A picture that fails
+  // is dropped.
   const plate = appIcon({ size: "l", fade: true, class: "apps-card-icon" })
-  const icon = plate.img
-  icon.loading = "lazy" // defer off-screen blob fetches; loadCardIcons sets src later
-  if (o.iconSha) {
-    icon.dataset.iconSha = o.iconSha
-    if (o.iconMime) icon.dataset.iconMime = o.iconMime
-    icon.src = PLACEHOLDER_SRC
-  } else if (o.iconUrl) {
+  if (o.iconUrl) {
+    const icon = plate.img
+    icon.addEventListener("error", () => icon.remove())
     icon.src = o.iconUrl
-    icon.addEventListener("error", () => {
-      icon.src = PLACEHOLDER_SRC
-    })
-  } else {
-    icon.src = PLACEHOLDER_SRC
   }
   card.appendChild(plate)
 

@@ -18,12 +18,7 @@ import { openNappConfigSettings } from "../napp-config.js"
 import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { resolveCardIcon } from "../nsite/icon.js"
-import {
-  detailField,
-  PLACEHOLDER_SRC,
-  renderAppCard,
-  type AppCardOpts
-} from "./card.js"
+import { detailField, renderAppCard, type AppCardOpts } from "./card.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
@@ -50,9 +45,14 @@ import {
   tabs,
   authors
 } from "./ui.js"
-import type { List } from "./ui.js"
+import type { AppIcon, List } from "./ui.js"
 
 const DEFAULT_RELAYS = NAPP_RELAYS
+
+// A blossom server can sit on a request for a blob it doesn't have instead of
+// answering 404, and an <img> waiting on it never errors: past this long, a
+// card icon asks the next server.
+const ICON_WAIT_MS = 4000
 
 export function mount(
   container: HTMLElement,
@@ -467,7 +467,6 @@ export function mount(
       type: classifyInstalled(app),
       temporary,
       description,
-      iconSha,
       // Direct data:/URL icon (self-contained napplets), else the napp's own
       // origin path.
       iconUrl: iconSha ? null : resolvedIcon?.url || installedIconUrl(app),
@@ -721,9 +720,8 @@ export function mount(
     opts.onStateChange?.({ params: { relays: [...relays], disabled: [...disabled] } })
   }
 
-  // Resolve and assign icon URLs for a set of events. Queries each unique
-  // author's blossom servers once, then points every matching card icon at it.
-  // Cache per-author blossom lists so each is fetched once per render.
+  // Each author's blossom list, looked up once per mount: the servers a card
+  // icon asks after the ones it already knows (loadCardIcons).
   const blossomCache = new Map<string, Promise<string[]>>()
   function authorBlossom(pubkey: string): Promise<string[]> {
     let p = blossomCache.get(pubkey)
@@ -744,33 +742,56 @@ export function mount(
       if (!evt) continue
       const { sha } = resolveCardIcon(evt)
       if (!sha) continue
-      const img = listEl.querySelector(
-        `.apps-card[data-napp-id="${CSS.escape(nappId)}"] .apps-card-icon img`
-      ) as HTMLImageElement | null
-      if (!img || img.dataset.iconLoaded === "1") continue
-      img.dataset.iconLoaded = "1"
-      // Candidate servers, mirroring fetchNsite: the manifest's own `server`
-      // tags + the author's blossom list + the default — the blob can be on any.
-      const manifestServers = evt.tags
-        .filter((t: any) => t[0] === "server" && t[1])
-        .map((t: any) => t[1])
-      authorBlossom(evt.pubkey).then((userServers: string[]) => {
-        const servers = [
-          ...new Set(
-            [...manifestServers, ...userServers, "relay.nostrapps.com"].map(normalizeServer)
-          )
-        ]
-        let i = 0
-        const tryNext = () => {
-          if (i >= servers.length) {
-            img.src = PLACEHOLDER_SRC
-            return
-          }
+      const plate = listEl.querySelector<AppIcon>(
+        `.apps-card[data-napp-id="${CSS.escape(nappId)}"] .apps-card-icon`
+      )
+      if (!plate || plate.dataset.iconLoaded === "1") continue
+      plate.dataset.iconLoaded = "1"
+      // The blob can be on the servers the manifest names, the default, or the
+      // author's blossom list. The first two are asked at once; the author's
+      // list is a relay lookup, its servers queued behind them when it lands.
+      const servers = [
+        ...new Set(
+          [
+            ...evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1]),
+            "relay.nostrapps.com"
+          ].map(normalizeServer)
+        )
+      ]
+      // The picture goes in with the first server. On an error, or no answer
+      // in time, the next one is asked; the last is waited on, and with all of
+      // them failed the plate stands alone.
+      const img = plate.img
+      let i = 0
+      let wait = 0
+      let late = false // the server asked hasn't answered in ICON_WAIT_MS
+      let failed = false // it answered with an error
+      let listed = false // the author's servers are in the queue
+      const ask = () => {
+        window.clearTimeout(wait)
+        if (i < servers.length) {
+          late = failed = false
           img.src = `${servers[i++]}/${sha}`
-        }
-        img.onerror = tryNext
-        tryNext()
+          wait = window.setTimeout(() => {
+            late = true
+            if (i < servers.length) ask()
+          }, ICON_WAIT_MS)
+        } else if (failed && listed) img.remove()
+      }
+      img.onload = () => {
+        window.clearTimeout(wait)
+        late = false
+      }
+      img.onerror = () => {
+        failed = true
+        ask()
+      }
+      authorBlossom(evt.pubkey).then(more => {
+        for (const s of more.map(normalizeServer)) if (!servers.includes(s)) servers.push(s)
+        listed = true
+        if (failed || late) ask()
       })
+      ask()
     }
   }
 
@@ -1250,7 +1271,7 @@ function renderCard(
   const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
 
   const title = tag("title")
-  const { sha: iconSha, mime: iconMime, url: iconUrl } = resolveCardIcon(evt)
+  const { sha: iconSha, url: iconUrl } = resolveCardIcon(evt)
 
   // Assigned after renderAppCard() returns; menu/buttons close over it.
   let card: HTMLElement
@@ -1393,8 +1414,6 @@ function renderCard(
     title: title || `(${dTag})`,
     type: classifyEvent(evt.kind),
     description: tag("description") || tag("summary"),
-    iconSha,
-    iconMime,
     iconUrl: iconSha ? null : iconUrl,
     authorPubkey: evt.pubkey,
     createdAt: evt.created_at,
