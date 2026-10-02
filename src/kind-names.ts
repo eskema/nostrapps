@@ -1,0 +1,50 @@
+// What an event kind is, in a few words, for the approval prompts. Only the
+// kinds napps commonly sign; the rest go by number alone.
+const NAMES: Record<number, string> = {
+  0: "profile",
+  1: "note",
+  3: "follow list",
+  4: "encrypted message",
+  5: "deletion request",
+  6: "repost",
+  7: "reaction",
+  9: "chat message",
+  13: "seal",
+  14: "direct message",
+  16: "repost",
+  20: "picture",
+  21: "video",
+  22: "short video",
+  1059: "gift wrap",
+  1063: "file metadata",
+  1111: "comment",
+  1984: "report",
+  5129: "napplet",
+  9734: "zap request",
+  9802: "highlight",
+  10000: "mute list",
+  10001: "pin list",
+  10002: "relay list",
+  10003: "bookmark list",
+  10050: "message relay list",
+  10063: "blossom server list",
+  15129: "napplet",
+  22242: "relay auth",
+  24133: "nostr connect",
+  24242: "blossom auth",
+  27235: "http auth",
+  30000: "follow set",
+  30003: "bookmark set",
+  30023: "article",
+  30024: "article draft",
+  30078: "app data record",
+  31922: "calendar event",
+  31923: "calendar event",
+  35128: "nsite",
+  35129: "napplet",
+  35130: "napp"
+}
+
+export function kindName(kind: number): string {
+  return NAMES[kind] ?? ""
+}

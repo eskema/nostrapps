@@ -436,14 +436,18 @@ function actionRow<T>(resolve: (v: T | null) => void, label: string, value: () =
 // stacked below it. The whole row is a <label>, so clicking anywhere toggles.
 // Exported because it is the shape for any labelled checkbox, not just a grant
 // — the uploader's "protected" reads as one of these.
-export function permRow(box: HTMLInputElement, title: string, desc?: string): HTMLLabelElement {
+export function permRow(
+  box: HTMLInputElement,
+  title: string | Node,
+  desc?: string
+): HTMLLabelElement {
   // The kit's labelled check, given a box made earlier (the caller keeps it),
   // as a full-width row with a rule above.
   const row = document.createElement("label")
   row.className = "ui-check-label napp-perms-row"
   const text = document.createElement("span")
   text.className = "ui-check-text"
-  text.textContent = title
+  text.append(title)
   if (desc) {
     const d = document.createElement("span")
     d.className = "ui-check-note"

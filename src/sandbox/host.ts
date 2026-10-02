@@ -119,7 +119,15 @@ import {
 } from "../outbox.js"
 import { relayHealth, relayUrl } from "../relay-health.js"
 import { debounce, HEX64, isHex64 } from "../utils.js"
-import { authors, code, codeBlock } from "../system-napps/ui.js"
+import {
+  describeCipher,
+  describeCopyText,
+  eventDetail,
+  nipName,
+  publishDetail
+} from "../approval-details.js"
+import { aKind, peopleList } from "../event-facts.js"
+import { author as authorEl, authors, code, codeBlock, el } from "../system-napps/ui.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -1002,13 +1010,7 @@ async function publishNappletOutbox(
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
 
   const kind = Number(template.kind)
-  if (
-    !(await requireApproval(
-      nappId,
-      "outbox.publish",
-      `Sign and publish a kind ${kind} event on your behalf.`
-    ))
-  ) {
+  if (!(await requireApproval(nappId, "outbox.publish", eventDetail(template)))) {
     return { type: resultType, ok: false, error: "permission denied" }
   }
 
@@ -1136,8 +1138,14 @@ async function publishNappletEvent(
 
   const kind = Number(template.kind)
   const detail = enc
-    ? `Encrypt (${enc.encryption}) and publish a kind ${kind} event to ${enc.recipient.slice(0, 12)}…`
-    : `Sign and publish a kind ${kind} event on your behalf.`
+    ? eventDetail(template, {
+        line: [
+          `encrypted with ${nipName(enc.encryption)}, for `,
+          authorEl(enc.recipient, { link: false }),
+          "."
+        ]
+      })
+    : eventDetail(template)
   if (!(await requireApproval(nappId, enc ? "relay.publishEncrypted" : "relay.publish", detail))) {
     return { type: resultType, ok: false, error: "permission denied" }
   }
@@ -1312,7 +1320,8 @@ async function commonGetProfile(target: unknown): Promise<Record<string, unknown
 async function commonAction(
   nappId: string,
   action: string,
-  detail: string,
+  // Goes on from "<napp> wants to <action's verb>".
+  line: Array<Node | string>,
   template: { kind: number; content: string; tags: string[][] },
   // The caller already asked, in a prompt of its own.
   approved = false
@@ -1320,7 +1329,10 @@ async function commonAction(
   const resultType = `${action}.result`
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
-  if (!approved && !(await requireApproval(nappId, action, detail))) {
+  if (
+    !approved &&
+    !(await requireApproval(nappId, action, eventDetail(template, { line, object: false })))
+  ) {
     return { type: resultType, ok: false, error: "permission denied" }
   }
   try {
@@ -1367,9 +1379,7 @@ async function commonFollowChange(
   const tags = add
     ? [...base, ...wanted.map(t => ["p", t])]
     : base.filter(t => t[0] !== "p" || !targets.has(t[1]))
-  const detail = `${add ? "Follow" : "Unfollow"} ${wanted.length} profile${
-    wanted.length === 1 ? "" : "s"
-  } (rewrites your follow list).`
+  const line = [...peopleList(wanted), ", rewriting your follow list."]
   // No list found is a new account or relays that didn't answer, and the two
   // look the same. Publishing on the second replaces everyone with these few,
   // so this one is always asked, whatever was allowed before.
@@ -1379,7 +1389,7 @@ async function commonFollowChange(
   return commonAction(
     nappId,
     add ? "common.follow" : "common.unfollow",
-    detail,
+    line,
     { kind: 3, content: current.event?.content ?? "", tags },
     add && !current.event
   )
@@ -1419,11 +1429,14 @@ async function commonReact(nappId: string, data: any): Promise<Record<string, un
   if (shortcode && typeof data?.customEmojiHref === "string" && data.customEmojiHref) {
     tags.push(["emoji", shortcode, data.customEmojiHref])
   }
-  return commonAction(nappId, "common.react", `React ${reaction} to event ${id.slice(0, 8)}….`, {
-    kind: 7,
-    content: reaction,
-    tags
-  })
+  const line = target
+    ? [
+        `with ${reaction} on ${aKind(target.kind)} by `,
+        authorEl(target.pubkey, { link: false }),
+        "."
+      ]
+    : [`with ${reaction} on an event.`]
+  return commonAction(nappId, "common.react", line, { kind: 7, content: reaction, tags })
 }
 
 async function commonReport(nappId: string, data: any): Promise<Record<string, unknown>> {
@@ -1441,7 +1454,7 @@ async function commonReport(nappId: string, data: any): Promise<Record<string, u
   } else {
     return { type: resultType, ok: false, error: "invalid target" }
   }
-  return commonAction(nappId, "common.report", `Publish a NIP-56 ${reason} report.`, {
+  return commonAction(nappId, "common.report", [`a NIP-56 ${reason} report.`], {
     kind: 1984,
     content: String(data?.text ?? ""),
     tags
@@ -1466,8 +1479,10 @@ async function linkOpen(nappId: string, data: any): Promise<Record<string, unkno
   if (url.host.endsWith(`.${location.host}`)) {
     return { type: resultType, error: "napp-origin" }
   }
-  const label = typeof data?.options?.label === "string" ? ` — "${data.options.label}"` : ""
-  if (!(await requireApproval(nappId, "link.open", `Open ${url.href} in a new tab${label}.`))) {
+  // The napplet's own label for the link (options.label) isn't shown: nothing
+  // ties it to the url, which is what the prompt is to be judged by.
+  const detail = { object: "a link", line: el("p", "", code(url.href), " in a new tab.") }
+  if (!(await requireApproval(nappId, "link.open", detail))) {
     return { type: resultType, status: "denied" }
   }
   // A remembered allow arrives with no user activation left; report a blocked
@@ -3892,7 +3907,8 @@ async function handleRpc(
   signer: Signer | SignerGetter,
   nappId: string
 ) {
-  const { id, method, params, instanceId } = data
+  const { id, method, instanceId } = data
+  let { params } = data
   try {
     // Signer access (NIP-07 / window.nostr) requires the granted `identity`
     // capability. The bridge pins window.nostr to undefined when it's ungranted,
@@ -3918,12 +3934,20 @@ async function handleRpc(
       // the details only a prompt needs.
       if (wouldRefuse(nappId, method!)) throw new Error(`Permission denied: ${method!}`)
       let detail: ApprovalDetail | undefined
+      let relays: (() => string[]) | undefined
       if (method === "napp.saveFile") detail = describeSaveFile(params)
       else if (method === "napp.copyText") detail = describeCopyText(params)
-      else if (method === "signEvent") detail = describeSignEvent(params)
-      else if (method === "napp.publish") detail = await describePublish(params)
+      else if (method === "signEvent") detail = eventDetail(params)
+      else if (method === "napp.publish") {
+        const d = await describePublish(params)
+        detail = d
+        relays = d.relays
+      } else if (/^nip(04|44)\./.test(method!))
+        detail = describeCipher(method!, params, getPubkey())
       const allowed = await requireApproval(nappId, method!, detail)
       if (!allowed) throw new Error(`Permission denied: ${method!}`)
+      // A publish goes to the relays left ticked in the prompt.
+      if (relays) params = { ...params, relays: relays() }
     }
     // Signer can be passed either as an object (legacy) or as a getter
     // (`() => currentSigner()`). The getter form lets the user hot-swap
@@ -4918,7 +4942,7 @@ function sanitizeFilename(raw: unknown): string {
 export function describeSaveFile(params: any): string | undefined {
   const name = sanitizeFilename(params?.name)
   const size = params?.data?.size ?? params?.data?.byteLength ?? params?.data?.length
-  if (typeof size !== "number") return `Save “${name}” to your downloads folder.`
+  if (typeof size !== "number") return `“${name}” to your downloads folder.`
   const units = ["B", "KiB", "MiB", "GiB"]
   let n = size
   let u = 0
@@ -4927,7 +4951,7 @@ export function describeSaveFile(params: any): string | undefined {
     u++
   }
   const pretty = `${u === 0 ? n : n.toFixed(1)} ${units[u]}`
-  return `Save “${name}” (${pretty}) to your downloads folder.`
+  return `“${name}” (${pretty}) to your downloads folder.`
 }
 
 // ─── the logs window ────────────────────────────────────────────
@@ -4975,92 +4999,11 @@ function logForNapp(nappId: string, params: { message?: unknown }): boolean {
   return true
 }
 
-// The clipboard preview shows enough to recognise what is being copied (an
-// address, a key, a url). It renders as a wrapping code block in the dialog —
-// these strings have no spaces, so a plain paragraph would overflow the card.
-export function describeCopyText(params: any): { text: string; code: string } {
-  const text = typeof params?.text === "string" ? params.text : ""
-  const oneLine = text.replace(/\s+/g, " ").trim()
-  const preview = oneLine.length > 120 ? `${oneLine.slice(0, 120)}…` : oneLine
-  return {
-    text: `Copy ${text.length} character${text.length === 1 ? "" : "s"} to your clipboard:`,
-    code: preview
-  }
-}
-
-// A one-line summary of the event a napp wants to sign or publish — just the
-// kind, the start of the content, and the tag count (when non-zero), so the
-// approval prompt shows what is actually at stake instead of a bare method name.
-function getEventSummary(evt: any): { kind: string; preview: string; tagCount: number } {
-  const kind = Number(evt?.kind)
-  const raw = typeof evt?.content === "string" ? evt.content : ""
-  const oneLine = raw.replace(/\s+/g, " ").trim()
-  return {
-    kind: Number.isFinite(kind) ? String(kind) : "unknown",
-    preview: oneLine.length > 140 ? `${oneLine.slice(0, 140)}…` : oneLine,
-    tagCount: Array.isArray(evt?.tags) ? evt.tags.length : 0
-  }
-}
-
-// First line of an event approval: "Sign a kind <1> event with 2 tags."
-// The kind renders as code, matching the "Napp x wants to use y" line.
-function eventIntro(
-  verb: string,
-  summary: { kind: string; tagCount: number }
-): HTMLParagraphElement {
-  const p = document.createElement("p")
-  p.append(`${verb} a kind `, code(summary.kind), ` event`)
-  if (summary.tagCount > 0)
-    p.append(` with ${summary.tagCount} tag${summary.tagCount === 1 ? "" : "s"}`)
-  p.append(".")
-  return p
-}
-
-// The event content out of the sentence flow, as a code block (same as the
-// other approval payloads).
-function eventContentBlock(preview: string): HTMLElement | null {
-  if (!preview) return null
-  return codeBlock(preview, "app-dialog-detail-code")
-}
-
-function stripRelayScheme(url: string): string {
-  return url.replace(/^wss?:\/\//i, "").replace(/\/$/, "")
-}
-
-export function describeSignEvent(params: any): Node {
-  const summary = getEventSummary(params)
-  const wrap = document.createElement("div")
-  wrap.appendChild(eventIntro("Sign", summary))
-  const block = eventContentBlock(summary.preview)
-  if (block) wrap.appendChild(block)
-  return wrap
-}
-
-export async function describePublish(params: any): Promise<Node> {
-  const summary = getEventSummary(params?.event)
-  const targets = await resolvePublishTargetRelays(params?.event, params?.relays)
-  const wrap = document.createElement("div")
-  wrap.appendChild(eventIntro("Publish", summary))
-  const block = eventContentBlock(summary.preview)
-  if (block) wrap.appendChild(block)
-  if (targets.length === 0) {
-    const p = document.createElement("p")
-    p.textContent = "No relays to publish to were found."
-    wrap.appendChild(p)
-  } else {
-    const p = document.createElement("p")
-    p.textContent = `To ${targets.length} relay${targets.length === 1 ? "" : "s"}:`
-    wrap.appendChild(p)
-    const ul = document.createElement("ul")
-    ul.className = "app-dialog-relay-list"
-    for (const url of targets) {
-      const li = document.createElement("li")
-      li.textContent = stripRelayScheme(url)
-      ul.appendChild(li)
-    }
-    wrap.appendChild(ul)
-  }
-  return wrap
+async function describePublish(params: any): Promise<ReturnType<typeof publishDetail>> {
+  return publishDetail(
+    params?.event,
+    await resolvePublishTargetRelays(params?.event, params?.relays)
+  )
 }
 
 // Resolve the relays publishEventToRelays would publish to, so the approval

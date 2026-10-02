@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>permission prompts</title>
+    <link rel="stylesheet" href="/src/launcher.css" />
+    <style>
+      body {
+        display: block;
+        padding: var(--space-xl);
+        background: color-mix(in srgb, var(--surface) 55%, black);
+      }
+      .mock-bar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        margin-bottom: var(--space-xl);
+        color: #fff;
+      }
+      .mock-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--space-xxl) var(--space-xl);
+        align-items: start;
+      }
+      .mock-card {
+        display: grid;
+        gap: var(--space-s);
+        justify-items: start;
+      }
+      .mock-label {
+        color: #fff;
+      }
+      .mock-label b {
+        margin-right: var(--space-s);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mock-bar">
+      <span>permission prompts, fake data</span>
+      <span id="theme"></span>
+    </div>
+    <div class="mock-grid" id="grid"></div>
+    <script type="module" src="/src/mocks/permissions.ts"></script>
+  </body>
+</html>

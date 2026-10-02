@@ -3,7 +3,7 @@
 // prompt, toast and list that names an app says "<title> from <author>", the
 // same line the Apps card shows. (host.ts has a nappLabel of its own — that
 // one is the origin label, nothing to do with these.)
-import { getInstalledApp } from "./persistence.js"
+import { classifyInstalled, getInstalledApp } from "./persistence.js"
 import { author as authorEl, authors } from "./system-napps/ui.js"
 
 export interface NappName {
@@ -12,6 +12,8 @@ export interface NappName {
   author: string | null
   // Stands in for the author when there is no manifest: dev / temp / local.
   authorLabel: string | null
+  // nsite / napp / napplet; null for system napps and ones we have no record of.
+  type: string | null
   // Whether we found the app at all. False → title is the bare id, nothing
   // better to show.
   known: boolean
@@ -19,9 +21,9 @@ export interface NappName {
 
 export function nappName(nappId: string): NappName {
   const system = /^__(.+)__$/.exec(nappId)
-  if (system) return { title: system[1], author: null, authorLabel: null, known: true }
+  if (system) return { title: system[1], author: null, authorLabel: null, type: null, known: true }
   const app = getInstalledApp(nappId)
-  if (!app) return { title: nappId, author: null, authorLabel: null, known: false }
+  if (!app) return { title: nappId, author: null, authorLabel: null, type: null, known: false }
   return {
     // The petname first: what the user calls it beats what it calls itself.
     title: app.petname || app.title || nappId,
@@ -33,6 +35,7 @@ export function nappName(nappId: string): NappName {
         : nappId.startsWith("temp~") || app.temporary
           ? "temp"
           : "local",
+    type: classifyInstalled(app),
     known: true
   }
 }

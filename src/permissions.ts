@@ -1,6 +1,7 @@
-import { openDialog } from "./dialog.js"
-import { nappNameEl } from "./napp-name.js"
-import { code, codeBlock } from "./system-napps/ui.js"
+import { openDialog, type DialogAction } from "./dialog.js"
+import { nappName, nappNameEl, type NappName } from "./napp-name.js"
+import { getInstalledApp } from "./persistence.js"
+import { appIcon, author, code, el } from "./system-napps/ui.js"
 
 const STORAGE_KEY = "nostrapps:permissions"
 
@@ -97,11 +98,11 @@ export function subscribe(fn: () => void) {
   return () => subscribers.delete(fn)
 }
 
-// A detail can be a plain sentence, a sentence plus a `code` payload — the
-// payload renders as a code block, which wraps (a url or key would otherwise
-// overflow the card) — or a prebuilt node for richer layouts (event previews,
-// relay lists).
-export type ApprovalDetail = string | { text: string; code?: string } | Node
+// A detail goes on from "<napp> wants to <verb>": a plain sentence; a prebuilt
+// node for richer layouts (folds, relay rows), a fragment's children each a
+// row; or the parts of a sentence: what the verb acts on, to go after it
+// ("wants to sign a note"), a line going on from that, and rows under it all.
+export type ApprovalDetail = string | { object?: string | Node; line?: Node; body?: Node } | Node
 
 // ─── asking, with limits ─────────────────────────────────────────
 // One prompt per napp and method at a time: a napp calling in a loop would
@@ -161,13 +162,9 @@ export async function requireApproval(nappId: string, method: string, detail?: A
     const decision = await openDialog<string>({
       title: "Permission request",
       queue: { kind: "permission", name: nappNameEl(nappId), type: method },
-      body: permissionBody(nappId, method, detail),
-      actions: [
-        { label: "Deny always", value: "deny-always", variant: "outline" },
-        { label: "Deny", value: "deny-once", variant: "outline" },
-        { label: "Allow once", value: "allow-once", variant: "primary" },
-        { label: "Allow always", value: "allow-always", variant: "primary", autofocus: true }
-      ],
+      body: permissionBody(nappName(nappId), method, detail, nappIcon(nappId)),
+      class: "app-dialog-permission",
+      actions: PERMISSION_ACTIONS,
       dismissValue: "deny-once" // Esc / backdrop → deny
     })
     if (decision === "allow-always") setDecision(nappId, method, "allow")
@@ -185,23 +182,103 @@ export async function requireApproval(nappId: string, method: string, detail?: A
   }
 }
 
-function permissionBody(nappId: string, method: string, detail?: ApprovalDetail): Node {
-  const wrap = document.createElement("div")
-  const p = document.createElement("p")
-  p.append(nappNameEl(nappId), " wants to use ", code(method))
-  wrap.appendChild(p)
+// Two columns, read in rows: deny | allow, then deny always | allow always.
+export const PERMISSION_ACTIONS: DialogAction<string>[] = [
+  { label: "Deny", value: "deny-once", variant: "outline" },
+  { label: "Allow", value: "allow-once", variant: "primary", autofocus: true },
+  { label: "Deny always", value: "deny-always", variant: "link" },
+  { label: "Allow always", value: "allow-always", variant: "link" }
+]
+
+// What each method is asking to do, as the verb of "<napp> wants to <verb>".
+const VERBS: Record<string, string> = {
+  signEvent: "sign",
+  "napp.publish": "publish",
+  "relay.publish": "publish",
+  "relay.publishEncrypted": "publish",
+  "outbox.publish": "publish",
+  "nip04.encrypt": "encrypt",
+  "nip44.encrypt": "encrypt",
+  "nip04.decrypt": "decrypt",
+  "nip44.decrypt": "decrypt",
+  "napp.saveFile": "save",
+  "napp.copyText": "copy",
+  "link.open": "open",
+  "common.follow": "follow",
+  "common.unfollow": "unfollow",
+  "common.react": "react",
+  "common.report": "report"
+}
+
+// The napp's icon before its name: a plate holding the place, then the first
+// of its sources that loads. None loading, it drops out. Its sources are
+// looked up lazily: nsite/icon.ts reaches into the host, which imports this.
+function nappIcon(nappId: string): HTMLElement | undefined {
+  const app = getInstalledApp(nappId)
+  if (!app) return undefined
+  const icon = appIcon({ size: "s", fade: true })
+  import("./nsite/icon.js")
+    .then(m => m.installedIconSources(app))
+    .then(srcs => {
+      let i = 0
+      const next = () => {
+        if (i < srcs.length) icon.img.src = srcs[i++]
+        else icon.remove()
+      }
+      icon.img.addEventListener("error", next)
+      next()
+    })
+    .catch(() => icon.remove())
+  return icon
+}
+
+// Who asks and what, the way an Apps card names an app: the icon in line with
+// the title; "<type> from <author> wants to" under it, in the card's author
+// line; then the ask a size up, a line each: the verb ("SIGN"), what it acts
+// on ("a note"), the sentence going on from that ("notifying <person>."). The
+// rest of what it is about under that.
+export function permissionBody(
+  napp: Pick<NappName, "title" | "author" | "authorLabel" | "type">,
+  method: string,
+  detail?: ApprovalDetail,
+  icon?: HTMLElement
+): Node {
+  const verb = VERBS[method]
+  const ask = el("p", "", el("span", "ui-title", verb || "use"))
   // Some methods can say what they are actually about to do — a filename is a
-  // far better basis for a decision than a method name.
-  if (detail) {
-    if (detail instanceof Node) {
-      wrap.appendChild(detail)
-    } else {
-      const d = document.createElement("p")
-      d.textContent = typeof detail === "string" ? detail : detail.text
-      wrap.appendChild(d)
-      if (typeof detail !== "string" && detail.code)
-        wrap.appendChild(codeBlock(detail.code, "app-dialog-detail-code"))
-    }
+  // far better basis for a decision than a method name. What the verb acts on
+  // and the sentence going on from it each get a line under the verb;
+  // anything else goes under it all.
+  let object: Node | string | undefined = verb ? undefined : code(method)
+  let line: Node | undefined
+  let rest: Node | undefined
+  if (typeof detail === "string") line = el("p", "", detail)
+  else if (detail instanceof Node) rest = detail
+  else if (detail) {
+    object = detail.object ?? object
+    line = detail.line
+    rest = detail.body
   }
+  const named = el(
+    "div",
+    "permission-name",
+    ...(icon ? [icon, " "] : []),
+    el("strong", "", napp.title)
+  )
+  const from = el("div", "permission-from")
+  const meta = (text: string) => from.append(el("span", "permission-meta", text))
+  if (napp.type) meta(napp.author ? `${napp.type} from ` : napp.type)
+  if (napp.author) from.append(author(napp.author, { link: false }))
+  else if (napp.authorLabel) meta(napp.type ? ` · ${napp.authorLabel}` : napp.authorLabel)
+  meta(" wants to")
+  const said = el(
+    "div",
+    "permission-ask",
+    ask,
+    ...(object ? [el("p", "permission-object", object)] : []),
+    ...(line ? [line] : [])
+  )
+  const wrap = el("div", "permission", el("div", "permission-head", named, from, said))
+  if (rest) wrap.append(rest)
   return wrap
 }
