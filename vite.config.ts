@@ -118,8 +118,26 @@ ${names.map(n => `.ui-icon-${n}`).join(",\n")} {
   }
 }
 
+// Avatars and icons come from arbitrary nostr events: the build upgrades
+// http:// loads so one stale picture URL can't flag the whole origin as
+// insecure. Not in dev: the server has no TLS, and Safari upgrades localhost
+// too, the launcher's own scripts included.
+function upgradeInsecureRequests(): Plugin {
+  return {
+    name: "upgrade-insecure-requests",
+    apply: "build",
+    transformIndexHtml: () => [
+      {
+        tag: "meta",
+        attrs: { "http-equiv": "Content-Security-Policy", content: "upgrade-insecure-requests" },
+        injectTo: "head"
+      }
+    ]
+  }
+}
+
 export default defineConfig({
-  plugins: [nappUi()],
+  plugins: [nappUi(), upgradeInsecureRequests()],
   server: {
     port: 5173,
     strictPort: true,
