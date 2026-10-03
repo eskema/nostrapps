@@ -13,6 +13,8 @@ import {
   publishDetail
 } from "../approval-details.js"
 import { peopleList } from "../event-facts.js"
+import type { NappName } from "../napp-name.js"
+import { permissionsSection, type Decisions } from "../system-napps/permissions-section.js"
 import { PERMISSION_ACTIONS, permissionBody, type ApprovalDetail } from "../permissions.js"
 import { appIcon, author, authors, button, code, el } from "../system-napps/ui.js"
 
@@ -205,7 +207,7 @@ const cards: Array<[string, string, () => ApprovalDetail | undefined]> = [
       )
   ],
   [
-    "profile, no current one found",
+    "profile, without the current one",
     "signEvent",
     () =>
       eventDetail(
@@ -228,7 +230,7 @@ const cards: Array<[string, string, () => ApprovalDetail | undefined]> = [
         ])
       })
   ],
-  ["follow list, no current one found", "signEvent", () => eventDetail(event(3, follows(1, 5)))],
+  ["follow list, without the current one", "signEvent", () => eventDetail(event(3, follows(1, 5)))],
   [
     "relay list, one new, one gone",
     "signEvent",
@@ -427,8 +429,87 @@ cards.forEach(([label, method, detail], i) => {
   )
 })
 
+// Settings' permissions, with decisions as the prompts would have left them.
+// Kept here, not in storage: this page shares the launcher's origin.
+const NAPPS: Record<string, NappName> = {
+  [`${pk(50)}~notes`]: {
+    title: "my-notes",
+    type: "napp",
+    author: PUBLISHER,
+    authorLabel: null,
+    known: true
+  },
+  "dev~my-napp": { title: "my-napp", type: "napp", author: null, authorLabel: "dev", known: true },
+  [`napplet~${pk(2)}~chat`]: {
+    title: "my-chat",
+    type: "napplet",
+    author: pk(2),
+    authorLabel: null,
+    known: true
+  },
+  [`${pk(3)}~blog`]: {
+    title: "my-blog",
+    type: "nsite",
+    author: pk(3),
+    authorLabel: null,
+    known: true
+  }
+}
+const decisions: Decisions = {
+  [`${pk(50)}~notes`]: { signEvent: "allow", "nip44.encrypt": "allow", "napp.publish": "deny" },
+  "dev~my-napp": { "napp.copyText": "allow", "napp.saveFile": "deny" },
+  [`napplet~${pk(2)}~chat`]: {
+    "relay.publish": "allow",
+    "relay.publishEncrypted": "allow",
+    "common.follow": "allow",
+    "link.open": "deny"
+  },
+  [`${pk(3)}~blog`]: { signEvent: "deny" }
+}
+const settings = permissionsSection({
+  napp: nappId =>
+    NAPPS[nappId] ?? { title: nappId, type: null, author: null, authorLabel: null, known: false },
+  icon: () => appIcon({ src: ICON, size: "s" }),
+  forget(nappId, method) {
+    if (method) delete decisions[nappId]?.[method]
+    if (!method || !Object.keys(decisions[nappId] ?? {}).length) delete decisions[nappId]
+    settings.render(decisions)
+  },
+  forgetAll() {
+    for (const k of Object.keys(decisions)) delete decisions[k]
+    settings.render(decisions)
+  }
+})
+settings.el.open = true
+settings.render(decisions)
+
+// A grant arriving while Settings is open: the next of these, into the list
+// as it stands.
+const GRANTS: Array<[string, string, string]> = [
+  [`${pk(50)}~notes`, "napp.copyText", "allow"],
+  ["dev~my-napp", "signEvent", "allow"],
+  [`${pk(3)}~blog`, "link.open", "allow"],
+  [`napplet~${pk(2)}~chat`, "common.react", "deny"],
+  [`${pk(50)}~notes`, "nip44.decrypt", "allow"]
+]
+let granted = 0
+function grant() {
+  const [id, method, decision] = GRANTS[granted++ % GRANTS.length]
+  ;(decisions[id] ??= {})[method] = decision
+  settings.render(decisions)
+}
+document.getElementById("settings")!.append(settings.el)
+
 const root = document.documentElement
-document.getElementById("theme")!.append(
+document.getElementById("controls")!.append(
+  button({ label: "grant", variant: "outline", onClick: grant }),
+  " ",
+  button({
+    label: "prompts",
+    variant: "outline",
+    onClick: () => (grid.hidden = !grid.hidden)
+  }),
+  " ",
   button({
     label: "theme",
     variant: "outline",

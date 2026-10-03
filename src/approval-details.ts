@@ -4,6 +4,7 @@
 import { aKind, eventFacts } from "./event-facts.js"
 import { kindName } from "./kind-names.js"
 import { permRow } from "./napp-permissions.js"
+import { HEX64, host } from "./utils.js"
 import {
   author as authorEl,
   check,
@@ -52,9 +53,7 @@ export function describeCipher(
 ): { object?: Node; body: Node } {
   const decrypt = method.endsWith(".decrypt")
   const peer =
-    typeof params?.pubkey === "string" && /^[0-9a-f]{64}$/i.test(params.pubkey)
-      ? params.pubkey
-      : null
+    typeof params?.pubkey === "string" && HEX64.test(params.pubkey) ? params.pubkey : null
   const self = peer !== null && peer === me
   const person = () => authorEl(peer, { link: false })
   const object = !peer
@@ -146,10 +145,6 @@ export function eventDetail(
   }
 }
 
-function stripRelayScheme(url: string): string {
-  return url.replace(/^wss?:\/\//i, "").replace(/\/$/, "")
-}
-
 const toRelays = (n: number) => (n ? `to ${n} relay${n === 1 ? "" : "s"}:` : "to no relays:")
 
 // A publish: where it goes, at the end of what the event says ("…, to 3
@@ -173,7 +168,7 @@ export function publishDetail(
     boxes[i].addEventListener("change", () => {
       count.textContent = toRelays(boxes.filter(b => b.checked).length)
     })
-    section.append(permRow(boxes[i], code(stripRelayScheme(url))))
+    section.append(permRow(boxes[i], code(host(url))))
   })
   // Before the fold: where it goes, then what it is.
   if (targets.length) detail.body.insertBefore(section, detail.body.lastChild)

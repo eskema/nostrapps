@@ -5,6 +5,7 @@
 // its text included, stays in the fold under it. Given the event it replaces
 // (a follow list, a profile), it says what changes.
 import { kindName } from "./kind-names.js"
+import { HEX64, host } from "./utils.js"
 import { author, code, notice } from "./system-napps/ui.js"
 
 type Words = Array<Node | string>
@@ -17,7 +18,6 @@ interface Facts {
 }
 
 const PEOPLE_MAX = 5
-const HEX64 = /^[0-9a-f]{64}$/i
 
 const tagValues = (evt: any, name: string): string[] =>
   Array.isArray(evt?.tags)
@@ -30,9 +30,13 @@ const tagged = (evt: any, name: string) => tagValues(evt, name)[0] ?? ""
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
-const host = (url: string) => url.replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "")
-
 const content = (evt: any) => (typeof evt?.content === "string" ? evt.content : "")
+
+// A kind out of a tag value: "0" is a kind, "" and junk are not.
+const kindOf = (v: string): number | null => {
+  const n = Number(v)
+  return v !== "" && Number.isFinite(n) ? n : null
+}
 
 // "a note", "an http auth"; `unknown` for a kind we have no name for.
 export function aKind(kind: number, unknown = "post"): string {
@@ -134,8 +138,11 @@ function profileFields(evt: any): Record<string, string> {
     const o = JSON.parse(content(evt))
     if (!o || typeof o !== "object") return {}
     const out: Record<string, string> = {}
+    // Structured values keep their shape in the comparison: String() would
+    // turn every object into the same "[object Object]" and hide a change.
     for (const [k, v] of Object.entries(o))
-      if (v !== null && v !== undefined && v !== "") out[k] = String(v)
+      if (v !== null && v !== undefined && v !== "")
+        out[k] = typeof v === "string" ? v : (JSON.stringify(v) ?? "")
     return out
   } catch {
     return {}
@@ -152,8 +159,8 @@ const FACTS: Record<number, (evt: any, prev?: any) => Facts | null> = {
   // the fields it has.
   0: (evt, prev) => {
     const now = profileFields(evt)
-    if (!prev)
-      return { sentence: ["with ", ...fieldNames(Object.keys(now)), " (no current one found)"] }
+    // Without the current one in hand there is no diff to claim: just what it has.
+    if (!prev) return { sentence: ["with ", ...fieldNames(Object.keys(now))] }
     const was = profileFields(prev)
     const changed = Object.keys(now).filter(k => now[k] !== was[k])
     const removed = Object.keys(was).filter(k => !(k in now))
@@ -177,11 +184,9 @@ const FACTS: Record<number, (evt: any, prev?: any) => Facts | null> = {
   // followed and unfollowed; losing more than a quarter of it is a warning.
   3: (evt, prev) => {
     const now = new Set(tagValues(evt, "p"))
-    if (!prev)
-      return {
-        sentence: [`of ${plural(now.size, "profile")}`],
-        warn: "Your current follow list wasn't found: this replaces whatever it is."
-      }
+    // Without the current one in hand there is no diff to claim: just its size.
+    // (commonFollowChange always asks when no current list was found.)
+    if (!prev) return { sentence: [`of ${plural(now.size, "profile")}`] }
     const was = new Set(tagValues(prev, "p"))
     const added = [...now].filter(p => !was.has(p))
     const removed = [...was].filter(p => !now.has(p))
@@ -220,7 +225,7 @@ const FACTS: Record<number, (evt: any, prev?: any) => Facts | null> = {
     const c = content(evt)
     const [by] = tagValues(evt, "p").filter(p => HEX64.test(p))
     const on = [
-      aKind(Number(tagged(evt, "k")) || 1),
+      aKind(kindOf(tagged(evt, "k")) ?? 1),
       ...(by ? [" by ", author(by, { link: false })] : [])
     ]
     if (c === "+" || c === "") return { sentence: ["liking ", ...on] }
@@ -243,7 +248,8 @@ const FACTS: Record<number, (evt: any, prev?: any) => Facts | null> = {
         ...(ext
           ? [code(ext)]
           : [
-              aKind(Number(tagged(evt, "K"))),
+              // no K tag: "a post", not kind 0's name
+              aKind(kindOf(tagged(evt, "K")) ?? NaN),
               ...(root ? [" by ", author(root, { link: false })] : [])
             ]),
         ...(p.length ? [", notifying ", ...peopleList(p)] : [])
@@ -328,7 +334,7 @@ function repost(evt: any): Facts {
   const [by] = tagValues(evt, "p").filter(p => HEX64.test(p))
   return {
     sentence: [
-      `of ${aKind(Number(tagged(evt, "k")) || (evt?.kind === 6 ? 1 : 0))}`,
+      `of ${aKind(kindOf(tagged(evt, "k")) ?? (evt?.kind === 6 ? 1 : 0))}`,
       ...(by ? [" by ", author(by, { link: false })] : [])
     ]
   }
