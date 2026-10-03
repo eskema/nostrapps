@@ -137,7 +137,6 @@ import {
   actionList
 } from "./system-napps/index.js"
 import { pool } from "@nostr/gadgets/global"
-import { loadNostrUser } from "@nostr/gadgets/metadata"
 import { loadFollowsList } from "@nostr/gadgets/lists"
 import type { NostrEvent } from "@nostr/tools/pure"
 import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
@@ -727,13 +726,16 @@ async function runNappAction(
     try {
       // One way to go: the one app, or the one open window (an open system
       // napp, which isn't offered again as a new one).
-      const [nappId, existingInstanceId] =
-        candidates.length + openCandidates.length === 1
-          ? candidates.length
-            ? [candidates[0], undefined]
-            : [openCandidates[0].nappId, openCandidates[0].instanceId]
-          : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
+      const picked = candidates.length + openCandidates.length !== 1
+      const [nappId, existingInstanceId] = !picked
+        ? candidates.length
+          ? [candidates[0], undefined]
+          : [openCandidates[0].nappId, openCandidates[0].instanceId]
+        : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
 
+      // Revealed when a window opened, or the user picked one to see; an
+      // auto-selected open window answers behind the caller.
+      let reveal = true
       // the user may have picked an existing window.
       // if not, open a new window here and get its id
       const sysId = handlers.systemIdOf(nappId)
@@ -742,6 +744,7 @@ async function runNappAction(
         instanceId = launchSystemNapp(sysId).getState().instanceId
       } else if (existingInstanceId) {
         // Raised like a new window would be, or it answers behind the caller.
+        reveal = picked
         focusInstance(existingInstanceId)
         instanceId = existingInstanceId
       } else if (auxiliary) {
@@ -763,9 +766,9 @@ async function runNappAction(
         maybeRepack()
         instanceId = win.getState().instanceId
       }
-      // Whatever answers is seen: out from under a maximized window (the
-      // caller, usually).
-      revealInstance(instanceId)
+      // What opened, or what the user asked to see: out from under a
+      // maximized window (the caller, usually).
+      if (reveal) revealInstance(instanceId)
       setStatus(
         `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}\n${formatPayload(payload)}`
       )
@@ -1384,7 +1387,10 @@ function authorFor(pubkey: string, front = false): Author | null {
   enqueue(
     `author:${pubkey}`,
     () =>
-      loadNostrUser(pubkey)
+      // The kit's loader: one gadgets cache entry, and the profile lands in
+      // the search index too — the kit author element asks for the same thing
+      // and gets the cached answer.
+      loadNostrUserIndexed(pubkey)
         .then(u => {
           kitAuthors.set(pubkey, u)
           const author = {
