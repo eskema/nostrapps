@@ -12,20 +12,10 @@ import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
 import { startOutbox, stopOutbox } from "../outbox.js"
 import { loginControls } from "../login.js"
-import { nappNameEl } from "../napp-name.js"
-import {
-  author,
-  badge,
-  busy,
-  button,
-  check,
-  code,
-  details,
-  empty,
-  item,
-  itemList
-} from "./ui.js"
+import { nappName, nappNameEl } from "../napp-name.js"
+import { author, badge, busy, button, check, code, details, empty, item, itemList } from "./ui.js"
 import { backupSection } from "./backup-section.js"
+import { permissionsSection } from "./permissions-section.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): void } = {}) {
   container.innerHTML = `
@@ -115,11 +105,12 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   const panel = container.querySelector(".settings-panel") as HTMLElement
   const buildRow = container.querySelector(".settings-build-row") as HTMLElement
 
-  const permDetails = details({ summary: "permissions", sticky: true, class: "settings-permissions" })
-  const permSummary = permDetails.querySelector("summary") as HTMLElement
-  const decisionsEl = document.createElement("div")
-  decisionsEl.className = "perm-list"
-  permDetails.appendChild(decisionsEl)
+  const permissions = permissionsSection({
+    napp: nappName,
+    icon: perms.nappIcon,
+    forget: (nappId, method) => perms.forgetDecision(nappId, method),
+    forgetAll: () => perms.forgetAllDecisions()
+  })
 
   const actionsDetails = details({ summary: "actions", sticky: true, class: "settings-actions" })
   const actionsSummary = actionsDetails.querySelector("summary") as HTMLElement
@@ -139,7 +130,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
 
   // Sections live directly on the root panel (user · permissions · actions ·
   // relays · backups), inserted before the build/reset footer.
-  panel.insertBefore(permDetails, buildRow)
+  panel.insertBefore(permissions.el, buildRow)
   panel.insertBefore(actionsDetails, buildRow)
   panel.insertBefore(relaysDetails, buildRow)
   panel.insertBefore(backup.el, buildRow)
@@ -197,56 +188,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     relaysEl.appendChild(list)
   }
 
-  function renderDecisions() {
-    decisionsEl.innerHTML = ""
-    const all = perms.listDecisions()
-    const entries = Object.entries(all)
-    permSummary.textContent = `permissions (${entries.length})`
-    if (entries.length === 0) {
-      decisionsEl.appendChild(empty("no permission was granted yet"))
-      return
-    }
-    decisionsEl.appendChild(listAction("forget all", () => perms.forgetAllDecisions()))
-    for (const [nappId, methods] of entries as [string, Record<string, string>][]) {
-      const group = document.createElement("div")
-      group.className = "perm-group"
-
-      const head = document.createElement("div")
-      head.className = "perm-group-head"
-      const name = nappNameEl(nappId)
-      name.classList.add("perm-napp-id")
-      head.appendChild(name)
-      const clearAll = button({
-        label: "forget all",
-        variant: "outline",
-        class: "perm-forget-all",
-        onClick: () => perms.forgetDecision(nappId)
-      })
-      head.appendChild(clearAll)
-      group.appendChild(head)
-
-      for (const [method, decision] of Object.entries(methods) as [string, string][]) {
-        const row = document.createElement("div")
-        row.className = "perm-row"
-        const m = code(method, "perm-method")
-        const d = badge(decision, {
-          tone: decision === "allow" ? "good" : "danger",
-          class: "perm-decision"
-        })
-        const f = button({
-          label: "forget",
-          variant: "outline",
-          class: "perm-forget",
-          onClick: () => perms.forgetDecision(nappId, method)
-        })
-        row.append(m, d, f)
-        group.appendChild(row)
-      }
-
-      decisionsEl.appendChild(group)
-    }
-  }
-
   function renderHandlerPrefs() {
     handlersEl.innerHTML = ""
     const snapshot = handlers.snapshotActionMap()
@@ -271,7 +212,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   }
 
   function renderPerms() {
-    renderDecisions()
+    permissions.render(perms.listDecisions())
     renderHandlerPrefs()
   }
 

@@ -35,14 +35,34 @@
       .mock-label b {
         margin-right: var(--space-s);
       }
+      .mock-section {
+        display: grid;
+        gap: var(--space-s);
+        justify-items: start;
+        margin-bottom: var(--space-xxl);
+      }
+      /* Settings' window body, roughly: a surface at a window's width. */
+      .mock-settings {
+        box-sizing: border-box;
+        width: min(100%, 32rem);
+        padding: var(--space-l);
+        border-radius: var(--radius-xl);
+        background: var(--surface);
+      }
     </style>
   </head>
   <body>
     <div class="mock-bar">
-      <span>permission prompts, fake data</span>
-      <span id="theme"></span>
+      <span>permissions, fake data</span>
+      <span id="controls"></span>
     </div>
-    <div class="mock-grid" id="grid"></div>
+    <div class="mock-section">
+      <div class="mock-label">settings · permissions</div>
+      <div class="mock-settings system-napp-settings">
+        <div class="settings-panel" id="settings"></div>
+      </div>
+    </div>
+    <div class="mock-grid" id="grid" hidden></div>
     <script type="module" src="/src/mocks/permissions.ts"></script>
   </body>
 </html>

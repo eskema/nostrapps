@@ -66,6 +66,25 @@ export function nameEl(title: string, author?: string | null): HTMLElement {
   return el
 }
 
+// What an Apps card says under a title: "<type> from <author>", or "<type> ·
+// dev" with no manifest. The small words are semibold (.napp-byline-meta);
+// the author is the kit's and fills itself in. A caller can go on with
+// meta(), "… wants to".
+export function nappByline(napp: Pick<NappName, "author" | "authorLabel" | "type">) {
+  const line = document.createElement("div")
+  line.className = "napp-byline"
+  const meta = (text: string) => {
+    const s = document.createElement("span")
+    s.className = "napp-byline-meta"
+    s.textContent = text
+    line.append(s)
+  }
+  if (napp.type) meta(napp.author ? `${napp.type} from ` : napp.type)
+  if (napp.author) line.append(authorEl(napp.author, { link: false }))
+  else if (napp.authorLabel) meta(napp.type ? ` · ${napp.authorLabel}` : napp.authorLabel)
+  return Object.assign(line, { meta })
+}
+
 // The same line as plain text, for the places that take a string (toasts, the
 // log). No live update: whatever the author's name is right now.
 export function nappNameText(nappId: string): string {

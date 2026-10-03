@@ -1048,6 +1048,14 @@ body.popover-open .napp-body iframe {
   min-width: 40vw;
 }
 
+/* On a phone, 40vw is narrower than the prompt's content: its least is the
+   most there is. */
+@media (max-width: 791px) {
+  .app-dialog-permission .app-dialog-cards {
+    min-width: 100%;
+  }
+}
+
 .permission {
   display: grid;
   gap: var(--space-m);
@@ -1064,11 +1072,15 @@ body.popover-open .napp-body iframe {
   line-height: 1.2;
 }
 
+/* As far from the title as the install screen's icon is from its name. */
 .permission-name > .ui-app-icon {
   vertical-align: middle;
+  margin-right: var(--space-s);
 }
 
-.permission-meta {
+/* An Apps card's byline wherever it is borrowed (nappByline): its small
+   words semibold, the author as the kit draws it. */
+.napp-byline-meta {
   font-size: var(--text-xs);
   font-weight: 600;
 }
@@ -1935,20 +1947,33 @@ body.popover-open .napp-body iframe {
   justify-content: end;
 }
 
-.perm-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xxs);
-  padding: var(--space-s);
-  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  border-radius: var(--radius-m);
+/* Settings' permissions (permissionsSection): a napp each, room between
+   them. A napp: its title, the icon in line before it, "forget" at the
+   line's end, the Apps card's byline under; then a row per decision, the
+   prompt's words, the decision and a ×. */
+.settings-permissions .perm-list {
+  gap: var(--space-l);
 }
 
-.perm-group-head {
-  display: flex;
+.perm-napp {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.perm-napp-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-s);
-  justify-content: space-between;
+  column-gap: var(--space-s);
+}
+
+.perm-napp-head > .napp-byline {
+  grid-column: 1 / -1;
+}
+
+.perm-napp-title > .ui-app-icon {
+  vertical-align: middle;
+  margin-right: var(--space-s);
 }
 
 /* Holds a nappNameEl now — "<title> from <author>" prose, not an id, so no

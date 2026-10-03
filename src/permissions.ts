@@ -1,7 +1,7 @@
 import { openDialog, type DialogAction } from "./dialog.js"
-import { nappName, nappNameEl, type NappName } from "./napp-name.js"
+import { nappByline, nappName, nappNameEl, type NappName } from "./napp-name.js"
 import { getInstalledApp } from "./persistence.js"
-import { appIcon, author, code, el } from "./system-napps/ui.js"
+import { appIcon, code, el, overline } from "./system-napps/ui.js"
 
 const STORAGE_KEY = "nostrapps:permissions"
 
@@ -190,6 +190,33 @@ export const PERMISSION_ACTIONS: DialogAction<string>[] = [
   { label: "Allow always", value: "allow-always", variant: "link" }
 ]
 
+// How Settings names a remembered decision: the prompt's verb, then what
+// tells apart the methods sharing it, and what the grant covers ("sign any
+// event": an always for signEvent is one for every kind).
+const DECISION_WORDS: Record<string, string> = {
+  signEvent: "any event",
+  "napp.publish": "events",
+  "relay.publish": "events",
+  "relay.publishEncrypted": "encrypted events",
+  "outbox.publish": "events to outboxes",
+  "napp.saveFile": "files",
+  "napp.copyText": "to clipboard",
+  "link.open": "links",
+  "common.follow": "people",
+  "common.unfollow": "people"
+}
+
+export function decisionLabel(method: string): HTMLElement {
+  const verb = VERBS[method]
+  const label = el("span", "", el("span", "ui-title", verb || "use"))
+  const words = verb ? DECISION_WORDS[method] : undefined
+  if (words) label.append(" ", words)
+  if (!verb) label.append(" ", code(method))
+  const nip = /^nip(04|44)\./.exec(method)
+  if (nip) label.append(" ", overline(`NIP-${nip[1]}`))
+  return label
+}
+
 // What each method is asking to do, as the verb of "<napp> wants to <verb>".
 const VERBS: Record<string, string> = {
   signEvent: "sign",
@@ -213,19 +240,27 @@ const VERBS: Record<string, string> = {
 // The napp's icon before its name: a plate holding the place, then the first
 // of its sources that loads. None loading, it drops out. Its sources are
 // looked up lazily: nsite/icon.ts reaches into the host, which imports this.
-function nappIcon(nappId: string): HTMLElement | undefined {
+export function nappIcon(nappId: string): HTMLElement | undefined {
   const app = getInstalledApp(nappId)
   if (!app) return undefined
   const icon = appIcon({ size: "s", fade: true })
   import("./nsite/icon.js")
     .then(m => m.installedIconSources(app))
     .then(srcs => {
+      // A blossom server can sit on a request for a missing blob without ever
+      // answering (the <img> fires neither load nor error): past this long the
+      // next source is asked; the last is waited on.
       let i = 0
+      let wait = 0
       const next = () => {
-        if (i < srcs.length) icon.img.src = srcs[i++]
-        else icon.remove()
+        window.clearTimeout(wait)
+        if (i < srcs.length) {
+          icon.img.src = srcs[i++]
+          if (i < srcs.length) wait = window.setTimeout(next, 4000)
+        } else icon.remove()
       }
       icon.img.addEventListener("error", next)
+      icon.img.addEventListener("load", () => window.clearTimeout(wait))
       next()
     })
     .catch(() => icon.remove())
@@ -259,18 +294,9 @@ export function permissionBody(
     line = detail.line
     rest = detail.body
   }
-  const named = el(
-    "div",
-    "permission-name",
-    ...(icon ? [icon, " "] : []),
-    el("strong", "", napp.title)
-  )
-  const from = el("div", "permission-from")
-  const meta = (text: string) => from.append(el("span", "permission-meta", text))
-  if (napp.type) meta(napp.author ? `${napp.type} from ` : napp.type)
-  if (napp.author) from.append(author(napp.author, { link: false }))
-  else if (napp.authorLabel) meta(napp.type ? ` · ${napp.authorLabel}` : napp.authorLabel)
-  meta(" wants to")
+  const named = el("div", "permission-name", ...(icon ? [icon] : []), el("strong", "", napp.title))
+  const from = nappByline(napp)
+  from.meta(" wants to")
   const said = el(
     "div",
     "permission-ask",
