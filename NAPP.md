@@ -2,6 +2,28 @@
 
 A napp is an app published as kind `35130`. It is a static site with launcher capabilities such as actions, permissions, and declared requirements. Kind identifies it as a napp; `action` and `requires` tags declare capabilities but do not classify the event.
 
+## Development
+
+A napp is a folder with `metadata.json`, `index.html` and the rest of its files. `/dev` in the launcher runs a local folder (Chrome, Edge). `/dev <url>` runs one from a local server. Files are read on every request, so a reload picks up changes. Closing the window erases the napp's data. `/upload` publishes the folder.
+
+Keep scripts, styles and fonts in the folder. The user can turn off `network`, which blocks everything else. Read and publish Nostr events through the bridge.
+
+The `ui` kit styles elements but not `body`:
+
+```css
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+}
+```
+
+The bridge keeps `data-theme`, `--surface` and `--text` in sync with the launcher, so napps need no theme code.
+
+`window.nostr` is undefined when `identity` isn't granted, and `getPublicKey()` throws when nobody is logged in.
+
+Each napp has its own origin, so `localStorage` is its own.
+
 ## Local metadata
 
 Local and uploaded napps use `metadata.json` next to `index.html`:
