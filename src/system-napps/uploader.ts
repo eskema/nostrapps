@@ -27,7 +27,7 @@ const DEFAULT_BLOSSOM = ["https://relay.nostrapps.com"]
 
 import type { SystemCtx } from "../types.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
-import { normalizeServer, publishOutcomes } from "../utils.js"
+import { host, normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
 import { NAPP_NAMED_KIND, NSITE_NAMED_KIND } from "../nsite/fetch.js"
 import { NAPPLET_NAMED_KIND, computeAggregateHash, nappletMetaFromHtml } from "../nsite/napplet.js"
@@ -78,7 +78,6 @@ type Plan = {
   upload: Entry[]
 }
 
-const host = (url: string) => url.replace(/^[a-z]+:\/\//, "")
 
 // Per blob, per server. uploadBlob() passes no timeout of its own, so without
 // this a server that accepts the connection and never answers hangs the whole

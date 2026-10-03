@@ -6,6 +6,10 @@
 export const HEX64 = /^[0-9a-f]{64}$/i
 export const isHex64 = (s: unknown): s is string => typeof s === "string" && HEX64.test(s)
 
+// A url the way people read it: no scheme, no trailing slash. For display
+// only — never feed it back to fetch or the pool.
+export const host = (url: string) => url.replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "")
+
 export function debounce<T extends (...args: any[]) => any>(
   fn: T,
   delay: number
