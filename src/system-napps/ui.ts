@@ -1043,7 +1043,9 @@ export const authors = {
    *  leaves what's held alone. */
   set(pubkey: string, user: unknown) {
     const info = authorFrom(user)
-    if (!info.name && !info.displayName && !info.picture) return
+    // An empty profile still caches — known is what stops the re-asks — but
+    // never over a fuller one already in hand (a junk set must not blank it).
+    if (!info.name && !info.displayName && !info.picture && authorInfo.has(pubkey)) return
     authorInfo.set(pubkey, info)
     authorRepaint(pubkey)
   },

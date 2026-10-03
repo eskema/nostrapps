@@ -26,7 +26,7 @@ const JS_HEAD = `// napp-ui.js: the nostrapps kit's helpers as window.napp.ui, f
 const AUTHORS = `__nappUi.authors.use({
   load: pubkey => window.napp.utils.loadNostrUser(pubkey),
   npub: pubkey => window.napp.nip19.npubEncode(pubkey),
-  open: pubkey => window.napp.action("profile", pubkey).catch(() => {})
+  open: pubkey => void window.napp.action?.("profile", pubkey)?.catch(() => {})
 })
 `
 
