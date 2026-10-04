@@ -4,3 +4,6 @@ dist
 *.log
 .claude/
 tsconfig.tsbuildinfo
+
+# the wasm harness runs whatever module is dropped next to it
+harness/app.wasm

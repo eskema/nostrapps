@@ -28,6 +28,8 @@ import { setPointer } from "../pointer.js"
 import { getStore, isDeleted, safeQueryEvents } from "../store.js"
 import { feedsMode, subscribeStore } from "../store-subs.js"
 import { createNappWindow, fitWindowHeight } from "./napp-window.js"
+import { startWasmNapp, type WasmNapp } from "./wasm-canvas.js"
+import { WASM_DEFAULT_ENTRY } from "./wasm-abi.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
@@ -87,6 +89,7 @@ import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
 import {
   getInstalledApp,
   getLoadedActions,
+  isWasmApp,
   setLoadedAction,
   getNappletConfig,
   getPolicy,
@@ -497,7 +500,15 @@ function legacyNappOriginFor(nappId: string): string {
 }
 
 export async function launch(stageEl: HTMLElement, nappId: string, opts: LaunchOpts = {}) {
-  if (!getInstalledApp(nappId)) throw new Error(`failed to launch uninstalled app ${nappId}`)
+  const app = getInstalledApp(nappId)
+  if (!app) throw new Error(`failed to launch uninstalled app ${nappId}`)
+
+  // A wasm napp has no page: the window gets a canvas and this runs the
+  // module. Everything after the branch — the open-window bookkeeping, the
+  // space bookkeeping, the header — is the same either way.
+  if (isWasmApp(app)) {
+    return launchWasm(stageEl, nappId, opts)
+  }
 
   const origin = nappOriginFor(nappId)
   const win = mount(stageEl, nappId, origin, currentSigner, opts)
@@ -1790,6 +1801,9 @@ export function unmountNappWindows(): string[] {
   for (const [instanceId, win] of [...openWindows]) {
     if (win.systemId) continue
     const { nappId } = win.getState()
+    // A wasm module holds a frame loop and a frame callback; unmount has to
+    // stop it, or it paints into a canvas that is no longer in the document.
+    stopWasm(instanceId)
     win.unmount()
     openWindows.delete(instanceId)
     clearInstanceRuntimeState(instanceId)
@@ -2041,6 +2055,9 @@ export function reloadNappletWindows(nappId: string, html: string): number {
 }
 
 export function reloadIframesByNappId(nappId: string): number {
+  // A wasm napp has no iframe to reassign; its window is reloaded through the
+  // module runtime instead, and there is no stored action to replay.
+  reloadWasmByNappId(nappId)
   let count = 0
   for (const win of openWindows.values()) {
     if (win.root.dataset.nappId === nappId && win.iframe) {
@@ -2233,6 +2250,177 @@ function mount(
   if (!position) fitFreshWindow(win.root, stageEl)
   captureWindowGeom(win.root)
   return win
+}
+
+// ─── wasm napp loader (kind 35131 — a module, not a page) ──
+//
+// A wasm napp is always /app.wasm and no index.html. Its window gets
+// a canvas, this runs the module against it, and that is the whole surface: no
+// DOM, no iframe, no service worker, no bridge. The module imports four
+// functions and nothing else, so a napp that reaches for a file or a socket
+// gets neither.
+//
+// The window it builds is an ordinary napp window — same header, same
+// draggable, same packing — with a canvas where the iframe would be. What
+// differs is everything behind it: the actions, the permissions, the storage
+// and the nostr bridge are all web-napp machinery and none of it is here yet.
+
+// Running modules, so a reload or a whole-napp reload can stop the old one.
+const wasmNapps = new Map<string, WasmRuntime>()
+
+type WasmRuntime = {
+  napp: WasmNapp
+  window: NappWindow
+}
+
+async function launchWasm(
+  stageEl: HTMLElement,
+  nappId: string,
+  opts: LaunchOpts = {}
+): Promise<NappWindow> {
+  const {
+    instanceId = opts.instanceId ? opts.instanceId : `${instanceIdSerial++}`,
+    petname,
+    onProgress = () => {},
+    onStateChange,
+    onReorder,
+    onClose,
+    onDestroy,
+    position,
+    status
+  } = opts
+
+  onProgress(`Starting ${petname || nappId}…`)
+
+  const module = await wasmModuleFor(nappId, onProgress)
+
+  const win = createNappWindow({
+    nappId,
+    instanceId,
+    wasm: true,
+    petname,
+    position,
+    status,
+    onStateChange,
+    onReorder,
+    onClose: () => {
+      stopWasm(instanceId)
+      openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
+      cancelApprovalsIfGone(nappId)
+      onClose?.(instanceId)
+    },
+    onDestroy: () => {
+      stopWasm(instanceId)
+      openWindows.delete(instanceId)
+      clearInstanceRuntimeState(instanceId)
+      cancelApprovalsIfGone(nappId)
+      onDestroy?.(instanceId)
+    },
+    // A wasm napp has no registered actions and no popstate to replay, so a
+    // reload is just a reload.
+    onReload: () => reloadWasm(instanceId)
+  })
+
+  adoptWindow(win)
+  flagFreshInPack(stageEl, win, !!position)
+  stageEl.appendChild(win.root)
+  openWindows.set(instanceId, win)
+  ensureStageObserver(stageEl)
+  scaleFromSaved(win.root, position)
+  clampToStage(win.root, stageEl)
+  if (!position) fitFreshWindow(win.root, stageEl)
+  captureWindowGeom(win.root)
+
+  try {
+    const napp = await startWasmNapp({
+      module,
+      canvas: win.canvas!,
+      onLog: line => console.info(`[${nappId}] ${line}`)
+    })
+    // The window may already be gone: a reload, or the user closing it while
+    // the module was still compiling.
+    if (wasmNapps.has(instanceId)) stopWasm(instanceId)
+    wasmNapps.set(instanceId, { napp, window: win })
+  } catch (err) {
+    console.error(`[${nappId}] wasm napp failed to start`, err)
+    showWasmFailure(win, err)
+  }
+
+  if (!opts.transient) updateOpen(instanceId, win.getState())
+  return win
+}
+
+function stopWasm(instanceId: string) {
+  const running = wasmNapps.get(instanceId)
+  if (!running) return
+  wasmNapps.delete(instanceId)
+  try {
+    running.napp.stop()
+  } catch {}
+}
+
+/** wasmModuleFor is the napp's module: /app.wasm, from wherever this app's
+ * files live. Dev and temp apps serve on demand; installed and local ones
+ * were booted into storage. */
+async function wasmModuleFor(
+  nappId: string,
+  onProgress: (m: string) => void
+): Promise<ArrayBuffer> {
+  onProgress("Reading the module…")
+  try {
+    return (await readDevFile(nappId, `/${WASM_DEFAULT_ENTRY}`)).body
+  } catch {
+    // Not a live folder: an installed or local app, whose files were booted
+    // into its origin.
+  }
+  const files = await readNappFiles(nappId)
+  const file = files.find(f => f.path === `/${WASM_DEFAULT_ENTRY}`)
+  if (!file) throw new Error(`this napp ships no wasm module (looked for /${WASM_DEFAULT_ENTRY})`)
+  return await file.body.arrayBuffer()
+}
+
+/** reloadWasm starts the module again from scratch: there is no state to keep. */
+async function reloadWasm(instanceId: string) {
+  const running = wasmNapps.get(instanceId)
+  if (!running) return
+  const { window: win } = running
+  stopWasm(instanceId)
+  try {
+    const module = await wasmModuleFor(win.root.dataset.nappId!, () => {})
+    const napp = await startWasmNapp({
+      module,
+      canvas: win.canvas!,
+      onLog: line => console.info(`[${win.root.dataset.nappId}] ${line}`)
+    })
+    if (!openWindows.has(instanceId)) {
+      napp.stop()
+      return
+    }
+    wasmNapps.set(instanceId, { napp, window: win })
+  } catch (err) {
+    showWasmFailure(win, err)
+  }
+}
+
+/** reloadIframesByNappId's counterpart: every open window of a wasm napp. */
+function reloadWasmByNappId(nappId: string) {
+  for (const [instanceId, running] of wasmNapps) {
+    if (running.window.root.dataset.nappId === nappId) void reloadWasm(instanceId)
+  }
+}
+
+/** showWasmFailure puts the reason on the canvas's window, since there is
+ * nowhere else for it to go: the napp is the whole content. */
+function showWasmFailure(win: NappWindow, err: unknown) {
+  const message = err instanceof Error ? err.message : String(err)
+  win.root.classList.add("wasm-failed")
+  const body = win.canvas?.parentElement
+  if (!body) return
+  const note = document.createElement("div")
+  note.className = "napp-wasm-error"
+  note.textContent = message
+  body.appendChild(note)
 }
 
 // ─── NIP-5D napplet loader (kind 35129 — separate from the nsite path) ──
@@ -3605,6 +3793,7 @@ export async function applyNappPolicy(origin: string, nappId: string) {
   } finally {
     boot.remove()
   }
+
   // Reload every open window of this napp so the new CSP takes effect now.
   for (const [, win] of openWindows) {
     if (win.root?.dataset.nappId !== nappId) continue
@@ -3686,6 +3875,54 @@ export function getDevUrl(nappId: string): string | null {
   return devUrls.get(nappId) || null
 }
 
+// One file out of a dev/temp napp, straight off its backing: temp files, dev
+// server, or picked folder. Same source the napp-dev-read-file channel serves
+// the SW from, without any file listing.
+async function readDevFile(
+  nappId: string,
+  path: string
+): Promise<{ body: ArrayBuffer; mime: string }> {
+  const dirHandle = devHandles.get(nappId)
+  const devUrl = devUrls.get(nappId)
+  const tempAppFiles = tempFiles.get(nappId)
+
+  if (!dirHandle && !devUrl && !tempAppFiles) throw new Error("No files for " + nappId)
+
+  const tempFile = tempAppFiles?.get(path.startsWith("/") ? path : `/${path}`)
+  if (tempFile) {
+    return {
+      body: await tempFile.body.arrayBuffer(),
+      mime: tempFile.mime || "application/octet-stream"
+    }
+  }
+
+  if (devUrl) {
+    const rel = path.replace(/^\//, "")
+    const target = new URL(rel, devUrl).toString()
+    const res = await fetch(target)
+    if (!res.ok) throw new Error(`Fetch ${target} failed: ${res.status}`)
+    return {
+      body: await res.arrayBuffer(),
+      mime: res.headers.get("content-type") || "application/octet-stream"
+    }
+  }
+
+  if (!dirHandle) throw new Error("File not found: " + path)
+
+  const parts = path.replace(/^\//, "").split("/").filter(Boolean)
+  if (parts.length === 0) throw new Error("Empty path")
+
+  let handle: FileSystemDirectoryHandle | FileSystemFileHandle = dirHandle
+  for (let i = 0; i < parts.length - 1; i++) {
+    handle = await (handle as FileSystemDirectoryHandle).getDirectoryHandle(parts[i])
+  }
+  const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(
+    parts[parts.length - 1]
+  )
+  const file = await fileHandle.getFile()
+  return { body: await file.arrayBuffer(), mime: file.type || "application/octet-stream" }
+}
+
 export async function bootDevApp(
   origin: string,
   nappId: string,
@@ -3765,60 +4002,9 @@ window.addEventListener("message", async event => {
   }
 
   try {
-    const tempFile = tempAppFiles?.get(path.startsWith("/") ? path : `/${path}`)
-    if (tempFile) {
-      ;(event.source as Window)?.postMessage(
-        {
-          __nostrapps: "napp-dev-file-result",
-          requestId,
-          body: await tempFile.body.arrayBuffer(),
-          mime: tempFile.mime || "application/octet-stream"
-        },
-        "*"
-      )
-      return
-    }
-
-    if (devUrl) {
-      const rel = path.replace(/^\//, "")
-      const target = new URL(rel, devUrl).toString()
-      const res = await fetch(target)
-      if (!res.ok) throw new Error(`Fetch ${target} failed: ${res.status}`)
-      const body = await res.arrayBuffer()
-      ;(event.source as Window)?.postMessage(
-        {
-          __nostrapps: "napp-dev-file-result",
-          requestId,
-          body,
-          mime: res.headers.get("content-type") || "application/octet-stream"
-        },
-        "*"
-      )
-      return
-    }
-
-    if (!dirHandle) throw new Error("File not found: " + path)
-
-    const parts = path.replace(/^\//, "").split("/").filter(Boolean)
-    if (parts.length === 0) throw new Error("Empty path")
-
-    let handle: FileSystemDirectoryHandle | FileSystemFileHandle = dirHandle
-    for (let i = 0; i < parts.length - 1; i++) {
-      handle = await (handle as FileSystemDirectoryHandle).getDirectoryHandle(parts[i])
-    }
-    const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(
-      parts[parts.length - 1]
-    )
-    const file = await fileHandle.getFile()
-    const body = await file.arrayBuffer()
-
+    const { body, mime } = await readDevFile(nappId, path)
     ;(event.source as Window)?.postMessage(
-      {
-        __nostrapps: "napp-dev-file-result",
-        requestId,
-        body,
-        mime: file.type || "application/octet-stream"
-      },
+      { __nostrapps: "napp-dev-file-result", requestId, body, mime },
       "*"
     )
   } catch (err: any) {
@@ -5192,7 +5378,9 @@ function resolveCode(params: {
     return out
   }
 
-  const s = String(code ?? "").trim().replace(/^nostr:/i, "")
+  const s = String(code ?? "")
+    .trim()
+    .replace(/^nostr:/i, "")
   if (s.startsWith("nevent1")) {
     const { data } = decode(s)
     const ptr = data as { id: string; relays?: string[]; author?: string; kind?: number }
@@ -5221,11 +5409,7 @@ function resolveCode(params: {
 // One cache key per pointer. Built from what the code RESOLVES to, not from the
 // code itself: a napp asking with a nevent1 and another asking with the decoded
 // pointer want the same event and must share one lookup (and one backoff).
-function loadEventKey(params: {
-  code: EventCode
-  relays?: string[]
-  author?: string
-}): string {
+function loadEventKey(params: { code: EventCode; relays?: string[]; author?: string }): string {
   try {
     const r = resolveCode(params)
     return JSON.stringify([
@@ -5275,14 +5459,7 @@ async function fetchEvent(params: {
   relays?: string[]
   author?: string
 }): Promise<NostrEvent | null> {
-  const {
-    id,
-    kind,
-    author,
-    identifier,
-    relayHints,
-    isReplaceable
-  } = resolveCode(params)
+  const { id, kind, author, identifier, relayHints, isReplaceable } = resolveCode(params)
 
   // Validate BEFORE any store/relay query. A malformed id/author (a note1 that
   // didn't decode, junk hex, …) panics redstore's wasm and — because its

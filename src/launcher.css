@@ -698,6 +698,40 @@ button {
   display: block;
 }
 
+/* A wasm napp's window content: one canvas, sized to the body, painting the
+   whole of it. The backing store is set from the device pixel ratio in
+   wasm-canvas.ts; this is the CSS half, which is what gives it a size to have. */
+.napp-body > canvas.napp-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* A napp draws every pixel, so there is nothing behind it to show and
+     nothing to select. */
+  touch-action: none;
+  user-select: none;
+}
+
+/* A napp that could not start says so here rather than showing an empty
+   canvas for ever: the canvas is the whole window, so there is nowhere else
+   for the reason to go. */
+.napp-wasm-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-m);
+  text-align: center;
+  white-space: pre-wrap;
+  color: var(--text);
+  background: var(--surface);
+  font-size: var(--text-s);
+}
+
+.napp-window.wasm-failed .napp-canvas {
+  display: none;
+}
+
 .napp-loading {
   display: flex;
   align-items: center;
@@ -831,6 +865,13 @@ body.napp-dragging * {
    cursor flies over, and don't steal captured pointer events. */
 body.napp-dragging .napp-body iframe,
 body.napp-resizing .napp-body iframe {
+  pointer-events: none;
+}
+
+/* A wasm napp's canvas is in the launcher's own document, so a drag that
+   starts inside one would otherwise be eaten by the pointer capture. */
+body.napp-dragging .napp-body canvas.napp-canvas,
+body.napp-resizing .napp-body canvas.napp-canvas {
   pointer-events: none;
 }
 

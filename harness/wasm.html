@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>wasm napp harness</title>
+<style>
+  body {
+    margin: 0;
+    background: #1b1c1f;
+    color: #8f8;
+    font: 12px monospace;
+  }
+  .napp-body {
+    width: 320px;
+    height: 260px;
+    position: relative;
+    margin: 8px;
+  }
+  canvas.napp-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+</style>
+<div class="napp-body"><canvas class="napp-canvas"></canvas></div>
+<pre id="log"></pre>
+<script type="module">
+  // A wasm napp, running, with no launcher around it.
+  //
+  // This is the half of a wasm napp window that is not chrome: the canvas,
+  // the runtime, and the events a window would deliver. Drop a module next to
+  // this file as app.wasm and open the page — see ../WASM.md. It exists
+  // because installing a wasm napp properly goes through a folder picker, and
+  // iterating on the module should not. The module goes next to this page, as app.wasm.
+  import { startWasmNapp } from "/src/sandbox/wasm-canvas.ts"
+
+  const log = document.getElementById("log")
+  const lines = []
+  const note = m => {
+    lines.push(m)
+    log.textContent = lines.join("\n")
+    console.log(m)
+  }
+  const seen = s => log.textContent.includes(s)
+  const canvas = document.querySelector("canvas")
+
+  const bytes = await (await fetch("./app.wasm")).arrayBuffer()
+  note(`module: ${bytes.byteLength} bytes`)
+
+  let wapp
+  try {
+    wapp = await startWasmNapp({ module: bytes, canvas, onLog: l => note("napp: " + l) })
+    note("started")
+  } catch (err) {
+    note("FAILED: " + err)
+    throw err
+  }
+
+  const click = (clientX, clientY) => {
+    canvas.dispatchEvent(new PointerEvent("pointermove", { clientX, clientY, buttons: 0 }))
+    canvas.dispatchEvent(new PointerEvent("pointerdown", { clientX, clientY, buttons: 1 }))
+    canvas.dispatchEvent(new PointerEvent("pointerup", { clientX, clientY, buttons: 1 }))
+  }
+
+  // One click per forced frame, sweeping the canvas: the button is found
+  // without guessing coordinates, and each click is seen by a frame that
+  // happens right after it rather than whenever the display gets round to it.
+  const box = canvas.getBoundingClientRect()
+  let hit = null
+  for (let y = 4; y < box.height && !hit; y += 6) {
+    for (let x = 4; x < box.width; x += 6) {
+      click(box.left + x, box.top + y)
+      wapp.frame()
+      if (seen("clicked (")) {
+        hit = [x, y]
+        break
+      }
+    }
+  }
+  note(hit ? `clicked at canvas ${hit[0]},${hit[1]}` : "swept the canvas, nothing clicked")
+</script>

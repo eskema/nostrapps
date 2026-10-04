@@ -2,6 +2,8 @@
 
 A napp is an app published as kind `35130`. It is a static site with launcher capabilities such as actions, permissions, and declared requirements. Kind identifies it as a napp; `action` and `requires` tags declare capabilities but do not classify the event.
 
+A wasm napp is an app published as kind `35131`. It is one WebAssembly module instead of a static site; the launcher runs the module itself and gives it a canvas to paint into. Same manifest shape — `path` tags, `title`, `icon`, `action`, `requires`, `initial_size` — with the module always at `/app.wasm` and no extra tags. See [WASM.md](./WASM.md).
+
 ## Local metadata
 
 Local and uploaded napps use `metadata.json` next to `index.html`:
@@ -19,14 +21,16 @@ Local and uploaded napps use `metadata.json` next to `index.html`:
 
 `id` becomes the `d` tag. `requires` becomes `requires` tags. `actions` becomes `action` tags.
 
-| Field         | Published as  | Meaning                                  |
-| ------------- | ------------- | ---------------------------------------- |
-| `id`          | `d`           | Required identifier and origin basis.    |
-| `title`       | `title`       | Display name.                            |
-| `icon`        | `icon`        | Icon URL or path.                        |
-| `description` | `description` | One-line card description.               |
-| `requires`    | `requires`    | Capability domains requested by the app. |
-| `actions`     | `action`      | Action patterns handled by the app.      |
+| Field          | Published as   | Meaning                                                   |
+| -------------- | -------------- | --------------------------------------------------------- |
+| `id`           | `d`            | Required identifier and origin basis.                     |
+| `title`        | `title`        | Display name.                                             |
+| `icon`         | `icon`         | Icon URL or path.                                         |
+| `description`  | `description`  | One-line card description.                                |
+| `requires`     | `requires`     | Capability domains requested by the app.                  |
+| `actions`      | `action`       | Action patterns handled by the app.                       |
+| `modes`        | `mode`         | How the app presents (`normal`, `auxiliary`, `headless`). |
+| `initial_size` | `initial_size` | Preferred window size.                                    |
 
 ## Launcher bridge
 
@@ -206,7 +210,7 @@ There is no restriction on what actions are allowed, but these are some of the c
 | -------------------- | ----------------------------------- | ------------------------------- |
 | `view`               | `nevent`/`naddr` **or** full event  |                                 |
 | `view:<kind-number>` | full event object (always resolved) |                                 |
-| `profile`            | `pubkey` as hex                    |                                 |
+| `profile`            | `pubkey` as hex                     |                                 |
 | `feed`               | list of pubkey strings              |                                 |
 | `relay`              | list of relay URLs                  |                                 |
 | `wiki-term`          | a `d`-tag NIP-54 normalized string  | the resolved `kind:30818` event |

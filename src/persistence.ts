@@ -1,4 +1,5 @@
 import { NostrEvent } from "@nostr/tools"
+import { WASM_NAMED_KIND } from "./nsite/fetch.js"
 import {
   AppType,
   InstalledApp,
@@ -686,6 +687,9 @@ export function storeInstalledLocalApp(app: {
   modes?: unknown
   initialSize?: unknown
   html?: string | null
+  // A local wasm napp's kind, since it carries no manifest event. Absent
+  // means a page.
+  kind?: number
 }) {
   if (!app?.nappId) return
   const all = readInstalled()
@@ -699,6 +703,7 @@ export function storeInstalledLocalApp(app: {
     modes: sanitizeModes(app.modes),
     initialSize: sanitizeInitialSize(app.initialSize),
     ...(app.html ? { html: app.html } : {}),
+    ...(app.kind === WASM_NAMED_KIND ? { kind: WASM_NAMED_KIND } : {}),
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)
@@ -735,6 +740,17 @@ export function sanitizeModes(v: unknown): NappMode[] {
 export function modesOfApp(app: { modes?: NappMode[] } | undefined | null): NappMode[] {
   const modes = sanitizeModes(app?.modes)
   return modes.length ? modes : ["normal"]
+}
+
+// What an app is is its kind: 35131 is a module painting a canvas, everything
+// else a page. Published records carry the manifest event; local/dev/temp
+// records carry the kind directly, since they have no event.
+export function isWasmApp(
+  app: { event?: { kind: number } | null; kind?: number } | undefined | null
+): boolean {
+  if (!app) return false
+  if (app.event && typeof app.event.kind === "number") return app.event.kind === WASM_NAMED_KIND
+  return app.kind === WASM_NAMED_KIND
 }
 
 // ["mode", "<mode>"] per-mode tags (["modes", ...] accepted too).
@@ -1026,7 +1042,7 @@ export function getInstalledApp(nappId: string): InstalledApp | undefined {
 
 export function classifyEvent(kind: number): AppType {
   if (kind === 5129 || kind === 15129 || kind === 35129) return "napplet"
-  if (kind === 35130) return "napp"
+  if (kind === 35130 || kind === WASM_NAMED_KIND) return "napp"
   if (kind === 35128) return "nsite"
   return "invalid"
 }
@@ -1128,6 +1144,9 @@ export function storeDevApp(app: {
   initialSize?: unknown
   temporary?: boolean
   event?: NostrEvent | null
+  // A dev wasm napp's kind, since a folder dev app carries no manifest
+  // event. Absent means a page.
+  kind?: number
 }) {
   if (!app?.nappId) return
   devApps.set(app.nappId, {
@@ -1140,7 +1159,8 @@ export function storeDevApp(app: {
     initialSize: sanitizeInitialSize(app.initialSize),
     installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000),
     ...(app.temporary ? { temporary: true } : {}),
-    ...(app.event ? { event: app.event } : {})
+    ...(app.event ? { event: app.event } : {}),
+    ...(app.kind === WASM_NAMED_KIND ? { kind: WASM_NAMED_KIND } : {})
   })
 }
 

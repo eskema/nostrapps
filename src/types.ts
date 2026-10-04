@@ -83,6 +83,7 @@ export type Position = {
 export type NappWindow = {
   root: HTMLDivElement
   iframe: HTMLIFrameElement | null
+  canvas: HTMLCanvasElement | null
   body: HTMLDivElement
   titleEl: HTMLSpanElement
   close(): void
@@ -181,8 +182,9 @@ export type NappPolicy = {
   domains: string[]
 }
 
-// nsite = kind 35128; napp = kind 35130; napplet = a
-// self-contained kind-35129 app. The three flavors the launcher runs.
+// nsite = kind 35128; napp = kind 35130; wasm napp = kind 35131; napplet =
+// a self-contained kind-35129 app. What an app is is its kind; tags describe.
+// A wasm napp is a napp whose window is a canvas rather than a page.
 export type AppType = "nsite" | "napp" | "napplet" | "invalid"
 
 // How an app presents itself. "normal" = a regular window; "auxiliary" =
@@ -204,6 +206,10 @@ export type InstalledApp = {
   // "modes" the app advertises (["mode", "<mode>"] manifest tags, or a
   // `modes` array in metadata.json). Absent/empty implies ["normal"].
   modes?: NappMode[]
+  // The manifest kind for apps that have one (35128/35130/35131), stored for
+  // local/dev/temp records that carry no event. Published records read it off
+  // `event` instead.
+  kind?: number
   // Preferred size for the ephemeral floating window used in auxiliary
   // dispatch (["initial_size", "<width>", "<height>"] manifest tags, or an
   // `initial_size` {width, height} object in metadata.json).

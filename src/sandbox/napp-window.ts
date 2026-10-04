@@ -13,6 +13,7 @@ import {
 import { moveBefore } from "../dom.js"
 import { getWindowSize, rememberWindowSize } from "../persistence.js"
 import { isInstanceSerial } from "../utils.js"
+import { WASM_DEFAULT_HEIGHT, WASM_DEFAULT_WIDTH } from "./wasm-abi.js"
 import { icon, spinner } from "../system-napps/ui.js"
 
 // A window's starter height, and the ceiling a content-sized one fits within
@@ -81,7 +82,8 @@ export function createNappWindow({
   status,
   bodyElement,
   system = false,
-  loading = false
+  loading = false,
+  wasm = false
 }: {
   nappId: string
   instanceId: string
@@ -109,6 +111,9 @@ export function createNappWindow({
   bodyElement?: HTMLElement
   system?: boolean
   loading?: boolean
+  // A wasm napp gets a canvas in the body instead of an iframe: the launcher
+  // runs its module and paints the pixels itself. See wasm-canvas.ts.
+  wasm?: boolean
 }): NappWindow {
   const root = document.createElement("div")
   root.className = "napp-window"
@@ -156,6 +161,7 @@ export function createNappWindow({
   if (system) body.classList.add("napp-body-system")
 
   const iframeRef = { current: null as HTMLIFrameElement | null }
+  const canvasRef = { current: null as HTMLCanvasElement | null }
   if (bodyElement) {
     body.appendChild(bodyElement)
   } else if (loading) {
@@ -163,6 +169,14 @@ export function createNappWindow({
     holder.className = "napp-loading"
     holder.append(spinner("napp-loading-spinner"))
     body.appendChild(holder)
+  } else if (wasm) {
+    // The napp draws every pixel here, so there is no chrome inside the body
+    // and the canvas takes all of it.
+    const canvas = document.createElement("canvas")
+    canvas.className = "napp-canvas"
+    canvas.tabIndex = 0
+    body.appendChild(canvas)
+    canvasRef.current = canvas
   } else {
     const iframe = document.createElement("iframe")
     iframe.sandbox = sandbox
@@ -176,28 +190,36 @@ export function createNappWindow({
     iframeRef.current = iframe
   }
 
-  // Nav controls (back/forward/reload) for iframe napps. The parent can't drive
-  // a cross-origin frame's history, so these post to bridge.js — which runs
-  // inside the napp and calls history.back()/forward()/location.reload().
+  // Nav controls. An iframe napp gets back/forward/reload, because the parent
+  // cannot drive a cross-origin frame's history and so these post to
+  // bridge.js, which runs inside the napp. A wasm napp has no history to walk,
+  // so it gets reload alone; a canvas is in the launcher's own document and
+  // needs no bridge to be reloaded either.
   if (!system && !bodyElement) {
     const nav = document.createElement("div")
     nav.className = "napp-nav"
-    const navCmd = (dir: "back" | "forward" | "reload") => {
-      if (dir === "reload") onReload?.()
-      iframeRef.current?.contentWindow?.postMessage({ __nostrapps: "napp-nav", dir }, origin || "*")
-    }
     const navBtn = (iconName: string, title: string) => {
       const b = makeBtn("", title)
       b.append(icon(iconName))
       return b
     }
-    const btnBack = navBtn("back", "Back")
-    const btnFwd = navBtn("forward", "Forward")
-    const btnReload = navBtn("reload", "Reload")
-    btnBack.addEventListener("click", e => (e.stopPropagation(), navCmd("back")))
-    btnFwd.addEventListener("click", e => (e.stopPropagation(), navCmd("forward")))
-    btnReload.addEventListener("click", e => (e.stopPropagation(), navCmd("reload")))
-    nav.append(btnBack, btnFwd, btnReload)
+    const navCmd = (dir: "back" | "forward" | "reload") => {
+      if (dir === "reload") onReload?.()
+      iframeRef.current?.contentWindow?.postMessage({ __nostrapps: "napp-nav", dir }, origin || "*")
+    }
+    if (wasm) {
+      const btnReload = navBtn("reload", "Reload")
+      btnReload.addEventListener("click", e => (e.stopPropagation(), onReload?.()))
+      nav.append(btnReload)
+    } else {
+      const btnBack = navBtn("back", "Back")
+      const btnFwd = navBtn("forward", "Forward")
+      const btnReload = navBtn("reload", "Reload")
+      btnBack.addEventListener("click", e => (e.stopPropagation(), navCmd("back")))
+      btnFwd.addEventListener("click", e => (e.stopPropagation(), navCmd("forward")))
+      btnReload.addEventListener("click", e => (e.stopPropagation(), navCmd("reload")))
+      nav.append(btnBack, btnFwd, btnReload)
+    }
     header.classList.add("has-nav")
     header.append(nav, titleEl, controls)
   } else {
@@ -221,15 +243,17 @@ export function createNappWindow({
   const start = position ?? nextPosition()
   root.style.left = `${start.left ?? 40}px`
   root.style.top = `${start.top ?? 40}px`
-  root.style.width = `${remembered?.width ?? start.width ?? 640}px`
+  root.style.width = `${remembered?.width ?? start.width ?? WASM_DEFAULT_WIDTH}px`
   // Persisted height wins, then the remembered one. Otherwise: a system napp
   // is left auto for launchSystem to measure or set; an iframe napp falls back
   // to the starter height, since cross-origin iframes expose no intrinsic one.
+  // A wasm napp's canvas exposes none either, but it has a size its author
+  // chose, so that is what it gets rather than the starter height.
   const startHeight = start.height ?? remembered?.height
   if (startHeight) {
     root.style.height = `${startHeight}px`
   } else if (!system) {
-    root.style.height = `${START_HEIGHT}px`
+    root.style.height = `${wasm ? WASM_DEFAULT_HEIGHT : START_HEIGHT}px`
   }
 
   if (status?.minimized) root.classList.add("minimized")
@@ -326,6 +350,9 @@ export function createNappWindow({
     // doesn't fight the explicit, controlled scrollIntoView below.
     const iframe = iframeRef.current
     if (iframe) iframe.focus({ preventScroll: true })
+    // A canvas takes focus itself so it gets key events; a napp that has no
+    // keys yet will simply not use them.
+    else if (canvasRef.current && !system) canvasRef.current.focus({ preventScroll: true })
     else root.focus({ preventScroll: true })
     // Bring the window into view within the scrollable stage. `nearest` keeps an
     // already-visible window put and scrolls an off-screen one just enough.
@@ -436,7 +463,8 @@ export function createNappWindow({
   }
 
   // Same channel as the header's reload button: bridge.js (inside the napp)
-  // hears it and calls location.reload(). No iframe (system napp) → no-op.
+  // hears it and calls location.reload(). No iframe (system or wasm napp) →
+  // onReload alone, and the wasm window's own reload is the launcher's job.
   function reload() {
     onReload?.()
     iframeRef.current?.contentWindow?.postMessage(
@@ -448,6 +476,7 @@ export function createNappWindow({
   return {
     root,
     iframe: iframeRef.current,
+    canvas: canvasRef.current,
     body,
     titleEl,
     close,

@@ -29,13 +29,13 @@ import type { SystemCtx } from "../types.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
-import { NAPP_NAMED_KIND, NSITE_NAMED_KIND } from "../nsite/fetch.js"
+import { NAPP_NAMED_KIND, NSITE_NAMED_KIND, WASM_NAMED_KIND } from "../nsite/fetch.js"
 import { NAPPLET_NAMED_KIND, computeAggregateHash, nappletMetaFromHtml } from "../nsite/napplet.js"
 import { isIgnoredPath } from "../nsite/ignore.js"
 import { guessMime } from "../nsite/mime.js"
 import { resolveCardIcon } from "../nsite/icon.js"
 import { permRow, unsupportedRequires } from "../napp-permissions.js"
-import { slug } from "../nsite/local.js"
+import { isWasmListing, slug } from "../nsite/local.js"
 import { classifyEvent, computeNappId } from "../persistence.js"
 import {
   badge,
@@ -66,6 +66,9 @@ type Entry = {
 type Plan = {
   napplet: boolean
   napp: boolean
+  // Whether the folder is a wasm napp: an /app.wasm with no index.html.
+  // False means a page.
+  wasm: boolean
   dTag: string
   title: string | null
   description: string | null
@@ -438,14 +441,22 @@ export function mount(
     // tags. `ui`, `network` and the NAP domains all ride the same list.
     for (const r of plan.requires) tags.push(["requires", r])
     // Presentation modes ride as one ["mode", "<mode>"] tag per mode; the
-    // preferred auxiliary-window size as ["initial_size", w, h].
+    // preferred auxiliary-window size as ["initial_size", w, h]. A wasm napp
+    // needs no module tag: kind 35131 says what it is, and the module is
+    // always /app.wasm.
     for (const m of plan.modes) tags.push(["mode", m])
     if (plan.initialSize)
       tags.push(["initial_size", String(plan.initialSize.width), String(plan.initialSize.height)])
     tags.push(["d", plan.dTag])
 
     eventTemplate = {
-      kind: plan.napplet ? NAPPLET_NAMED_KIND : plan.napp ? NAPP_NAMED_KIND : NSITE_NAMED_KIND,
+      kind: plan.napplet
+        ? NAPPLET_NAMED_KIND
+        : plan.wasm
+          ? WASM_NAMED_KIND
+          : plan.napp
+            ? NAPP_NAMED_KIND
+            : NSITE_NAMED_KIND,
       created_at: Math.floor(Date.now() / 1000),
       tags,
       content: "",
@@ -525,9 +536,14 @@ export function mount(
     // Back-compat: the retired `ui: "wrapper"` field becomes requires: ["ui"].
     if (metadata?.ui === "wrapper") requires.add("ui")
 
+    // A folder with an /app.wasm and no index.html beside it publishes as
+    // kind 35131. A page wins on any doubt.
+    const wasm = !napplet && isWasmListing(files)
+
     plan = {
       napplet,
       napp: !!metadata,
+      wasm,
       dTag,
       // Napplet metadata comes from the html; nsite metadata from metadata.json.
       title: napplet ? meta!.title : metadata?.title || metadata?.name || null,

@@ -75,7 +75,8 @@ import {
   blobServers,
   manifestPaths,
   NSITE_NAMED_KIND,
-  NAPP_NAMED_KIND
+  NAPP_NAMED_KIND,
+  WASM_NAMED_KIND
 } from "./nsite/fetch.js"
 import { ensureReplicatedAll, type ReplicationTarget } from "./nsite/heal.js"
 import { openShareDialog, type ShareCheck, type ShareWindow } from "./share-dialog.js"
@@ -86,7 +87,13 @@ import {
   NAPPLET_NAMED_KIND,
   type ResolvedNapplet
 } from "./nsite/napplet.js"
-import { collectLocalFolder, slug } from "./nsite/local.js"
+import {
+  collectLocalFolder,
+  isWasmDevUrl,
+  isWasmDirHandle,
+  isWasmListing,
+  slug
+} from "./nsite/local.js"
 import {
   directIconSrc,
   iconBlobFrom,
@@ -2472,7 +2479,7 @@ window.addEventListener("hashchange", () => {
 function manifestAppType(event: { kind: number; tags: string[][] } | null | undefined): string {
   if (!event) return "napp"
   if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) return "napplet"
-  if (event.kind === NAPP_NAMED_KIND) return "napp"
+  if (event.kind === NAPP_NAMED_KIND || event.kind === WASM_NAMED_KIND) return "napp"
   return "nsite"
 }
 // Same, from a dev/local metadata.json.
@@ -2763,6 +2770,11 @@ async function installDevApp() {
 
     if (!metadata?.id) throw new Error("metadata.json must contain an .id field")
 
+    // A dev folder is a wasm napp the same way a published one is: an
+    // /app.wasm with no index.html beside it. The files stay in the folder
+    // and serve on demand, so only the top level is listed here.
+    const wasm = await isWasmDirHandle(dirHandle)
+
     const nappId = `dev~${slug(metadata.id)}`
     const origin = nappOriginFor(nappId)
     const onProgress = setStatus
@@ -2775,7 +2787,7 @@ async function installDevApp() {
       !(await resolvePolicyForLaunch(nappId, {
         title: label,
         iconBlob: await iconBlobFromDir(dirHandle, metadata.icon),
-        type: metaAppType(metadata),
+        type: wasm ? "napp" : metaAppType(metadata),
         declaredDomains: metadata.requires || []
       }))
     ) {
@@ -2796,7 +2808,8 @@ async function installDevApp() {
       actions: metadata.actions || [],
       requires: metadata.requires || [],
       modes: metadata.modes,
-      initialSize: persist.initialSizeFromMeta(metadata)
+      initialSize: persist.initialSizeFromMeta(metadata),
+      ...(wasm ? { kind: WASM_NAMED_KIND } : {})
     })
     handlers.addApp(nappId, metadata.actions || [])
 
@@ -2822,6 +2835,11 @@ async function installDevAppFromUrl(rawUrl: string) {
     const metadata = JSON.parse(await metaRes.text())
     if (!metadata?.id) throw new Error("metadata.json must contain an .id field")
 
+    // A dev server cannot be listed, so the module's presence is checked
+    // directly: /app.wasm answers, or this is a page. The file itself serves
+    // on demand like every other dev file.
+    const wasm = await isWasmDevUrl(baseUrl)
+
     const nappId = `dev~${slug(baseUrl)}-${slug(metadata.id)}`
     const origin = nappOriginFor(nappId)
     const onProgress = setStatus
@@ -2834,7 +2852,7 @@ async function installDevAppFromUrl(rawUrl: string) {
         icon: metadata.icon
           ? new URL(String(metadata.icon).replace(/^\//, ""), baseUrl).toString()
           : undefined,
-        type: metaAppType(metadata),
+        type: wasm ? "napp" : metaAppType(metadata),
         declaredDomains: metadata.requires || []
       }))
     ) {
@@ -2855,7 +2873,8 @@ async function installDevAppFromUrl(rawUrl: string) {
       actions: metadata.actions || [],
       requires: metadata.requires || [],
       modes: metadata.modes,
-      initialSize: persist.initialSizeFromMeta(metadata)
+      initialSize: persist.initialSizeFromMeta(metadata),
+      ...(wasm ? { kind: WASM_NAMED_KIND } : {})
     })
     handlers.addApp(nappId, metadata.actions || [])
 
@@ -3096,7 +3115,10 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       // above makes resolvePolicyForLaunch a no-prompt pass-through).
     }
 
-    // install(), but from local, not fetching an nsite
+    // install(), but from local, not fetching an nsite. An /app.wasm with
+    // no index.html beside it is a wasm napp here the same way it is
+    // published.
+    const wasm = isWasmListing(files)
     const origin = nappOriginFor(nappId)
     const onProgress = setStatus
     const label = metadata.title || nappId
@@ -3105,7 +3127,7 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       title: label,
       icon: directIconSrc(metadata?.icon),
       iconBlob: iconBlobFrom(metadata?.icon, files),
-      type: metaAppType(metadata),
+      type: wasm ? "napp" : metaAppType(metadata),
       declaredDomains: metadata?.requires || []
     })
     if (!policy) {
@@ -3113,7 +3135,7 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       return
     }
 
-    console.debug("[sandbox] install", { nappId, label, origin })
+    console.debug("[sandbox] install", { nappId, label, origin, wasm })
     setStatus(`Booting ${label}…`)
     await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId))
 
@@ -3127,7 +3149,8 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       actions: metadata?.actions || [],
       requires: metadata?.requires || [],
       modes: metadata?.modes,
-      initialSize: persist.initialSizeFromMeta(metadata)
+      initialSize: persist.initialSizeFromMeta(metadata),
+      ...(wasm ? { kind: WASM_NAMED_KIND } : {})
     })
     handlers.addApp(nappId, metadata?.actions || [])
 
@@ -3518,6 +3541,21 @@ async function launchAddress(raw: string) {
     win.focus()
     return
   }
+  // A wasm napp is a module, no page: nothing to show before its bytes are
+  // in, and no placeholder iframe to show them in.
+  if (target.kind === WASM_NAMED_KIND) {
+    const fetched = await fetchNsite(target, setStatus)
+    const petname = fetched.title || target.dTag
+    if (!(await resolvePolicyForLaunch(nappId, policyOptsFor(fetched, petname)))) {
+      persist.forgetDevApp(nappId)
+      setStatus("Cancelled")
+      return
+    }
+    const win = await launchSharedApp(nappId, raw, fetched, petname)
+    syncDOM(win)
+    win.focus()
+    return
+  }
   // A napplet is srcdoc, no origin: nothing to show before its bytes are in.
   if (target.kind != null && isNappletKind(target.kind)) {
     const fetched = nappletAsFetched(
@@ -3723,7 +3761,12 @@ function shareableFor(nappId: string): Shareable | null {
   const temp = sharedTemps.get(nappId)
   const manifest = temp ? temp.fetched.manifest : persist.getInstalledApp(nappId)?.event
   if (!manifest) return null
-  if (![NSITE_NAMED_KIND, NAPP_NAMED_KIND, NAPPLET_NAMED_KIND].includes(manifest.kind)) return null
+  if (
+    ![NSITE_NAMED_KIND, NAPP_NAMED_KIND, WASM_NAMED_KIND, NAPPLET_NAMED_KIND].includes(
+      manifest.kind
+    )
+  )
+    return null
   const dTag = manifest.tags.find(t => t[0] === "d")?.[1]
   if (!dTag) return null
   const installed = isNappletKind(manifest.kind)

@@ -1,4 +1,5 @@
 import { guessMime } from "./mime.js"
+import { WASM_DEFAULT_ENTRY as WASM_ENTRY } from "../sandbox/wasm-abi.js"
 import { isIgnoredPath } from "./ignore.js"
 import { nappletMetaFromHtml } from "./napplet.js"
 
@@ -83,6 +84,46 @@ export async function collectLocalFolder(
       initialSize?: unknown
     }
   }
+}
+
+// isWasmListing says whether a folder is a wasm napp: an /app.wasm with no
+// index.html beside it. A page wins on any doubt — a folder with both is a
+// page that happens to ship a wasm file, not a module that happens to ship a
+// page — because the module's name is fixed and there is nothing to name.
+export function isWasmListing(paths: Array<{ path: string } | string>): boolean {
+  const names = paths.map(p => (typeof p === "string" ? p : p.path))
+  return names.some(p => p === `/${WASM_ENTRY}`) && !names.some(p => /(^|\/)index\.html$/i.test(p))
+}
+
+// isWasmDevUrl is the same question for a dev server, which cannot be
+// listed: /app.wasm answers, or this is a page. HEAD keeps it to headers;
+// a server that refuses HEAD is treated as having no module rather than as
+// broken, and launch says so if the file turns out to be needed.
+export async function isWasmDevUrl(baseUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(new URL(WASM_ENTRY, baseUrl).toString(), { method: "HEAD" })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+// isWasmDirHandle is isWasmListing for a picked folder: its top-level names,
+// which is all the decision needs.
+export async function isWasmDirHandle(dirHandle: FileSystemDirectoryHandle): Promise<boolean> {
+  let hasModule = false
+  let hasIndex = false
+  for await (const entry of (
+    dirHandle as unknown as FileSystemDirectoryHandle
+  ).values() as AsyncIterable<{
+    kind: string
+    name: string
+  }>) {
+    if (entry.kind !== "file" || typeof entry.name !== "string") continue
+    if (entry.name === WASM_ENTRY) hasModule = true
+    if (/^index\.html$/i.test(entry.name)) hasIndex = true
+  }
+  return hasModule && !hasIndex
 }
 
 export function slug(s: string): string {
