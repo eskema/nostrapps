@@ -361,6 +361,9 @@ type Ui = {
     cls?: string,
     ...children: Array<Node | string>
   ): HTMLElementTagNameMap[K]
+  // the launcher's faces in place of the system's; call it from the head, before the first
+  // paint. Absent where the kit came without them (from Blossom by hash)
+  fonts?(): Promise<void>
   // a column with a gap; a row of controls that wraps
   stack(...children: Array<Node | string>): HTMLDivElement
   bar(...children: Array<Node | string>): HTMLDivElement
@@ -386,6 +389,9 @@ type Napp = {
   feeds: Feeds
   utils: Utils
   ui: Ui
+  // Set by the kit's loader line (the nostrapps ui kit napp shows it): resolves
+  // once the kit is in; await it before the first helper. Absent without the line.
+  ready?: Promise<void>
   nip19: {
     decode(value: string): unknown
     npubEncode(hex: string): string

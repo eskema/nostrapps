@@ -48,11 +48,13 @@ async function handleFetch(req, url) {
   // generateKey) — generated from @nostr/tools/pure, served like bridge.js.
   if (path === "/nostr-crypto.js") return passthrough(req, LOCKED_CSP)
   // The kit (opt-in via metadata `requires: ["ui"]`, injected below), served
-  // from the launcher origin for every napp subdomain like bridge.js. The
-  // stylesheet's fonts are inlined as data URIs (a separate /fonts/ request is
-  // fetched in CORS mode, which fails the napp-subdomain passthrough).
+  // from the launcher origin for every napp subdomain like bridge.js. Its
+  // fonts are their own stylesheet, for napp.ui.fonts(), the faces inlined as
+  // data URIs (a separate font request is fetched in CORS mode, which fails
+  // the napp-subdomain passthrough).
   if (path === "/napp-ui.css") return passthrough(req, LOCKED_CSP)
   if (path === "/napp-ui.js") return passthrough(req, LOCKED_CSP)
+  if (path === "/napp-fonts.css") return passthrough(req, LOCKED_CSP)
 
   if (url.host.startsWith("dev-") || url.host.startsWith("temp-")) {
     try {

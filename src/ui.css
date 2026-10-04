@@ -1,7 +1,7 @@
 /* The kit: the launcher's controls, and napps' with `requires: ["ui"]`. The
    launcher imports this file; the build hands it to napps as /napp-ui.css, the
-   fonts inlined and the icon glyphs as classes, with system-napps/ui.ts as
-   /napp-ui.js, the helpers that build these elements (window.napp.ui).
+   icon glyphs as classes, with system-napps/ui.ts as /napp-ui.js, the helpers
+   that build these elements (window.napp.ui).
    Appearance is the class's; layout (width, margins, placement) is the
    parent's. */
 
@@ -10,12 +10,14 @@
   /* Serif is the voice — the base, not an accent. Sans is the exception,
      declared where it is wanted (.ui-overline, .ui-ring); mono is for machine
      text (ids, relays, logs, code). */
-  font-family: "Source Serif 4 Variable", Georgia, ui-serif, serif;
+  font-family: var(--font-serif);
   /* Italic is the real italic face or nothing: never slanted by the browser. */
   font-synthesis-style: none;
-  --font-sans: "Source Sans 3 Variable", system-ui, -apple-system, sans-serif;
-  --font-serif: "Source Serif 4 Variable", Georgia, ui-serif, serif;
-  --font-mono: "Source Code Pro Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* The system's fonts, unless a fonts stylesheet fills the napp-* slots with
+     faces of its own (the launcher's: /napp-fonts.css, napp.ui.fonts()). */
+  --font-sans: "napp-sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "napp-serif", ui-serif, serif;
+  --font-mono: "napp-mono", ui-monospace, monospace;
   /* Colors: what's behind, what's on it, and what went well or wrong. */
   --surface: #ffffff;
   --text: #111111;

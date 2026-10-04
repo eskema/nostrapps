@@ -8,6 +8,16 @@ A napp is a folder with `metadata.json`, `index.html` and the rest of its files.
 
 Keep scripts, styles and fonts in the folder. The user can turn off `network`, which blocks everything else. Read and publish Nostr events through the bridge.
 
+Outside the launcher nothing injects the kit. The nostrapps ui kit napp shows one line for the head: when `window.napp.ui` is missing it pulls the kit from Blossom by hash, every server in the line at once, and sets `window.napp.ready`, a promise to await before the first helper.
+
+The kit is in the system's fonts. The launcher's come with one line in the head:
+
+```html
+<script>window.napp?.ui?.fonts?.()</script>
+```
+
+The kit's line takes them as its last hash.
+
 The `ui` kit styles elements but not `body`:
 
 ```css
@@ -146,6 +156,7 @@ window.napp.fx.satsFromBolt11(invoice)
 window.napp.relays.health(urls)
 
 // UI kit, with `requires: ["ui"]`: the launcher's controls as elements
+window.napp.ui.fonts() // the launcher's faces, from the head; absent with a kit from Blossom
 window.napp.ui.button({ label, variant, icon, onClick })
 window.napp.ui.chip({ label, active, icon, onClick })
 window.napp.ui.tabs({ items, active, onChange, segmented }) // .select(value), .value
@@ -261,7 +272,7 @@ history.pushState({ action: { name: "profile", payload: pubkey } }, "")
 Declare required domains in `requires`. The launcher asks for permission on first launch and stores the grant. Sensitive operations such as signing, clipboard access, and file saving prompt separately.
 
 The `ui` domain injects `/napp-ui.css` and `/napp-ui.js`: the launcher's
-buttons, inputs, disclosures, checks, icons, fonts and `--surface`/`--text`
+buttons, inputs, disclosures, checks, icons and `--surface`/`--text`
 theme variables, the tokens for colors, corners, shadows, type sizes,
 spacing, motion, dimming and hairlines, and the helpers that build them as
 `window.napp.ui`. The stylesheet lands before the napp's own, so the napp can

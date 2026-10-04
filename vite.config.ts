@@ -9,9 +9,15 @@ const CSS_HEAD = `/* napp-ui.css: the nostrapps kit, for napps that declare \`re
    Generated from the launcher's src/ui.css by its build; the launcher wears
    the same rules. Injected at the top of the napp's <head>, before its own
    styles, with /napp-ui.js (window.napp.ui, the helpers that build these
-   elements). --surface and --text follow the launcher's theme live. The fonts
-   are inlined: a separate font request is fetched in CORS mode, which the
-   napp-origin passthrough can't serve. */
+   elements). --surface and --text follow the launcher's theme live. The text
+   is in the system's fonts; /napp-fonts.css brings the launcher's. */
+
+`
+
+const FONTS_HEAD = `/* napp-fonts.css: the nostrapps launcher's faces in the kit's font slots,
+   napp-sans, napp-serif and napp-mono, for a napp that asks with
+   napp.ui.fonts(). The latin subset, inlined: a separate font request is
+   fetched in CORS mode, which the napp-origin passthrough can't serve. */
 
 `
 
@@ -19,6 +25,38 @@ const JS_HEAD = `// napp-ui.js: the nostrapps kit's helpers as window.napp.ui, f
 // declare \`requires: ["ui"]\`. Generated from the launcher's
 // src/system-napps/ui.ts by its build. Types: napp-env.d.ts. Outside the
 // launcher there is no bridge, so the script makes window.napp itself.
+`
+
+// The kit's font slots and the faces the launcher fills them with.
+const FONTS = [
+  { slot: "napp-sans", pkg: "source-sans-3", family: "Source Sans 3 Variable" },
+  { slot: "napp-serif", pkg: "source-serif-4", family: "Source Serif 4 Variable" },
+  { slot: "napp-mono", pkg: "source-code-pro", family: "Source Code Pro Variable" }
+]
+
+// fonts(): the faces next to a kit served by name, a launcher's /napp-ui.js or
+// a napp's own kit/napp-ui.js. One from Blossom by hash has nothing next to
+// it, and no fonts().
+const FONTS_JS = `const src = document.currentScript?.src
+if (src && new URL(src).pathname.endsWith("/napp-ui.js")) {
+  let loading
+  __nappUi.fonts = () =>
+    (loading ||= new Promise((resolve, reject) => {
+      const link = Object.assign(document.createElement("link"), {
+        rel: "stylesheet",
+        href: new URL("napp-fonts.css", src).href
+      })
+      // Called from the head, the first paint waits for it (Chromium).
+      link.setAttribute("blocking", "render")
+      link.onload = () => resolve()
+      link.onerror = () => {
+        link.remove()
+        loading = undefined
+        reject(new Error("napp-fonts.css did not load"))
+      }
+      document.head.append(link)
+    }))
+}
 `
 
 // author() finds its profiles, npubs and the profile action through the
@@ -30,11 +68,12 @@ const AUTHORS = `__nappUi.authors.use({
 })
 `
 
-// The kit as napps get it: src/ui.css as /napp-ui.css, the launcher's fonts
-// inlined and the icon glyphs as classes, and src/system-napps/ui.ts as
-// /napp-ui.js, its exports on window.napp.ui. The service worker injects both
-// into a napp that declares `requires: ["ui"]`. Served in dev, written to
-// dist/ by the build.
+// The kit as napps get it: src/ui.css as /napp-ui.css, the icon glyphs as
+// classes, and src/system-napps/ui.ts as /napp-ui.js, its exports on
+// window.napp.ui. The service worker injects both into a napp that declares
+// `requires: ["ui"]`. Beside them /napp-fonts.css, the launcher's faces, and
+// /napp-ui-loader.js, the line that brings the kit from Blossom elsewhere.
+// Served in dev, written to dist/ by the build.
 function nappUi(): Plugin {
   const font = (family: string, pkg: string, style: "normal" | "italic" = "normal") => {
     // The latin subset, variable weight, as the launcher loads it. Upright and
@@ -61,13 +100,6 @@ function nappUi(): Plugin {
     const names = Object.keys(icons)
     return (
       CSS_HEAD +
-      font("Source Sans 3 Variable", "source-sans-3") +
-      font("Source Sans 3 Variable", "source-sans-3", "italic") +
-      font("Source Serif 4 Variable", "source-serif-4") +
-      font("Source Serif 4 Variable", "source-serif-4", "italic") +
-      font("Source Code Pro Variable", "source-code-pro") +
-      font("Source Code Pro Variable", "source-code-pro", "italic") +
-      "\n" +
       readFileSync(here("src/ui.css"), "utf8") +
       `
 /* The glyphs as masks, for markup without icon():
@@ -98,22 +130,55 @@ ${names.map(n => `.ui-icon-${n}`).join(",\n")} {
       globalName: "__nappUi",
       sourcemap: false
     })
-    return `${JS_HEAD}(() => {\n${code}(window.napp ||= {}).ui = __nappUi\n${AUTHORS}})()\n`
+    return `${JS_HEAD}(() => {\n${code}(window.napp ||= {}).ui = __nappUi\n${FONTS_JS}${AUTHORS}})()\n`
+  }
+  const fonts = () =>
+    FONTS_HEAD +
+    FONTS.map(f => font(f.slot, f.pkg) + font(f.slot, f.pkg, "italic")).join("")
+  // One line, the function the line calls: comments and whitespace go, and
+  // the statement's semicolons, so the line can wrap it in parens.
+  const loader = async () => {
+    const path = here("src/napp-ui-loader.js")
+    const { code } = await transformWithEsbuild(readFileSync(path, "utf8"), path, {
+      minifyWhitespace: true,
+      sourcemap: false
+    })
+    return code.trim().replace(/^;|;$/g, "")
+  }
+  const files: Record<string, () => string | Promise<string>> = {
+    "napp-ui.css": css,
+    "napp-ui.js": js,
+    "napp-fonts.css": fonts,
+    "napp-ui-loader.js": loader
   }
   return {
     name: "napp-ui",
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        const path = (req.url || "").split("?")[0]
-        if (path !== "/napp-ui.css" && path !== "/napp-ui.js") return next()
-        res.setHeader("Content-Type", path.endsWith(".css") ? "text/css" : "text/javascript")
+        const name = (req.url || "").split("?")[0].slice(1)
+        if (!Object.hasOwn(files, name)) return next()
+        res.setHeader("Content-Type", name.endsWith(".css") ? "text/css" : "text/javascript")
         res.setHeader("Cache-Control", "no-store")
-        res.end(path.endsWith(".css") ? css() : await js())
+        res.end(await files[name]())
       })
     },
     async generateBundle() {
-      this.emitFile({ type: "asset", fileName: "napp-ui.css", source: css() })
-      this.emitFile({ type: "asset", fileName: "napp-ui.js", source: await js() })
+      for (const [fileName, make] of Object.entries(files))
+        this.emitFile({ type: "asset", fileName, source: await make() })
+    }
+  }
+}
+
+// The launcher's own faces: fontsource's, every script of them, renamed into
+// the kit's slots as main.ts imports them.
+function fontSlots(): Plugin {
+  return {
+    name: "font-slots",
+    enforce: "pre",
+    transform(code, id) {
+      if (!/\.css($|\?)/.test(id)) return
+      const f = FONTS.find(f => id.includes(`/@fontsource-variable/${f.pkg}/`))
+      if (f) return code.replaceAll(`'${f.family}'`, `"${f.slot}"`)
     }
   }
 }
@@ -137,7 +202,7 @@ function upgradeInsecureRequests(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [nappUi(), upgradeInsecureRequests()],
+  plugins: [nappUi(), fontSlots(), upgradeInsecureRequests()],
   server: {
     port: 5173,
     strictPort: true,
