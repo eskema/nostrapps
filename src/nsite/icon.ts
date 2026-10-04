@@ -5,7 +5,7 @@
 import type { InstalledApp } from "../types.js"
 import { getDevHandle, getDevUrl, nappOriginFor } from "../sandbox/host.js"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
-import { normalizeServer } from "../utils.js"
+import { DEFAULT_BLOSSOM_SERVERS, normalizeServer } from "../utils.js"
 
 const DIRECT = /^(data:|https?:)/i
 const SHA = /^[0-9a-f]{64}$/i
@@ -152,7 +152,9 @@ export async function installedIconSources(app: InstalledApp): Promise<string[]>
       : await loadBlossomServers(app.event.pubkey)
           .then((r: any) => (r?.items ?? []) as string[])
           .catch(() => [])
-    const servers = [...new Set([...own, ...authors, "relay.nostrapps.com"].map(normalizeServer))]
+    const servers = [
+      ...new Set([...own, ...authors, ...DEFAULT_BLOSSOM_SERVERS].map(normalizeServer))
+    ]
     return servers.map(s => `${s}/${sha}`)
   }
   if (!app.icon) return []

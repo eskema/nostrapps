@@ -659,6 +659,8 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string, install
   const all = readInstalled()
   const nappId = computeNappId(event)
   const existing = all[nappId]
+  const now = Math.floor(Date.now() / 1000)
+  const updated = !!existing?.event && existing.event.id !== event.id
 
   const title = event.tags.find(t => t[0] === "title")?.[1] || ""
   all[nappId] = {
@@ -670,8 +672,10 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string, install
     initialSize: initialSizeFromEventTags(event.tags),
     event,
     // First install wins: an update re-runs this, and it shouldn't read as a
-    // fresh install (the apps list orders by this).
-    installedAt: existing?.installedAt || installedAt || Math.floor(Date.now() / 1000)
+    // fresh install (the card's date falls back to this). The update gets a
+    // stamp of its own, which lifts the app in the apps list.
+    installedAt: existing?.installedAt || installedAt || now,
+    ...(updated ? { updatedAt: now } : existing?.updatedAt ? { updatedAt: existing.updatedAt } : {})
   }
   writeInstalled(all)
 }
@@ -681,6 +685,7 @@ export function storeInstalledLocalApp(app: {
   title?: string | null
   icon?: string | null
   petname?: string | null
+  description?: string | null
   actions?: string[]
   requires?: string[]
   modes?: unknown
@@ -694,6 +699,7 @@ export function storeInstalledLocalApp(app: {
     title: sanitizeString(app.title),
     icon: sanitizeString(app.icon),
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
+    ...(sanitizeString(app.description) ? { description: sanitizeString(app.description) } : {}),
     actions: app.actions || [],
     requires: sanitizeRequires(app.requires),
     modes: sanitizeModes(app.modes),
@@ -1104,6 +1110,7 @@ export interface DevAppData {
   title: string
   icon: string
   petname: string
+  description?: string
   actions: string[]
   requires?: string[]
   modes?: NappMode[]
@@ -1122,6 +1129,7 @@ export function storeDevApp(app: {
   title?: string | null
   icon?: string | null
   petname?: string | null
+  description?: string | null
   actions?: string[]
   requires?: string[]
   modes?: unknown
@@ -1134,6 +1142,7 @@ export function storeDevApp(app: {
     title: sanitizeString(app.title),
     icon: sanitizeString(app.icon),
     petname: sanitizeString(app.petname) || sanitizeString(app.title) || app.nappId,
+    ...(sanitizeString(app.description) ? { description: sanitizeString(app.description) } : {}),
     actions: app.actions || [],
     requires: sanitizeRequires(app.requires),
     modes: sanitizeModes(app.modes),

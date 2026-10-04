@@ -15,9 +15,9 @@ import type { AppType, InstalledApp, SystemCtx } from "../types.js"
 import { classifyEvent, classifyInstalled, getNappletConfig } from "../persistence.js"
 import { unsupportedRequires } from "../napp-permissions.js"
 import { openNappConfigSettings } from "../napp-config.js"
-import { getDevHandle, nappOriginFor } from "../sandbox/host.js"
+import { getDevHandle } from "../sandbox/host.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
-import { resolveCardIcon } from "../nsite/icon.js"
+import { installedIconSources, resolveCardIcon } from "../nsite/icon.js"
 import { detailField, renderAppCard, type AppCardOpts } from "./card.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
@@ -26,7 +26,7 @@ import { NAPP_RELAYS, NSITE_NAMED_KIND, NAPP_NAMED_KIND } from "../nsite/fetch.j
 import { NAPPLET_NAMED_KIND } from "../nsite/napplet.js"
 import { NostrEvent } from "@nostr/tools"
 import { BlossomClient } from "@nostr/tools/nipb7"
-import { normalizeServer, publishOutcomes } from "../utils.js"
+import { DEFAULT_BLOSSOM_SERVERS, normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
 import { hasBytes } from "../nsite/heal.js"
 
@@ -196,7 +196,9 @@ export function mount(
     const files = detailFiles(req.event, ctx)
     if (files) detailOverlay.appendChild(files)
     // The card lives in the overlay (not the list), so load its icon here too.
-    loadCardIcons(detailOverlay, [{ nappId: req.nappId, evt: req.event }])
+    loadCardIcons(detailOverlay, [
+      { nappId: req.nappId, evt: req.event, app: ctx.apps.get(req.nappId) }
+    ])
     detailOverlay.hidden = false
     detailOverlay.scrollTop = 0
     appsPanel.classList.add("has-overlay")
@@ -241,18 +243,44 @@ export function mount(
 
   // ─── Installed tab ─────────────────────────────────────────────
 
-  // Best-effort icon for an installed app: absolute URLs pass through; a path
-  // (e.g. "/icon.svg") resolves against the napp's own origin (served by its
-  // SW). Falls back to a placeholder on error.
-  function installedIconUrl(app: any): string | null {
-    const icon = app.icon
-    if (!icon || typeof icon !== "string") return null
-    if (/^https?:\/\//.test(icon)) return icon
-    return `${nappOriginFor(app.nappId)}${icon.startsWith("/") ? "" : "/"}${icon}`
+  // The card's danger button: asks (when there's a warning to put), then
+  // closes the app's windows and erases what the launcher keeps of it. `busy`
+  // is the verb while it runs.
+  function deleteButton(app: any, label: string, busy: string, warning?: string): HTMLElement {
+    const del = button({ label, variant: "danger" })
+    del.addEventListener("click", async () => {
+      if (warning) {
+        ctx.setStatus?.(`Apps: ${label} requested for ${app.nappId}`)
+        if (!window.confirm(warning)) {
+          ctx.setStatus?.(`Apps: ${label} cancelled for ${app.nappId}`)
+          return
+        }
+      }
+      del.disabled = true
+      del.textContent = `${busy}…`
+      try {
+        ctx.setStatus?.(`Apps: ${busy} ${app.nappId}…`)
+        await ctx.uninstall(app.nappId)
+        ctx.setStatus?.(`Apps: ${label} finished for ${app.nappId}`)
+      } catch (err: any) {
+        ctx.setStatus?.(`Apps: ${label} failed for ${app.nappId}: ${err?.message || String(err)}`)
+        del.disabled = false
+        del.textContent = "error"
+        del.title = err?.message || String(err)
+        setTimeout(() => {
+          del.textContent = label
+          del.removeAttribute("title")
+        }, 3000)
+      }
+    })
+    return del
   }
 
   function installedButtons(app: any): HTMLElement[] {
     if (app.nappId.startsWith("dev~")) {
+      // Its files are the developer's, on disk or at a URL: removing it only
+      // drops what the launcher made of them, and a reload drops that anyway —
+      // so no asking.
       return [
         button({
           label: "publish",
@@ -262,7 +290,8 @@ export function mount(
               params: getDevHandle(app.nappId),
               persistent: false
             })
-        })
+        }),
+        deleteButton(app, "remove", "removing")
       ]
     }
     if (app.nappId.startsWith("temp~") || app.temporary) {
@@ -306,33 +335,12 @@ export function mount(
             })
         })
       : null
-    const del = button({ label: "delete", variant: "danger" })
-    del.addEventListener("click", async () => {
-      ctx.setStatus?.(`Apps: delete requested for ${app.nappId}`)
-      const ok = window.confirm(
-        `Delete ${app.petname || app.title || app.nappId}?\n\nThis closes every open window of this app and erases all of its data — files, settings, permissions, and any storage it created. This cannot be undone.`
-      )
-      if (!ok) {
-        ctx.setStatus?.(`Apps: delete cancelled for ${app.nappId}`)
-        return
-      }
-      del.disabled = true
-      del.textContent = "deleting…"
-      try {
-        ctx.setStatus?.(`Apps: deleting ${app.nappId}…`)
-        await ctx.uninstall(app.nappId)
-        ctx.setStatus?.(`Apps: delete finished for ${app.nappId}`)
-      } catch (err: any) {
-        ctx.setStatus?.(`Apps: delete failed for ${app.nappId}: ${err?.message || String(err)}`)
-        del.disabled = false
-        del.textContent = "error"
-        del.title = err?.message || String(err)
-        setTimeout(() => {
-          del.textContent = "delete"
-          del.removeAttribute("title")
-        }, 3000)
-      }
-    })
+    const del = deleteButton(
+      app,
+      "delete",
+      "deleting",
+      `Delete ${app.petname || app.title || app.nappId}?\n\nThis closes every open window of this app and erases all of its data — files, settings, permissions, and any storage it created. This cannot be undone.`
+    )
     // Local napplet (loaded via /folder): its index.html is stored in the
     // record. The flavor was the user's choice at load time, so tell the
     // uploader explicitly instead of having it re-guess from the html.
@@ -440,7 +448,7 @@ export function mount(
     const search = buildHaystack({
       title: app.title,
       petname: app.petname,
-      description: app.event?.tags.find((t: any) => t[0] === "description")?.[1],
+      description: app.event?.tags.find((t: any) => t[0] === "description")?.[1] || app.description,
       summary: app.event?.tags.find((t: any) => t[0] === "summary")?.[1],
       id: app.nappId,
       pubkey: author,
@@ -455,21 +463,18 @@ export function mount(
     const description =
       app.event?.tags.find((t: any) => t[0] === "description")?.[1] ||
       app.event?.tags.find((t: any) => t[0] === "summary")?.[1] ||
+      app.description ||
       null
-    // Published apps carry a manifest → resolve the icon from blossom (same as
-    // discover, doesn't depend on the napp's SW). Local/dev/temp apps have no
-    // manifest → fall back to their own origin path, served by their SW.
-    const resolvedIcon = app.event ? resolveCardIcon(app.event) : null
-    const iconSha = resolvedIcon?.sha ?? null
     return {
       nappId: app.nappId,
       title,
       type: classifyInstalled(app),
       temporary,
       description,
-      // Direct data:/URL icon (self-contained napplets), else the napp's own
-      // origin path.
-      iconUrl: iconSha ? null : resolvedIcon?.url || installedIconUrl(app),
+      // A manifest's icon that is a URL (a napplet's inline one). One behind a
+      // blossom sha, and the icon of an app without a manifest, come from
+      // loadCardIcons.
+      iconUrl: (app.event && resolveCardIcon(app.event).url) || null,
       authorPubkey: author,
       authorLabel,
       createdAt,
@@ -483,14 +488,15 @@ export function mount(
     }
   }
 
-  // List order: newest install first, with dev apps pinned above everything —
-  // those are the ones being worked on. installedAt is stamped on every install
-  // and survives updates, so the order is stable for a given set (which is what
-  // _installedSig relies on). Apps installed before it was stamped fall back to
-  // their manifest date, which at least keeps them in a meaningful order.
+  // List order: most recently installed or updated first, with dev apps pinned
+  // above everything — those are the ones being worked on. installedAt is
+  // stamped on the first install and updatedAt on each update, so an update
+  // lifts the app and nothing else moves. Apps installed before either was
+  // stamped fall back to their manifest date, which at least keeps them in a
+  // meaningful order.
   function installedApps(): InstalledApp[] {
     const dev = (a: InstalledApp) => (a.nappId.startsWith("dev~") ? 1 : 0)
-    const at = (a: InstalledApp) => a.installedAt || a.event?.created_at || 0
+    const at = (a: InstalledApp) => a.updatedAt || a.installedAt || a.event?.created_at || 0
     return ctx.apps.list().sort((a, b) => dev(b) - dev(a) || at(b) - at(a))
   }
 
@@ -566,11 +572,10 @@ export function mount(
       else listEl.insertBefore(el, cursor)
     }
     applyInstalledFilter()
-    // Load icons from blossom for the published apps (those with a manifest);
-    // a card that already has its icon is skipped.
+    // A card that already has its icon is skipped.
     loadCardIcons(
       listEl,
-      apps.filter(a => a.event).map(a => ({ nappId: a.nappId, evt: a.event }))
+      apps.map(a => ({ nappId: a.nappId, evt: a.event, app: a }))
     )
     loadAuthorNames(listEl, applyInstalledFilter)
     _installedUpdatesSig = installedUpdateSig()
@@ -734,19 +739,27 @@ export function mount(
     return p
   }
 
-  // Load card icons from blossom for any list (discover or installed). Each item
-  // pairs a card's nappId with its manifest event (for the icon sha + servers).
-  function loadCardIcons(listEl: HTMLElement | null, items: Array<{ nappId: string; evt: any }>) {
+  // Load card icons for any list (discover or installed). Each item pairs a
+  // card's nappId with its manifest event, for the icon sha and servers, or,
+  // for an installed app without one, with the app.
+  function loadCardIcons(
+    listEl: HTMLElement | null,
+    items: Array<{ nappId: string; evt: any; app?: InstalledApp }>
+  ) {
     if (!listEl) return
-    for (const { nappId, evt } of items) {
-      if (!evt) continue
-      const { sha } = resolveCardIcon(evt)
-      if (!sha) continue
+    for (const { nappId, evt, app } of items) {
+      // A manifest's icon that is a URL went in with the card.
+      const sha = evt ? resolveCardIcon(evt).sha : null
+      if (evt ? !sha : !app) continue
       const plate = listEl.querySelector<AppIcon>(
         `.apps-card[data-napp-id="${CSS.escape(nappId)}"] .apps-card-icon`
       )
       if (!plate || plate.dataset.iconLoaded === "1") continue
       plate.dataset.iconLoaded = "1"
+      if (!sha) {
+        ownIcon(plate, app!)
+        continue
+      }
       // The blob can be on the servers the manifest names, the default, or the
       // author's blossom list. The first two are asked at once; the author's
       // list is a relay lookup, its servers queued behind them when it lands.
@@ -754,7 +767,7 @@ export function mount(
         ...new Set(
           [
             ...evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1]),
-            "relay.nostrapps.com"
+            ...DEFAULT_BLOSSOM_SERVERS
           ].map(normalizeServer)
         )
       ]
@@ -793,6 +806,29 @@ export function mount(
       })
       ask()
     }
+  }
+
+  // An installed app without a manifest: a dev napp's icon comes off its
+  // picked folder or its dev server. A local or temporary one's files are only
+  // in its own origin, which the launcher page can't read, so it shows an icon
+  // only when that is a URL.
+  function ownIcon(plate: AppIcon, app: InstalledApp) {
+    installedIconSources(app)
+      .then(([src]) => {
+        if (!src) return
+        const img = plate.img
+        // A folder's file comes as a blob URL made for this card: freed once read.
+        const free = () => {
+          if (src.startsWith("blob:")) URL.revokeObjectURL(src)
+        }
+        img.onload = free
+        img.onerror = () => {
+          free()
+          img.remove()
+        }
+        img.src = src
+      })
+      .catch(() => {})
   }
 
   function loadIcons(evts: any[]) {

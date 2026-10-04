@@ -49,6 +49,9 @@ export async function publishOutcomes(
   }))
 }
 
+// The launcher's own blossom servers: the last resort for a card icon.
+export const DEFAULT_BLOSSOM_SERVERS = ["https://relay.nostrapps.com"]
+
 export function normalizeServer(s: string): string {
   const u = s.endsWith("/") ? s.slice(0, -1) : s
   return u.startsWith("http") ? u : `https://${u}`

@@ -2826,6 +2826,7 @@ async function installDevApp() {
       title: metadata.title || null,
       icon: metadata.icon || null,
       petname,
+      description: metadata.description || null,
       actions: metadata.actions || [],
       requires: metadata.requires || [],
       modes: metadata.modes,
@@ -2885,6 +2886,7 @@ async function installDevAppFromUrl(rawUrl: string) {
       title: metadata.title || null,
       icon: metadata.icon || null,
       petname,
+      description: metadata.description || null,
       actions: metadata.actions || [],
       requires: metadata.requires || [],
       modes: metadata.modes,
@@ -3104,6 +3106,7 @@ localFolderInput.addEventListener("change", async (e: Event) => {
           title: metadata.title || null,
           icon: metadata.icon || null,
           petname: label,
+          description: metadata.description || null,
           requires: metadata.requires || [],
           html: single.html
         })
@@ -3157,6 +3160,7 @@ localFolderInput.addEventListener("change", async (e: Event) => {
       title: metadata?.title || null,
       icon: metadata?.icon || null,
       petname,
+      description: metadata?.description || null,
       actions: metadata?.actions || [],
       requires: metadata?.requires || [],
       modes: metadata?.modes,

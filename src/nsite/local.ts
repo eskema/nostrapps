@@ -56,6 +56,7 @@ export async function collectLocalFolder(
         id,
         title: m.title || undefined,
         icon: m.icon || undefined,
+        description: m.description || undefined,
         actions: [],
         requires: m.requires
       }
@@ -76,6 +77,7 @@ export async function collectLocalFolder(
       id: string
       title?: string
       icon?: string
+      description?: string
       actions: string[]
       requires?: string[]
       modes?: unknown

@@ -213,6 +213,9 @@ export type InstalledApp = {
   // what marks the app as a napplet; relay installs carry the manifest event
   // itself, so this field is only populated for local/dev/temp apps.
   requires?: string[]
+  // Apps without a manifest (dev, local): the metadata's description. A relay
+  // install reads the manifest's tag instead.
+  description?: string
   event?: NostrEvent
   // Opened from a share link and not kept yet: the record is memory-only and
   // the origin is swept on the next boot. Same id as the install would have.
@@ -224,6 +227,9 @@ export type InstalledApp = {
   // list, and stands in as the card's date for apps with no manifest event (no
   // publish date of their own). Absent on apps installed before it was stamped.
   installedAt?: number
+  // Unix seconds of the last update, a newer manifest over an installed one.
+  // Lifts the app to the top of the installed list; installedAt stays put.
+  updatedAt?: number
 }
 
 export interface SuggestionItem {
