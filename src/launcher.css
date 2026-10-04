@@ -1063,9 +1063,9 @@ body.popover-open .napp-body iframe {
 
 /* The title, the napp's icon in line before it; "<type> from <author> wants
    to" under it, the type, "from" and "wants to" small and semibold like an
-   Apps card's author line; then the ask a size up, a line each, no gaps, so
-   they read as one: the verb in the title's voice; what it acts on, heavy;
-   the sentence going on from that. */
+   Apps card's author line; then the ask: a size up, the verb in the title's
+   voice and what it acts on, heavy, kept whole on its line or the next; the
+   sentence going on from that under them, at the text's size. */
 .permission-head {
   display: grid;
   gap: var(--space-xs);
@@ -1087,11 +1087,16 @@ body.popover-open .napp-body iframe {
 
 .permission-ask {
   display: grid;
+  gap: var(--space-s);
   margin-top: var(--space-s);
+}
+
+.permission-verb {
   font-size: var(--text-l);
 }
 
 .permission-object {
+  display: inline-block;
   font-weight: 800;
 }
 

@@ -386,7 +386,7 @@ const cards: Array<[string, string, () => ApprovalDetail | undefined]> = [
   [
     "open a link",
     "link.open",
-    () => ({ object: "a link", line: el("p", "", code("https://url.com/page"), " in a new tab.") })
+    () => ({ object: "a link", line: el("p", "", code("https://url.com/page")) })
   ],
   ["a method with no verb", "napp.someMethod", () => undefined]
 ]

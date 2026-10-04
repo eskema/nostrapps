@@ -1479,9 +1479,10 @@ async function linkOpen(nappId: string, data: any): Promise<Record<string, unkno
   if (url.host.endsWith(`.${location.host}`)) {
     return { type: resultType, error: "napp-origin" }
   }
-  // The napplet's own label for the link (options.label) isn't shown: nothing
-  // ties it to the url, which is what the prompt is to be judged by.
-  const detail = { object: "a link", line: el("p", "", code(url.href), " in a new tab.") }
+  // The url alone: the napplet's own label for it (options.label) isn't
+  // shown, nothing ties it to the url; nor where it opens, always a new tab
+  // (a napp can't take the launcher's own).
+  const detail = { object: "a link", line: el("p", "", code(url.href)) }
   if (!(await requireApproval(nappId, "link.open", detail))) {
     return { type: resultType, status: "denied" }
   }

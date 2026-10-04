@@ -269,9 +269,10 @@ export function nappIcon(nappId: string): HTMLElement | undefined {
 
 // Who asks and what, the way an Apps card names an app: the icon in line with
 // the title; "<type> from <author> wants to" under it, in the card's author
-// line; then the ask a size up, a line each: the verb ("SIGN"), what it acts
-// on ("a note"), the sentence going on from that ("notifying <person>."). The
-// rest of what it is about under that.
+// line; then the ask a size up: the verb and what it acts on ("SIGN a note"),
+// that kept whole on the line or wrapped whole to the next, and the sentence
+// going on from it under them, at the text's size ("notifying <person>.").
+// The rest of what it is about under that.
 export function permissionBody(
   napp: Pick<NappName, "title" | "author" | "authorLabel" | "type">,
   method: string,
@@ -279,11 +280,11 @@ export function permissionBody(
   icon?: HTMLElement
 ): Node {
   const verb = VERBS[method]
-  const ask = el("p", "", el("span", "ui-title", verb || "use"))
+  const ask = el("p", "permission-verb", el("span", "ui-title", verb || "use"))
   // Some methods can say what they are actually about to do — a filename is a
   // far better basis for a decision than a method name. What the verb acts on
-  // and the sentence going on from it each get a line under the verb;
-  // anything else goes under it all.
+  // goes on its line, the sentence going on from it on the next; anything
+  // else goes under it all.
   let object: Node | string | undefined = verb ? undefined : code(method)
   let line: Node | undefined
   let rest: Node | undefined
@@ -297,13 +298,8 @@ export function permissionBody(
   const named = el("div", "permission-name", ...(icon ? [icon] : []), el("strong", "", napp.title))
   const from = nappByline(napp)
   from.meta(" wants to")
-  const said = el(
-    "div",
-    "permission-ask",
-    ask,
-    ...(object ? [el("p", "permission-object", object)] : []),
-    ...(line ? [line] : [])
-  )
+  if (object) ask.append(" ", el("span", "permission-object", object))
+  const said = el("div", "permission-ask", ask, ...(line ? [line] : []))
   const wrap = el("div", "permission", el("div", "permission-head", named, from, said))
   if (rest) wrap.append(rest)
   return wrap
