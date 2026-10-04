@@ -2716,11 +2716,45 @@ body.popover-open .napp-body iframe {
   min-width: 0;
 }
 
+/* The buttons, where the card keeps them — top right, by the icon — but laid
+   over the card from the panel's own grid cell (both in row 1), so the kit's
+   sticky can hold them at the top of the window while the sections scroll
+   under them; inside the card they would scroll away with it. No surface of
+   their own; the outline state gets one so text doesn't show through it once
+   stuck. */
+.upload-actions {
+  grid-row: 1;
+  grid-column: 1;
+  justify-self: end;
+  align-self: start;
+  display: grid;
+  grid-auto-flow: column;
+  gap: var(--space-xs);
+}
+.upload-actions[hidden] {
+  display: none;
+}
+.upload-actions > .btn-outline {
+  background: var(--surface);
+}
+
+/* No scrollbar on the uploader's and settings' scroll areas, as on the Apps
+   panes (scroll still works). */
+.napp-body-system:has(> .system-napp-uploader),
+.napp-body-system:has(> .system-napp-settings) {
+  scrollbar-width: none; /* Firefox */
+}
+.napp-body-system:has(> .system-napp-uploader)::-webkit-scrollbar,
+.napp-body-system:has(> .system-napp-settings)::-webkit-scrollbar {
+  display: none;
+}
+
 /* What's being published, previewed with the Apps window's own card at detail
-   size (the shared .apps-detail-overlay rules above) — publish button in the
-   card's own button area — followed by the napp id in the Apps spelling and the
-   one publish option. */
+   size (the shared .apps-detail-overlay rules above), followed by the napp id
+   in the Apps spelling and the one publish option. */
 .upload-head {
+  grid-row: 1; /* the cell .upload-actions lies over */
+  grid-column: 1;
   display: grid;
   gap: 0.15rem;
 }
@@ -2741,6 +2775,13 @@ body.popover-open .napp-body iframe {
   margin-top: var(--space-s);
 }
 
+/* The box that brings in the account's own relays, under the app's, and the
+   rows it brings in; both go while there are none to bring. */
+.upload-mine[hidden],
+.upload-mine-list[hidden] {
+  display: none;
+}
+
 /* The panel's own gap spaces the sections; the disclosure's margin would add to it. */
 .upload-panel .ui-details {
   margin: 0;
@@ -2753,11 +2794,11 @@ body.popover-open .napp-body iframe {
   opacity: 0.4;
 }
 
-.upload-section-actions {
-  display: grid;
-  grid-auto-flow: column;
-  justify-content: end;
-  gap: var(--space-xs);
+/* A target row is host and box only; it keeps the height a button's box gave
+   it (text, padding, border), so the list sits as it did. */
+.upload-servers-list .ui-item,
+.upload-relays-list .ui-item {
+  min-height: calc(1.2 * var(--text-s) + 2 * var(--btn-pad-y) + 2px);
 }
 
 /* The event about to be published, a .ui-code-block: a manifest's tags run

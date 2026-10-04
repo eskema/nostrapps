@@ -38,6 +38,7 @@ import { permRow, unsupportedRequires } from "../napp-permissions.js"
 import { slug } from "../nsite/local.js"
 import { classifyEvent, computeNappId } from "../persistence.js"
 import {
+  addControl,
   badge,
   button,
   check,
@@ -47,7 +48,8 @@ import {
   item,
   itemList,
   list,
-  overline
+  overline,
+  sticky
 } from "./ui.js"
 import { detailField, renderAppCard } from "./card.js"
 
@@ -117,6 +119,10 @@ export function mount(
   let plan: Plan | null = null
   let eventTemplate: any = null
   let publishing = false
+  // The last run went out: the button says so and stays put until an edit —
+  // a server or relay toggled, the protected flag, the account — makes a new
+  // publish worth offering.
+  let settled = false
   let loadingServers = false
   let dirName: string | null = null // fallback napplet id when the html has no <meta name="id">
   // Set when the caller already knows the flavor/id (a local napplet's publish
@@ -133,10 +139,17 @@ export function mount(
   // keeps a target listed without publishing to it.
   let servers: string[] = []
   let relays: string[] = ["wss://relay.nostrapps.com"]
+  // The account's write relays (NIP-65), brought in by one box; until then a
+  // publish stays on the app's own relays.
+  let mine: string[] = []
+  let includeMine = false
   const offServers = new Set<string>()
   const offRelays = new Set<string>()
   const onServers = () => servers.filter(s => !offServers.has(s))
-  const onRelays = () => relays.filter(r => !offRelays.has(r))
+  const onRelays = () => [
+    ...relays.filter(r => !offRelays.has(r)),
+    ...(includeMine ? mine.filter(r => !offRelays.has(r)) : [])
+  ]
 
   // ─── panel ──────────────────────────────────────────────────────
   const panel = document.createElement("div")
@@ -150,7 +163,8 @@ export function mount(
   const filesList = itemList("upload-files-list")
   filesSec.el.appendChild(filesList)
 
-  // A row per target: host · on/off · remove. Off ones dim (.disabled).
+  // A row per target: host · on/off. Off ones dim (.disabled). Unticking is
+  // as far as it goes — the list is this run's only, nothing to remove from.
   const serversSec = section("blossom servers", "upload-servers")
   const serversList = list<string>({
     class: "upload-servers-list",
@@ -163,15 +177,6 @@ export function mount(
           checked: !offServers.has(url),
           title: "upload blobs here",
           onChange: on => toggle(offServers, url, on, renderServers)
-        }),
-        button({
-          label: "remove",
-          variant: "danger",
-          onClick: () => {
-            servers = servers.filter(s => s !== url)
-            offServers.delete(url)
-            renderServers()
-          }
         })
       ]
     },
@@ -180,56 +185,71 @@ export function mount(
   serversSec.el.append(serversList)
 
   const relaysSec = section("relays", "upload-relays")
+  // A row per relay: host · on/off, as above. The same rows for both groups.
+  function relayControls(url: string, row: HTMLDivElement) {
+    row.classList.toggle("disabled", offRelays.has(url))
+    return [
+      check({
+        checked: !offRelays.has(url),
+        title: "publish the event here",
+        onChange: on => toggle(offRelays, url, on, renderRelays)
+      })
+    ]
+  }
   const relaysList = list<string>({
     class: "upload-relays-list",
     label: url => code(host(url)),
     title: url => url,
-    controls: (url, row) => {
-      row.classList.toggle("disabled", offRelays.has(url))
-      return [
-        check({
-          checked: !offRelays.has(url),
-          title: "publish the event here",
-          onChange: on => toggle(offRelays, url, on, renderRelays)
-        }),
-        button({
-          label: "remove",
-          variant: "danger",
-          onClick: () => {
-            relays = relays.filter(r => r !== url)
-            offRelays.delete(url)
-            renderRelays()
-          }
-        })
-      ]
-    },
-    add: { label: "add a relay", placeholder: "wss://relay.example.com", onAdd: addRelay }
+    controls: relayControls
   })
-  const relaysActions = document.createElement("div")
-  relaysActions.className = "upload-section-actions"
-  relaysActions.appendChild(
-    button({ label: "reset to defaults", variant: "ghost", onClick: () => void loadRelays() })
+  // The account's own relays, under the app's: one box brings them in, rows
+  // and all; unticked, they are neither shown nor published to.
+  const mineCb = check({
+    onChange: on => {
+      includeMine = on
+      renderRelays()
+    }
+  })
+  const mineRow = permRow(mineCb, "include my relays")
+  mineRow.classList.add("upload-mine")
+  const mineList = list<string>({
+    class: "upload-relays-list upload-mine-list",
+    label: url => code(host(url)),
+    title: url => url,
+    controls: relayControls
+  })
+  // Under both groups; what it adds joins the app's.
+  relaysSec.el.append(
+    relaysList,
+    mineRow,
+    mineList,
+    addControl({ label: "add a relay", placeholder: "wss://relay.example.com", onAdd: addRelay })
   )
-  relaysSec.el.append(relaysList, relaysActions)
 
   const eventSec = section("event", "upload-event")
   const jsonEl = codeBlock("", "upload-json")
   eventSec.el.appendChild(jsonEl)
 
-  const protectedCb = check({ onChange: () => render() })
+  const protectedCb = check({ onChange: () => touch() })
   const protectedLabel = permRow(
     protectedCb,
     "protected",
     "prevents re-publishing by others (NIP-70)"
   )
   protectedLabel.classList.add("upload-protected")
-  // Lives in the card's own button area (top right), where Apps puts install
-  // and delete — so it's rebuilt into each new card rather than owned by the panel.
+  // The buttons sit where the card keeps them, top right by the icon, but as
+  // the panel's own row laid over the card (CSS), so the kit's sticky can hold
+  // them at the top of the window while the sections scroll under them.
   const publishBtn = button({ label: "upload & publish", variant: "primary", disabled: true })
   // Once the event is out: install what was just published, or update the
-  // installed copy, the same way Apps would. Left of publish until used.
+  // installed copy, the same way Apps would. Left of publish; says what it did.
   const installBtn = button({ label: "install", variant: "primary" })
-  let published: { event: NostrEvent; relays: string[] } | null = null
+  const actions = document.createElement("div")
+  actions.className = "upload-actions"
+  actions.hidden = true // with the head, until there is a plan
+  actions.append(publishBtn)
+  sticky(actions)
+  let published: { event: NostrEvent; relays: string[]; update: boolean } | null = null
 
   // Only a hard failure speaks up — nothing to publish, or a run that broke.
   // Everything else is legible from the button, the badges and the result rows.
@@ -239,7 +259,16 @@ export function mount(
   const resultsEl = itemList("upload-results")
   resultsEl.hidden = true
 
-  panel.append(head, errorEl, filesSec.el, serversSec.el, relaysSec.el, eventSec.el, resultsEl)
+  panel.append(
+    actions,
+    head,
+    errorEl,
+    filesSec.el,
+    serversSec.el,
+    relaysSec.el,
+    eventSec.el,
+    resultsEl
+  )
   container.replaceChildren(panel)
 
   // Shown in the panel and logged, so a failure survives the window being closed.
@@ -291,7 +320,7 @@ export function mount(
     let url = raw.trim().replace(/\/+$/, "")
     if (!url) return
     if (!/^wss?:\/\//.test(url)) url = `wss://${url}`
-    if (relays.includes(url)) return "already in list"
+    if (relays.includes(url) || mine.includes(url)) return "already in list"
     relays.push(url)
     renderRelays()
   }
@@ -307,13 +336,17 @@ export function mount(
     serversSec.badge.textContent = servers.length
       ? `${onServers().length}/${servers.length}`
       : "none"
-    render()
+    touch()
   }
 
   function renderRelays() {
     relaysList.items = relays
-    relaysSec.badge.textContent = `${onRelays().length}/${relays.length}`
-    render()
+    mineList.items = mine
+    mineRow.hidden = mine.length === 0
+    mineList.hidden = !includeMine || mine.length === 0
+    const shown = relays.length + (includeMine ? mine.length : 0)
+    relaysSec.badge.textContent = `${onRelays().length}/${shown}`
+    touch()
   }
 
   function renderFiles() {
@@ -374,7 +407,7 @@ export function mount(
       createdAt: eventTemplate?.created_at ?? null,
       actions: plan.actions,
       search: "",
-      buttons: published ? [installBtn, publishBtn] : [publishBtn]
+      buttons: []
     })
     card.querySelector(".apps-title")?.classList.replace("ui-heading", "ui-heading-xxl")
     // Requires ride with the action chips, red when this launcher can't provide
@@ -402,6 +435,7 @@ export function mount(
     if (eventTemplate) idBlock.appendChild(detailField("id", code(computeNappId(eventTemplate))))
     head.replaceChildren(card, idBlock, protectedLabel)
     head.hidden = false
+    actions.hidden = false
   }
 
   // ─── event ──────────────────────────────────────────────────────
@@ -467,8 +501,15 @@ export function mount(
             : onRelays().length === 0
               ? "No relay picked."
               : null
-    publishBtn.disabled = publishing || !eventTemplate || !!blocker
+    if (!publishing) publishBtn.textContent = settled ? "published" : "upload & publish"
+    publishBtn.disabled = publishing || settled || !eventTemplate || !!blocker
     publishBtn.title = blocker || ""
+  }
+
+  // An edit after a publish: back to the action.
+  function touch() {
+    settled = false
+    render()
   }
 
   // ─── reading the input ──────────────────────────────────────────
@@ -588,8 +629,9 @@ export function mount(
     renderServers()
   }
 
-  // The app's own relays plus wherever this account publishes, so an app lands
-  // in the launcher's discovery AND in the author's outbox.
+  // The app's own relays, so an app lands in the launcher's discovery;
+  // wherever this account publishes, held for the box, for the author's
+  // outbox when asked.
   async function loadRelays() {
     const pubkey = ctx.account.getPubkey()
     let write: string[] = []
@@ -613,15 +655,14 @@ export function mount(
           .map(r => r.url.replace(/\/+$/, ""))
       } catch {}
     }
-    relays = [
-      ...new Set([
-        ...(isMember
-          ? ["wss://relay.nostrapps.com"]
-          : ["wss://relay.nostrapps.com/public", "wss://relay.nostrapps.com/network"]),
-        ...write
-      ])
-    ]
+    const own = isMember
+      ? ["wss://relay.nostrapps.com"]
+      : ["wss://relay.nostrapps.com/public", "wss://relay.nostrapps.com/network"]
+    mine = [...new Set(write)].filter(r => !own.includes(r))
+    relays = own
     offRelays.clear()
+    includeMine = false
+    mineCb.checked = false
     renderRelays()
   }
 
@@ -769,7 +810,6 @@ export function mount(
 
   function reset() {
     publishing = false
-    publishBtn.textContent = "upload & publish"
     render()
   }
 
@@ -810,19 +850,20 @@ export function mount(
       const missing = outcomes.filter(o => !o.ok).map(o => host(o.relay))
       for (const o of outcomes)
         resultRow("relay", host(o.relay), o.ok ? "ok" : o.reason || "failed", o.ok, o.relay)
+      // The rows above say why each relay refused.
+      if (!okCount) throw new Error("No relay accepted the event.")
       ctx.setStatus(
         missing.length
           ? `Published app event to ${okCount}/${relayList.length} relays — missing: ${missing.join(", ")}`
           : `Published app event to all ${relayList.length} relays`
       )
       // The per-relay rows below carry the detail; the log keeps the summary.
-      publishBtn.textContent = "published"
-      if (okCount)
-        offerInstall(
-          signed,
-          outcomes.filter(o => o.ok).map(o => o.relay)
-        )
-      setTimeout(reset, 3000)
+      offerInstall(
+        signed,
+        outcomes.filter(o => o.ok).map(o => o.relay)
+      )
+      settled = true
+      reset()
     } catch (err) {
       fail((err as any).message)
       publishBtn.textContent = "error"
@@ -831,20 +872,20 @@ export function mount(
   })
 
   function offerInstall(event: NostrEvent, took: string[]) {
-    published = { event, relays: took }
     const update = ctx.isInstalled(computeNappId(event))
+    published = { event, relays: took, update }
     installBtn.textContent = update ? "update" : "install"
     installBtn.className = `btn btn-${update ? "warning" : "primary"}`
     installBtn.disabled = false
     installBtn.removeAttribute("title")
+    installBtn.removeAttribute("aria-disabled")
     if (!installBtn.isConnected) publishBtn.before(installBtn)
   }
 
   installBtn.addEventListener("click", async () => {
     if (!published) return
-    const { event, relays: relayHints } = published
+    const { event, relays: relayHints, update } = published
     const dTag = event.tags.find(t => t[0] === "d")![1]
-    const update = installBtn.textContent === "update"
     installBtn.disabled = true
     installBtn.textContent = update ? "updating…" : "installing…"
     try {
@@ -859,8 +900,12 @@ export function mount(
             relays: relayHints
           })
         )
-      published = null
-      installBtn.remove()
+      // Done, and it says so — the same disabled button Apps leaves on an
+      // installed card. A later publish re-arms it as an update.
+      installBtn.textContent = update ? "updated" : "installed"
+      installBtn.className = "btn btn-outline"
+      installBtn.setAttribute("aria-disabled", "true")
+      ctx.setStatus(`Uploader: ${update ? "updated" : "installed"} ${plan!.title || plan!.dTag}`)
     } catch (err: any) {
       const msg = err?.message || String(err)
       // Backing out of the permission screen isn't a failure: offered again.
@@ -876,7 +921,7 @@ export function mount(
     void loadServers()
     void loadRelays()
     renderHead()
-    render()
+    touch()
   })
 
   return {
