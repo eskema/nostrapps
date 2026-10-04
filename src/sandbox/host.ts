@@ -5154,7 +5154,9 @@ function resolveCode(params: {
     return out
   }
 
-  const s = String(code ?? "").trim().replace(/^nostr:/i, "")
+  const s = String(code ?? "")
+    .trim()
+    .replace(/^nostr:/i, "")
   if (s.startsWith("nevent1")) {
     const { data } = decode(s)
     const ptr = data as { id: string; relays?: string[]; author?: string; kind?: number }
@@ -5183,11 +5185,7 @@ function resolveCode(params: {
 // One cache key per pointer. Built from what the code RESOLVES to, not from the
 // code itself: a napp asking with a nevent1 and another asking with the decoded
 // pointer want the same event and must share one lookup (and one backoff).
-function loadEventKey(params: {
-  code: EventCode
-  relays?: string[]
-  author?: string
-}): string {
+function loadEventKey(params: { code: EventCode; relays?: string[]; author?: string }): string {
   try {
     const r = resolveCode(params)
     return JSON.stringify([
@@ -5237,14 +5235,7 @@ async function fetchEvent(params: {
   relays?: string[]
   author?: string
 }): Promise<NostrEvent | null> {
-  const {
-    id,
-    kind,
-    author,
-    identifier,
-    relayHints,
-    isReplaceable
-  } = resolveCode(params)
+  const { id, kind, author, identifier, relayHints, isReplaceable } = resolveCode(params)
 
   // Validate BEFORE any store/relay query. A malformed id/author (a note1 that
   // didn't decode, junk hex, …) panics redstore's wasm and — because its

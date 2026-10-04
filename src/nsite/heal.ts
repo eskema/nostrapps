@@ -6,10 +6,9 @@
 //
 // The existence probe is a 1-byte ranged GET, not BUD-01 HEAD: khatru/blossom
 // answers HEAD from its metadata index without touching the bytes, so a server
-// that lost a blob's file but kept its index row (seen live on r.alphaama.com)
-// HEAD-lies with a 200. A ranged GET has to open the file. A failed probe just
-// means we attempt the upload — content-addressed servers dedupe, so a
-// redundant PUT is harmless.
+// that lost a blob's file but kept its index row HEAD-lies with a 200. A
+// ranged GET has to open the file. A failed probe just means we attempt the
+// upload — content-addressed servers dedupe, so a redundant PUT is harmless.
 import { pool } from "@nostr/gadgets/global"
 import { BlossomClient, createUploadAuth, uploadBlob } from "@nostr/tools/nipb7"
 import type { NostrEvent } from "@nostr/tools/core"
