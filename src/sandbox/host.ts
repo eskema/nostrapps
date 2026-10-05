@@ -28,8 +28,9 @@ import { setPointer } from "../pointer.js"
 import { getStore, isDeleted, safeQueryEvents } from "../store.js"
 import { feedsMode, subscribeStore } from "../store-subs.js"
 import { createNappWindow, fitWindowHeight } from "./napp-window.js"
-import { startWasmNapp, type WasmNapp } from "./wasm-canvas.js"
-import { WASM_DEFAULT_ENTRY } from "./wasm-abi.js"
+import { startWasmNapp, type WasmCall, type WasmNapp } from "./wasm-canvas.js"
+import { NAPP_MSG, WASM_DEFAULT_ENTRY } from "./wasm-abi.js"
+import { WASM_LOCAL_METHODS } from "./wasm-local.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
@@ -561,6 +562,10 @@ export function broadcastTheme() {
     // Only post to napps that have signalled ready — others are still on
     // about:blank (origin mismatch) and will get the theme on their napp-ready.
     if (!readyInstances.has(instanceId)) continue
+    if (win.canvas) {
+      wasmNapps.get(instanceId)?.napp.deliver(NAPP_MSG.theme, 0, JSON.stringify(wasmTheme()))
+      continue
+    }
     if (win.iframe?.contentWindow) {
       try {
         const origin = new URL(win.iframe.src).origin
@@ -1940,6 +1945,7 @@ export async function callIframe(
 
   await waitReady(instanceId)
   const win = openWindows.get(instanceId)
+  if (win?.canvas) return callWasm(instanceId, actionName, actionPayload)
   if (!win || !win.iframe) {
     throw new Error(`No iframe for instance ${instanceId}`)
   }
@@ -2254,16 +2260,15 @@ function mount(
 
 // ─── wasm napp loader (kind 35131 — a module, not a page) ──
 //
-// A wasm napp is always /app.wasm and no index.html. Its window gets
-// a canvas, this runs the module against it, and that is the whole surface: no
-// DOM, no iframe, no service worker, no bridge. The module imports four
-// functions and nothing else, so a napp that reaches for a file or a socket
-// gets neither.
+// A wasm napp is always /app.wasm and no index.html. Its window gets a canvas,
+// this runs the module against it, and the module reaches everything else
+// through one import, napp_call: the same rpc names and params bridge.js sends
+// for a web napp, behind the same gates (wasmCall below). It never gets a
+// DOM, an iframe or a service worker, and a napp that reaches for a file or a
+// socket gets neither.
 //
 // The window it builds is an ordinary napp window — same header, same
-// draggable, same packing — with a canvas where the iframe would be. What
-// differs is everything behind it: the actions, the permissions, the storage
-// and the nostr bridge are all web-napp machinery and none of it is here yet.
+// draggable, same packing — with a canvas where the iframe would be.
 
 // Running modules, so a reload or a whole-napp reload can stop the old one.
 const wasmNapps = new Map<string, WasmRuntime>()
@@ -2317,9 +2322,9 @@ async function launchWasm(
       cancelApprovalsIfGone(nappId)
       onDestroy?.(instanceId)
     },
-    // A wasm napp has no registered actions and no popstate to replay, so a
-    // reload is just a reload.
-    onReload: () => reloadWasm(instanceId)
+    // A canvas has no history, so a reload is the module from scratch and the
+    // window's stored actions replayed into it.
+    onReload: () => void reloadWasm(instanceId)
   })
 
   adoptWindow(win)
@@ -2332,23 +2337,38 @@ async function launchWasm(
   if (!position) fitFreshWindow(win.root, stageEl)
   captureWindowGeom(win.root)
 
+  await runWasm(win, nappId, instanceId, module)
+
+  if (!opts.transient) updateOpen(instanceId, win.getState())
+  return win
+}
+
+/** runWasm starts the module in the window, as a fresh document: whatever an
+ * earlier module registered, subscribed to or was asked is gone with it. */
+async function runWasm(win: NappWindow, nappId: string, instanceId: string, module: ArrayBuffer) {
+  resetInstanceRuntimeState(instanceId, "Window reloaded before action registered")
   try {
     const napp = await startWasmNapp({
       module,
       canvas: win.canvas!,
-      onLog: line => console.info(`[${nappId}] ${line}`)
+      onLog: line => console.info(`[${nappId}] ${line}`),
+      onCall: (call, napp) => void wasmCall(nappId, instanceId, call, napp)
     })
-    // The window may already be gone: a reload, or the user closing it while
-    // the module was still compiling.
-    if (wasmNapps.has(instanceId)) stopWasm(instanceId)
+    // The window may already be gone: the user closing it while the module
+    // was still compiling.
+    if (!openWindows.has(instanceId)) {
+      napp.stop()
+      return
+    }
+    stopWasm(instanceId)
     wasmNapps.set(instanceId, { napp, window: win })
   } catch (err) {
     console.error(`[${nappId}] wasm napp failed to start`, err)
     showWasmFailure(win, err)
+  } finally {
+    // Actions wait on this, then on the module registering them.
+    resolveReady(instanceId)
   }
-
-  if (!opts.transient) updateOpen(instanceId, win.getState())
-  return win
 }
 
 function stopWasm(instanceId: string) {
@@ -2380,33 +2400,30 @@ async function wasmModuleFor(
   return await file.body.arrayBuffer()
 }
 
-/** reloadWasm starts the module again from scratch: there is no state to keep. */
+/** reloadWasm starts the module again from scratch and replays the window's
+ * actions into it, the way an iframe reload does. */
 async function reloadWasm(instanceId: string) {
-  const running = wasmNapps.get(instanceId)
-  if (!running) return
-  const { window: win } = running
+  const win = openWindows.get(instanceId)
+  if (!win?.canvas) return
+  const nappId = win.root.dataset.nappId!
   stopWasm(instanceId)
+  clearWasmFailure(win)
+  let module: ArrayBuffer
   try {
-    const module = await wasmModuleFor(win.root.dataset.nappId!, () => {})
-    const napp = await startWasmNapp({
-      module,
-      canvas: win.canvas!,
-      onLog: line => console.info(`[${win.root.dataset.nappId}] ${line}`)
-    })
-    if (!openWindows.has(instanceId)) {
-      napp.stop()
-      return
-    }
-    wasmNapps.set(instanceId, { napp, window: win })
+    module = await wasmModuleFor(nappId, () => {})
   } catch (err) {
     showWasmFailure(win, err)
+    return
   }
+  if (!openWindows.has(instanceId)) return
+  await runWasm(win, nappId, instanceId, module)
+  replayStoredActions(instanceId)
 }
 
 /** reloadIframesByNappId's counterpart: every open window of a wasm napp. */
 function reloadWasmByNappId(nappId: string) {
-  for (const [instanceId, running] of wasmNapps) {
-    if (running.window.root.dataset.nappId === nappId) void reloadWasm(instanceId)
+  for (const [instanceId, win] of openWindows) {
+    if (win.canvas && win.root.dataset.nappId === nappId) void reloadWasm(instanceId)
   }
 }
 
@@ -2421,6 +2438,206 @@ function showWasmFailure(win: NappWindow, err: unknown) {
   note.className = "napp-wasm-error"
   note.textContent = message
   body.appendChild(note)
+}
+
+function clearWasmFailure(win: NappWindow) {
+  win.root.classList.remove("wasm-failed")
+  win.canvas?.parentElement?.querySelectorAll(".napp-wasm-error").forEach(el => el.remove())
+}
+
+// ─── napp_call: bridge.js for a napp with no page ──
+//
+// Every napp_call lands here with the method and params bridge.js would have
+// sent for the same function. Most go through runRpc unchanged, behind the
+// same grants and prompts a web napp's rpc meets. The ones bridge.js answers
+// inside the page (nip19, fx, throwaway keys, localStorage, the instance, the
+// theme) are answered here without a round trip, and the ones a web napp
+// posts as their own messages (registerAction, a dispatch's answer, link,
+// close) are restated as calls. Every answer, local or not, goes back the
+// same way: a message under the call's id, delivered between two frames.
+
+async function wasmCall(nappId: string, instanceId: string, call: WasmCall, napp: WasmNapp) {
+  const { id, method, params } = call
+  try {
+    const result = await wasmAnswer(nappId, instanceId, id, method, params)
+    napp.deliver(NAPP_MSG.result, id, JSON.stringify(result ?? null))
+  } catch (err) {
+    napp.deliver(NAPP_MSG.error, id, err instanceof Error ? err.message : String(err))
+  }
+}
+
+async function wasmAnswer(
+  nappId: string,
+  instanceId: string,
+  id: number,
+  method: string,
+  params: any
+): Promise<unknown> {
+  const local = WASM_LOCAL_METHODS[method]
+  if (local) return local(params)
+
+  switch (method) {
+    case "napp.instance":
+      return instanceId
+    case "napp.theme":
+      return wasmTheme()
+    case "nostrdb.supports":
+      return []
+
+    case "napp.storageGet":
+      return nappletStorageGet(nappId, WASM_STORAGE_SCOPE, storageKeyParam(method, params))
+    case "napp.storageKeys":
+      return nappletStorageKeys(nappId, WASM_STORAGE_SCOPE).sort()
+    case "napp.storageSet": {
+      const key = storageKeyParam(method, params)
+      if (typeof params.value !== "string") throw new Error(`${method}: value must be a string`)
+      wasmStorageSet(nappId, key, params.value)
+      wasmStorageChanged(nappId, instanceId, { op: "set", key, value: params.value })
+      return null
+    }
+    case "napp.storageRemove": {
+      const key = storageKeyParam(method, params)
+      nappletStorageRemove(nappId, WASM_STORAGE_SCOPE, key)
+      wasmStorageChanged(nappId, instanceId, { op: "remove", key })
+      return null
+    }
+    case "napp.storageClear":
+      for (const key of nappletStorageKeys(nappId, WASM_STORAGE_SCOPE)) {
+        nappletStorageRemove(nappId, WASM_STORAGE_SCOPE, key)
+      }
+      wasmStorageChanged(nappId, instanceId, { op: "clear" })
+      return null
+
+    case "napp.registerAction": {
+      // bridge.js sends the index of the handler it kept; a module has no
+      // function to keep, so idx is whatever number it wants handed back with
+      // the action, 0 by default. -1 says it wants to hear about the action
+      // but will not answer it.
+      if (typeof params?.pattern !== "string" || !params.pattern) {
+        throw new Error("napp.registerAction: params must be {pattern, idx?}")
+      }
+      const idx = Number.isInteger(params.idx) ? (params.idx as number) : 0
+      addRegisteredAction(instanceId, { idx, pattern: params.pattern })
+      return null
+    }
+    case "napp.dispatchResult": {
+      // Only the window the action went to can answer it.
+      const key = `${params?.id}`
+      const p = pendingDispatches.get(key)
+      if (!p || p.instanceId !== instanceId) return null
+      pendingDispatches.delete(key)
+      if (params.error != null) p.reject(new Error(String(params.error)))
+      else p.resolve(params.result ?? null)
+      return null
+    }
+    case "napp.close":
+      // Same path as the header ×: keeps the window's state for a restore.
+      openWindows.get(instanceId)?.close()
+      return null
+    case "napp.link":
+      // Fire and forget, as for a web napp: the prompt is the user's, not the
+      // napp's to wait on.
+      void linkOpen(nappId, { url: typeof params === "string" ? params : params?.url })
+      return null
+
+    case "napp.saveFile":
+      // JSON has no bytes, so a wasm napp's data comes as base64.
+      if (typeof params?.data !== "string") throw new Error("saveFile: data must be base64")
+      return runRpc(
+        currentSigner,
+        method,
+        { ...params, data: base64Bytes(params.data) },
+        nappId,
+        instanceId
+      )
+  }
+
+  if (method.startsWith("napp.feeds.") && method !== "napp.feeds.cancel") {
+    // The call's own id is the feed's callbackId: batches come back under the
+    // id the napp already has.
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      throw new Error(`${method}: params must be an object`)
+    }
+    await runRpc(currentSigner, method, { ...params, callbackId: id }, nappId, instanceId)
+    return null
+  }
+
+  return runRpc(currentSigner, method, params, nappId, instanceId)
+}
+
+/** callWasm is callIframe for a wasm window: the action goes in as a message,
+ * and the napp answers it with napp.dispatchResult. */
+function callWasm(instanceId: string, actionName: string, actionPayload: unknown) {
+  const requestId = iframeCallSerial++
+  return new Promise<unknown>((resolve, reject) => {
+    pendingDispatches.set(`${requestId}`, { instanceId, resolve, reject })
+    ;(async () => {
+      const { idx } = await waitForRegisteredAction(instanceId, actionName)
+      const napp = wasmNapps.get(instanceId)?.napp
+      if (!napp) throw new Error(`No wasm napp running for instance ${instanceId}`)
+      // A napp that registered with -1 will not answer: like a web napp with
+      // no handler, the window itself is the answer.
+      const answering = idx !== -1 && idx !== undefined
+      napp.deliver(
+        NAPP_MSG.action,
+        answering ? requestId : -1,
+        JSON.stringify({ name: actionName, payload: actionPayload ?? null, idx: idx ?? -1 })
+      )
+    })().catch(err => {
+      pendingDispatches.delete(`${requestId}`)
+      reject(err instanceof Error ? err : new Error(String(err)))
+    })
+  })
+}
+
+/** wasmTheme is what napp.theme answers and a theme message carries. */
+function wasmTheme() {
+  const { theme, vars } = themePayload()
+  return { name: theme, vars }
+}
+
+// A wasm napp's localStorage. It has no origin of its own, so it lives in the
+// launcher's own storage beside a napplet's, cleared with it on uninstall, and
+// is shared by all the napp's windows. It shares the launcher's quota too,
+// which is why each napp gets less of it than a web napp's origin would.
+const WASM_STORAGE_SCOPE = "shared"
+const WASM_STORAGE_QUOTA = 1024 * 1024
+
+function storageKeyParam(method: string, params: any): string {
+  const key = typeof params === "string" ? params : params?.key
+  if (typeof key !== "string") throw new Error(`${method}: key must be a string`)
+  return key
+}
+
+function wasmStorageSet(nappId: string, key: string, value: string) {
+  let size = key.length + value.length
+  for (const k of nappletStorageKeys(nappId, WASM_STORAGE_SCOPE)) {
+    if (k === key) continue
+    size += k.length + (nappletStorageGet(nappId, WASM_STORAGE_SCOPE, k)?.length ?? 0)
+  }
+  if (size > WASM_STORAGE_QUOTA) throw new Error("storage quota exceeded (1MB)")
+  nappletStorageSet(nappId, WASM_STORAGE_SCOPE, key, value)
+}
+
+/** wasmStorageChanged tells the napp's other windows, which is what a web
+ * napp's storage event does. */
+function wasmStorageChanged(
+  nappId: string,
+  fromInstance: string,
+  change: { op: "set" | "remove" | "clear"; key?: string; value?: string }
+) {
+  const message = JSON.stringify({ key: null, value: null, ...change })
+  for (const [instanceId, running] of wasmNapps) {
+    if (instanceId === fromInstance || running.window.root.dataset.nappId !== nappId) continue
+    running.napp.deliver(NAPP_MSG.storage, 0, message)
+  }
+}
+
+function base64Bytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
 }
 
 // ─── NIP-5D napplet loader (kind 35129 — separate from the nsite path) ──
@@ -4062,42 +4279,7 @@ async function handleRpc(
 ) {
   const { id, method, params, instanceId } = data
   try {
-    // Signer access (NIP-07 / window.nostr) requires the granted `identity`
-    // capability. The bridge pins window.nostr to undefined when it's ungranted,
-    // but a site could postMessage this rpc directly, so enforce it here too —
-    // this is the real boundary.
-    if (SIGNER_METHODS.has(method!) && !getPolicy(nappId).domains.includes("identity")) {
-      throw new Error(`identity access not granted: ${method!}`)
-    }
-    // Granted but nobody is logged in — the case where a napp opened from a
-    // link asks on load and gets "No NIP-07 extension detected" back, which it
-    // swallows. Ask first, and ask before the signing approval below: consent
-    // to sign is meaningless while there is no key to sign with.
-    if (SIGNER_METHODS.has(method!) && !getPubkey()) {
-      const pk = await requireAccount({
-        nappId,
-        what: method === "getPublicKey" ? "read your public key" : `use ${method}`,
-        passive: method === "getPublicKey"
-      })
-      if (!pk) throw new Error(`not logged in: ${method!}`)
-    }
-    if (isGated(method!)) {
-      // Refused without asking (a denial just now, too many waiting): skip
-      // the details only a prompt needs.
-      if (wouldRefuse(nappId, method!)) throw new Error(`Permission denied: ${method!}`)
-      let detail: ApprovalDetail | undefined
-      if (method === "napp.saveFile") detail = describeSaveFile(params)
-      else if (method === "napp.copyText") detail = describeCopyText(params)
-      else if (method === "signEvent") detail = describeSignEvent(params)
-      else if (method === "napp.publish") detail = await describePublish(params)
-      const allowed = await requireApproval(nappId, method!, detail)
-      if (!allowed) throw new Error(`Permission denied: ${method!}`)
-    }
-    // Signer can be passed either as an object (legacy) or as a getter
-    // (`() => currentSigner()`). The getter form lets the user hot-swap
-    // signer types (NIP-07 ↔ NIP-46) without forcing a napp reload.
-    const resolvedSigner = typeof signer === "function" ? signer() : signer
-    const result = await dispatch(resolvedSigner, method!, params, nappId, instanceId)
+    const result = await runRpc(signer, method!, params, nappId, instanceId)
     iframe.contentWindow?.postMessage({ __nostrapps: "rpc-result", id, result }, "*")
   } catch (err: any) {
     iframe.contentWindow?.postMessage(
@@ -4105,6 +4287,68 @@ async function handleRpc(
       "*"
     )
   }
+}
+
+// One rpc behind its gates: the identity grant, an account, the user's
+// approval. Shared by bridge.js's rpcs and a wasm napp's napp_call.
+async function runRpc(
+  signer: Signer | SignerGetter,
+  method: string,
+  params: any,
+  nappId: string,
+  instanceId: string | undefined
+): Promise<unknown> {
+  // Signer access (NIP-07 / window.nostr) requires the granted `identity`
+  // capability. The bridge pins window.nostr to undefined when it's ungranted,
+  // but a site could postMessage this rpc directly, so enforce it here too —
+  // this is the real boundary.
+  if (SIGNER_METHODS.has(method) && !getPolicy(nappId).domains.includes("identity")) {
+    throw new Error(`identity access not granted: ${method}`)
+  }
+  // Granted but nobody is logged in — the case where a napp opened from a
+  // link asks on load and gets "No NIP-07 extension detected" back, which it
+  // swallows. Ask first, and ask before the signing approval below: consent
+  // to sign is meaningless while there is no key to sign with.
+  if (SIGNER_METHODS.has(method) && !getPubkey()) {
+    const pk = await requireAccount({
+      nappId,
+      what: method === "getPublicKey" ? "read your public key" : `use ${method}`,
+      passive: method === "getPublicKey"
+    })
+    if (!pk) throw new Error(`not logged in: ${method}`)
+  }
+  if (isGated(method)) {
+    // Refused without asking (a denial just now, too many waiting): skip
+    // the details only a prompt needs.
+    if (wouldRefuse(nappId, method)) throw new Error(`Permission denied: ${method}`)
+    let detail: ApprovalDetail | undefined
+    if (method === "napp.saveFile") detail = describeSaveFile(params)
+    else if (method === "napp.copyText") detail = describeCopyText(params)
+    else if (method === "signEvent") detail = describeSignEvent(params)
+    else if (method === "napp.publish") detail = await describePublish(params)
+    const allowed = await requireApproval(nappId, method, detail)
+    if (!allowed) throw new Error(`Permission denied: ${method}`)
+  }
+  // Signer can be passed either as an object (legacy) or as a getter
+  // (`() => currentSigner()`). The getter form lets the user hot-swap
+  // signer types (NIP-07 ↔ NIP-46) without forcing a napp reload.
+  const resolvedSigner = typeof signer === "function" ? signer() : signer
+  return dispatch(resolvedSigner, method, params, nappId, instanceId)
+}
+
+// Where a feed's batches go: the window's iframe, or its wasm module as feed
+// messages under the call id that started the feed (which is its callbackId).
+function feedSink(
+  instanceId: string
+): (callbackId: string, events: NostrEvent[], synced: boolean) => void {
+  const frame = openWindows.get(instanceId)?.iframe?.contentWindow
+  if (frame) {
+    return (callbackId, events, synced) =>
+      frame.postMessage({ __nostrapps: "napp-feed-callback", callbackId, events, synced }, "*")
+  }
+  const napp = wasmNapps.get(instanceId)?.napp
+  return (callbackId, events, synced) =>
+    napp?.deliver(NAPP_MSG.feed, Number(callbackId), JSON.stringify({ events, synced }))
 }
 
 // The full-set feeds (profile, following, single inbox) hand the napp the whole
@@ -4327,14 +4571,15 @@ async function startOutboxFeed(
 ) {
   const controller = new AbortController()
 
-  const win = openWindows.get(instanceId)?.iframe?.contentWindow
+  const sink = feedSink(instanceId)
   let synced = authors.map(() => false)
   const more = authors.length > 1 ? `+${authors.length - 1}` : ""
   const label = `outbox-${(authors[0] ?? "").slice(0, 6)}${more}`
   const results = feedResults(label, filter, controller.signal, events =>
-    win?.postMessage(
-      { __nostrapps: "napp-feed-callback", callbackId, events, synced: synced.every(v => v) },
-      "*"
+    sink(
+      callbackId,
+      events,
+      synced.every(v => v)
     )
   )
   // sync, before and heal write to the store themselves: each round asks it
@@ -4484,7 +4729,7 @@ async function startStreamFeed(
   let closeStoreSub = () => {}
   trackFeedRequest(instanceId, callbackId, { controller, cleanup: () => closeStoreSub() })
 
-  const win = openWindows.get(instanceId)?.iframe?.contentWindow
+  const sink = feedSink(instanceId)
   let synced = false
   let queue: NostrEvent[] = []
   // what the napp was handed, so the store subscription only adds what it lacks,
@@ -4495,7 +4740,7 @@ async function startStreamFeed(
 
   const post = (events: NostrEvent[]) => {
     if (controller.signal.aborted) return
-    win?.postMessage({ __nostrapps: "napp-feed-callback", callbackId, events, synced }, "*")
+    sink(callbackId, events, synced)
   }
   const flush = () => {
     flushTimer = null
@@ -4599,15 +4844,14 @@ async function startInboxFeed(
 ) {
   const controller = new AbortController()
 
-  const win = openWindows.get(instanceId)?.iframe?.contentWindow
+  const sink = feedSink(instanceId)
 
   let synced = false
   const results = feedResults(
     `inbox-${pubkeys[0].substring(0, 6)}`,
     filter,
     controller.signal,
-    events =>
-      win?.postMessage({ __nostrapps: "napp-feed-callback", callbackId, events, synced }, "*")
+    events => sink(callbackId, events, synced)
   )
   trackFeedRequest(instanceId, callbackId, { controller, cleanup: results.close })
   results.requery()

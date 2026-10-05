@@ -22,7 +22,16 @@ export const NAPP_IMPORTS = {
   /** Milliseconds since the window opened. */
   nowMs: "napp_now_ms",
   /** Write one line to the launcher's log: `length` bytes at `offset`. */
-  log: "napp_log"
+  log: "napp_log",
+  /**
+   * napp_call(method_ptr, method_len, params_ptr, params_len) -> id: the wasm
+   * side of everything bridge.js gives a web napp (window.nostr,
+   * window.nostrdb, window.napp). method is one of the bridge's rpc names and
+   * params its JSON, both utf-8 in the napp's own memory. It never blocks: it
+   * returns a call id at once (always above zero, 0 meaning there is no host
+   * to call) and the answer comes later through napp_receive under that id.
+   */
+  call: "napp_call"
 } as const
 
 /** Exports: the napp calling out to the host. */
@@ -32,7 +41,37 @@ export const NAPP_EXPORTS = {
   /** Where the canvas is, as a byte offset into the module's own memory. */
   canvasPtr: "napp_canvas_ptr",
   /** Optional: hand the napp one input event. */
-  event: "napp_event"
+  event: "napp_event",
+  /**
+   * napp_alloc(len) -> ptr: room for a message the host is about to hand
+   * over. Ownership passes to the napp with the message. Required with
+   * napp_call.
+   */
+  alloc: "napp_alloc",
+  /**
+   * napp_receive(kind, id, ptr, len): one message from the host, len bytes at
+   * ptr (0 and 0 for an empty one). Only ever called between two frames, and
+   * the frame after it always runs. Required with napp_call.
+   */
+  receive: "napp_receive"
+} as const
+
+/** The messages a host hands over through napp_receive. */
+export const NAPP_MSG = {
+  /** The napp_call with this id answered: its JSON result. */
+  result: 0,
+  /** The napp_call with this id failed: the reason, as plain text. */
+  error: 1,
+  /** One batch from the feed this call id started: {"events", "synced"}. */
+  feed: 2,
+  /** An action dispatched to this window: {"name", "payload", "idx"}. */
+  action: 3,
+  /** Another window of this napp changed its storage: {"op", "key", "value"}. */
+  storage: 4,
+  /** The user switched the launcher's theme: {"name", "vars"}. */
+  theme: 5,
+  /** News from the napp.subscribe call with this id: {"type", ...}. */
+  subscription: 6
 } as const
 
 /** The input events a launcher reports. Pointer coordinates are canvas pixels. */

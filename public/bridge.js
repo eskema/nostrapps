@@ -458,7 +458,7 @@
   }
   const encodeBytes = (hrp, bytes) => bech32Encode(hrp, convertBits(Array.from(bytes), 8, 5, true))
   const npubEncode = hex => encodeBytes("npub", hexToBytes(hex))
-  const noteEncode = hex => encodeBytes("note", hexToBytes(hex))
+  const noteEncode = hex => neventEncode({id: hex})
   // nostr-tools' encodeTLV emits types in reversed order (3,2,1,0); match it so
   // our encoded strings are byte-identical to the library's.
   function neventEncode(p) {

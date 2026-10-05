@@ -15,10 +15,12 @@
 // launcher reads it".
 
 import {
+  NAPP_IMPORT_MODULE,
   NAPP_BUTTON,
   NAPP_EVENT,
   NAPP_EXPORTS,
   NAPP_IMPORTS,
+  NAPP_MSG,
   WASM_BYTES_PER_PIXEL
 } from "./wasm-abi.js"
 
@@ -28,6 +30,20 @@ export type WasmNapp = {
   stop(): void
   /** Paint another frame right now, rather than waiting for the next rAF. */
   frame(): boolean
+  /**
+   * Hand the napp one message through napp_receive. It is queued and
+   * delivered before the next frame, never from inside a call into the module.
+   * A string is sent as its utf-8, null as an empty message.
+   */
+  deliver(kind: number, id: number, data: string | Uint8Array | null): void
+}
+
+/** One napp_call: what the napp asked for, already copied out of its memory. */
+export type WasmCall = {
+  id: number
+  method: string
+  /** The parsed JSON params; null when the napp sent none. */
+  params: unknown
 }
 
 export type WasmNappOptions = {
@@ -37,9 +53,24 @@ export type WasmNappOptions = {
   canvas: HTMLCanvasElement
   /** Where the napp said it was, for the launcher's log. */
   onLog?: (line: string) => void
+  /**
+   * What napp_call reaches. The answer goes back through napp.deliver, under
+   * call.id; without this every napp_call returns 0.
+   */
+  onCall?: (call: WasmCall, napp: WasmNapp) => void
 }
 
-export async function startWasmNapp({ module, canvas, onLog }: WasmNappOptions): Promise<WasmNapp> {
+// What a napp may hand napp_call in one go, a saveFile payload being the
+// practical limit.
+const MAX_CALL_METHOD = 256
+const MAX_CALL_PARAMS = 64 << 20
+
+export async function startWasmNapp({
+  module,
+  canvas,
+  onLog,
+  onCall
+}: WasmNappOptions): Promise<WasmNapp> {
   const ctx = canvas.getContext("2d", { alpha: true })
   if (!ctx) throw new Error("this browser will not give a napp a 2d canvas")
 
@@ -51,6 +82,15 @@ export async function startWasmNapp({ module, canvas, onLog }: WasmNappOptions):
   let instance: WebAssembly.Instance
   let exports: WebAssembly.Exports
   let stopped = false
+  const started = performance.now()
+
+  // Messages for the module, delivered between frames. napp_call never
+  // answers from inside itself, which is what lets a napp call from anywhere
+  // — inside a frame, an event, or another message.
+  let inbox: Array<{ kind: number; id: number; data: Uint8Array | null }> = []
+  let callSerial = 0
+  // The handle onCall gets, filled in once the module is up.
+  let self: WasmNapp | undefined
 
   // The host's side of the ABI. Every function here is something a wasm napp
   // can import; there is nothing else, and that is deliberate: a napp that
@@ -61,10 +101,36 @@ export async function startWasmNapp({ module, canvas, onLog }: WasmNappOptions):
     // a window resize is something it notices on its own.
     [NAPP_IMPORTS.canvasWidth]: () => width,
     [NAPP_IMPORTS.canvasHeight]: () => height,
-    [NAPP_IMPORTS.nowMs]: () => performance.now(),
+    [NAPP_IMPORTS.nowMs]: () => performance.now() - started,
     [NAPP_IMPORTS.log]: (offset: number, length: number) => {
       const line = readString(instance.exports, offset, length)
       if (line) onLog?.(line)
+    },
+    // Copy both strings out before returning, so the napp can reuse its
+    // buffers at once, and answer later through napp_receive.
+    [NAPP_IMPORTS.call]: (mPtr: number, mLen: number, pPtr: number, pLen: number) => {
+      // Not from a start function, either: there is nowhere for the answer
+      // to go until the module is up.
+      if (!onCall || stopped || !self) return 0
+      if (mLen <= 0 || mLen > MAX_CALL_METHOD || pLen < 0 || pLen > MAX_CALL_PARAMS) return 0
+      const method = readBytes(instance.exports, mPtr >>> 0, mLen)
+      const raw = pLen > 0 ? readBytes(instance.exports, pPtr >>> 0, pLen) : new Uint8Array()
+      if (!method || !raw) return 0
+
+      const id = ++callSerial
+      const name = new TextDecoder().decode(method)
+      let params: unknown = null
+      const text = new TextDecoder().decode(raw).trim()
+      if (text) {
+        try {
+          params = JSON.parse(text)
+        } catch {
+          self.deliver(NAPP_MSG.error, id, `${name}: params are not valid JSON`)
+          return id
+        }
+      }
+      onCall({ id, method: name, params }, self)
+      return id
     }
   }
 
@@ -80,6 +146,8 @@ export async function startWasmNapp({ module, canvas, onLog }: WasmNappOptions):
   const frameFn = exports[NAPP_EXPORTS.frame] as CallableFunction | undefined
   const ptrFn = exports[NAPP_EXPORTS.canvasPtr] as CallableFunction | undefined
   const eventFn = exports[NAPP_EXPORTS.event] as CallableFunction | undefined
+  const allocFn = exports[NAPP_EXPORTS.alloc] as CallableFunction | undefined
+  const receiveFn = exports[NAPP_EXPORTS.receive] as CallableFunction | undefined
 
   if (typeof frameFn !== "function" || typeof ptrFn !== "function") {
     throw new Error(
@@ -90,6 +158,18 @@ export async function startWasmNapp({ module, canvas, onLog }: WasmNappOptions):
   // memory is the module's own linear memory, exported as "memory".
   const memory = exports.memory as WebAssembly.Memory | undefined
   if (!memory) throw new Error("this module has no memory for the launcher to read")
+
+  // A napp that calls out must have somewhere for the answers to land. One
+  // that does not call is spared the two exports.
+  const callsOut = WebAssembly.Module.imports(compiled).some(
+    imp => imp.module === NAPP_IMPORT_MODULE && imp.name === NAPP_IMPORTS.call
+  )
+  if (callsOut && (typeof allocFn !== "function" || typeof receiveFn !== "function")) {
+    throw new Error(
+      `this module imports ${NAPP_IMPORTS.call} but does not export both ` +
+        `${NAPP_EXPORTS.alloc} and ${NAPP_EXPORTS.receive}, so there is no way to hand it the answers`
+    )
+  }
 
   // Pointer input goes in as canvas events: the napp decides what they
   // mean. The module can leave napp_event out entirely if it only draws.
@@ -161,13 +241,19 @@ export async function startWasmNapp({ module, canvas, onLog }: WasmNappOptions):
       canvas.height = h
     }
 
-    for (const [kind, x, y, buttons, a, b] of pending) {
-      if (typeof eventFn === "function") eventFn(kind, x, y, buttons, a, b)
-    }
-    pending = []
-
     let more = 0
     try {
+      // Messages first, so a click that lands with its answer sees it.
+      const messages = inbox
+      inbox = []
+      for (const m of messages) receive(m.kind, m.id, m.data)
+
+      const events = pending
+      pending = []
+      for (const [kind, x, y, buttons, a, b] of events) {
+        if (typeof eventFn === "function") eventFn(kind, x, y, buttons, a, b)
+      }
+
       more = Number(frameFn?.(16.7) ?? 0)
     } catch (err) {
       // A trap is the napp's own crash. Take the window down rather than sit
@@ -187,28 +273,58 @@ export async function startWasmNapp({ module, canvas, onLog }: WasmNappOptions):
     return more
   }
 
+  /** receive hands one message to the module, in room it allocates. */
+  function receive(kind: number, id: number, data: Uint8Array | null) {
+    if (typeof receiveFn !== "function") return
+    let ptr = 0
+    const len = data?.length ?? 0
+    if (data && len > 0) {
+      ptr = Number(allocFn!(len)) >>> 0
+      // napp_alloc may have grown the memory, so the buffer is looked up only
+      // now.
+      if (!ptr || ptr + len > memory!.buffer.byteLength) {
+        throw new Error(`${NAPP_EXPORTS.alloc} gave ${ptr}, which does not fit ${len} bytes`)
+      }
+      new Uint8Array(memory!.buffer, ptr, len).set(data)
+    }
+    receiveFn(kind, id, ptr, len)
+  }
+
   const observer = new ResizeObserver(() => request())
   observer.observe(canvas)
 
-  request()
-
-  return {
+  const napp: WasmNapp = {
     stop() {
       stopped = true
+      inbox = []
       observer.disconnect()
     },
     frame() {
       paint()
       return true
+    },
+    deliver(kind, id, data) {
+      // A module that never imported napp_call has nothing coming.
+      if (stopped || typeof receiveFn !== "function") return
+      const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data
+      inbox.push({ kind, id, data: bytes && bytes.length ? bytes : null })
+      // The frame after a message always runs, so a napp parked on an idle
+      // canvas still sees its answer at once.
+      request()
     }
   }
+
+  self = napp
+  request()
+
+  return napp
 }
 
 /**
  * missingImports explains an instantiation failure, because the browser's own
  * message ("module is not an object or function") says nothing about what a
  * napp author has to change. The mistake is nearly always a build that expects
- * WASI: a wasm napp gets a canvas and nothing else, and there is no WASI here.
+ * WASI: a wasm napp gets a canvas and napp_call, and there is no WASI here.
  */
 function missingImports(module: WebAssembly.Module, provided: WebAssembly.Imports): string {
   const absent = new Set<string>()
@@ -221,8 +337,8 @@ function missingImports(module: WebAssembly.Module, provided: WebAssembly.Import
   if (absent.size === 0) return ""
   return (
     `this module imports ${[...absent].join(", ")}, which a napp does not get. ` +
-    `A wasm napp is handed a canvas and nothing else: no WASI, no filesystem, no network, ` +
-    `no clock of its own.`
+    `A wasm napp is handed a canvas and napp_call, and nothing else: no WASI, no filesystem, ` +
+    `no network, no clock of its own.`
   )
 }
 
@@ -254,6 +370,18 @@ function buttonsOf(e: PointerEvent): number {
 /** dpr is how many device pixels a CSS pixel is, which the canvas counts in. */
 function dpr(): number {
   return Math.min(3, Math.max(1, Math.round(window.devicePixelRatio || 1)))
+}
+
+/** readBytes copies n bytes out of the module's memory, or null if they are not there. */
+function readBytes(
+  exports: WebAssembly.Exports,
+  offset: number,
+  length: number
+): Uint8Array | null {
+  const memory = exports.memory as WebAssembly.Memory | undefined
+  if (!memory) return null
+  if (offset < 0 || offset + length > memory.buffer.byteLength) return null
+  return new Uint8Array(memory.buffer, offset, length).slice()
 }
 
 /** readString reads n bytes of UTF-8 out of the module's memory. */
