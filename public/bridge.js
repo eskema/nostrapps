@@ -44,6 +44,7 @@
 
   const pending = new Map()
   const feedCallbacks = new Map()
+  const subCallbacks = new Map()
 
   let rpcSerial = 0
   function rpc(method, params) {
@@ -100,6 +101,22 @@
       case "napp-feed-callback": {
         const callback = feedCallbacks.get(data.callbackId)
         if (callback) callback(data.events, data.synced)
+        return
+      }
+      case "napp-sub-callback": {
+        const cbs = subCallbacks.get(data.callbackId)
+        const msg = data.msg
+        if (!cbs || !msg) return
+        try {
+          if (msg.type === "eose") cbs.eoseEventsCallback?.(msg.events || [])
+          else if (msg.type === "event") cbs.liveEventCallback?.(msg.event)
+          else if (msg.type === "closed") {
+            subCallbacks.delete(data.callbackId)
+            cbs.closedCallback?.(msg.reasons || {})
+          }
+        } catch (err) {
+          console.error("[napp] subscription callback threw", err)
+        }
         return
       }
       case "napp-dispatch-action": {
@@ -263,6 +280,30 @@
         feedCallbacks.delete(callbackId)
         rpc("napp.feeds.cancel", { callbackId }).catch(() => {})
       }
+    }
+  }
+
+  // A plain REQ to exactly these relays: everything stored comes in one go to
+  // eoseEventsCallback, then each new event to liveEventCallback. Numbered
+  // with the feeds, since the host keeps both in the same place.
+  function subscribe(relays, filter, opts) {
+    const { label, maxEoseTimeout, eoseEventsCallback, liveEventCallback, closedCallback } =
+      opts || {}
+    const callbackId = feedSerial++
+    subCallbacks.set(callbackId, { eoseEventsCallback, liveEventCallback, closedCallback })
+    rpc("napp.subscribe", { relays, filter, label, maxEoseTimeout, callbackId }).catch(err => {
+      const cbs = subCallbacks.get(callbackId)
+      if (!cbs) return
+      subCallbacks.delete(callbackId)
+      console.error("[napp] subscription failed", err)
+      const reason = "error: " + String(err?.message || err)
+      try {
+        cbs.closedCallback?.(Object.fromEntries((relays || []).map(url => [url, reason])))
+      } catch {}
+    })
+    return () => {
+      if (!subCallbacks.delete(callbackId)) return
+      rpc("napp.unsubscribe", { callbackId }).catch(() => {})
     }
   }
 
@@ -458,7 +499,7 @@
   }
   const encodeBytes = (hrp, bytes) => bech32Encode(hrp, convertBits(Array.from(bytes), 8, 5, true))
   const npubEncode = hex => encodeBytes("npub", hexToBytes(hex))
-  const noteEncode = hex => neventEncode({id: hex})
+  const noteEncode = hex => neventEncode({ id: hex })
   // nostr-tools' encodeTLV emits types in reversed order (3,2,1,0); match it so
   // our encoded strings are byte-identical to the library's.
   function neventEncode(p) {
@@ -606,6 +647,8 @@
       loadRelaySets: user => rpc("napp.loadRelaySets", user),
       // ── relays ──────────────────────────────────────
       loadRelayInfo: url => rpc("napp.loadRelayInfo", url),
+      // a plain REQ to exactly these relays (no outbox logic); returns the closer
+      subscribe,
       // ── metadata ───────────────────────────────────
       loadNostrUser: request => rpc("napp.loadNostrUser", request),
       // Local full-text search over profiles known to the launcher

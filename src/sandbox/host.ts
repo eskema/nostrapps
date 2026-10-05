@@ -72,6 +72,7 @@ import {
 import { loadRelayInfo } from "@nostr/gadgets/relays"
 import { pool } from "@nostr/gadgets/global"
 import type { SubCloser } from "@nostr/tools/abstract-pool"
+import type { AbstractRelay, Subscription } from "@nostr/tools/abstract-relay"
 import type { NostrEvent } from "@nostr/tools/core"
 import { matchFilter, type Filter } from "@nostr/tools/filter"
 import { isNip05, queryProfile } from "@nostr/tools/nip05"
@@ -2552,9 +2553,12 @@ async function wasmAnswer(
       )
   }
 
-  if (method.startsWith("napp.feeds.") && method !== "napp.feeds.cancel") {
-    // The call's own id is the feed's callbackId: batches come back under the
-    // id the napp already has.
+  if (
+    (method.startsWith("napp.feeds.") && method !== "napp.feeds.cancel") ||
+    method === "napp.subscribe"
+  ) {
+    // The call's own id is the feed's (or subscription's) callbackId: what it
+    // brings comes back under the id the napp already has.
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new Error(`${method}: params must be an object`)
     }
@@ -4417,6 +4421,200 @@ function mergeFeedEvent(list: NostrEvent[], event: NostrEvent, limit: number): N
   return next.length > limit ? next.slice(0, limit) : next
 }
 
+// ─── subscriptions (napp.utils.subscribe) ───────────────────────
+// A plain REQ to the relays the napp names, with no outbox logic in between.
+// Unlike a feed it is not batched: everything stored arrives in one go at
+// EOSE, and after that every live event is handed over on its own. It lives in
+// feedRequests beside the feeds, so it ends with them (napp.unsubscribe, the
+// window closing or reloading).
+//
+// The pool folds a relay's CLOSED into its EOSE and never reconnects, so each
+// relay is driven here directly.
+
+// How long a subscription waits for every relay's EOSE before handing over
+// what it has anyway.
+const DEFAULT_MAX_EOSE_TIMEOUT = 20_000
+
+type SubscriptionMsg =
+  | { type: "eose"; events: NostrEvent[] }
+  | { type: "event"; event: NostrEvent }
+  | { type: "closed"; reasons: Record<string, string> }
+
+// Where a subscription's news goes: the window's iframe, or its wasm module as
+// subscription messages under the call id that started it.
+function subscriptionSink(instanceId: string): (callbackId: string, msg: SubscriptionMsg) => void {
+  const frame = openWindows.get(instanceId)?.iframe?.contentWindow
+  if (frame) {
+    return (callbackId, msg) =>
+      frame.postMessage({ __nostrapps: "napp-sub-callback", callbackId, msg }, "*")
+  }
+  const napp = wasmNapps.get(instanceId)?.napp
+  return (callbackId, msg) =>
+    napp?.deliver(NAPP_MSG.subscription, Number(callbackId), JSON.stringify(msg))
+}
+
+function startSubscription(nappId: string, instanceId: string, params: any) {
+  const relays = [
+    ...new Set(
+      (Array.isArray(params?.relays) ? params.relays : [])
+        .filter((u: unknown) => typeof u === "string")
+        .map(relayUrl)
+        .filter(Boolean) as string[]
+    )
+  ]
+  if (relays.length === 0) throw new Error("no relays to subscribe to")
+  const filter: Filter | null = Array.isArray(params?.filter)
+    ? null
+    : sanitizeFilter(params?.filter)
+  if (!filter) throw new Error("subscribe: invalid filter")
+
+  // "<author prefix>-<d tag>" when the napp names none
+  const label =
+    typeof params.label === "string" && params.label ? params.label : nappId.replace("~", "-")
+  const timeout =
+    params.maxEoseTimeout > 0 ? Number(params.maxEoseTimeout) : DEFAULT_MAX_EOSE_TIMEOUT
+  const callbackId: string = params.callbackId
+  const controller = new AbortController()
+  const signal = controller.signal
+  const sink = subscriptionSink(instanceId)
+  const isOpen = () => feedRequests.get(instanceId)?.get(callbackId)?.controller === controller
+  const deliver = (msg: SubscriptionMsg) => {
+    if (isOpen()) sink(callbackId, msg)
+  }
+
+  const seen = new Set<string>()
+  let stored: NostrEvent[] | null = []
+  let pending = relays.length // relays that have not sent EOSE (or ended) yet
+  let live = relays.length // relays that have not ended yet
+  const reasons: Record<string, string> = {}
+
+  // everything stored, once: when the last relay sends its EOSE, or when the
+  // timeout says we have waited long enough
+  const eose = () => {
+    if (!stored) return
+    const events = stored
+    stored = null
+    clearTimeout(timer)
+    deliver({ type: "eose", events })
+  }
+  const timer = setTimeout(eose, timeout)
+  trackFeedRequest(instanceId, callbackId, { controller, cleanup: () => clearTimeout(timer) })
+
+  const onevent = (event: NostrEvent) => {
+    if (signal.aborted || seen.has(event.id)) return
+    seen.add(event.id)
+    if (stored) stored.push(event)
+    else deliver({ type: "event", event })
+    store
+      .saveEvent(event)
+      .then(isNew => (isNew ? applyDeletionLocally(event) : undefined))
+      .catch(() => {})
+  }
+  const relayEosed = () => {
+    if (--pending <= 0) eose()
+  }
+  // once every relay has ended its part the napp hears why
+  const relayEnded = (url: string, reason: string) => {
+    reasons[url] = reason
+    if (--live > 0) return
+    // stored events always come before the closing
+    eose()
+    deliver({ type: "closed", reasons })
+    if (isOpen()) finishFeedRequest(instanceId, callbackId)
+  }
+
+  // One relay's REQ, kept open until the napp lets go or the relay ends it. A
+  // connection that drops after EOSE is reopened for what is new since.
+  const drive = async (url: string) => {
+    let eosed = false
+    let since = filter.since
+    let interval = 3000
+    while (!signal.aborted) {
+      let relay: AbstractRelay
+      try {
+        relay = await pool.ensureRelay(url, {
+          connectionTimeout: Math.min(timeout, 10_000),
+          abort: signal
+        })
+      } catch (err) {
+        if (signal.aborted) return
+        if (!eosed) {
+          relayEosed()
+          relayEnded(url, "error: " + String((err as any)?.message || err))
+          return
+        }
+        await reconnectWait()
+        continue
+      }
+
+      // what ended this REQ: a reason when the relay closed it, null when the
+      // connection went away
+      const ended = await new Promise<string | null>(resolve => {
+        let authed = false
+        let sub: Subscription | undefined
+        const stop = () => sub?.close("napp unsubscribed")
+        const open = () => {
+          if (signal.aborted) return resolve(null)
+          if (!relay.connected) return resolve(null)
+          signal.addEventListener("abort", stop)
+          sub = relay.subscribe([since !== filter.since ? { ...filter, since } : filter], {
+            label,
+            eoseTimeout: timeout,
+            onevent,
+            oneose() {
+              interval = 3000
+              if (!eosed) {
+                eosed = true
+                relayEosed()
+              }
+            },
+            onclose(reason) {
+              signal.removeEventListener("abort", stop)
+              if (signal.aborted) return resolve(reason)
+              if (!relay.connected) return resolve(null)
+              if (reason.startsWith("auth-required:") && !authed) {
+                authed = true
+                relay
+                  .auth(relayAuthSigner(nappId))
+                  .then(open, err =>
+                    resolve(`auth was required and attempted, but failed with: ${err}`)
+                  )
+                return
+              }
+              resolve(reason)
+            }
+          })
+        }
+        open()
+      })
+      if (signal.aborted) return
+      if (ended !== null) {
+        if (!eosed) relayEosed()
+        relayEnded(url, ended)
+        return
+      }
+      // the connection went away: ask again for whatever comes from now on
+      since = Math.floor(Date.now() / 1000)
+      await reconnectWait()
+    }
+
+    async function reconnectWait() {
+      await new Promise<void>(resolve => {
+        const t = setTimeout(done, interval)
+        signal.addEventListener("abort", done)
+        function done() {
+          clearTimeout(t)
+          signal.removeEventListener("abort", done)
+          resolve()
+        }
+      })
+      interval = Math.min(10 * 60_000, (interval * 17) / 10)
+    }
+  }
+
+  for (const url of relays) void drive(url)
+}
+
 // ─── feeds from a store subscription (trial, store-subs.ts) ─────
 // The usual result set merges in what the feed's own relays saved as new, so
 // an event another door saved first (another feed, a napp, another tab) waits
@@ -5202,6 +5400,12 @@ async function dispatch(
     }
     case "napp.feeds.cancel":
       return cancelFeedRequest(instanceId, params?.callbackId)
+    case "napp.subscribe":
+      startSubscription(callerNappId, instanceId!, params)
+      return null
+    case "napp.unsubscribe":
+      cancelFeedRequest(instanceId, params?.callbackId)
+      return null
     case "napp.loadBlockedRelays":
       return loadBlockedRelays(resolvePubkey(params), undefined, undefined, undefined)
     case "napp.loadBlossomServers":

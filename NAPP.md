@@ -102,6 +102,7 @@ window.napp.utils.loadEmojiSets(pubkey)
 
 // Search, publishing and other utils.
 window.napp.utils.loadRelayInfo(url)
+window.napp.utils.subscribe(relays, filter, opts?) // a plain REQ to exactly these relays; returns the closer
 window.napp.utils.searchUserLocal(term)
 window.napp.utils.searchUser(term)
 window.napp.utils.loadEvent(code, relays?, author?) // code: nip19/URI/hex, or a decoded pointer (nevent/naddr)
