@@ -28,6 +28,13 @@ Links open apps in an ephemeral space. **Keep** installs apps and preserves the 
 
 Read [Napp development](./NAPP.md) and use [`napp-env.d.ts`](./napp-env.d.ts) for TypeScript declarations. Napps use `window.napp` as well as `window.nostr` and `window.nostrdb`.
 
+## Wasm napps
+
+A napp can be one WebAssembly module instead of a page. The launcher runs the
+module itself and gives it a canvas to paint into — no DOM, no iframe, no
+JavaScript. Read [wasm napps](./WASM.md). The same modules run in
+[verdana](https://github.com/fiatjaf/verdana), in a window of its own.
+
 ## Napplet compatibility
 
 Read [Napplet compatibility](./NAPPLET.md) and use [`napplet-env.d.ts`](./napplet-env.d.ts) for TypeScript declarations. Napplets use NIP-5D `window.napplet`.

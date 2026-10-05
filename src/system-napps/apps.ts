@@ -22,7 +22,7 @@ import { detailField, renderAppCard, type AppCardOpts } from "./card.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
-import { NAPP_RELAYS, NSITE_NAMED_KIND, NAPP_NAMED_KIND } from "../nsite/fetch.js"
+import { NAPP_RELAYS, NSITE_NAMED_KIND, NAPP_NAMED_KIND, WASM_NAMED_KIND } from "../nsite/fetch.js"
 import { NAPPLET_NAMED_KIND } from "../nsite/napplet.js"
 import { NostrEvent } from "@nostr/tools"
 import { BlossomClient } from "@nostr/tools/nipb7"
@@ -30,8 +30,9 @@ import { DEFAULT_BLOSSOM_SERVERS, normalizeServer, publishOutcomes } from "../ut
 import { onRelayAuth } from "../relay-auth.js"
 import { hasBytes } from "../nsite/heal.js"
 
-// Addressable app kinds shown in Discover: nsites, napps, and named napplets.
-const DISCOVER_KINDS = [NSITE_NAMED_KIND, NAPP_NAMED_KIND, NAPPLET_NAMED_KIND]
+// Addressable app kinds shown in Discover: nsites, napps, wasm napps, and
+// named napplets.
+const DISCOVER_KINDS = [NSITE_NAMED_KIND, NAPP_NAMED_KIND, WASM_NAMED_KIND, NAPPLET_NAMED_KIND]
 import {
   badge,
   button,

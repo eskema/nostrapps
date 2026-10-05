@@ -91,6 +91,18 @@ type Feeds = {
     opts?: object
   ): FeedHandle
 }
+type SubscribeOpts = {
+  /** Sent to the relays as the subscription id prefix. Defaults to "<author prefix>-<napp d tag>". */
+  label?: string
+  /** Milliseconds to wait for every relay's EOSE before giving up on the slow ones. Defaults to 20000. */
+  maxEoseTimeout?: number
+  /** Called once, with everything that arrived before EOSE (or the timeout), deduplicated. */
+  eoseEventsCallback?: (events: NostrEvent[]) => void
+  /** Called once for each new event that arrives after that. */
+  liveEventCallback?: (event: NostrEvent) => void
+  /** Called once when every relay has ended the subscription, with each relay's reason. Not called when the napp closes it. */
+  closedCallback?: (reasons: { [relay: string]: string }) => void
+}
 type Utils = {
   loadRelayList(pubkey: string): Promise<ListResult<RelayItem>>
   loadFollowsList(pubkey: string): Promise<ListResult<string>>
@@ -121,6 +133,8 @@ type Utils = {
   loadRelaySets(pubkey: string): Promise<unknown>
   loadEmojiSets(pubkey: string): Promise<unknown>
   loadRelayInfo(url: string): Promise<unknown>
+  // A plain REQ to exactly these relays (no outbox logic). Returns the closer.
+  subscribe(relays: string[], filter: object, opts?: SubscribeOpts): () => void
   loadNostrUser(request: string | { pubkey: string; relays?: string[] }): Promise<unknown>
   searchUserLocal(term: string): Promise<unknown[]>
   searchUser(term: string): Promise<unknown[]>

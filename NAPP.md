@@ -51,14 +51,16 @@ Local and uploaded napps use `metadata.json` next to `index.html`:
 
 `id` becomes the `d` tag. `requires` becomes `requires` tags. `actions` becomes `action` tags.
 
-| Field         | Published as  | Meaning                                  |
-| ------------- | ------------- | ---------------------------------------- |
-| `id`          | `d`           | Required identifier and origin basis.    |
-| `title`       | `title`       | Display name.                            |
-| `icon`        | `icon`        | Icon URL or path.                        |
-| `description` | `description` | One-line card description.               |
-| `requires`    | `requires`    | Capability domains requested by the app. |
-| `actions`     | `action`      | Action patterns handled by the app.      |
+| Field          | Published as   | Meaning                                                   |
+| -------------- | -------------- | --------------------------------------------------------- |
+| `id`           | `d`            | Required identifier and origin basis.                     |
+| `title`        | `title`        | Display name.                                             |
+| `icon`         | `icon`         | Icon URL or path.                                         |
+| `description`  | `description`  | One-line card description.                                |
+| `requires`     | `requires`     | Capability domains requested by the app.                  |
+| `actions`      | `action`       | Action patterns handled by the app.                       |
+| `modes`        | `mode`         | How the app presents (`normal`, `auxiliary`, `headless`). |
+| `initial_size` | `initial_size` | Preferred window size.                                    |
 
 ## Launcher bridge
 
@@ -130,6 +132,7 @@ window.napp.utils.loadEmojiSets(pubkey)
 
 // Search, publishing and other utils.
 window.napp.utils.loadRelayInfo(url)
+window.napp.utils.subscribe(relays, filter, opts?) // a plain REQ to exactly these relays; returns the closer
 window.napp.utils.searchUserLocal(term)
 window.napp.utils.searchUser(term)
 window.napp.utils.loadEvent(code, relays?, author?) // code: nip19/URI/hex, or a decoded pointer (nevent/naddr)
@@ -243,7 +246,7 @@ There is no restriction on what actions are allowed, but these are some of the c
 | -------------------- | ----------------------------------- | ------------------------------- |
 | `view`               | `nevent`/`naddr` **or** full event  |                                 |
 | `view:<kind-number>` | full event object (always resolved) |                                 |
-| `profile`            | `pubkey` as hex                    |                                 |
+| `profile`            | `pubkey` as hex                     |                                 |
 | `feed`               | list of pubkey strings              |                                 |
 | `relay`              | list of relay URLs                  |                                 |
 | `wiki-term`          | a `d`-tag NIP-54 normalized string  | the resolved `kind:30818` event |

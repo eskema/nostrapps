@@ -11,6 +11,10 @@ import { healNapp } from "./heal.js"
 
 export const NSITE_NAMED_KIND = 35128
 export const NAPP_NAMED_KIND = 35130
+// A wasm napp is its own kind, the way an nsite is 35128 and a napplet is
+// 35129: a module painting a canvas rather than a page in an iframe. Kind
+// decides; tags describe.
+export const WASM_NAMED_KIND = 35131
 
 // Where manifests are looked for when a link or hostname carries no relay
 // hints: the author's write relays plus these, the relays the Apps napp
