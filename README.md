@@ -24,6 +24,10 @@ https://<launcher>/#space=my-space&app=naddr1…&action=profile~npub1…&app=nad
 
 Links open apps in an ephemeral space. **Keep** installs apps and preserves the space; reload discards unkept state.
 
+## Hosting
+
+The launcher is static files. Napps run on wildcard subdomains: serve the same files for `<launcher>` and `*.<launcher>` with a wildcard certificate, and no SPA catch-all — napp origins must get `/sw.js`, `/boot.html` and `/assets/*` as real files. Runtime files must never be cached or a napp origin keeps a stale kit silently: serve `/sw.js /boot.html /bridge.js /nostr-crypto.js /napp*` with `Cache-Control: public, max-age=0, must-revalidate`.
+
 ## Napp development
 
 Read [Napp development](./NAPP.md) and use [`napp-env.d.ts`](./napp-env.d.ts) for TypeScript declarations. Napps use `window.napp` as well as `window.nostr` and `window.nostrdb`.
