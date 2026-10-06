@@ -242,14 +242,17 @@ Use `window.napp.action()` to delegate work to another app.
 
 There is no restriction on what actions are allowed, but these are some of the common ones:
 
-| Action               | Payload                             | Returns                         |
-| -------------------- | ----------------------------------- | ------------------------------- |
-| `view`               | `nevent`/`naddr` **or** full event  |                                 |
-| `view:<kind-number>` | full event object (always resolved) |                                 |
-| `profile`            | `pubkey` as hex                     |                                 |
-| `feed`               | list of pubkey strings              |                                 |
-| `relay`              | list of relay URLs                  |                                 |
-| `wiki-term`          | a `d`-tag NIP-54 normalized string  | the resolved `kind:30818` event |
+| Action               | Payload                                                      | Returns                         |
+| -------------------- | -----------------------------------                          | ------------------------------- |
+| `view`               | `nevent`/`naddr` **or** full event                           |                                 |
+| `view:<kind-number>` | full event object (always resolved)                          |                                 |
+| `profile`            | `pubkey` as hex                                              |                                 |
+| `feed`               | list of pubkey strings                                       |                                 |
+| `relay`              | list of relay URLs                                           |                                 |
+| `wiki-term`          | `{ term: "<normalized NIP-54 d-tag>", source?: NostrEvent }` | the resolved `kind:30818` event |
+| `hashtag`            | `{ value: "<hashtag>", source?: NostrEvent }`                |                                 |
+| `user-search`        | string                                                       | the chosen `NostrUser`          |
+| `event-search`       | `NostrFilter`                                                | the chosen `NostrEvent`         |
 
 `view` may receive an `nevent`, `naddr`, or resolved event. A specific
 `view:<kind-number>` always receives a resolved event: the launcher resolves
