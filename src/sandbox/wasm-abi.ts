@@ -71,15 +71,60 @@ export const NAPP_MSG = {
   /** The user switched the launcher's theme: {"name", "vars"}. */
   theme: 5,
   /** News from the napp.subscribe call with this id: {"type", ...}. */
-  subscription: 6
+  subscription: 6,
+  /**
+   * The http_fetch_image call with this id answered with a decoded image:
+   * width and height as little-endian u32s, then width*height*4 bytes of
+   * RGBA, rows top-down, alpha not premultiplied.
+   */
+  bitmap: 7
 } as const
 
-/** The input events a launcher reports. Pointer coordinates are canvas pixels. */
+/**
+ * The input events a launcher reports. Pointer coordinates are canvas pixels.
+ * The keyboard ones carry the key (NAPP_KEY) or the typed code point in x and
+ * the modifier mask (NAPP_MOD) in buttons; a key down has a = 1 when it is the
+ * key repeating.
+ */
 export const NAPP_EVENT = {
   pointerMove: 0,
   pointerDown: 1,
   pointerUp: 2,
-  scroll: 3
+  scroll: 3,
+  keyDown: 4,
+  keyUp: 5,
+  /** One code point of text typed or pasted, in x. */
+  text: 6
+} as const
+
+/**
+ * The keys a key event names that do not type a character. Every other key is
+ * the code point of the character it types, lowercased. The ones with an ASCII
+ * control code use it; the rest are past the end of Unicode, so no character
+ * can be mistaken for them.
+ */
+export const NAPP_KEY = {
+  Backspace: 8,
+  Tab: 9,
+  Enter: 13,
+  Escape: 27,
+  Delete: 127,
+  ArrowLeft: 0x110000,
+  ArrowRight: 0x110001,
+  ArrowUp: 0x110002,
+  ArrowDown: 0x110003,
+  Home: 0x110004,
+  End: 0x110005,
+  PageUp: 0x110006,
+  PageDown: 0x110007
+} as const
+
+/** Keyboard modifiers, as the bit mask a key or text event carries in buttons. */
+export const NAPP_MOD = {
+  shift: 1,
+  ctrl: 2,
+  alt: 4,
+  meta: 8
 } as const
 
 /** Pointer buttons, as the bit mask sent alongside a position. */

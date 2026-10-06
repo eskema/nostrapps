@@ -65,15 +65,41 @@ window resize is something it notices on its own.
 click gets drawn on the frame after it. Returning zero parks the window until
 something happens, so an idle window costs nothing.
 
-`napp_event` kinds, with `x` and `y` in canvas pixels and `buttons` a mask of
-`1` primary, `2` secondary, `4` middle:
+`napp_event` kinds. For the pointer ones `x` and `y` are canvas pixels and
+`buttons` a mask of `1` primary, `2` secondary, `4` middle; for the keyboard
+ones `x` is the key or the character and `buttons` the modifiers, a mask of
+`1` shift, `2` ctrl, `4` alt, `8` meta:
 
-| kind |                        |
-| ---- | ---------------------- |
-| 0    | pointer moved          |
-| 1    | pointer pressed        |
-| 2    | pointer released       |
-| 3    | scroll, in `a` and `b` |
+| kind |                                                              |
+| ---- | ------------------------------------------------------------ |
+| 0    | pointer moved                                                |
+| 1    | pointer pressed                                              |
+| 2    | pointer released                                             |
+| 3    | scroll, in `a` and `b`                                       |
+| 4    | key down: the key in `x`; `a` is `1` when the key repeats    |
+| 5    | key up: the key in `x`                                       |
+| 6    | text: one code point typed (or pasted), in `x`               |
+
+A key is the code point of the character it types, lowercased (`a` for both
+`a` and `A`, the shift being in `buttons`), or for a key that types nothing:
+
+| key         | `x`        | key         | `x`        |
+| ----------- | ---------- | ----------- | ---------- |
+| Backspace   | `8`        | ArrowUp     | `0x110002` |
+| Tab         | `9`        | ArrowDown   | `0x110003` |
+| Enter       | `13`       | Home        | `0x110004` |
+| Escape      | `27`       | End         | `0x110005` |
+| Delete      | `127`      | PageUp      | `0x110006` |
+| ArrowLeft   | `0x110000` | PageDown    | `0x110007` |
+| ArrowRight  | `0x110001` |             |            |
+
+Other keys (a modifier on its own, function keys) are not reported. A text
+field wants the text events, which carry what was typed with the layout and
+shift already applied; the key events are for shortcuts and for editing keys.
+Every character typed is a key down and then a text event; a paste is only
+text events. The canvas gets keys once it has been clicked, like any focused
+element, and ctrl/meta shortcuts are left to the browser (that is what makes
+ctrl+v a paste at all).
 
 A module may leave `napp_event` out entirely if it only draws.
 
@@ -127,6 +153,7 @@ idle canvas still sees its answer at once.
 | 4    | 0                    | `{"op", "key", "value"}`            | storage: another window of this napp changed it   |
 | 5    | 0                    | `{"name", "vars"}`                  | theme: the user switched the launcher's theme     |
 | 6    | the subscribe call's | `{"type", ...}`                     | subscription: see [Subscriptions](#subscriptions) |
+| 7    | the image call's     | width, height, RGBA                 | bitmap: see [The web](#the-web)                   |
 
 ### Methods
 
@@ -190,12 +217,17 @@ prompts a wasm napp too.
 | `fx.parseCoordinate`                       | string                                      | `{kind, pubkey, identifier}` or null | `napp.fx.parseCoordinate`              |
 | `fx.formatCoordinate`                      | `{kind, pubkey, identifier}`                | string                               | `napp.fx.formatCoordinate`             |
 | `fx.satsFromBolt11`                        | invoice string                              | sats or null                         | `napp.fx.satsFromBolt11`               |
+| `http_fetch`                               | `{url, method?, headers?, body?}` or a url  | `{status, url, headers, body}`       | `fetch()`; see [The web](#the-web)     |
+| `http_fetch_image`                         | `{url, width?, height?, fit?}` or a url     | a bitmap message                     | see [The web](#the-web)                |
 
 The `napp.storage*`, `nip19.*`, `fx.*`, `napp.generateKey`,
 `napp.signWithKey`, `napp.instance`, `napp.theme` and `nostrdb.supports`
 calls are answered by the launcher on the spot, the way bridge.js answers
 them inside the page, but they still answer through `napp_receive` like
 everything else.
+
+`signEvent` may leave `created_at` out: a wasm napp has no wall clock, so a
+template without one is stamped with the time it is signed at.
 
 A wasm napp has no origin of its own, so its storage lives in the launcher's
 storage, shared by all the napp's windows and erased with it on uninstall.
@@ -231,6 +263,34 @@ Calling out is `napp.action`, the same as a web napp: its answer is the
 handler's result. A reload starts the module from scratch and replays the
 window's actions into it, the way a web napp's reload does.
 
+### The web
+
+A web napp granted `network` has `fetch()`. A wasm napp has no sockets, so the
+launcher fetches for it, behind the same `network` grant (a napp without it
+gets an error):
+
+- `http_fetch` makes one request: `method` defaults to `GET`, `headers` is an
+  object of strings and `body` a string (base64 bytes yourself if you need
+  to send any). It answers `{"status", "url", "headers", "body"}`, with the
+  header names lowercased and **`body` base64**, since JSON has no bytes. A
+  non-2xx status is still an answer; only not getting one is an error.
+- `http_fetch_image` fetches an image and decodes it, so a napp can show a
+  picture without a png/jpeg/gif/webp decoder in its module. It answers with
+  a **bitmap message** (kind 7) under the call's id instead of a result:
+  `width` and `height` as little-endian u32s, then `width * height * 4` bytes
+  of RGBA, rows top-down, **alpha not premultiplied** — what iced's
+  `image::Handle::from_rgba` and egui's `ColorImage::from_rgba_unmultiplied`
+  take. With no `width`/`height` the image comes at its own size, scaled down
+  to fit 1024×1024. With them, `fit: "contain"` (the default) scales it to fit
+  inside, never up; `fit: "cover"` fills exactly `width`×`height` and crops
+  what overhangs evenly — the square avatar out of any photo. Only one of the
+  two sides is a square of that side. An animated image gives its first
+  frame.
+
+Both read at most 16MB and give up after 20 seconds. Here they are the
+launcher's own `fetch()`, so the browser's rules hold: a server that sends no
+CORS headers cannot be read, the same as from a web napp.
+
 ### Subscriptions
 
 `napp.subscribe` is a plain REQ with `filter` to exactly `relays`. Like a
@@ -254,7 +314,7 @@ that.
 ## What a wasm napp does not have
 
 **No WASI.** There is no `wasi_snapshot_preview1` module, no filesystem, no
-socket, no clock of its own. A module that imports anything beyond the five
+socket (the web is `http_fetch`), no clock of its own. A module that imports anything beyond the five
 above is refused, with what it asked for in the message — a launcher cannot
 half-support a napp, because the parts it does support are the parts nobody
 had to think about. Whatever a napp needs from the outside comes through

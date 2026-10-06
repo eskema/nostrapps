@@ -31,6 +31,7 @@ import { createNappWindow, fitWindowHeight } from "./napp-window.js"
 import { startWasmNapp, type WasmCall, type WasmNapp } from "./wasm-canvas.js"
 import { NAPP_MSG, WASM_DEFAULT_ENTRY } from "./wasm-abi.js"
 import { WASM_LOCAL_METHODS } from "./wasm-local.js"
+import { httpFetch, httpFetchImage } from "./wasm-http.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
@@ -2494,6 +2495,12 @@ function clearWasmFailure(win: NappWindow) {
 async function wasmCall(nappId: string, instanceId: string, call: WasmCall, napp: WasmNapp) {
   const { id, method, params } = call
   try {
+    // A decoded image is no JSON: it goes back as the bitmap message.
+    if (method === "http_fetch_image") {
+      requireNetwork(nappId, method)
+      napp.deliver(NAPP_MSG.bitmap, id, await httpFetchImage(params))
+      return
+    }
     const result = await wasmAnswer(nappId, instanceId, id, method, params)
     napp.deliver(NAPP_MSG.result, id, JSON.stringify(result ?? null))
   } catch (err) {
@@ -2575,6 +2582,18 @@ async function wasmAnswer(
       void linkOpen(nappId, { url: typeof params === "string" ? params : params?.url })
       return null
 
+    case "http_fetch":
+      requireNetwork(nappId, method)
+      return httpFetch(params)
+
+    case "signEvent":
+      // A wasm napp has no wall clock to stamp an event with, so a template
+      // without created_at is stamped now, the way verdana does it.
+      if (params && typeof params === "object" && !Number(params.created_at)) {
+        params = { ...params, created_at: Math.floor(Date.now() / 1000) }
+      }
+      break
+
     case "napp.saveFile":
       // JSON has no bytes, so a wasm napp's data comes as base64.
       if (typeof params?.data !== "string") throw new Error("saveFile: data must be base64")
@@ -2601,6 +2620,14 @@ async function wasmAnswer(
   }
 
   return runRpc(currentSigner, method, params, nappId, instanceId)
+}
+
+/** requireNetwork is the `network` grant a web napp's fetch() is held to,
+ * applied to the launcher fetching on a wasm napp's behalf. */
+function requireNetwork(nappId: string, method: string) {
+  if (!getPolicy(nappId).domains.includes("network")) {
+    throw new Error(`network access not granted: ${method}`)
+  }
 }
 
 /** callWasm is callIframe for a wasm window: the action goes in as a message,

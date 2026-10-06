@@ -706,6 +706,12 @@ button {
   user-select: none;
 }
 
+/* It takes keys once clicked, and the napp draws its own focus (a caret, a
+   ring): a browser outline round the whole window says nothing. */
+.napp-body > canvas.napp-canvas:focus {
+  outline: none;
+}
+
 /* A napp that could not start says so here rather than showing an empty
    canvas for ever: the canvas is the whole window, so there is nowhere else
    for the reason to go. */

@@ -20,6 +20,8 @@ import {
   NAPP_EVENT,
   NAPP_EXPORTS,
   NAPP_IMPORTS,
+  NAPP_KEY,
+  NAPP_MOD,
   NAPP_MSG,
   WASM_BYTES_PER_PIXEL
 } from "./wasm-abi.js"
@@ -214,6 +216,37 @@ export async function startWasmNapp({
     // A napp that never gets to know the pointer left stops reporting a hover,
     // and one that waits for the cursor to come back would never idle.
     canvas.addEventListener("pointerleave", () => post(NAPP_EVENT.pointerMove, -1, -1, 0, 0, 0))
+
+    // Keys go to the canvas once it has been clicked, like to any focused
+    // element: a key down and up for every key the ABI can name, and a text
+    // event for each character typed, which is what a text field wants.
+    canvas.addEventListener("pointerdown", () => canvas.focus({ preventScroll: true }))
+    canvas.addEventListener("keydown", e => {
+      const key = keyOf(e)
+      if (key === null) return
+      const mods = modsOf(e)
+      post(NAPP_EVENT.keyDown, key, 0, mods, e.repeat ? 1 : 0, 0)
+      // A shortcut (ctrl+c, ctrl+v, ctrl+k) stays the browser's and the
+      // launcher's too: its default is what makes a paste event at all.
+      // AltGr arrives as ctrl+alt on some systems and still types.
+      const shortcut = (e.ctrlKey || e.metaKey) && !e.getModifierState("AltGraph")
+      if (!shortcut) {
+        e.preventDefault()
+        if ([...e.key].length === 1) post(NAPP_EVENT.text, e.key.codePointAt(0)!, 0, mods, 0, 0)
+      }
+    })
+    canvas.addEventListener("keyup", e => {
+      const key = keyOf(e)
+      if (key !== null) post(NAPP_EVENT.keyUp, key, 0, modsOf(e), 0, 0)
+    })
+    // A paste is text arriving all at once: the same events typing it would
+    // have sent.
+    canvas.addEventListener("paste", e => {
+      const text = e.clipboardData?.getData("text/plain")
+      if (!text) return
+      e.preventDefault()
+      for (const ch of text) post(NAPP_EVENT.text, ch.codePointAt(0)!, 0, 0, 0, 0)
+    })
   }
 
   let queued = false
@@ -364,6 +397,28 @@ function buttonsOf(e: PointerEvent): number {
   if (e.buttons & 1) mask |= NAPP_BUTTON.primary
   if (e.buttons & 2) mask |= NAPP_BUTTON.secondary
   if (e.buttons & 4) mask |= NAPP_BUTTON.middle
+  return mask
+}
+
+/**
+ * keyOf is the ABI's number for a key: a named one from NAPP_KEY, or the
+ * character it types, lowercased. Null for keys the ABI has no name for
+ * (modifiers on their own, function keys), which are not reported.
+ */
+function keyOf(e: KeyboardEvent): number | null {
+  if (Object.hasOwn(NAPP_KEY, e.key)) return NAPP_KEY[e.key as keyof typeof NAPP_KEY]
+  const chars = [...e.key]
+  if (chars.length !== 1) return null
+  return chars[0].toLowerCase().codePointAt(0)!
+}
+
+/** modsOf is the launcher's modifier mask, which is four bits. */
+function modsOf(e: KeyboardEvent): number {
+  let mask = 0
+  if (e.shiftKey) mask |= NAPP_MOD.shift
+  if (e.ctrlKey) mask |= NAPP_MOD.ctrl
+  if (e.altKey) mask |= NAPP_MOD.alt
+  if (e.metaKey) mask |= NAPP_MOD.meta
   return mask
 }
 
