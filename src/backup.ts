@@ -440,7 +440,10 @@ export async function fetchPublished(pubkey: string): Promise<NostrEvent[]> {
   const relays = await writeRelays(pubkey)
   const events = await pool.querySync(
     relays,
-    { kinds: [BACKUP_KIND], authors: [pubkey] },
+    {
+      kinds: [BACKUP_KIND],
+      authors: [pubkey]
+    },
     { maxWait: 4000 }
   )
   const newest = new Map<string, NostrEvent>()

@@ -173,8 +173,11 @@ type RespawnResult = "leader" | "follower" | false
 let respawning: Promise<RespawnResult> | null = null
 let respawnTimes: number[] = []
 let gaveUp = false
+// set by destroyStore(): the store is being erased, never bring it back
+let destroyed = false
 
 async function respawn(): Promise<RespawnResult> {
+  if (destroyed) return false
   if (respawning) return respawning
   respawning = (async (): Promise<RespawnResult> => {
     const now = Date.now()
@@ -283,6 +286,18 @@ export async function safeQueryEvents(filter: Filter, maxLimit?: number): Promis
   const merged = chunks.flat().sort((a, b) => b.created_at - a.created_at)
   const limit = Math.min(filter.limit ?? Infinity, maxLimit ?? Infinity)
   return Number.isFinite(limit) ? merged.slice(0, limit) : merged
+}
+
+export async function destroyStore(): Promise<void> {
+  destroyed = true
+  // never opened in this page: the OPFS sweep after this takes the file
+  if (!facade) return
+  const s = instance
+  await Promise.race([s.close(), new Promise(r => setTimeout(r, 1000))]).catch(() => {})
+  try {
+    ;(s as any).worker?.terminate?.()
+  } catch {}
+  await s.delete()
 }
 
 // Vite HMR: when this module reloads, the old RedEventStore worker still

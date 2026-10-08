@@ -150,6 +150,7 @@ import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
 import * as relayAuth from "./relay-auth.js"
 import { buildUserIndex, loadNostrUserIndexed } from "./user-search.js"
 import { verifyEvent } from "./verify.js"
+import { destroyStore } from "./store.js"
 
 pool.trackRelays = true
 // Relays capture pool.verifyEvent when they connect: set it before any does.
@@ -574,6 +575,13 @@ async function factoryReset() {
   }
 
   // 5. OPFS (used by @nostr/gadgets/redstore for the global event store).
+  // Close and erase the store properly first, then sweep whatever is left.
+  setStatus("Erasing event store…")
+  try {
+    await destroyStore()
+  } catch (err) {
+    console.warn("[reset] closing the event store failed", err)
+  }
   if (navigator.storage?.getDirectory) {
     try {
       const root = await navigator.storage.getDirectory()

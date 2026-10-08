@@ -133,8 +133,7 @@ ${names.map(n => `.ui-icon-${n}`).join(",\n")} {
     return `${JS_HEAD}(() => {\n${code}(window.napp ||= {}).ui = __nappUi\n${FONTS_JS}${AUTHORS}})()\n`
   }
   const fonts = () =>
-    FONTS_HEAD +
-    FONTS.map(f => font(f.slot, f.pkg) + font(f.slot, f.pkg, "italic")).join("")
+    FONTS_HEAD + FONTS.map(f => font(f.slot, f.pkg) + font(f.slot, f.pkg, "italic")).join("")
   // One line, the function the line calls: comments and whitespace go, and
   // the statement's semicolons, so the line can wrap it in parens.
   const loader = async () => {
@@ -211,7 +210,14 @@ export default defineConfig({
     // Vite 5.4+ blocks unknown Host headers in dev to mitigate DNS rebinding.
     // Our per-napp origins land at `<id>.napps.localhost:5173`, which isn't
     // in the implicit allow-list. The leading dot makes this a wildcard.
-    allowedHosts: [".localhost"]
+    allowedHosts: [".localhost"],
+    // @nostr/gadgets is symlinked to a sibling checkout outside the root
+    // (node_modules/@nostr/gadgets -> ../nostr-gadgets), and redstore's
+    // worker is served from there via /@fs in dev. Without this the worker
+    // request 403s (or falls back to index.html → a text/html MIME error).
+    fs: {
+      allow: [here("."), here("../nostr-gadgets")]
+    }
   },
   preview: {
     allowedHosts: [".localhost"]
