@@ -377,6 +377,9 @@ function pushLog(source: string, msg: string) {
     const gone = logHistory.shift()!
     logCounts.set(gone.source, logCounts.get(gone.source)! - 1)
   }
+  notifyLogs()
+}
+function notifyLogs() {
   for (const fn of logSubs) {
     try {
       fn()
@@ -388,6 +391,11 @@ function setStatus(msg: string) {
 }
 const logs = {
   history: () => logHistory.slice(),
+  clear() {
+    logHistory.length = 0
+    logCounts.clear()
+    notifyLogs()
+  },
   subscribe(fn: () => void) {
     logSubs.add(fn)
     return () => logSubs.delete(fn)

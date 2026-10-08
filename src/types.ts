@@ -314,6 +314,7 @@ export interface SystemCtx {
   }
   logs: {
     history(): Array<{ seq: number; at: number; msg: string }>
+    clear(): void
     subscribe(fn: () => void): () => void
   }
   // Relay auth policy (NIP-42): the global auto-auth switch plus the per-relay

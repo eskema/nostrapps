@@ -1807,6 +1807,22 @@ body.popover-open .napp-body iframe {
 }
 
 /* logs */
+/* The window's body is sized by the window, never by its content, so it can be
+   the size container: in a small window the clear button gives its row back
+   to the entries. */
+.napp-body-system:has(> .system-napp-logs) {
+  container: logs / size;
+}
+.logs-actions {
+  justify-content: flex-end;
+  background: var(--surface);
+}
+@container logs (width < 36rem) or (height < 24rem) {
+  .logs-actions {
+    display: none;
+  }
+}
+
 .logs-view {
   list-style: none;
   margin: 0;

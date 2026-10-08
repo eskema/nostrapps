@@ -10,11 +10,20 @@ export const height = START_HEIGHT
 
 import type { SystemCtx } from "../types.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
-import { el } from "./ui.js"
+import { bar, button, el, sticky } from "./ui.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx) {
-  container.innerHTML = `<ul class="logs-view"></ul>`
-  const list = container.querySelector(".logs-view")!
+  const list = el("ul", "logs-view")
+  const clearBtn = button({
+    label: "clear",
+    icon: "trash",
+    variant: "ghost",
+    onClick: () => ctx.logs.clear()
+  })
+  // Held at the top of the window while the entries scroll under it.
+  const actions = sticky(bar(clearBtn))
+  actions.classList.add("logs-actions")
+  container.replaceChildren(actions, list)
 
   function fmtTime(at: number) {
     return new Date(at).toLocaleTimeString(undefined, { hour12: false })
@@ -41,6 +50,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx) {
       list.appendChild(li)
       rows.set(entry.seq, li)
     }
+    clearBtn.disabled = entries.length === 0
     const scroller = list.closest(".napp-body")
     if (scroller) scroller.scrollTop = scroller.scrollHeight
   }
