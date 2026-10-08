@@ -13,6 +13,17 @@ type NostrEvent = {
   sig: string
 }
 
+type Filter = {
+  ids?: string[]
+  kinds?: number[]
+  authors?: string[]
+  since?: number
+  until?: number
+  limit?: number
+  search?: string
+  [tag: `#${string}`]: string[] | undefined
+}
+
 type EventTemplate = Omit<NostrEvent, "id" | "pubkey" | "sig">
 type Nip04 = {
   encrypt(pubkey: string, plaintext: string): Promise<string>
@@ -32,6 +43,9 @@ type NostrDB = {
   event(id: string): Promise<NostrEvent | undefined>
   remove(ids: string[]): Promise<string[]>
   replaceable(kind: number, author: string, identifier?: string): Promise<NostrEvent | undefined>
+  // Every event saved to the store from now on that matches filters, one by
+  // one. What is already stored comes from query(). Leaving the loop ends it.
+  subscribe(filters: Filter | Filter[]): AsyncGenerator<NostrEvent>
   supports(): string[]
 }
 type ListResult<T> = { event: NostrEvent | null; items: T[] }
@@ -45,7 +59,6 @@ type AddressPointer = {
   relays?: string[]
 }
 type RelayItem = { url: string; read: boolean; write: boolean }
-type FeedHandle = { close(): void }
 type RelayHealth = {
   url: string
   // online: a monitor checked it in the last 2 hours; offline: checked this
@@ -56,40 +69,6 @@ type RelayHealth = {
   nips: number[] | null
   // [] when the monitors say it requires nothing, null when nobody said
   requires: string[] | null
-  // place in the launcher's ranking across the user's follows, 0 first
-  rank: number | null
-}
-type Feeds = {
-  profile(
-    pubkey: string,
-    kinds: number[],
-    cb: (events: NostrEvent[], synced: boolean) => void,
-    opts?: object
-  ): FeedHandle
-  following(
-    source: string,
-    kinds: number[],
-    cb: (events: NostrEvent[], synced: boolean) => void,
-    opts?: object
-  ): FeedHandle
-  inbox(
-    pubkey: string | string[],
-    kinds: number[],
-    cb: (events: NostrEvent[], synced: boolean) => void,
-    opts?: object
-  ): FeedHandle
-  outbox(
-    pubkeys: string | string[],
-    kinds: number[],
-    cb: (events: NostrEvent[], synced: boolean) => void,
-    opts?: object
-  ): FeedHandle
-  relay(
-    relays: string[],
-    kinds: number[],
-    cb: (events: NostrEvent[], synced: boolean) => void,
-    opts?: object
-  ): FeedHandle
 }
 type SubscribeOpts = {
   /** Sent to the relays as the subscription id prefix. Defaults to "<author prefix>-<napp d tag>". */
@@ -400,7 +379,6 @@ type Napp = {
   link(url: string): void
   log(message: string): void
   relays: { health(urls: string[]): Promise<RelayHealth[]> }
-  feeds: Feeds
   utils: Utils
   ui: Ui
   // Set by the kit's loader line (the nostrapps ui kit napp shows it): resolves

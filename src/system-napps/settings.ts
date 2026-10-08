@@ -10,7 +10,6 @@ import type { SystemCtx } from "../types.js"
 import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
-import { startOutbox, stopOutbox } from "../outbox.js"
 import { loginControls } from "../login.js"
 import { nappName, nappNameEl } from "../napp-name.js"
 import { author, badge, busy, button, check, code, details, empty, item, itemList } from "./ui.js"
@@ -56,7 +55,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
 
   function renderAccount(pk: string | null) {
     if (pk) {
-      startOutbox(pk).catch(() => {})
       connectedEl.hidden = false
       disconnectedEl.hidden = true
       pubkeyEl.replaceChildren(
@@ -71,7 +69,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
       const type = ctx.account.getType?.()
       accountTypeEl.textContent = type === "nip46" ? "bunker" : "extension"
     } else {
-      stopOutbox()
       connectedEl.hidden = true
       disconnectedEl.hidden = false
       fillLoginOptions()

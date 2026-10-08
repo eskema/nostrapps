@@ -12,9 +12,11 @@
 // dozen check-ins of ~1.3 KB each, too much to keep in the store for the few
 // seconds a reload would save.
 
-import { pool } from "@nostr/gadgets/global"
+import { pool, setRelayPicker } from "@nostr/gadgets/global"
 import { normalizeURL } from "@nostr/tools/utils"
 import type { NostrEvent } from "@nostr/tools/core"
+
+export const FALLBACK_RELAYS = ["relay.damus.io", "relay.primal.net", "nos.lol"]
 
 const MONITOR_RELAYS = ["wss://relay.nostr.watch", "wss://relaypag.es"]
 const ONLINE_WINDOW = 2 * 3600 // s; active monitors check every 15–60 min
@@ -196,3 +198,21 @@ export async function relayHealth(urls: string[], waitMs = 6000): Promise<RelayH
     await Promise.race([Promise.all(pending), new Promise(r => setTimeout(r, waitMs))])
   return list.map(health)
 }
+
+// Where to read an author from, two of their write relays (gadgets has already
+// left out the ones that failed to connect lately):
+//   - none the NIP-66 monitors report offline, unless that's all there is;
+//   - free before those that require payment or auth, which may not let us read;
+//   - then the fastest.
+// Whatever the monitors don't know about yet is neutral, and asked about in
+// the background for next time.
+const LAST = Number.MAX_SAFE_INTEGER
+setRelayPicker(candidates => {
+  const urls = candidates.map(r => r.url)
+  const facts = new Map(urls.map(u => [u, relayHealthNow(u)]))
+  const up = urls.filter(u => facts.get(u)?.status !== "offline")
+  const gated = (u: string) =>
+    facts.get(u)?.requires?.some(r => r === "payment" || r === "auth") ? 1 : 0
+  const rtt = (u: string) => facts.get(u)?.rtt ?? LAST
+  return (up.length ? up : urls).sort((a, b) => gated(a) - gated(b) || rtt(a) - rtt(b)).slice(0, 2)
+})

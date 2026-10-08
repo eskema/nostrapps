@@ -62,8 +62,8 @@ export const NAPP_MSG = {
   result: 0,
   /** The napp_call with this id failed: the reason, as plain text. */
   error: 1,
-  /** One batch from the feed this call id started: {"events", "synced"}. */
-  feed: 2,
+  /** An event just saved that matches the nostrdb.subscribe with this id. */
+  stored: 2,
   /** An action dispatched to this window: {"name", "payload", "idx"}. */
   action: 3,
   /** Another window of this napp changed its storage: {"op", "key", "value"}. */

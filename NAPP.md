@@ -96,6 +96,7 @@ window.nostrdb.count(filters)
 window.nostrdb.event(id)
 window.nostrdb.remove(ids)
 window.nostrdb.replaceable(kind, author, identifier?)
+window.nostrdb.subscribe(filters) // async generator: for await (const event of ...)
 
 // Access to metadata for a given pubkey.
 // These are saved on local store and LRU-cached in memory, with automatic cache invalidation.
@@ -204,8 +205,7 @@ window.napp.log(message)
 `window.napp.relays.health(urls)` answers, per relay, what the NIP-66 monitors
 say: `status` (`online` if checked in the last 2 hours, `offline` if checked
 this week but not since, `unknown` otherwise), `checkedAt`, `rtt` (ms),
-`nips`, `requires` (`auth`, `payment`, …) and `rank`, the relay's place across
-the user's follows (null if unranked). Waits up to 6 s for relays the launcher
+`nips` and `requires` (`auth`, `payment`, …). Waits up to 6 s for relays the launcher
 hasn't asked about yet; up to 200 urls per call.
 
 `window.napp.log(message)` appends a line to the launcher's logs window,
@@ -214,19 +214,6 @@ answered, say), not prompts. One printable line of up to 400 characters, at
 most 60 lines per 10 seconds per napp; anything beyond is dropped.
 
 TypeScript declarations: [`napp-env.d.ts`](./napp-env.d.ts).
-
-Napps can use the feed helpers for live event streams:
-
-```js
-window.napp.feeds.profile(pubkey, kinds, callback, { since, until, limit })
-window.napp.feeds.following(source, kinds, callback, options)
-window.napp.feeds.inbox(pubkey, kinds, callback, options)
-window.napp.feeds.outbox(pubkeys, kinds, callback, options)
-window.napp.feeds.relay(relays, kinds, callback, options)
-```
-
-Each returns a handle with `close()`. `relay` reads only the relays given, up
-to 20, and nothing from the launcher's cache.
 
 ## Actions
 

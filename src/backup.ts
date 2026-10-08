@@ -37,7 +37,7 @@ import {
   setAutomaticallyAuth
 } from "./relay-auth.js"
 import { currentSigner } from "./signers/index.js"
-import { FALLBACK_RELAYS } from "./outbox.js"
+import { FALLBACK_RELAYS } from "./relay-health.js"
 import { publishOutcomes } from "./utils.js"
 import type { InstalledApp, NappWindowState, SpaceData } from "./types.js"
 

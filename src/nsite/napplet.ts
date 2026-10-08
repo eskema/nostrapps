@@ -9,7 +9,7 @@ import { verifyEvent } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
 import { fetchBlob } from "./fetch.js"
 import { healNapp } from "./heal.js"
-import { FALLBACK_RELAYS } from "../outbox.js"
+import { FALLBACK_RELAYS } from "../relay-health.js"
 
 export const NAPPLET_SNAPSHOT_KIND = 5129
 export const NAPPLET_ROOT_KIND = 15129

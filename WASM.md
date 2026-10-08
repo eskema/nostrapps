@@ -148,7 +148,7 @@ idle canvas still sees its answer at once.
 | ---- | -------------------- | ----------------------------------- | ------------------------------------------------- |
 | 0    | the call's           | JSON                                | result: what the call returned                    |
 | 1    | the call's           | text                                | error: why the call failed (including a denial)   |
-| 2    | the feed call's      | `{"events": [...], "synced": bool}` | feed: one batch from a feed                       |
+| 2    | the subscribe call's | the event                           | stored: see [Store subscriptions](#store-subscriptions) |
 | 3    | the dispatch's       | `{"name", "payload", "idx"}`        | action: dispatched to this window                 |
 | 4    | 0                    | `{"op", "key", "value"}`            | storage: another window of this napp changed it   |
 | 5    | 0                    | `{"name", "vars"}`                  | theme: the user switched the launcher's theme     |
@@ -174,6 +174,8 @@ prompts a wasm napp too.
 | `nostrdb.event`                            | `{id}`                                      | event or null                        | `nostrdb.event`                        |
 | `nostrdb.remove`                           | `{ids}`                                     | removed ids                          | `nostrdb.remove`                       |
 | `nostrdb.replaceable`                      | `{kind, author, identifier?}`               | event or null                        | `nostrdb.replaceable`                  |
+| `nostrdb.subscribe`                        | `{filters}` (one or an array)               | null, then stored messages           | `nostrdb.subscribe`                    |
+| `nostrdb.unsubscribe`                      | `{callbackId}`                              | null                                 | leaving the `for await` loop           |
 | `nostrdb.supports`                         | —                                           | `[]`                                 | `nostrdb.supports`                     |
 | `napp.instance`                            | —                                           | instance id                          | `napp.instance`                        |
 | `napp.theme`                               | —                                           | `{name, vars}`                       | the theme message bridge.js applies    |
@@ -183,13 +185,7 @@ prompts a wasm napp too.
 | `napp.close`                               | —                                           | null                                 | `napp.close`                           |
 | `napp.link`                                | url string                                  | null                                 | `napp.link`                            |
 | `napp.log`                                 | `{message}`                                 | bool                                 | `napp.log`                             |
-| `napp.relays.health`                       | `{urls}`                                    | health, with rank                    | `napp.relays.health`                   |
-| `napp.feeds.profile`                       | `{pubkey, kinds, ...opts}`                  | null, then feed messages             | `napp.feeds.profile`                   |
-| `napp.feeds.following`                     | `{source, kinds, ...opts}`                  | 〃                                   | `napp.feeds.following`                 |
-| `napp.feeds.inbox`                         | `{pubkey, kinds, ...opts}`                  | 〃                                   | `napp.feeds.inbox`                     |
-| `napp.feeds.outbox`                        | `{pubkeys, kinds, ...opts}`                 | 〃                                   | `napp.feeds.outbox`                    |
-| `napp.feeds.relay`                         | `{relays, kinds, ...opts}`                  | 〃                                   | `napp.feeds.relay`                     |
-| `napp.feeds.cancel`                        | `{callbackId}`                              | bool                                 | `feed.close()`                         |
+| `napp.relays.health`                       | `{urls}`                                    | health                               | `napp.relays.health`                   |
 | `napp.load*`, `napp.fetch*WithSets`        | user (hex, npub, nprofile, nip05)           | the list                             | `napp.utils.load*` / `fetch*`          |
 | `napp.loadRelayInfo`                       | url string                                  | NIP-11 info                          | `napp.utils.loadRelayInfo`             |
 | `napp.loadNostrUser`                       | user, or `{pubkey, relays}`                 | profile                              | `napp.utils.loadNostrUser`             |
@@ -234,13 +230,14 @@ storage, shared by all the napp's windows and erased with it on uninstall.
 Here that is 1MB per napp, because it shares the launcher's own quota; a
 write over it fails with an error message.
 
-### Feeds
+### Store subscriptions
 
-A feed call's own id is its `callbackId`. The call answers `null` once the
-feed is up; the events then keep arriving as feed messages under that same
-id, `synced` turning true once the relays have sent what they had stored.
-`napp.feeds.cancel` with `{"callbackId": id}` ends it, and nothing more is
-delivered for it after that.
+`nostrdb.subscribe` holds `filters` open on the launcher's store. The call's
+own id is its `callbackId`: it answers `null` once the subscription is up,
+then every event saved to the store from then on that matches one of the
+filters arrives as a stored message under that id, one by one. What was
+stored before comes from `nostrdb.query`. `nostrdb.unsubscribe` with
+`{"callbackId": id}` ends it, and nothing more is delivered for it after that.
 
 ### Actions
 
@@ -294,7 +291,7 @@ CORS headers cannot be read, the same as from a web napp.
 ### Subscriptions
 
 `napp.subscribe` is a plain REQ with `filter` to exactly `relays`. Like a
-feed, the call's own id is its `callbackId`: it answers `null` once the
+store subscription, the call's own id is its `callbackId`: it answers `null` once the
 subscription is up, then subscription messages arrive under that id:
 
 1. `{"type": "eose", "events": [...]}` once, with every event that came before

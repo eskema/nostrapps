@@ -25,8 +25,7 @@ import { openDialog } from "../dialog.js"
 import { nappNameEl } from "../napp-name.js"
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
-import { getStore, isDeleted, safeQueryEvents } from "../store.js"
-import { feedsMode, subscribeStore } from "../store-subs.js"
+import { getStore, safeQueryEvents } from "../store.js"
 import { createNappWindow, fitWindowHeight } from "./napp-window.js"
 import { startWasmNapp, type WasmCall, type WasmNapp } from "./wasm-canvas.js"
 import { NAPP_MSG, WASM_DEFAULT_ENTRY } from "./wasm-abi.js"
@@ -88,7 +87,6 @@ import {
   type EventPointer
 } from "@nostr/tools/nip19"
 import { verifyEvent } from "../verify.js"
-import { isAddressableKind, isReplaceableKind } from "@nostr/tools/kinds"
 import {
   getInstalledApp,
   getLoadedActions,
@@ -116,15 +114,8 @@ import { requireAccount } from "../login.js"
 import { relayAuthSigner } from "../relay-auth.js"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
-import {
-  current as outboxCurrent,
-  outbox,
-  FALLBACK_RELAYS,
-  goLive,
-  relayRankOf
-} from "../outbox.js"
-import { relayHealth, relayUrl } from "../relay-health.js"
-import { debounce, HEX64, isHex64 } from "../utils.js"
+import { FALLBACK_RELAYS, relayHealth, relayUrl } from "../relay-health.js"
+import { HEX64, isHex64 } from "../utils.js"
 import {
   describeCipher,
   describeCopyText,
@@ -133,7 +124,7 @@ import {
   publishDetail
 } from "../approval-details.js"
 import { aKind, peopleList } from "../event-facts.js"
-import { author as authorEl, authors, code, codeBlock, el } from "../system-napps/ui.js"
+import { author as authorEl, authors, code, el } from "../system-napps/ui.js"
 
 const BOOT_TIMEOUT_MS = 10_000
 
@@ -2606,12 +2597,9 @@ async function wasmAnswer(
       )
   }
 
-  if (
-    (method.startsWith("napp.feeds.") && method !== "napp.feeds.cancel") ||
-    method === "napp.subscribe"
-  ) {
-    // The call's own id is the feed's (or subscription's) callbackId: what it
-    // brings comes back under the id the napp already has.
+  if (method === "nostrdb.subscribe" || method === "napp.subscribe") {
+    // The call's own id is the subscription's callbackId: what it brings
+    // comes back under the id the napp already has.
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new Error(`${method}: params must be an object`)
     }
@@ -4409,85 +4397,49 @@ async function runRpc(
   return dispatch(resolvedSigner, method, params, nappId, instanceId)
 }
 
-// Where a feed's batches go: the window's iframe, or its wasm module as feed
-// messages under the call id that started the feed (which is its callbackId).
-function feedSink(
-  instanceId: string
-): (callbackId: string, events: NostrEvent[], synced: boolean) => void {
+// ─── store subscriptions (nostrdb.subscribe) ────────────────────
+// Filters a napp holds open on the store: every event saved here from then on
+// that matches one of them is handed over, one by one. Each store.saveEvent
+// in this file is followed by notifyStoreSubs; what was stored before comes
+// from a query. They live in feedRequests beside the relay subscriptions, so
+// they end with them (nostrdb.unsubscribe, the window closing or reloading).
+
+type StoreSub = { filters: Filter[]; deliver: (event: NostrEvent) => void }
+const storeSubs = new Set<StoreSub>()
+
+// A newly saved event, to every open store subscription it matches.
+function notifyStoreSubs(event: NostrEvent) {
+  for (const sub of storeSubs) {
+    if (!sub.filters.some(f => matchFilter(f, event))) continue
+    try {
+      sub.deliver(event)
+    } catch (err) {
+      console.warn("[store-subs] delivery failed", err)
+    }
+  }
+}
+
+// Where a store subscription's events go: the window's iframe, or its wasm
+// module as stored messages under the call id that started it.
+function storeSubSink(instanceId: string): (callbackId: string, event: NostrEvent) => void {
   const frame = openWindows.get(instanceId)?.iframe?.contentWindow
   if (frame) {
-    return (callbackId, events, synced) =>
-      frame.postMessage({ __nostrapps: "napp-feed-callback", callbackId, events, synced }, "*")
+    return (callbackId, event) =>
+      frame.postMessage({ __nostrapps: "nostrdb-sub-event", callbackId, event }, "*")
   }
   const napp = wasmNapps.get(instanceId)?.napp
-  return (callbackId, events, synced) =>
-    napp?.deliver(NAPP_MSG.feed, Number(callbackId), JSON.stringify({ events, synced }))
+  return (callbackId, event) =>
+    napp?.deliver(NAPP_MSG.stored, Number(callbackId), JSON.stringify(event))
 }
 
-// The full-set feeds (profile, following, single inbox) hand the napp the whole
-// current result on every update. The set is kept here: built by a store query,
-// then new events merge in by hand, so an update is a post, not a store query
-// parsed on this thread. The store is asked again only when something wrote to
-// it past us: a sync round, a heal, a deletion.
-function feedResultSet(filter: Filter, signal: AbortSignal, post: (events: NostrEvent[]) => void) {
-  const limit = filter.limit ?? 100
-  let events: NostrEvent[] = []
-  let stale = true
-  let querying = false
-  // merged while a query was out: its result doesn't have them yet
-  let arrived: NostrEvent[] = []
-  const flush = debounce(async () => {
-    if (signal.aborted) return
-    if (stale) {
-      stale = false
-      querying = true
-      arrived = []
-      try {
-        let fresh = await safeQueryEvents(filter)
-        for (const e of arrived) fresh = mergeFeedEvent(fresh, e, limit)
-        events = fresh
-      } catch (err) {
-        stale = true // the next update tries again
-        console.warn("[feed] store query failed", err)
-      } finally {
-        querying = false
-        arrived = []
-      }
-      if (signal.aborted) return
-    }
-    post(events)
-  }, 800)
-  const requery = () => {
-    stale = true
-    flush()
-  }
-  const add = (event: NostrEvent) => {
-    // a deletion takes events out of the store: ask it
-    if (event.kind === 5) return requery()
-    events = mergeFeedEvent(events, event, limit)
-    if (querying) arrived.push(event)
-    flush()
-  }
-  return { requery, add }
-}
-
-// One event into a newest-first result of at most `limit`, the way the store
-// would hold it: a replaceable or addressable event replaces its older version.
-function mergeFeedEvent(list: NostrEvent[], event: NostrEvent, limit: number): NostrEvent[] {
-  if (list.some(e => e.id === event.id)) return list
-  let next = list
-  const addressable = isAddressableKind(event.kind)
-  if (addressable || isReplaceableKind(event.kind)) {
-    const d = (e: NostrEvent) => e.tags.find(t => t[0] === "d")?.[1] ?? ""
-    const same = (e: NostrEvent) =>
-      e.kind === event.kind && e.pubkey === event.pubkey && (!addressable || d(e) === d(event))
-    const current = next.find(same)
-    if (current && current.created_at >= event.created_at) return list
-    next = next.filter(e => !same(e))
-  } else next = [...next]
-  const at = next.findIndex(e => e.created_at < event.created_at)
-  next.splice(at === -1 ? next.length : at, 0, event)
-  return next.length > limit ? next.slice(0, limit) : next
+function startStoreSub(instanceId: string, callbackId: string, filters: Filter[]) {
+  const sink = storeSubSink(instanceId)
+  const sub: StoreSub = { filters, deliver: event => sink(callbackId, event) }
+  storeSubs.add(sub)
+  trackFeedRequest(instanceId, callbackId, {
+    controller: new AbortController(),
+    cleanup: () => storeSubs.delete(sub)
+  })
 }
 
 // ─── subscriptions (napp.utils.subscribe) ───────────────────────
@@ -4576,7 +4528,11 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
     else deliver({ type: "event", event })
     store
       .saveEvent(event)
-      .then(isNew => (isNew ? applyDeletionLocally(event) : undefined))
+      .then(isNew => {
+        if (!isNew) return
+        notifyStoreSubs(event)
+        return applyDeletionLocally(event)
+      })
       .catch(() => {})
   }
   const relayEosed = () => {
@@ -4682,482 +4638,6 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
   }
 
   for (const url of relays) void drive(url)
-}
-
-// ─── feeds from a store subscription (trial, store-subs.ts) ─────
-// The usual result set merges in what the feed's own relays saved as new, so
-// an event another door saved first (another feed, a napp, another tab) waits
-// for the next store query. The store one is fed by a store subscription
-// instead: whatever lands in the store and matches.
-function eventList(events: NostrEvent[]): string {
-  const shown = events.slice(0, 10).map(e => `k${e.kind} ${e.id.slice(0, 8)}`)
-  return shown.join(", ") + (events.length > 10 ? ` and ${events.length - 10} more` : "")
-}
-
-type FeedResults = { requery: () => void; add: (event: NostrEvent) => void; close: () => void }
-
-let feedsModeLogged = false
-function feedResults(
-  label: string,
-  filter: Filter,
-  signal: AbortSignal,
-  post: (events: NostrEvent[]) => void
-): FeedResults {
-  if (feedsMode && !feedsModeLogged) {
-    feedsModeLogged = true
-    hostLog(
-      "launcher",
-      `feeds: ${feedsMode} mode (localStorage nostrapps:feeds: store, compare or usual)`
-    )
-  }
-  if (feedsMode === "store") return storeResultSet(filter, signal, post)
-  if (feedsMode === "compare") return comparedResultSets(label, filter, signal, post)
-  return { ...feedResultSet(filter, signal, post), close() {} }
-}
-
-// The feed's own relays' events come in through the store like everyone's,
-// so add is the subscription's alone.
-function storeResultSet(
-  filter: Filter,
-  signal: AbortSignal,
-  post: (events: NostrEvent[]) => void
-): FeedResults {
-  const results = feedResultSet(filter, signal, post)
-  const close = subscribeStore(filter, results.add, results.requery)
-  signal.addEventListener("abort", close, { once: true })
-  return { requery: results.requery, add() {}, close }
-}
-
-// The napp gets the usual result set, a store one runs beside it, and an
-// event only one of them has goes to the logs window once it's still missing
-// from the other after a second quiet spell.
-function comparedResultSets(
-  label: string,
-  filter: Filter,
-  signal: AbortSignal,
-  post: (events: NostrEvent[]) => void
-): FeedResults {
-  const limit = filter.limit ?? 100
-  let usual: NostrEvent[] = []
-  let fromStore: NostrEvent[] = []
-  let suspects = new Set<string>()
-  const reported = new Set<string>()
-  let timer: ReturnType<typeof setTimeout> | undefined
-
-  // in `list`, not in `other`, and new enough that `other` would hold it
-  const lacking = (list: NostrEvent[], other: NostrEvent[]) => {
-    const ids = new Set(other.map(e => e.id))
-    const floor = other.length >= limit ? other[other.length - 1].created_at : -Infinity
-    return list.filter(e => !ids.has(e.id) && e.created_at > floor)
-  }
-  const report = (events: NostrEvent[], what: string) => {
-    const sure = events.filter(e => suspects.has(e.id) && !reported.has(e.id))
-    if (!sure.length) return
-    for (const e of sure) reported.add(e.id)
-    hostLog("launcher", `feed ${label}: ${sure.length} ${what}: ${eventList(sure)}`)
-  }
-  const check = () => {
-    if (signal.aborted) return
-    const missed = lacking(fromStore, usual)
-    const extra = lacking(usual, fromStore)
-    report(missed, "in the store subscription, not the feed")
-    report(extra, "in the feed, not the store subscription")
-    suspects = new Set([...missed, ...extra].map(e => e.id))
-    if ([...suspects].some(id => !reported.has(id))) settle()
-  }
-  const settle = () => {
-    clearTimeout(timer)
-    if (!signal.aborted) timer = setTimeout(check, 3000)
-  }
-
-  const results = feedResultSet(filter, signal, events => {
-    usual = events
-    post(events)
-    settle()
-  })
-  const shadow = storeResultSet(filter, signal, events => {
-    fromStore = events
-    settle()
-  })
-  return {
-    requery() {
-      results.requery()
-      shadow.requery()
-    },
-    add: results.add,
-    close: shadow.close
-  }
-}
-
-// A stream feed hands the napp what its relays send, and its cache paint. The
-// store subscription adds what landed in the store by another door and isn't
-// covered already, or, in compare mode, logs what it would have added.
-function storeStream(
-  label: string,
-  filter: Filter,
-  signal: AbortSignal,
-  covered: (event: NostrEvent) => boolean,
-  push: (event: NostrEvent) => void
-): () => void {
-  if (!feedsMode) return () => {}
-  let pending: NostrEvent[] = []
-  let timer: ReturnType<typeof setTimeout> | undefined
-  // the feed's relays may still send it: logged once it's quiet and they haven't
-  const check = () => {
-    if (signal.aborted) return
-    const missed = pending.filter(e => !covered(e))
-    pending = []
-    if (missed.length)
-      hostLog(
-        "launcher",
-        `feed ${label}: ${missed.length} in the store subscription, not the feed: ${eventList(missed)}`
-      )
-  }
-  const close = subscribeStore(
-    filter,
-    event => {
-      if (covered(event)) return
-      if (feedsMode === "store") return push(event)
-      pending.push(event)
-      clearTimeout(timer)
-      timer = setTimeout(check, 3000)
-    },
-    () => {}
-  )
-  signal.addEventListener("abort", close, { once: true })
-  return close
-}
-
-async function startOutboxFeed(
-  instanceId: string,
-  callbackId: string,
-  authors: string[],
-  kinds: number[],
-  until: number | undefined,
-  filter: Filter
-) {
-  const controller = new AbortController()
-
-  const sink = feedSink(instanceId)
-  let synced = authors.map(() => false)
-  const more = authors.length > 1 ? `+${authors.length - 1}` : ""
-  const label = `outbox-${(authors[0] ?? "").slice(0, 6)}${more}`
-  const results = feedResults(label, filter, controller.signal, events =>
-    sink(
-      callbackId,
-      events,
-      synced.every(v => v)
-    )
-  )
-  // sync, before and heal write to the store themselves: each round asks it
-  const notify = results.requery
-  notify()
-
-  const onSync = (pubkey?: string) => {
-    if (!pubkey) return
-    const idx = authors.indexOf(pubkey)
-    if (idx !== -1) {
-      synced[idx] = true
-      notify()
-    }
-  }
-  const onBefore = (pubkey: string) => {
-    if (authors.includes(pubkey)) notify()
-  }
-  const onNew = (event: NostrEvent) => {
-    if (matchFilter(filter, event)) results.add(event)
-  }
-  const cleanup = () => {
-    outboxCurrent.onsync = outboxCurrent.onsync.filter(listener => listener !== onSync)
-    outboxCurrent.onbefore = outboxCurrent.onbefore.filter(listener => listener !== onBefore)
-    outboxCurrent.onnew = outboxCurrent.onnew.filter(listener => listener !== onNew)
-    results.close()
-  }
-
-  outboxCurrent.onsync.push(onSync)
-  outboxCurrent.onbefore.push(onBefore)
-  outboxCurrent.onnew.push(onNew)
-
-  trackFeedRequest(instanceId, callbackId, { controller, cleanup })
-  ;(async () => {
-    try {
-      // Live streaming is opt-in now — a feed being open is the request, and
-      // it lasts as long as the feed.
-      void goLive({ authors, kinds, signal: controller.signal })
-      try {
-        // Deleted events a lagging relay re-delivers are refused by the store
-        // itself (store.ts isDeleted), the sync's saves included.
-        await outbox.sync(authors, kinds, { signal: controller.signal })
-      } catch (err) {
-        // A failed sync must not skip the heal below — a flaky sync is one
-        // of the ways events go missing in the first place.
-        if (!controller.signal.aborted) console.warn("sync failed", err)
-      }
-      notify()
-      // Outbox-bounds poisoning heal. gadgets' sync stamps EVERY requested
-      // kind as caught-up-to-now after any non-empty round — including kinds
-      // it fetched nothing for (outbox.ts sync(), the bounds-update loop).
-      // Once stamped, later syncs skip (2h window) or use since≈stamp-time,
-      // so a replaceable event older than the stamp that the local store
-      // doesn't hold becomes permanently unreachable: publishing a first
-      // kind 10007 was enough to lock a user's older 10002 out of the
-      // relays napp. Until fixed upstream, any replaceable/addressable kind
-      // still absent from the store after sync gets one direct boundless
-      // query on the author's write relays. Single-author feeds only — the
-      // per-author fan-out would turn following-feeds into a REQ storm.
-      if (authors.length === 1 && !controller.signal.aborted) {
-        const author = authors[0]
-        const missing: number[] = []
-        for (const kind of kinds) {
-          if (!isReplaceableKind(kind) && !isAddressableKind(kind)) continue
-          const have = await store.queryEvents({ authors: [author], kinds: [kind] }, 1)
-          if (have.length === 0) missing.push(kind)
-        }
-        if (missing.length) {
-          try {
-            // Write relays when resolvable, but never ONLY them: when the
-            // missing kind is the 10002 itself, the relay list may be
-            // exactly what we can't resolve — the indexers the launcher
-            // broadcasts 10002 to on publish are the reliable source then.
-            const relays = new Set<string>(FALLBACK_RELAYS)
-            try {
-              for (const r of (await loadRelayList(author)).items) {
-                if (r.write) relays.add(r.url)
-              }
-            } catch {}
-            if (missing.includes(10002)) {
-              relays.add("wss://purplepag.es")
-              relays.add("wss://indexer.coracle.social")
-              relays.add("wss://user.kindpag.es")
-              relays.add("wss://relay.nos.social")
-            }
-            const targets = [...relays].slice(0, 10)
-            const healed = await pool.querySync(
-              targets,
-              { kinds: missing, authors: [author], limit: missing.length * 4 },
-              { label: "bounds-heal", maxWait: 4000 }
-            )
-            console.debug(
-              ":: bounds-heal",
-              author.slice(0, 8),
-              "missing",
-              missing,
-              "asked",
-              targets,
-              "got",
-              healed.length,
-              healed
-            )
-            for (const event of healed) await store.saveEvent(event)
-            if (healed.length) notify()
-          } catch (err) {
-            console.warn(":: bounds-heal failed", err)
-          }
-        }
-      }
-      if (until && until < Math.round(Date.now() / 1000) - 5)
-        await outbox.before(authors, kinds, until, { signal: controller.signal })
-    } catch (err) {
-      if (!controller.signal.aborted) console.warn("failed to update feed", err)
-    }
-  })()
-}
-
-// Stream-first feed delivery: the relay subscription feeds the napp directly
-// and store.saveEvent is a best-effort WRITE-BEHIND, so the store is not in
-// the delivery path at all. A poisoned store (see store.ts) then costs the
-// initial cache paint, not the live feed — the failure mode where one bad
-// event froze every feed in every napp. Same shape the napplet surface has
-// always used (nappletOutboxSubscribe).
-//
-// Used by napp.feeds.outbox, napp.feeds.relay and the multi-pubkey inbox path
-// only. profile / following / single-pubkey inbox stay on the store-requery
-// delivery below: the installed napps were written against "each callback
-// carries the full current result set" and may re-render wholesale.
-//
-// `open` resolves the feed's relays and opens the subscription — the callers
-// differ only in that (outbox relays per author, recipients' read relays, the
-// relays a napp named). A relaysOnly feed is what those relays return and
-// nothing from the store: no cache paint, no store subscription.
-async function startStreamFeed(
-  instanceId: string,
-  callbackId: string,
-  filter: Filter,
-  open: (params: {
-    label: string
-    abort: AbortSignal
-    onevent: (event: NostrEvent) => void
-    oneose: () => void
-  }) => Promise<SubCloser | undefined>,
-  label: string,
-  opts: { relaysOnly?: boolean } = {}
-) {
-  const controller = new AbortController()
-  let closeStoreSub = () => {}
-  trackFeedRequest(instanceId, callbackId, { controller, cleanup: () => closeStoreSub() })
-
-  const sink = feedSink(instanceId)
-  let synced = false
-  let queue: NostrEvent[] = []
-  // what the napp was handed, so the store subscription only adds what it lacks,
-  // and nothing older than a full cache paint's oldest: that's the next page's
-  const handed = new Set<string>()
-  let floor = -Infinity
-  let flushTimer: ReturnType<typeof setTimeout> | null = null
-
-  const post = (events: NostrEvent[]) => {
-    if (controller.signal.aborted) return
-    sink(callbackId, events, synced)
-  }
-  const flush = () => {
-    flushTimer = null
-    if (queue.length === 0) return
-    const events = queue
-    queue = []
-    post(events)
-  }
-  // A small tick, not requestAnimationFrame: rAF never fires while the
-  // launcher tab is hidden, which would stall a feed until it is looked at.
-  const schedule = () => {
-    if (flushTimer === null && !controller.signal.aborted) flushTimer = setTimeout(flush, 100)
-  }
-
-  if (!opts.relaysOnly) {
-    closeStoreSub = storeStream(
-      label,
-      filter,
-      controller.signal,
-      event => handed.has(event.id) || event.created_at < floor,
-      event => {
-        handed.add(event.id)
-        queue.push(event)
-        schedule()
-      }
-    )
-
-    // One cache paint so the napp still opens instantly on what we already
-    // have. The only store read in this function, and a failure is survivable.
-    try {
-      const cached = await safeQueryEvents(filter)
-      for (const e of cached) handed.add(e.id)
-      if (filter.limit && cached.length >= filter.limit)
-        floor = cached[cached.length - 1].created_at
-      if (cached.length) post(cached)
-    } catch (err) {
-      console.warn("[feed] cache paint skipped — store unavailable", err)
-    }
-    if (controller.signal.aborted) return
-  }
-
-  let writeBehindFailed = false
-  const writeBehind = async (event: NostrEvent) => {
-    try {
-      if (await store.saveEvent(event)) await applyDeletionLocally(event)
-    } catch (err) {
-      // Never propagated: the napp already has this event.
-      if (!writeBehindFailed) {
-        writeBehindFailed = true
-        console.warn("[feed] write-behind save failed (further ones silent)", err)
-      }
-    }
-  }
-
-  const onevent = async (event: NostrEvent) => {
-    if (controller.signal.aborted) return
-    // A relay that ignores the filter must not reach the napp; the legacy
-    // path got this for free by re-querying the store.
-    if (!matchFilter(filter, event)) return
-    // Posted before it's saved, so the store's deletion check is asked here.
-    if (await isDeleted(event)) return
-    handed.add(event.id)
-    queue.push(event)
-    schedule()
-    void writeBehind(event)
-  }
-
-  try {
-    const closer = await open({
-      label,
-      abort: controller.signal,
-      onevent,
-      oneose() {
-        synced = true
-        // Deliver the pending batch as synced, or tell the napp on its own.
-        if (queue.length) flush()
-        else post([])
-      }
-    })
-    if (controller.signal.aborted) {
-      closer?.close("feed cancelled")
-      return
-    }
-    if (!closer) {
-      finishFeedRequest(instanceId, callbackId)
-      return
-    }
-    const request = feedRequests.get(instanceId)?.get(callbackId)
-    if (request) request.closer = closer
-  } catch (err) {
-    if (!controller.signal.aborted) console.warn("failed to open feed", err)
-    finishFeedRequest(instanceId, callbackId)
-  }
-}
-
-async function startInboxFeed(
-  instanceId: string,
-  callbackId: string,
-  pubkeys: string[],
-  filter: Filter
-) {
-  const controller = new AbortController()
-
-  const sink = feedSink(instanceId)
-
-  let synced = false
-  const results = feedResults(
-    `inbox-${pubkeys[0].substring(0, 6)}`,
-    filter,
-    controller.signal,
-    events => sink(callbackId, events, synced)
-  )
-  trackFeedRequest(instanceId, callbackId, { controller, cleanup: results.close })
-  results.requery()
-
-  try {
-    const relays = new Set<string>()
-    for (const pk of pubkeys) {
-      try {
-        for (const i of (await loadRelayList(pk)).items) if (i.read) relays.add(i.url)
-      } catch {}
-    }
-    if (controller.signal.aborted || relays.size === 0) {
-      finishFeedRequest(instanceId, callbackId)
-      return
-    }
-    const more = pubkeys.length > 1 ? `+${pubkeys.length - 1}` : ""
-    const closer = pool.subscribeMany([...relays], filter, {
-      label: `inbox-${pubkeys[0].substring(0, 6)}${more}`,
-      abort: controller.signal,
-      async onevent(event) {
-        // a relay that ignores the filter doesn't get into the result
-        if (!matchFilter(filter, event) || (await isDeleted(event))) return
-        const isNew = await store.saveEvent(event)
-        if (isNew) {
-          await applyDeletionLocally(event)
-          results.add(event)
-        }
-      },
-      oneose() {
-        synced = true
-      }
-    })
-    const requests = feedRequests.get(instanceId)
-    const request = requests?.get(callbackId)
-    if (request) request.closer = closer
-  } catch (err) {
-    if (!controller.signal.aborted) console.warn("failed to update inbox feed", err)
-    finishFeedRequest(instanceId, callbackId)
-  }
 }
 
 // A napp's pubkey argument, as hex. Anything else is refused here rather than
@@ -5277,9 +4757,19 @@ async function dispatch(
       // must not get in.
       if (!params?.event || !verifyEvent(params.event)) return false
       const saved = await store.saveEvent(params.event)
+      if (saved) notifyStoreSubs(params.event)
       await applyDeletionLocally(params.event)
       return saved
     }
+    case "nostrdb.subscribe": {
+      const filters = normalizeFilters(params.filters)
+      if (filters.length === 0) throw new Error("subscribe: invalid filter")
+      startStoreSub(instanceId!, params.callbackId, filters)
+      return null
+    }
+    case "nostrdb.unsubscribe":
+      cancelFeedRequest(instanceId, params?.callbackId)
+      return null
     case "nostrdb.query": {
       const filters = normalizeFilters(params.filters)
       if (filters.length === 0) return []
@@ -5336,139 +4826,6 @@ async function dispatch(
       }
       return dispatchAction(callerNappId, params?.name ?? "", params?.payload, params?.options)
     }
-    case "napp.feeds.profile": {
-      if (!isHex64(params.pubkey)) return
-      const filter: Filter = {
-        authors: [params.pubkey],
-        kinds: intKinds(params.kinds),
-        limit: params.limit || 100
-      }
-      if (params.since) filter.since = params.since
-      if (params.until) filter.until = params.until
-      startOutboxFeed(
-        instanceId!,
-        params.callbackId,
-        [params.pubkey],
-        intKinds(params.kinds),
-        params.until,
-        filter
-      )
-      return
-    }
-    case "napp.feeds.following": {
-      // k3 p-tags are relay-accepted garbage sometimes — never let them
-      // reach the wasm or the gadgets loaders (see utils isHex64).
-      const authors = (await loadFollowsList(resolvePubkey(params.source))).items.filter(isHex64)
-      const filter: Filter = {
-        authors,
-        kinds: intKinds(params.kinds),
-        limit: params.limit || 100
-      }
-      if (params.since) filter.since = params.since
-      if (params.until) filter.until = params.until
-      startOutboxFeed(
-        instanceId!,
-        params.callbackId,
-        authors,
-        intKinds(params.kinds),
-        params.until,
-        filter
-      )
-      return
-    }
-    case "napp.feeds.inbox": {
-      const pubkeys = (Array.isArray(params.pubkey) ? params.pubkey : [params.pubkey]).filter(
-        isHex64
-      )
-      if (pubkeys.length === 0) return
-      const filter: Filter = {
-        "#p": pubkeys,
-        kinds: intKinds(params.kinds),
-        limit: params.limit || 100
-      }
-      if (params.since) filter.since = params.since
-      if (params.until) filter.until = params.until
-      // Single pubkey keeps the legacy store-requery delivery — that is the
-      // shape the installed napps were written against.
-      if (pubkeys.length === 1) {
-        startInboxFeed(instanceId!, params.callbackId, pubkeys, filter)
-        return
-      }
-      startStreamFeed(
-        instanceId!,
-        params.callbackId,
-        filter,
-        async p => {
-          const relays = new Set<string>()
-          for (const pk of pubkeys) {
-            try {
-              for (const i of (await loadRelayList(pk)).items) if (i.read) relays.add(i.url)
-            } catch {}
-          }
-          return relays.size ? pool.subscribeMany([...relays], filter, p) : undefined
-        },
-        `inbox-${pubkeys[0].substring(0, 6)}+${pubkeys.length - 1}`
-      )
-      return
-    }
-    case "napp.feeds.outbox": {
-      const pubkeys = (Array.isArray(params.pubkeys) ? params.pubkeys : [params.pubkeys]).filter(
-        isHex64
-      )
-      if (pubkeys.length === 0) return
-      const filter: Filter = {
-        authors: pubkeys,
-        kinds: intKinds(params.kinds),
-        limit: params.limit || 100
-      }
-      if (params.since) filter.since = params.since
-      if (params.until) filter.until = params.until
-      startStreamFeed(
-        instanceId!,
-        params.callbackId,
-        filter,
-        async p => {
-          // outboxFilterRelayBatch assigns the authors per relay, so the
-          // base filter must not carry them (same as the napplet path).
-          const { authors: _drop, ...base } = filter
-          const maps = await outboxFilterRelayBatch(pubkeys, [base], {
-            fallbackRelays: [...FALLBACK_RELAYS]
-          })
-          return maps.length
-            ? pool.subscribeMap(maps, p)
-            : pool.subscribeMany([...FALLBACK_RELAYS], filter, p)
-        },
-        `outbox-${pubkeys[0].substring(0, 6)}${pubkeys.length > 1 ? `+${pubkeys.length - 1}` : ""}`
-      )
-      return
-    }
-    case "napp.feeds.relay": {
-      // Only the relays named: the store can't say which relay an event came
-      // from, so none of it is mixed in.
-      const relays = [
-        ...new Set(
-          (Array.isArray(params.relays) ? params.relays : [params.relays])
-            .filter((u: unknown) => typeof u === "string")
-            .map(relayUrl)
-            .filter(Boolean) as string[]
-        )
-      ].slice(0, 20)
-      if (relays.length === 0) return
-      const filter: Filter = { kinds: intKinds(params.kinds), limit: params.limit || 100 }
-      if (params.since) filter.since = params.since
-      if (params.until) filter.until = params.until
-      startStreamFeed(
-        instanceId!,
-        params.callbackId,
-        filter,
-        async p => pool.subscribeMany(relays, filter, p),
-        `relay-${new URL(relays[0]).host}${relays.length > 1 ? `+${relays.length - 1}` : ""}`,
-        { relaysOnly: true }
-      )
-      return
-    }
-    case "napp.feeds.cancel":
-      return cancelFeedRequest(instanceId, params?.callbackId)
     case "napp.subscribe":
       startSubscription(callerNappId, instanceId!, params)
       return null
@@ -5568,7 +4925,7 @@ async function dispatch(
       const urls = (Array.isArray(params?.urls) ? params.urls : [])
         .filter((u: unknown) => typeof u === "string")
         .slice(0, 200)
-      return (await relayHealth(urls)).map(h => ({ ...h, rank: relayRankOf(h.url) }))
+      return relayHealth(urls)
     }
     case "napp.publish":
       return publishEvent(params.event, params.relays, callerNappId)
@@ -5954,7 +5311,7 @@ async function fetchEvent(params: {
     const results = await pool.querySync(relays, filter, { maxWait: 4000 })
     if (isReplaceable) results.sort((a, b) => b.created_at - a.created_at)
     const evt = results[0]
-    if (evt) await store.saveEvent(evt)
+    if (evt && (await store.saveEvent(evt))) notifyStoreSubs(evt)
     return evt || null
   }
 }
@@ -5974,7 +5331,7 @@ export async function loadEvents(ids: unknown): Promise<NostrEvent[]> {
   for (const e of fromRelays) {
     if (seen.has(e.id)) continue
     seen.add(e.id)
-    await store.saveEvent(e)
+    if (await store.saveEvent(e)) notifyStoreSubs(e)
     found.push(e)
   }
   return found
@@ -6028,7 +5385,7 @@ async function publishEvent(
   // answer from this store, and relays alone cannot clean it.
   if (event.kind === 5 && verifyEvent(event)) {
     try {
-      await store.saveEvent(event)
+      if (await store.saveEvent(event)) notifyStoreSubs(event)
     } catch {}
     await applyDeletionLocally(event)
   }

@@ -43,8 +43,11 @@
   } catch {}
 
   const pending = new Map()
-  const feedCallbacks = new Map()
+  const storeSubCallbacks = new Map()
   const subCallbacks = new Map()
+  // nostrdb.subscribe and napp.utils.subscribe share one numbering, since the
+  // host keeps both in the same place.
+  let subSerial = 0
 
   let rpcSerial = 0
   function rpc(method, params) {
@@ -98,9 +101,8 @@
         else p.reject(new Error(data.error))
         return
       }
-      case "napp-feed-callback": {
-        const callback = feedCallbacks.get(data.callbackId)
-        if (callback) callback(data.events, data.synced)
+      case "nostrdb-sub-event": {
+        storeSubCallbacks.get(data.callbackId)?.(data.event)
         return
       }
       case "napp-sub-callback": {
@@ -253,6 +255,29 @@
     remove: ids => rpc("nostrdb.remove", { ids }),
     replaceable: (kind, author, identifier) =>
       rpc("nostrdb.replaceable", { kind, author, identifier }),
+    // Every event saved to the store from now on that matches filters (one or
+    // an array), one by one. What is already stored comes from query().
+    // Leaving the loop (break, return, throw) ends the subscription.
+    subscribe: async function* (filters) {
+      const callbackId = subSerial++
+      const queue = []
+      let wake = null
+      storeSubCallbacks.set(callbackId, event => {
+        queue.push(event)
+        wake?.()
+      })
+      try {
+        await rpc("nostrdb.subscribe", { filters, callbackId })
+        while (true) {
+          while (queue.length) yield queue.shift()
+          await new Promise(resolve => (wake = resolve))
+          wake = null
+        }
+      } finally {
+        storeSubCallbacks.delete(callbackId)
+        rpc("nostrdb.unsubscribe", { callbackId }).catch(() => {})
+      }
+    },
     supports: async () => []
   }
 
@@ -265,31 +290,12 @@
   //   window.napp.registerAction(pattern, handler) - handle incoming action dispatches
   //   window.napp.registerAction(pattern)
   //   window.addEventListener('popstate', handler) - each action is translated to a history event
-  let feedSerial = 0
-  function feedRpc(method, params, callback) {
-    if (!callback) throw new Error("no callback specified")
-
-    const callbackId = feedSerial++
-    params.callbackId = callbackId
-    feedCallbacks.set(callbackId, callback)
-
-    rpc(method, params)
-
-    return {
-      close() {
-        feedCallbacks.delete(callbackId)
-        rpc("napp.feeds.cancel", { callbackId }).catch(() => {})
-      }
-    }
-  }
-
   // A plain REQ to exactly these relays: everything stored comes in one go to
-  // eoseEventsCallback, then each new event to liveEventCallback. Numbered
-  // with the feeds, since the host keeps both in the same place.
+  // eoseEventsCallback, then each new event to liveEventCallback.
   function subscribe(relays, filter, opts) {
     const { label, maxEoseTimeout, eoseEventsCallback, liveEventCallback, closedCallback } =
       opts || {}
-    const callbackId = feedSerial++
+    const callbackId = subSerial++
     subCallbacks.set(callbackId, { eoseEventsCallback, liveEventCallback, closedCallback })
     rpc("napp.subscribe", { relays, filter, label, maxEoseTimeout, callbackId }).catch(err => {
       const cbs = subCallbacks.get(callbackId)
@@ -596,18 +602,6 @@
     // in the launcher's ranking. See NAPP.md.
     relays: {
       health: urls => rpc("napp.relays.health", { urls })
-    },
-    feeds: {
-      profile: (pubkey, kinds, callback, { since, until, limit } = {}) =>
-        feedRpc("napp.feeds.profile", { pubkey, kinds, since, until, limit }, callback),
-      following: (source, kinds, callback, { since, until, limit } = {}) =>
-        feedRpc("napp.feeds.following", { source, kinds, since, until, limit }, callback),
-      inbox: (pubkey, kinds, callback, { since, until, limit } = {}) =>
-        feedRpc("napp.feeds.inbox", { pubkey, kinds, since, until, limit }, callback),
-      outbox: (pubkeys, kinds, callback, { since, until, limit } = {}) =>
-        feedRpc("napp.feeds.outbox", { pubkeys, kinds, since, until, limit }, callback),
-      relay: (relays, kinds, callback, { since, until, limit } = {}) =>
-        feedRpc("napp.feeds.relay", { relays, kinds, since, until, limit }, callback)
     },
     // Sync, pure nostr helpers (bech32/TLV) — no rpc, no await.
     nip19: { decode: nip19Decode, npubEncode, noteEncode, neventEncode, naddrEncode },
