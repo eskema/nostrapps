@@ -160,7 +160,10 @@ window.napp.fx.satsFromBolt11(invoice)
 window.napp.relays.health(urls)
 
 // Fetch authors' events into the store (read them with nostrdb.query)
-window.napp.sync(authors, kinds, since, until, { force }) // => { success, newEvents, error? }
+// without limit: everything in [since, until ?? now]; with it: the newest
+// limit per author and kind before until (and not before since); with neither
+// since nor limit, limit is 10
+window.napp.sync(authors, kinds, { since, until, limit }) // => { success, newEvents, error? }
 
 // Live subscription on each author's write relays (filter must have authors)
 window.napp.outbox(filter, opts?) // same opts as utils.subscribe; returns { close() }
@@ -214,7 +217,7 @@ this week but not since, `unknown` otherwise), `checkedAt`, `rtt` (ms),
 `nips` and `requires` (`auth`, `payment`, …). Waits up to 6 s for relays the launcher
 hasn't asked about yet; up to 200 urls per call.
 
-`window.napp.sync(authors, kinds, since, until, { force })` fetches, from
+`window.napp.sync(authors, kinds, { since, until, limit })` fetches, from
 each author's write relays, their events of each kind created between `since`
 and `until`, and saves them to the store, where `nostrdb.query` reads them and
 `nostrdb.subscribe` sees each new one. The launcher remembers, per author and

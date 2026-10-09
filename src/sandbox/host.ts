@@ -5014,10 +5014,19 @@ async function dispatch(
       const kinds = [...new Set(intKinds(params?.kinds))]
       if (authors.length === 0 || kinds.length === 0)
         return { success: false, newEvents: 0, error: "sync: no valid authors or kinds" }
-      const since = Number.isInteger(params?.since) ? params.since : 0
+      const since = Number.isInteger(params?.since) ? params.since : undefined
       const until = Number.isInteger(params?.until) ? params.until : Math.round(Date.now() / 1000)
-      return syncAuthors(authors, kinds, since, until, {
-        force: params?.force === true,
+      // with neither since nor limit, just the latest few
+      const limit =
+        Number.isInteger(params?.limit) && params.limit > 0
+          ? params.limit
+          : since === undefined
+            ? 10
+            : undefined
+      return syncAuthors(authors, kinds, {
+        since,
+        until,
+        limit,
         onNew: async event => {
           notifyStoreSubs(event)
           await applyDeletionLocally(event)
