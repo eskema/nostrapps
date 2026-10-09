@@ -2598,7 +2598,7 @@ async function wasmAnswer(
       )
   }
 
-  if (method === "nostrdb.subscribe" || method === "napp.subscribe") {
+  if (method === "nostrdb.subscribe" || method === "napp.subscribe" || method === "napp.outbox") {
     // The call's own id is the subscription's callbackId: what it brings
     // comes back under the id the napp already has.
     if (!params || typeof params !== "object" || Array.isArray(params)) {
@@ -4641,6 +4641,79 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
   for (const url of relays) void drive(url)
 }
 
+// ─── outbox subscriptions (napp.outbox) ─────────────────────────
+// A filter with authors, sent to each author's write relays as
+// outboxFilterRelayBatch picks them, each relay asked only for its own
+// authors. Speaks the same subscription messages as napp.utils.subscribe and
+// ends the same way (napp.unsubscribe, the window closing or reloading).
+async function startOutboxSubscription(nappId: string, instanceId: string, params: any) {
+  const filter: Filter | null = Array.isArray(params?.filter)
+    ? null
+    : sanitizeFilter(params?.filter)
+  if (!filter) throw new Error("outbox: invalid filter")
+  const { authors, ...base } = filter
+  if (!authors?.length) throw new Error("outbox: the filter must have authors")
+
+  const label =
+    typeof params.label === "string" && params.label ? params.label : nappId.replace("~", "-")
+  const timeout =
+    params.maxEoseTimeout > 0 ? Number(params.maxEoseTimeout) : DEFAULT_MAX_EOSE_TIMEOUT
+  const callbackId: string = params.callbackId
+  const controller = new AbortController()
+  const signal = controller.signal
+  const sink = subscriptionSink(instanceId)
+  const isOpen = () => feedRequests.get(instanceId)?.get(callbackId)?.controller === controller
+  const deliver = (msg: SubscriptionMsg) => {
+    if (isOpen()) sink(callbackId, msg)
+  }
+  // tracked before the relay lists load, so a close in the meantime counts
+  trackFeedRequest(instanceId, callbackId, { controller })
+
+  const maps = await outboxFilterRelayBatch(authors, base, { fallbackRelays: FALLBACK_RELAYS })
+  if (signal.aborted) return
+
+  const seen = new Set<string>()
+  let stored: NostrEvent[] | null = []
+  const eose = () => {
+    if (!stored) return
+    const events = stored
+    stored = null
+    deliver({ type: "eose", events })
+  }
+  pool.subscribeMap(maps, {
+    label,
+    maxWait: timeout,
+    abort: signal,
+    onauth: relayAuthSigner(nappId),
+    onevent(event) {
+      if (signal.aborted || seen.has(event.id)) return
+      seen.add(event.id)
+      if (stored) stored.push(event)
+      else deliver({ type: "event", event })
+      store
+        .saveEvent(event)
+        .then(isNew => {
+          if (!isNew) return
+          notifyStoreSubs(event)
+          return applyDeletionLocally(event)
+        })
+        .catch(() => {})
+    },
+    oneose: eose,
+    onclose(closes: (string | { url: string; reason: string })[]) {
+      if (signal.aborted) return
+      eose()
+      // older nostr-tools hands over bare reasons, in the order of the relays
+      const urls = [...new Set(maps.map(m => m.url))]
+      const reasons = Object.fromEntries(
+        closes.map((c, i) => (typeof c === "string" ? [urls[i], c] : [c.url, c.reason]))
+      )
+      deliver({ type: "closed", reasons })
+      if (isOpen()) finishFeedRequest(instanceId, callbackId)
+    }
+  })
+}
+
 // A napp's pubkey argument, as hex. Anything else is refused here rather than
 // passed on: a malformed author panics the store's wasm, and after three of
 // those in a minute the store stays down for everyone.
@@ -4829,6 +4902,9 @@ async function dispatch(
     }
     case "napp.subscribe":
       startSubscription(callerNappId, instanceId!, params)
+      return null
+    case "napp.outbox":
+      await startOutboxSubscription(callerNappId, instanceId!, params)
       return null
     case "napp.unsubscribe":
       cancelFeedRequest(instanceId, params?.callbackId)

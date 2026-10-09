@@ -290,27 +290,34 @@
   //   window.napp.registerAction(pattern, handler) - handle incoming action dispatches
   //   window.napp.registerAction(pattern)
   //   window.addEventListener('popstate', handler) - each action is translated to a history event
-  // A plain REQ to exactly these relays: everything stored comes in one go to
-  // eoseEventsCallback, then each new event to liveEventCallback.
-  function subscribe(relays, filter, opts) {
+  // A subscription on the host (napp.subscribe, napp.outbox): everything
+  // stored comes in one go to eoseEventsCallback, then each new event to
+  // liveEventCallback. Answers the closer.
+  function hostSubscription(method, params, opts) {
     const { label, maxEoseTimeout, eoseEventsCallback, liveEventCallback, closedCallback } =
       opts || {}
     const callbackId = subSerial++
     subCallbacks.set(callbackId, { eoseEventsCallback, liveEventCallback, closedCallback })
-    rpc("napp.subscribe", { relays, filter, label, maxEoseTimeout, callbackId }).catch(err => {
+    rpc(method, { ...params, label, maxEoseTimeout, callbackId }).catch(err => {
       const cbs = subCallbacks.get(callbackId)
       if (!cbs) return
       subCallbacks.delete(callbackId)
       console.error("[napp] subscription failed", err)
       const reason = "error: " + String(err?.message || err)
       try {
-        cbs.closedCallback?.(Object.fromEntries((relays || []).map(url => [url, reason])))
+        const relays = params.relays || [""]
+        cbs.closedCallback?.(Object.fromEntries(relays.map(url => [url, reason])))
       } catch {}
     })
     return () => {
       if (!subCallbacks.delete(callbackId)) return
       rpc("napp.unsubscribe", { callbackId }).catch(() => {})
     }
+  }
+
+  // A plain REQ to exactly these relays.
+  function subscribe(relays, filter, opts) {
+    return hostSubscription("napp.subscribe", { relays, filter }, opts)
   }
 
   // Track the cursor inside this iframe so dispatched actions can carry it; the
@@ -607,6 +614,12 @@
     // the store from their write relays. See NAPP.md.
     sync: (authors, kinds, since, until, { force = false } = {}) =>
       rpc("napp.sync", { authors, kinds, since, until, force }),
+    // A live subscription to filter (which must have authors) on each
+    // author's write relays. Same opts as utils.subscribe. See NAPP.md.
+    outbox: (filter, opts) => {
+      const close = hostSubscription("napp.outbox", { filter }, opts)
+      return { close }
+    },
     // Sync, pure nostr helpers (bech32/TLV) — no rpc, no await.
     nip19: { decode: nip19Decode, npubEncode, noteEncode, neventEncode, naddrEncode },
     fx: { isHex64, parseCoordinate, formatCoordinate, satsFromBolt11 },

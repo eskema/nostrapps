@@ -187,6 +187,7 @@ prompts a wasm napp too.
 | `napp.log`                                 | `{message}`                                 | bool                                 | `napp.log`                             |
 | `napp.relays.health`                       | `{urls}`                                    | health                               | `napp.relays.health`                   |
 | `napp.sync`                                | `{authors, kinds, since, until, force?}`    | `{success, newEvents, error?}`       | `napp.sync`                            |
+| `napp.outbox`                              | `{filter, label?, maxEoseTimeout?}`         | null, then subscription messages     | `napp.outbox`                          |
 | `napp.load*`, `napp.fetch*WithSets`        | user (hex, npub, nprofile, nip05)           | the list                             | `napp.utils.load*` / `fetch*`          |
 | `napp.loadRelayInfo`                       | url string                                  | NIP-11 info                          | `napp.utils.loadRelayInfo`             |
 | `napp.loadNostrUser`                       | user, or `{pubkey, relays}`                 | profile                              | `napp.utils.loadNostrUser`             |
@@ -308,6 +309,9 @@ subscription is up, then subscription messages arrive under that id:
 `<author prefix>-<d tag>` by default. `napp.unsubscribe` with
 `{"callbackId": id}` ends it, and nothing more is delivered for it after
 that.
+
+`napp.outbox` is the same, with the same messages, except that there are no
+`relays`: `filter` must have `authors`, and goes to each author's write relays.
 
 ## What a wasm napp does not have
 

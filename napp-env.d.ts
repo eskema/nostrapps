@@ -396,6 +396,9 @@ type Napp = {
     until: number,
     opts?: { force?: boolean }
   ): Promise<SyncResult>
+  // A live subscription to filter, which must have authors, on each author's
+  // write relays (outbox model). Every event is also saved to the store.
+  outbox(filter: Filter, opts?: SubscribeOpts): { close(): void }
   utils: Utils
   ui: Ui
   // Set by the kit's loader line (the nostrapps ui kit napp shows it): resolves

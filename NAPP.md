@@ -162,6 +162,9 @@ window.napp.relays.health(urls)
 // Fetch authors' events into the store (read them with nostrdb.query)
 window.napp.sync(authors, kinds, since, until, { force }) // => { success, newEvents, error? }
 
+// Live subscription on each author's write relays (filter must have authors)
+window.napp.outbox(filter, opts?) // same opts as utils.subscribe; returns { close() }
+
 // UI kit, with `requires: ["ui"]`: the launcher's controls as elements
 window.napp.ui.fonts() // the launcher's faces, from the head; absent with a kit from Blossom
 window.napp.ui.button({ label, variant, icon, onClick })
@@ -220,6 +223,14 @@ outside it — and nothing at all for a range it already has, unless `force`.
 `newEvents` counts the events the store did not have before; `success` is
 false when some author's relays could not be read, with `error` saying which.
 All syncs, from every napp, share at most 16 REQs open at a time.
+
+`window.napp.outbox(filter, opts)` keeps `filter` open on the write relays of
+its `authors` (two per author, a relay asked only for its own authors), until
+`close()`. It takes the same `opts` as `napp.utils.subscribe` and calls back
+the same way: everything stored at once to `eoseEventsCallback`, then each new
+event to `liveEventCallback`, and `closedCallback` if every relay ends it.
+Every event it brings is also saved to the store, where `nostrdb.subscribe`
+sees it.
 
 `window.napp.log(message)` appends a line to the launcher's logs window,
 prefixed with the napp's id — for reports (a publish and what each relay
