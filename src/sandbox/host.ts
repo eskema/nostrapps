@@ -26,6 +26,7 @@ import { nappNameEl } from "../napp-name.js"
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
 import { getStore, safeQueryEvents } from "../store.js"
+import { sync as syncAuthors } from "../sync.js"
 import { createNappWindow, fitWindowHeight } from "./napp-window.js"
 import { startWasmNapp, type WasmCall, type WasmNapp } from "./wasm-canvas.js"
 import { NAPP_MSG, WASM_DEFAULT_ENTRY } from "./wasm-abi.js"
@@ -4926,6 +4927,23 @@ async function dispatch(
         .filter((u: unknown) => typeof u === "string")
         .slice(0, 200)
       return relayHealth(urls)
+    }
+    case "napp.sync": {
+      const authors = [
+        ...new Set((Array.isArray(params?.authors) ? params.authors : []).filter(isHex64))
+      ] as string[]
+      const kinds = [...new Set(intKinds(params?.kinds))]
+      if (authors.length === 0 || kinds.length === 0)
+        return { success: false, newEvents: 0, error: "sync: no valid authors or kinds" }
+      const since = Number.isInteger(params?.since) ? params.since : 0
+      const until = Number.isInteger(params?.until) ? params.until : Math.round(Date.now() / 1000)
+      return syncAuthors(authors, kinds, since, until, {
+        force: params?.force === true,
+        onNew: async event => {
+          notifyStoreSubs(event)
+          await applyDeletionLocally(event)
+        }
+      })
     }
     case "napp.publish":
       return publishEvent(params.event, params.relays, callerNappId)

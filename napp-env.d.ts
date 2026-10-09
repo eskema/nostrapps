@@ -70,6 +70,13 @@ type RelayHealth = {
   // [] when the monitors say it requires nothing, null when nobody said
   requires: string[] | null
 }
+type SyncResult = {
+  // false when some author/kind could not be fetched; error says which
+  success: boolean
+  // events saved to the store that it did not have before
+  newEvents: number
+  error?: string
+}
 type SubscribeOpts = {
   /** Sent to the relays as the subscription id prefix. Defaults to "<author prefix>-<napp d tag>". */
   label?: string
@@ -379,6 +386,16 @@ type Napp = {
   link(url: string): void
   log(message: string): void
   relays: { health(urls: string[]): Promise<RelayHealth[]> }
+  // Fetches into the store, from each author's write relays, their events of
+  // these kinds between since and until, skipping what an earlier sync already
+  // brought (unless force). Read them back with nostrdb.query.
+  sync(
+    authors: string[],
+    kinds: number[],
+    since: number,
+    until: number,
+    opts?: { force?: boolean }
+  ): Promise<SyncResult>
   utils: Utils
   ui: Ui
   // Set by the kit's loader line (the nostrapps ui kit napp shows it): resolves

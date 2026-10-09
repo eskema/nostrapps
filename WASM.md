@@ -186,6 +186,7 @@ prompts a wasm napp too.
 | `napp.link`                                | url string                                  | null                                 | `napp.link`                            |
 | `napp.log`                                 | `{message}`                                 | bool                                 | `napp.log`                             |
 | `napp.relays.health`                       | `{urls}`                                    | health                               | `napp.relays.health`                   |
+| `napp.sync`                                | `{authors, kinds, since, until, force?}`    | `{success, newEvents, error?}`       | `napp.sync`                            |
 | `napp.load*`, `napp.fetch*WithSets`        | user (hex, npub, nprofile, nip05)           | the list                             | `napp.utils.load*` / `fetch*`          |
 | `napp.loadRelayInfo`                       | url string                                  | NIP-11 info                          | `napp.utils.loadRelayInfo`             |
 | `napp.loadNostrUser`                       | user, or `{pubkey, relays}`                 | profile                              | `napp.utils.loadNostrUser`             |

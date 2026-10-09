@@ -159,6 +159,9 @@ window.napp.fx.satsFromBolt11(invoice)
 // Relay health (NIP-66)
 window.napp.relays.health(urls)
 
+// Fetch authors' events into the store (read them with nostrdb.query)
+window.napp.sync(authors, kinds, since, until, { force }) // => { success, newEvents, error? }
+
 // UI kit, with `requires: ["ui"]`: the launcher's controls as elements
 window.napp.ui.fonts() // the launcher's faces, from the head; absent with a kit from Blossom
 window.napp.ui.button({ label, variant, icon, onClick })
@@ -207,6 +210,16 @@ say: `status` (`online` if checked in the last 2 hours, `offline` if checked
 this week but not since, `unknown` otherwise), `checkedAt`, `rtt` (ms),
 `nips` and `requires` (`auth`, `payment`, …). Waits up to 6 s for relays the launcher
 hasn't asked about yet; up to 200 urls per call.
+
+`window.napp.sync(authors, kinds, since, until, { force })` fetches, from
+each author's write relays, their events of each kind created between `since`
+and `until`, and saves them to the store, where `nostrdb.query` reads them and
+`nostrdb.subscribe` sees each new one. The launcher remembers, per author and
+kind, the range already fetched, so a call asks the relays only for what lies
+outside it — and nothing at all for a range it already has, unless `force`.
+`newEvents` counts the events the store did not have before; `success` is
+false when some author's relays could not be read, with `error` saying which.
+All syncs, from every napp, share at most 16 REQs open at a time.
 
 `window.napp.log(message)` appends a line to the launcher's logs window,
 prefixed with the napp's id — for reports (a publish and what each relay

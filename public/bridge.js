@@ -603,6 +603,10 @@
     relays: {
       health: urls => rpc("napp.relays.health", { urls })
     },
+    // Bring these authors' events of these kinds between since and until into
+    // the store from their write relays. See NAPP.md.
+    sync: (authors, kinds, since, until, { force = false } = {}) =>
+      rpc("napp.sync", { authors, kinds, since, until, force }),
     // Sync, pure nostr helpers (bech32/TLV) — no rpc, no await.
     nip19: { decode: nip19Decode, npubEncode, noteEncode, neventEncode, naddrEncode },
     fx: { isHex64, parseCoordinate, formatCoordinate, satsFromBolt11 },
