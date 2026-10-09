@@ -179,6 +179,7 @@ prompts a wasm napp too.
 | `nostrdb.supports`                         | —                                           | `[]`                                 | `nostrdb.supports`                     |
 | `napp.instance`                            | —                                           | instance id                          | `napp.instance`                        |
 | `napp.theme`                               | —                                           | `{name, vars}`                       | the theme message bridge.js applies    |
+| `napp.now`                                 | —                                           | unix time, seconds                   | `Date.now()` (a wasm napp has no clock) |
 | `napp.action`                              | `{name, payload, options?}`                 | the handler's result                 | `napp.action`                          |
 | `napp.registerAction`                      | `{pattern, idx?}`                           | null                                 | `napp.registerAction`                  |
 | `napp.dispatchResult`                      | `{id, result}` or `{id, error}`             | null                                 | (answering an action)                  |
@@ -219,13 +220,14 @@ prompts a wasm napp too.
 | `http_fetch_image`                         | `{url, width?, height?, fit?}` or a url     | a bitmap message                     | see [The web](#the-web)                |
 
 The `napp.storage*`, `nip19.*`, `fx.*`, `napp.generateKey`,
-`napp.signWithKey`, `napp.instance`, `napp.theme` and `nostrdb.supports`
+`napp.signWithKey`, `napp.instance`, `napp.theme`, `napp.now` and `nostrdb.supports`
 calls are answered by the launcher on the spot, the way bridge.js answers
 them inside the page, but they still answer through `napp_receive` like
 everything else.
 
 `signEvent` may leave `created_at` out: a wasm napp has no wall clock, so a
-template without one is stamped with the time it is signed at.
+template without one is stamped with the time it is signed at. For the time
+itself (a `since` for `napp.sync`, say), ask `napp.now`.
 
 A wasm napp has no origin of its own, so its storage lives in the launcher's
 storage, shared by all the napp's windows and erased with it on uninstall.

@@ -2515,6 +2515,9 @@ async function wasmAnswer(
       return instanceId
     case "napp.theme":
       return wasmTheme()
+    case "napp.now":
+      // A wasm napp has no wall clock: napp_now_ms counts from the window opening.
+      return Math.floor(Date.now() / 1000)
     case "nostrdb.supports":
       return []
 
