@@ -15,7 +15,7 @@
     "@fontsource-variable/source-sans-3": "^5.2.9",
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@noble/hashes": "^2.2.0",
-    "@nostr/gadgets": "npm:@jsr/nostr__gadgets@^0.20.14",
+    "@nostr/gadgets": "npm:@jsr/nostr__gadgets@^0.21.0",
     "@nostr/tools": "npm:@jsr/nostr__tools@^2.25.2",
     "flexsearch": "^0.8.212",
     "nostr-wasm": "0.1.0",
