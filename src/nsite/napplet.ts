@@ -1,10 +1,8 @@
 // NIP-5D napplet resolution + verification. A napplet is a SINGLE self-contained
 // /index.html, published as its own event kind (distinct from an nsite), fetched
-// from Blossom and verified against the signed manifest before it ever runs.
+// from Blossom by the manifest's x tag and verified before it ever runs.
 import { pool } from "@nostr/gadgets/global"
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
-import { sha256 } from "@noble/hashes/sha2.js"
-import { bytesToHex } from "@noble/hashes/utils.js"
 import { verifyEvent } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
 import { fetchBlob } from "./fetch.js"
@@ -19,51 +17,156 @@ export function isNappletKind(kind: number): boolean {
   return NAPPLET_KINDS.includes(kind)
 }
 
-// NIP-5A aggregate hash: for each path tag a line "<sha256> <absolute-path>\n",
-// sorted lexicographically, concatenated as UTF-8, then SHA-256 (lowercase hex).
-export function computeAggregateHash(pathTags: string[][]): string {
-  const lines = pathTags
-    .filter(t => t[0] === "path" && t[1] && t[2])
-    .map(t => `${t[2]} ${t[1].startsWith("/") ? t[1] : "/" + t[1]}\n`)
-    .sort()
-  return bytesToHex(sha256(new TextEncoder().encode(lines.join(""))))
+// A napplet splits its domains into R (needed for full functionality) and O
+// (optional, never in the way of loading); a napp lists all of them as requires.
+export function nappletDomains(event: { tags: string[][] }): {
+  required: string[]
+  optional: string[]
+} {
+  const pick = (k: string) => [
+    ...new Set(
+      event.tags.filter(t => t[0] === k && typeof t[1] === "string" && t[1]).map(t => t[1])
+    )
+  ]
+  return { required: pick("R"), optional: pick("O") }
 }
 
-// Authoring metadata for a single-file napplet, read from the html itself — a
+// Every domain a manifest declares, whichever way its kind spells them.
+export function declaredDomains(event: { kind: number; tags: string[][] }): string[] {
+  if (!isNappletKind(event.kind))
+    return event.tags
+      .filter(t => t[0] === "requires" && typeof t[1] === "string" && t[1])
+      .map(t => t[1])
+  const { required, optional } = nappletDomains(event)
+  return [...new Set([...required, ...optional])]
+}
+
+// The declared domains whose absence is a problem: a napplet's R, a napp's all.
+export function requiredDomains(event: { kind: number; tags: string[][] }): string[] {
+  return isNappletKind(event.kind) ? nappletDomains(event).required : declaredDomains(event)
+}
+
+// A napplet's description is its event content; a napp's, its description tag.
+export function manifestDescription(event: {
+  kind: number
+  tags: string[][]
+  content?: string
+}): string | null {
+  if (isNappletKind(event.kind)) return event.content?.trim() || null
+  return event.tags.find(t => t[0] === "description")?.[1] || null
+}
+
+export const NAPPLET_ICON_MIMES = ["image/png", "image/jpeg", "image/webp"]
+
+// Whether the bytes open the way the named format does: the mime a manifest or
+// a data: url names is a claim, not the format.
+export function isImageOfType(bytes: Uint8Array, mime: string): boolean {
+  const at = (i: number, ...b: number[]) => b.every((v, j) => bytes[i + j] === v)
+  if (mime === "image/png") return at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+  if (mime === "image/jpeg") return at(0, 0xff, 0xd8, 0xff)
+  if (mime === "image/webp") return at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)
+  return false
+}
+
+// Authoring metadata for a single-file napplet, read from the html head — a
 // napplet has no metadata.json. `napplet` is the explicit opt-in: any
 // napplet/napplet-* meta marks the file (a lone index.html could just as well
-// be a single-file nsite). Then <title>, <meta name="description">, <meta
-// name="napplet-id"> (the d tag), <meta name="napplet-requires"
-// content="identity,outbox"> (what @napplet/vite-plugin emits; the bare names
-// are also accepted), and <link rel="icon"> (data:/https only).
+// be a single-file nsite). The NIP-5D publishing mapping: <title> → title,
+// <meta name="description"> → content, napplet-id → d, napplet-requires and
+// napplet-optional → R and O, napplet-archetype → z, napplet-intent → i,
+// napplet-source → source, napplet-server → server, <link rel="icon"> → icon.
+// Lists split on whitespace, and on commas as older tooling wrote them; the
+// bare id/requires names are also accepted.
 export function nappletMetaFromHtml(html: string): {
   napplet: boolean
   id: string | null
   title: string | null
   description: string | null
   requires: string[]
+  optional: string[]
+  archetypes: string[]
+  intents: string[][]
+  source: string | null
+  servers: string[]
+  // A local folder's icon as an <img> src (data:/https only); the raw href is
+  // what a publish turns into the icon blob.
   icon: string | null
+  iconHref: string | null
 } {
-  const meta = (name: string) => {
-    const tag = new RegExp(`<meta\\b[^>]*\\bname\\s*=\\s*["']?${name}["']?[^>]*>`, "i").exec(
-      html
-    )?.[0]
-    if (!tag) return null
-    const m = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag)
-    return m ? (m[1] ?? m[2]).trim() || null : null
+  const metas = (name: string) => {
+    const out: string[] = []
+    const re = new RegExp(`<meta\\b[^>]*\\bname\\s*=\\s*["']?${name}(?=["'\\s/>])[^>]*>`, "gi")
+    for (const [tag] of html.matchAll(re)) {
+      const m = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag)
+      const v = m ? (m[1] ?? m[2]).trim() : ""
+      if (v) out.push(v)
+    }
+    return out
   }
+  const meta = (name: string) => metas(name)[0] ?? null
+  const list = (name: string) => [
+    ...new Set(
+      metas(name)
+        .flatMap(v => v.split(/[,\s]+/))
+        .filter(Boolean)
+    )
+  ]
   const iconTag = /<link\b[^>]*\brel\s*=\s*["']?[^"'>]*icon[^"'>]*["']?[^>]*>/i.exec(html)?.[0]
   const iconHref = iconTag
     ? (/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(iconTag)?.[1] ?? null)
     : null
+  const requires = list("napplet-requires")
   return {
     napplet: /<meta\b[^>]*\bname\s*=\s*["']?napplet(-[a-z]+)?["'\s/>]/i.test(html),
     id: meta("napplet-id") || meta("id"),
     title: /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1].trim() || null,
     description: meta("description"),
-    requires: (meta("napplet-requires") || meta("requires") || "").split(/[,\s]+/).filter(Boolean),
-    icon: iconHref && /^(data:|https:)/.test(iconHref) ? iconHref : null
+    requires: requires.length ? requires : list("requires"),
+    optional: list("napplet-optional"),
+    archetypes: [...new Set(metas("napplet-archetype"))],
+    intents: metas("napplet-intent").map(v => v.split(/\s+/)),
+    source: meta("napplet-source"),
+    servers: metas("napplet-server"),
+    icon: iconHref && /^(data:|https:)/.test(iconHref) ? iconHref : null,
+    iconHref
   }
+}
+
+// The icon a napplet publishes, from its html's <link rel="icon">: the bytes of
+// an inline png/jpeg/webp data: url, uploaded as they are so the html and the
+// manifest name the same picture. Anything else is left out, with why.
+export function nappletIconFromHref(
+  href: string | null
+): { bytes: Uint8Array<ArrayBuffer>; mime: string } | { note: string } | null {
+  if (!href) return null
+  const m = /^data:([^;,]*)((?:;[^;,]*)*),([\s\S]*)$/i.exec(href)
+  if (!m)
+    return { note: "left out: only an inline data: url (png, jpeg or webp) can be a napplet icon" }
+  const mime = m[1].trim().toLowerCase()
+  const short = mime.replace(/^image\//, "").replace(/\+xml$/, "") || "that format"
+  if (!NAPPLET_ICON_MIMES.includes(mime))
+    return { note: `left out: a napplet icon is png, jpeg or webp, not ${short}` }
+  let bytes: Uint8Array<ArrayBuffer>
+  try {
+    if (/;base64/i.test(m[2])) {
+      bytes = Uint8Array.from(atob(m[3].replace(/\s+/g, "")), c => c.charCodeAt(0))
+    } else {
+      const s = m[3]
+      const out: number[] = []
+      for (let i = 0; i < s.length; i++) {
+        const hex = s.slice(i + 1, i + 3)
+        if (s[i] === "%" && /^[0-9a-f]{2}$/i.test(hex)) {
+          out.push(parseInt(hex, 16))
+          i += 2
+        } else out.push(s.charCodeAt(i) & 0xff)
+      }
+      bytes = new Uint8Array(out)
+    }
+  } catch {
+    return { note: "left out: its data: url doesn't decode" }
+  }
+  if (!isImageOfType(bytes, mime)) return { note: `left out: its bytes aren't a ${short}` }
+  return { bytes, mime }
 }
 
 export interface ResolvedNapplet {
@@ -73,7 +176,7 @@ export interface ResolvedNapplet {
   // The verified bytes as fetched (html is their text): what a share re-uploads.
   body: Blob
   title: string | null
-  requires: string[]
+  domains: string[]
   manifest: NostrEvent
 }
 
@@ -84,9 +187,8 @@ function latest(events: NostrEvent[]): NostrEvent | null {
 }
 
 // Resolve → verify → return the napplet's index.html bytes. The whole trust
-// chain per NIP-5D: verify the manifest signature, fetch the index.html blob
-// from Blossom by its sha256 (fetchBlob checks the hash), and recompute the
-// NIP-5A aggregate against the manifest's `x` tag. Any failure throws.
+// chain per NIP-5D: verify the manifest signature, then fetch the blob its one
+// `x` tag names from Blossom (fetchBlob checks the hash). Any failure throws.
 export async function resolveNapplet(
   target: { pubkey: string; kind: number; dTag: string; relayHints: string[]; id?: string },
   onProgress: (m: string) => void = () => {}
@@ -123,17 +225,16 @@ export async function loadNappletFromManifest(
 ): Promise<ResolvedNapplet> {
   if (!verifyEvent(manifest)) throw new Error("napplet manifest signature is invalid")
 
-  const pathTags = manifest.tags.filter(t => t[0] === "path" && t.length >= 3 && t[1] && t[2])
-  if (pathTags.length === 0) throw new Error("napplet manifest has no path tags")
-
-  // Content-address integrity: the manifest's path set must hash to its x tag.
-  const xTag = manifest.tags.find(t => t[0] === "x" && t[2] === "aggregate")
-  if (xTag && computeAggregateHash(pathTags) !== xTag[1]) {
-    throw new Error("napplet aggregate hash mismatch — manifest tampered")
+  // The old shape (path tags and an aggregate x) carries one x tag too, but it
+  // names no blob: turned away here rather than asked of every server.
+  if (manifest.tags.some(t => t[0] === "path" || (t[0] === "x" && t[2] === "aggregate"))) {
+    throw new Error("napplet published in the old format, its author has to republish it")
   }
-
-  const indexTag = pathTags.find(t => (t[1].startsWith("/") ? t[1] : "/" + t[1]) === "/index.html")
-  if (!indexTag) throw new Error("napplet manifest has no /index.html path")
+  const xTags = manifest.tags.filter(t => t[0] === "x")
+  if (xTags.length !== 1 || !/^[0-9a-f]{64}$/.test(xTags[0][1] ?? "")) {
+    throw new Error("napplet manifest needs exactly one x tag")
+  }
+  const artifactHash = xTags[0][1]
 
   const pubkey = manifest.pubkey
   const manifestServers = manifest.tags.filter(t => t[0] === "server" && t[1]).map(t => t[1])
@@ -144,16 +245,16 @@ export async function loadNappletFromManifest(
     ...new Set(manifestServers)
   ].filter(Boolean) as string[]
 
-  onProgress("Fetching napplet /index.html…")
-  const blob = await fetchBlob(servers, indexTag[2]) // verifies sha256(blob) === hash
-  if (!blob) throw new Error(`Could not fetch napplet index.html (${indexTag[2]})`)
+  onProgress("Fetching napplet…")
+  const blob = await fetchBlob(servers, artifactHash) // verifies sha256(blob) === hash
+  if (!blob) throw new Error(`Could not fetch napplet (${artifactHash})`)
 
   if (opts.healRelays?.length) {
     healNapp({
       manifest,
       relays: opts.healRelays,
       servers,
-      files: [{ sha: indexTag[2], body: blob, mime: "text/html" }]
+      files: [{ sha: artifactHash, body: blob, mime: "text/html" }]
     })
   }
 
@@ -163,7 +264,7 @@ export async function loadNappletFromManifest(
     html: await blob.text(),
     body: blob,
     title: manifest.tags.find(t => t[0] === "title")?.[1] ?? null,
-    requires: manifest.tags.filter(t => t[0] === "requires" && t[1]).map(t => t[1]),
+    domains: declaredDomains(manifest),
     manifest
   }
 }

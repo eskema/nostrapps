@@ -137,7 +137,12 @@ export async function ensureReplicatedAll(
   const plans = await Promise.all(
     targets.map(async (t): Promise<Plan> => {
       const onProgress = t.onProgress ?? (() => {})
-      const shas = t.manifest.tags.filter(x => x[0] === "path" && x[2]).map(x => x[2])
+      // An nsite's blobs are its path tags; a napplet's one is its x tag (an
+      // nsite's aggregate x names no blob).
+      const paths = t.manifest.tags.filter(x => x[0] === "path" && x[2]).map(x => x[2])
+      const shas = paths.length
+        ? paths
+        : t.manifest.tags.filter(x => x[0] === "x" && x[1] && !x[2]).map(x => x[1])
       const plan: Plan = {
         t,
         relays: [],

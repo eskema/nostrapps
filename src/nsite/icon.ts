@@ -1,11 +1,14 @@
-// Manifest icons come in three shapes: a data:/http(s): URL (self-contained
-// napplets), a blossom sha, or a path into the napp's own files ("/icon.svg").
-// Only the first is a usable <img> src as-is — which is why the permission
-// screen showed a broken image for everything else.
+// Manifest icons come in three shapes: a data:/http(s): URL, a blossom sha, or
+// a path into the napp's own files ("/icon.svg"). Only the first is a usable
+// <img> src as-is — which is why the permission screen showed a broken image
+// for everything else. A napplet's is a sha and its mime, and is only ever
+// shown from bytes checked against them (nappletIconSrc).
 import type { InstalledApp } from "../types.js"
 import { getDevHandle, getDevUrl, nappOriginFor } from "../sandbox/host.js"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
 import { DEFAULT_BLOSSOM_SERVERS, normalizeServer } from "../utils.js"
+import { fetchBlob } from "./fetch.js"
+import { NAPPLET_ICON_MIMES, isImageOfType, isNappletKind } from "./napplet.js"
 
 const DIRECT = /^(data:|https?:)/i
 const SHA = /^[0-9a-f]{64}$/i
@@ -84,6 +87,33 @@ const ICON_FALLBACK_NAMES = [
   "favicon.ico"
 ]
 
+// A napplet's icon, per NIP-5D: fetched by its sha from the manifest's own
+// servers, the hash checked (fetchBlob), the bytes the format the tag names and
+// decodable. Anything short of that is no icon. One object URL per icon, kept
+// for the session.
+const nappletIcons = new Map<string, Promise<string | null>>()
+export function nappletIconSrc(evt: { tags: string[][] }): Promise<string | null> {
+  const [, sha, mime] = evt.tags.find(t => t[0] === "icon") ?? []
+  const servers = evt.tags.filter(t => t[0] === "server" && t[1]).map(t => t[1])
+  if (!sha || !/^[0-9a-f]{64}$/.test(sha) || !NAPPLET_ICON_MIMES.includes(mime) || !servers.length)
+    return Promise.resolve(null)
+  const key = `${sha} ${mime} ${servers.join(" ")}`
+  let p = nappletIcons.get(key)
+  if (!p) {
+    p = (async () => {
+      const blob = await fetchBlob(servers, sha)
+      if (!blob) return null
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      if (!isImageOfType(bytes, mime)) return null
+      const typed = new Blob([bytes], { type: mime })
+      ;(await createImageBitmap(typed)).close()
+      return URL.createObjectURL(typed)
+    })().catch(() => null)
+    nappletIcons.set(key, p)
+  }
+  return p
+}
+
 // Resolve a manifest's icon to a blossom sha, fetched from the author's servers
 // (the Apps cards, installedIconSources below). The `icon` tag may hold a sha OR
 // a path (e.g. "/icon.svg" from metadata.json) — for a path we map it to the
@@ -96,6 +126,8 @@ export function resolveCardIcon(evt: any): {
   mime: string | null
   url: string | null
 } {
+  // Never a bare sha or URL for a napplet: its icon goes through nappletIconSrc.
+  if (isNappletKind(evt.kind)) return { sha: null, mime: null, url: null }
   const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
   const basename = (p: any) => String(p).replace(/^.*\//, "").toLowerCase()
   // Match the full declared path (manifests vary on the leading slash).
@@ -109,8 +141,7 @@ export function resolveCardIcon(evt: any): {
   if (iconTag) {
     const val = iconTag[1] as string
     if (/^[0-9a-f]{64}$/i.test(val)) return { sha: val, mime: iconTag[2] || null, url: null }
-    // A self-contained napplet has no file paths to point at, so its icon is an
-    // inline data: URI or an absolute URL — use it directly.
+    // An inline data: URI or an absolute URL — used directly.
     if (/^(data:|https?:)/i.test(val)) return { sha: null, mime: null, url: val }
     // The declared path may not match exactly (root vs subfolder); fall back to
     // its filename anywhere in the manifest.
@@ -137,6 +168,10 @@ export function resolveCardIcon(evt: any): {
 // files only exist in its origin's IDB, so those show nothing unless the icon
 // is a data:/http(s): URL.
 export async function installedIconSources(app: InstalledApp): Promise<string[]> {
+  if (app.event && isNappletKind(app.event.kind)) {
+    const src = await nappletIconSrc(app.event)
+    return src ? [src] : []
+  }
   const direct = directIconSrc(app.icon)
   if (direct) return [direct]
   if (app.event) {

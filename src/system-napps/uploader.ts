@@ -30,7 +30,7 @@ import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { host, normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
 import { NAPP_NAMED_KIND, NSITE_NAMED_KIND, WASM_NAMED_KIND } from "../nsite/fetch.js"
-import { NAPPLET_NAMED_KIND, computeAggregateHash, nappletMetaFromHtml } from "../nsite/napplet.js"
+import { NAPPLET_NAMED_KIND, nappletIconFromHref, nappletMetaFromHtml } from "../nsite/napplet.js"
 import { isIgnoredPath } from "../nsite/ignore.js"
 import { guessMime } from "../nsite/mime.js"
 import { resolveCardIcon } from "../nsite/icon.js"
@@ -79,7 +79,19 @@ type Plan = {
   requires: string[]
   modes: string[]
   initialSize: { width: number; height: number } | null
-  /** The files that become path tags — a napplet ships only its index.html. */
+  /** A napplet's own, from its html head: requires above are its R tags. */
+  nap: {
+    optional: string[]
+    archetypes: string[]
+    intents: string[][]
+    source: string | null
+    servers: string[]
+    icon: Entry | null
+    // Why the html's icon was left out, shown under the card.
+    iconNote: string | null
+  } | null
+  /** The blobs to upload — an nsite's files, which become path tags; a
+   * napplet's index.html, then its icon. */
   upload: Entry[]
 }
 
@@ -384,9 +396,14 @@ export function mount(
   // placeholder here means a placeholder there.
   function previewIcon(): string | null {
     if (!eventTemplate) return null
-    const { sha, url } = resolveCardIcon(eventTemplate)
-    if (url) return url // data:/https: — a napplet's inline icon, or an absolute one
-    const f = sha ? plan!.upload.find(x => x.hash === sha) : null
+    let f: Entry | null | undefined
+    // A napplet's is the blob it's about to upload.
+    if (plan!.nap) f = plan!.nap.icon
+    else {
+      const { sha, url } = resolveCardIcon(eventTemplate)
+      if (url) return url // data:/https: — an inline icon, or an absolute one
+      f = sha ? plan!.upload.find(x => x.hash === sha) : null
+    }
     if (!f) return null
     const objUrl = URL.createObjectURL(f.file)
     iconUrls.push(objUrl)
@@ -415,7 +432,9 @@ export function mount(
     card.querySelector(".apps-title")?.classList.replace("ui-heading", "ui-heading-xxl")
     // Requires ride with the action chips, red when this launcher can't provide
     // them — same as the detail view, which is why no warning line is passed.
-    if (plan.requires.length) {
+    // A napplet's optional domains ride too, never red: it does without them.
+    const domains = [...plan.requires, ...(plan.nap?.optional ?? [])]
+    if (domains.length) {
       const unsupported = new Set(unsupportedRequires(plan.requires))
       let chips = card.querySelector<HTMLElement>(".apps-handlers")
       if (!chips) {
@@ -423,7 +442,7 @@ export function mount(
         chips.className = "apps-handlers"
         card.appendChild(chips)
       }
-      for (const r of plan.requires) {
+      for (const r of domains) {
         chips.appendChild(
           unsupported.has(r)
             ? badge(r, { tone: "danger", class: "apps-handler is-unsupported" })
@@ -436,6 +455,11 @@ export function mount(
     const idBlock = document.createElement("div")
     idBlock.className = "apps-detail-idblock"
     if (eventTemplate) idBlock.appendChild(detailField("id", code(computeNappId(eventTemplate))))
+    if (plan.nap?.iconNote) {
+      const note = document.createElement("span")
+      note.textContent = plan.nap.iconNote
+      idBlock.appendChild(detailField("note", note, "icon"))
+    }
     head.replaceChildren(card, idBlock, protectedLabel)
     head.hidden = false
     actions.hidden = false
@@ -444,7 +468,7 @@ export function mount(
   // ─── event ──────────────────────────────────────────────────────
   // Built from the local hashes, so the preview is accurate before anything is
   // uploaded. `okServers`, passed after the upload, narrows a napplet's server
-  // tags to the ones that actually took the blob.
+  // tags to the ones that actually took its blobs.
   function buildTemplate(okServers?: Set<string>) {
     const pubkey = ctx.account.getPubkey()
     if (!plan || !pubkey) {
@@ -453,32 +477,42 @@ export function mount(
       return
     }
     const tags: string[][] = []
-    // ["path", <path>, <sha256>, <mime>] — the serving worker reads the 4th
-    // element and only falls back to guessing from the extension, which knows
-    // nothing about .webmanifest, .avif and friends. A napplet's index.html is
-    // inlined as srcdoc, never served, so its tag stays the bare 3-element form.
-    for (const f of plan.upload)
-      tags.push(plan.napplet ? ["path", "/index.html", f.hash] : ["path", f.path, f.hash, f.mime])
-    if (plan.napplet) {
-      tags.push(["x", computeAggregateHash(tags), "aggregate"])
+    if (plan.nap) {
+      // NIP-5D: the index.html's sha as the one x tag, the html head's
+      // declarations, the icon as a blob of its own. The description is the
+      // event content.
+      const nap = plan.nap
+      tags.push(["x", plan.upload[0].hash])
+      for (const z of nap.archetypes) tags.push(["z", z])
+      for (const i of nap.intents) tags.push(["i", ...i])
+      for (const r of plan.requires) tags.push(["R", r])
+      for (const o of nap.optional) tags.push(["O", o])
+      if (nap.icon) tags.push(["icon", nap.icon.hash, nap.icon.mime])
       for (const s of okServers ? [...okServers] : onServers()) tags.push(["server", s])
+      if (protectedCb.checked) tags.push(["-"])
+      if (plan.title) tags.push(["title", plan.title])
+      if (nap.source) tags.push(["source", nap.source])
+    } else {
+      // ["path", <path>, <sha256>, <mime>] — the serving worker reads the 4th
+      // element and only falls back to guessing from the extension, which knows
+      // nothing about .webmanifest, .avif and friends.
+      for (const f of plan.upload) tags.push(["path", f.path, f.hash, f.mime])
+      if (protectedCb.checked) tags.push(["-"])
+      if (plan.title) tags.push(["title", plan.title])
+      if (plan.description) tags.push(["description", plan.description])
+      if (plan.icon) tags.push(["icon", plan.icon])
+      for (const a of plan.actions) tags.push(["action", a])
+      // The authored requires list becomes the manifest's ["requires", "<domain>"]
+      // tags. `ui`, `network` and the NAP domains all ride the same list.
+      for (const r of plan.requires) tags.push(["requires", r])
+      // Presentation modes ride as one ["mode", "<mode>"] tag per mode; the
+      // preferred auxiliary-window size as ["initial_size", w, h]. A wasm napp
+      // needs no module tag: kind 35131 says what it is, and the module is
+      // always /app.wasm.
+      for (const m of plan.modes) tags.push(["mode", m])
+      if (plan.initialSize)
+        tags.push(["initial_size", String(plan.initialSize.width), String(plan.initialSize.height)])
     }
-    if (protectedCb.checked) tags.push(["-"])
-    if (plan.title) tags.push(["title", plan.title])
-    if (plan.description) tags.push(["description", plan.description])
-    if (plan.icon) tags.push(["icon", plan.icon])
-    // Actions ride the napp bridge, which a napplet doesn't have.
-    for (const a of plan.actions) tags.push(["action", a])
-    // The authored requires list becomes the manifest's ["requires", "<domain>"]
-    // tags. `ui`, `network` and the NAP domains all ride the same list.
-    for (const r of plan.requires) tags.push(["requires", r])
-    // Presentation modes ride as one ["mode", "<mode>"] tag per mode; the
-    // preferred auxiliary-window size as ["initial_size", w, h]. A wasm napp
-    // needs no module tag: kind 35131 says what it is, and the module is
-    // always /app.wasm.
-    for (const m of plan.modes) tags.push(["mode", m])
-    if (plan.initialSize)
-      tags.push(["initial_size", String(plan.initialSize.width), String(plan.initialSize.height)])
     tags.push(["d", plan.dTag])
 
     eventTemplate = {
@@ -491,7 +525,7 @@ export function mount(
             : NSITE_NAMED_KIND,
       created_at: Math.floor(Date.now() / 1000),
       tags,
-      content: "",
+      content: plan.nap ? plan.description || "" : "",
       pubkey
     }
     jsonEl.textContent = JSON.stringify(eventTemplate, null, 2)
@@ -564,6 +598,8 @@ export function mount(
     if (napplet) {
       dTag = forcedId || meta!.id || slug(dirName || meta!.title || "") || null
       if (!dTag) return `napplet needs <meta name="napplet-id" content="…"> in its index.html`
+      if (!meta!.description)
+        return `napplet needs <meta name="description" content="…"> in its index.html`
     } else if (!dTag) {
       return `metadata.json is missing the "id"`
     }
@@ -579,6 +615,20 @@ export function mount(
     // kind 35131. A page wins on any doubt.
     const wasm = !napplet && isWasmListing(files)
 
+    // The icon blob is uploaded as the bytes the html carries; anything that
+    // can't be one is left out, with a note.
+    const icon = napplet ? nappletIconFromHref(meta!.iconHref) : null
+    const iconEntry: Entry | null =
+      icon && "bytes" in icon
+        ? {
+            path: "icon",
+            file: new File([icon.bytes], "icon", { type: icon.mime }),
+            hash: "",
+            mime: icon.mime
+          }
+        : null
+    const index = files.filter(f => f.path.replace(/^\//, "") === "index.html")
+
     plan = {
       napplet,
       napp: !!metadata,
@@ -587,7 +637,7 @@ export function mount(
       // Napplet metadata comes from the html; nsite metadata from metadata.json.
       title: napplet ? meta!.title : metadata?.title || metadata?.name || null,
       description: napplet ? meta!.description : metadata?.description || null,
-      icon: napplet ? meta!.icon : metadata?.icon || null,
+      icon: napplet ? null : metadata?.icon || null,
       actions: !napplet && Array.isArray(metadata?.actions) ? metadata.actions : [],
       requires: [...requires],
       // Presentation modes — nsite-only, like actions.
@@ -605,10 +655,23 @@ export function mount(
         if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null
         return { width: Math.min(2000, w), height: Math.min(2000, h) }
       })(),
-      // A napplet event carries only /index.html; metadata.json is authoring
-      // input. nsites ship metadata.json as a real file alongside its derived
-      // tags: the serving worker reads /metadata.json from the installed files.
-      upload: napplet ? files.filter(f => f.path.replace(/^\//, "") === "index.html") : files
+      nap: napplet
+        ? {
+            // A domain named both ways is required.
+            optional: meta!.optional.filter(d => !requires.has(d)),
+            archetypes: meta!.archetypes,
+            intents: meta!.intents,
+            source: meta!.source,
+            servers: meta!.servers,
+            icon: iconEntry,
+            iconNote: icon && "note" in icon ? icon.note : null
+          }
+        : null,
+      // A napplet event carries only /index.html and its icon; metadata.json is
+      // authoring input. nsites ship metadata.json as a real file alongside its
+      // derived tags: the serving worker reads /metadata.json from the installed
+      // files.
+      upload: napplet ? [...index, ...(iconEntry ? [iconEntry] : [])] : files
     }
     return null
   }
@@ -633,7 +696,8 @@ export function mount(
     // Origins keyed by host, as the BUD server-list reader treats them.
     const seen = new Set<string>()
     servers = []
-    for (const raw of [...DEFAULT_BLOSSOM, ...own]) {
+    // A napplet's html can name where it wants its blobs too.
+    for (const raw of [...DEFAULT_BLOSSOM, ...(plan?.nap?.servers ?? []), ...own]) {
       const origin = serverOrigin(raw)
       if (!origin) continue
       const key = normalizeServerTag(origin)

@@ -78,8 +78,11 @@ export interface PolicyPromptOpts {
   // of the static type, with `type` pre-selected. The choice is returned on
   // the resolved policy as `type`.
   chooseType?: boolean
-  // Capability domains the napp declared via `requires`.
+  // Capability domains the napp declared via `requires` (a napplet: R and O).
   declaredDomains: string[]
+  // The declared ones a napplet can do without (its O tags): listed apart,
+  // never flagged when this launcher can't provide them.
+  optionalDomains?: string[]
   // Existing policy when editing; absent on a fresh grant.
   current?: NappPolicy
   // "install" without placement: an install that opens nothing (a restore),
@@ -169,6 +172,7 @@ export interface SharedAppPrompt {
   // Already installed: listed for the record, its own grants stay.
   installed: boolean
   declaredDomains: string[]
+  optionalDomains?: string[]
   // What the link will send this app, and whether the app handles that action.
   actions: Array<{ name: string; payload: string; supported: boolean }>
 }
@@ -219,7 +223,12 @@ export function promptSharedSpace(opts: {
           // Its own rows, under its actions. Nothing is installed until the
           // space is kept; the grant is the temp app's until then.
           const section = policySection(
-            { title: "", declaredDomains: app.declaredDomains, type: app.type },
+            {
+              title: "",
+              declaredDomains: app.declaredDomains,
+              optionalDomains: app.optionalDomains,
+              type: app.type
+            },
             null
           )
           sections.set(app.key, section)
@@ -262,10 +271,17 @@ function policySection(
   // ui (auto-granted). network is always offered so any app can be un-sealed.
   const declaredCaps = CAP_ORDER.filter(d => opts.declaredDomains.includes(d))
   const declaredUi = opts.declaredDomains.includes("ui")
+  // Required and optional apart: only a napplet names optional ones.
+  const optional = new Set(opts.optionalDomains ?? [])
+  const declared = [...new Set(opts.declaredDomains.filter(Boolean))]
+  const required = declared.filter(d => !optional.has(d))
+  const optionals = declared.filter(d => optional.has(d))
   // Requirements this launcher doesn't implement. We can't grant them, but the
   // app declared them — surface them (unchecked, non-grantable) so the user
-  // knows some features won't work rather than us silently dropping them.
-  const unsupported = unsupportedRequires(opts.declaredDomains)
+  // knows some features won't work rather than us silently dropping them. An
+  // optional one missing is no problem: the napplet does without it.
+  const unsupported = unsupportedRequires(required)
+  const unsupportedOptional = unsupportedRequires(optionals)
   // The effective type. With chooseType the user flips it live and the rows
   // re-render: napplet = exactly its declared NAP domains, no network (sealed);
   // nsite/napp = identity + declared + network, all default ON, deselectable.
@@ -298,16 +314,28 @@ function policySection(
   // Explicit, compact summary of what the app declares it needs.
   const reqs = document.createElement("p")
   reqs.className = "napp-perms-reqs"
-  const declared = [...new Set(opts.declaredDomains.filter(Boolean))]
-  reqs.textContent = `Requires: ${declared.length ? declared.join(", ") : "nothing"}`
+  reqs.textContent = `Requires: ${required.length ? required.join(", ") : "nothing"}`
   el.appendChild(reqs)
+  if (optionals.length) {
+    const opt = document.createElement("p")
+    opt.className = "napp-perms-reqs"
+    opt.textContent = `Optional: ${optionals.join(", ")}`
+    el.appendChild(opt)
+  }
   // Declared requirements this launcher can't provide — named up top, same
-  // as the apps-list badge; they never appear as checklist rows.
+  // as the apps-list badge; they never appear as checklist rows. Optional ones
+  // are named plainly, not as a warning.
   if (unsupported.length) {
     const warn = document.createElement("p")
     warn.className = "napp-perms-unsupported"
     warn.textContent = `requires unsupported features: ${unsupported.join(", ")}`
     el.appendChild(warn)
+  }
+  if (unsupportedOptional.length) {
+    const note = document.createElement("p")
+    note.className = "napp-perms-reqs"
+    note.textContent = `optional features not available here: ${unsupportedOptional.join(", ")}`
+    el.appendChild(note)
   }
 
   // Capability rows, rebuilt when the type is flipped. Checkbox first,

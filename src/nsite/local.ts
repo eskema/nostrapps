@@ -59,7 +59,10 @@ export async function collectLocalFolder(
         icon: m.icon || undefined,
         description: m.description || undefined,
         actions: [],
-        requires: m.requires
+        // Every domain it touches is declared; the optional ones also go apart
+        // for the permission screen. One named both ways is required.
+        requires: [...new Set([...m.requires, ...m.optional])],
+        optional: m.optional.filter(d => !m.requires.includes(d))
       }
     }
   }
@@ -81,6 +84,7 @@ export async function collectLocalFolder(
       description?: string
       actions: string[]
       requires?: string[]
+      optional?: string[]
       modes?: unknown
       initial_size?: unknown
       initialSize?: unknown

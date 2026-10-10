@@ -17,13 +17,19 @@ import { unsupportedRequires } from "../napp-permissions.js"
 import { openNappConfigSettings } from "../napp-config.js"
 import { getDevHandle } from "../sandbox/host.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
-import { installedIconSources, resolveCardIcon } from "../nsite/icon.js"
+import { installedIconSources, nappletIconSrc, resolveCardIcon } from "../nsite/icon.js"
 import { detailField, renderAppCard, type AppCardOpts } from "./card.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
 import { NAPP_RELAYS, NSITE_NAMED_KIND, NAPP_NAMED_KIND, WASM_NAMED_KIND } from "../nsite/fetch.js"
-import { NAPPLET_NAMED_KIND } from "../nsite/napplet.js"
+import {
+  NAPPLET_NAMED_KIND,
+  declaredDomains,
+  isNappletKind,
+  manifestDescription,
+  requiredDomains
+} from "../nsite/napplet.js"
 import { NostrEvent } from "@nostr/tools"
 import { BlossomClient } from "@nostr/tools/nipb7"
 import { DEFAULT_BLOSSOM_SERVERS, normalizeServer, publishOutcomes } from "../utils.js"
@@ -173,9 +179,9 @@ export function mount(
     card.querySelector(".apps-title")?.classList.replace("ui-heading", "ui-heading-xxl")
     // Requires — lumped in with the action chips, detail view only (too noisy
     // in the list).
-    const reqs = req.event ? requiresOf(req.event) : []
+    const reqs = req.event ? declaredDomains(req.event) : []
     if (reqs.length) {
-      const unsupported = new Set(unsupportedRequires(reqs))
+      const unsupported = new Set(unsupportedRequires(requiredDomains(req.event!)))
       let chips = card.querySelector<HTMLElement>(".apps-handlers")
       if (!chips) {
         chips = document.createElement("div")
@@ -451,7 +457,7 @@ export function mount(
     const search = buildHaystack({
       title: app.title,
       petname: app.petname,
-      description: app.event?.tags.find((t: any) => t[0] === "description")?.[1] || app.description,
+      description: (app.event && manifestDescription(app.event)) || app.description,
       summary: app.event?.tags.find((t: any) => t[0] === "summary")?.[1],
       id: app.nappId,
       pubkey: author,
@@ -464,7 +470,7 @@ export function mount(
       ? [makeInstalledUpdateBtn(app, upd), ...installedButtons(app)]
       : installedButtons(app)
     const description =
-      app.event?.tags.find((t: any) => t[0] === "description")?.[1] ||
+      (app.event && manifestDescription(app.event)) ||
       app.event?.tags.find((t: any) => t[0] === "summary")?.[1] ||
       app.description ||
       null
@@ -482,7 +488,9 @@ export function mount(
       authorLabel,
       createdAt,
       actions: app.actions,
-      unsupported: unsupportedRequires(app.event ? requiresOf(app.event) : (app.requires ?? [])),
+      unsupported: unsupportedRequires(
+        app.event ? requiredDomains(app.event) : (app.requires ?? [])
+      ),
       search,
       buttons,
       onAuthorClick: author
@@ -661,7 +669,7 @@ export function mount(
       authorLabel: "temporary", // signed out: the no-manifest label instead
       createdAt: event.created_at,
       actions: actionsOf(event),
-      unsupported: unsupportedRequires(requiresOf(event)),
+      unsupported: unsupportedRequires(requiredDomains(event)),
       search: "",
       buttons: [button({ label: "keep", variant: "primary" })],
       menuTrigger: button({ label: "···", variant: "ghost", class: "apps-card-menu-trigger" })
@@ -751,14 +759,22 @@ export function mount(
   ) {
     if (!listEl) return
     for (const { nappId, evt, app } of items) {
-      // A manifest's icon that is a URL went in with the card.
+      // A manifest's icon that is a URL went in with the card. A napplet's is
+      // only ever its checked bytes.
+      const napplet = !!evt && isNappletKind(evt.kind)
       const sha = evt ? resolveCardIcon(evt).sha : null
-      if (evt ? !sha : !app) continue
+      if (!napplet && (evt ? !sha : !app)) continue
       const plate = listEl.querySelector<AppIcon>(
         `.apps-card[data-napp-id="${CSS.escape(nappId)}"] .apps-card-icon`
       )
       if (!plate || plate.dataset.iconLoaded === "1") continue
       plate.dataset.iconLoaded = "1"
+      if (napplet) {
+        nappletIconSrc(evt).then(src => {
+          if (src) plate.img.src = src
+        })
+        continue
+      }
       if (!sha) {
         ownIcon(plate, app!)
         continue
@@ -1452,12 +1468,12 @@ function renderCard(
     nappId,
     title: title || `(${dTag})`,
     type: classifyEvent(evt.kind),
-    description: tag("description") || tag("summary"),
+    description: manifestDescription(evt) || tag("summary"),
     iconUrl: iconSha ? null : iconUrl,
     authorPubkey: evt.pubkey,
     createdAt: evt.created_at,
     actions: actionsOf(evt),
-    unsupported: unsupportedRequires(requiresOf(evt)),
+    unsupported: unsupportedRequires(requiredDomains(evt)),
     search: searchHaystack(evt),
     buttons,
     menuTrigger,
@@ -1556,7 +1572,7 @@ function searchHaystack(evt: NostrEvent): string {
   return buildHaystack({
     title: tag("title"),
     summary: tag("summary"),
-    description: tag("description"),
+    description: manifestDescription(evt),
     id: tag("d") || "",
     pubkey: evt.pubkey,
     categories: evt.tags.filter((t: any) => t[0] === "l" && t[1]).map((t: any) => t[1]),
@@ -1568,10 +1584,6 @@ function searchHaystack(evt: NostrEvent): string {
 // Action/handler names a manifest declares.
 function actionsOf(evt: NostrEvent): string[] {
   return evt.tags.filter((t: any) => t[0] === "action" && t[1]).map((t: any) => t[1])
-}
-
-function requiresOf(evt: NostrEvent): string[] {
-  return evt.tags.filter((t: any) => t[0] === "requires" && t[1]).map((t: any) => t[1])
 }
 
 function appendSearch(card: HTMLElement, text: string) {

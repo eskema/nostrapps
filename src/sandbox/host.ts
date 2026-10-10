@@ -36,6 +36,7 @@ import { httpFetch, httpFetchImage } from "./wasm-http.js"
 // into a napplet's srcdoc before its verified bytes.
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
 import { fetchBlob } from "../nsite/fetch.js"
+import { declaredDomains } from "../nsite/napplet.js"
 import {
   fetchEmojisWithSets,
   fetchFavoriteFollowSetsWithSets,
@@ -615,17 +616,15 @@ const NAPPLET_OFFERED = [
   "config"
 ]
 
-// The capability domains this napp is actually granted: declared (via
-// ["requires", "<domain>"] manifest tags or a metadata.json `requires` array)
-// ∩ what we implement ∩ what the user granted in the permission screen. Empty
-// for a plain napp that declared nothing — it never enters the seam.
+// The capability domains this napp is actually granted: declared (a napp's
+// ["requires", "<domain>"] tags, a napplet's R and O tags, or a metadata.json
+// `requires` array) ∩ what we implement ∩ what the user granted in the
+// permission screen. Empty for a plain napp that declared nothing — it never
+// enters the seam.
 export function nappletDomainsFor(nappId: string): string[] {
   const app = getInstalledApp(nappId)
   if (!app) return []
-  const declared = new Set<string>()
-  for (const t of app.event?.tags ?? []) {
-    if (t[0] === "requires" && typeof t[1] === "string" && t[1]) declared.add(t[1])
-  }
+  const declared = new Set<string>(app.event ? declaredDomains(app.event) : [])
   for (const d of app.requires ?? []) declared.add(d)
   if (declared.size === 0) return []
   const granted = new Set(getPolicy(nappId).domains)
@@ -2710,7 +2709,7 @@ function base64Bytes(b64: string): Uint8Array {
 // The spec's conservative baseline: sealed to itself, every resource/socket via
 // a NAP domain over postMessage (not CSP-governed).
 const NAPPLET_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+  "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; " +
   "img-src data: blob:; font-src data:; connect-src 'none'; worker-src 'none'; " +
   "child-src 'none'; frame-src 'none'; media-src 'none'; object-src 'none'; " +
   "manifest-src 'none'; base-uri 'none'; form-action 'none'"

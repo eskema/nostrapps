@@ -93,7 +93,9 @@ import { ensureReplicatedAll, type ReplicationTarget } from "./nsite/heal.js"
 import { openShareDialog, type ShareCheck, type ShareWindow } from "./share-dialog.js"
 import {
   resolveNapplet,
+  declaredDomains,
   isNappletKind,
+  nappletDomains,
   loadNappletFromManifest,
   NAPPLET_NAMED_KIND,
   type ResolvedNapplet
@@ -658,18 +660,15 @@ function capabilitiesFromEvent(event: { tags: string[][] } | null | undefined): 
   return actions
 }
 
-// NIP-5D capability domains declared in a manifest (["requires", "<domain>"]).
-// Declaring any marks the app as a napplet — the host only performs the NAP
-// shell handshake for apps that asked for the seam.
-function requiresFromEvent(event: { tags: string[][] } | null | undefined): string[] {
-  if (!event) return []
-  const domains = []
-  for (const t of event.tags) {
-    if (t[0] === "requires" && typeof t[1] === "string" && t[1]) {
-      domains.push(t[1])
-    }
-  }
-  return domains
+// NIP-5D capability domains declared in a manifest: a napp's requires tags, a
+// napplet's R and O. The host only performs the NAP shell handshake for apps
+// that asked for the seam.
+function requiresFromEvent(event: { kind: number; tags: string[][] } | null | undefined): string[] {
+  return event ? declaredDomains(event) : []
+}
+// The ones a napplet can do without (its O tags), for the permission screen.
+function optionalFromEvent(event: { kind: number; tags: string[][] } | null | undefined): string[] {
+  return event && isNappletKind(event.kind) ? nappletDomains(event).optional : []
 }
 
 // Update flow: re-fetch the manifest + files at the same target, swap them
@@ -976,10 +975,7 @@ const systemCtx: SystemCtx = {
 async function editPermissions(nappId: string) {
   const app = persist.getInstalledApp(nappId)
   if (!app) return
-  const declared = new Set<string>()
-  for (const t of app.event?.tags ?? []) {
-    if (t[0] === "requires" && typeof t[1] === "string" && t[1]) declared.add(t[1])
-  }
+  const declared = new Set<string>(requiresFromEvent(app.event))
   for (const d of app.requires ?? []) declared.add(d)
 
   const type = nappId.startsWith("napplet~")
@@ -993,6 +989,7 @@ async function editPermissions(nappId: string) {
     type,
     author: app.event?.pubkey,
     declaredDomains: [...declared],
+    optionalDomains: optionalFromEvent(app.event),
     current: persist.getPolicy(nappId),
     mode: "edit"
   })
@@ -2549,6 +2546,7 @@ async function resolvePolicyForLaunch(
     type?: string
     author?: string | null
     declaredDomains: string[]
+    optionalDomains?: string[]
   }
 ): Promise<NappPolicy | null> {
   if (persist.hasPolicy(nappId)) return persist.getPolicy(nappId)
@@ -2568,7 +2566,8 @@ function policyOptsFor({ files, manifest }: NsiteResult, title: string) {
     iconBlob: iconBlobFrom(icon, files, manifest),
     type: manifestAppType(manifest),
     author: manifest?.pubkey,
-    declaredDomains: requiresFromEvent(manifest)
+    declaredDomains: requiresFromEvent(manifest),
+    optionalDomains: optionalFromEvent(manifest)
   }
 }
 
@@ -2686,7 +2685,7 @@ async function installFetched(
 
 // NIP-5D napplet install/launch — the srcdoc path, entirely separate from the
 // nsite install above. Resolve + verify the manifest, gate on the permission
-// screen (declaredDomains = its `requires`), store it as an installed app so
+// screen (declaredDomains = its R and O tags), store it as an installed app so
 // nappletDomainsFor sees the grant, then launch it into an opaque srcdoc window.
 async function installNapplet(
   target: {
@@ -2707,7 +2706,8 @@ async function installNapplet(
       title: resolved.title || resolved.dTag,
       type: "napplet",
       author: resolved.manifest.pubkey,
-      declaredDomains: resolved.requires
+      declaredDomains: resolved.domains,
+      optionalDomains: optionalFromEvent(resolved.manifest)
     },
     launch
   )
@@ -2782,7 +2782,8 @@ async function launchInstalledNapplet(
     title: app.petname || app.title || nappId,
     icon: installedIconSrc(app),
     type: "napplet",
-    declaredDomains: app.event ? requiresFromEvent(app.event) : (app.requires ?? [])
+    declaredDomains: app.event ? requiresFromEvent(app.event) : (app.requires ?? []),
+    optionalDomains: optionalFromEvent(app.event)
   })
   if (!policy) return null
   // Published napplets re-fetch + re-verify from the manifest; local ones run
@@ -3111,7 +3112,8 @@ localFolderInput.addEventListener("change", async (e: Event) => {
           icon: directIconSrc(metadata.icon),
           iconBlob: iconBlobFrom(metadata.icon, files),
           type: "napplet",
-          declaredDomains: metadata.requires || []
+          declaredDomains: metadata.requires || [],
+          optionalDomains: metadata.optional || []
         })
         if (!granted) {
           setStatus("Cancelled")
@@ -3427,8 +3429,7 @@ async function openSharedSpace(link: ShareLink, spaceId: string): Promise<boolea
     return false
   }
 
-  const declaredOf = (e: LinkEntry) =>
-    requiresFromEvent(e.installed ? e.installed.event : e.fetched!.manifest)
+  const manifestOf = (e: LinkEntry) => (e.installed ? e.installed.event : e.fetched!.manifest)
   const others = persist.listSpaces().filter(s => s.id !== spaceId)
   const granted = await promptSharedSpace({
     name: link.name,
@@ -3446,7 +3447,8 @@ async function openSharedSpace(link: ShareLink, spaceId: string): Promise<boolea
           ? persist.classifyInstalled(e.installed)
           : manifestAppType(e.fetched!.manifest),
         installed: !!e.installed,
-        declaredDomains: declaredOf(e),
+        declaredDomains: requiresFromEvent(manifestOf(e)),
+        optionalDomains: optionalFromEvent(manifestOf(e)),
         actions: e.actions.map(a => ({ ...a, supported: handlesAction(e.declared, a.name) }))
       }
     })
