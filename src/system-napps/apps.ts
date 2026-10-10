@@ -263,6 +263,8 @@ export function mount(
         ctx.setStatus?.(`Apps: ${busy} ${app.nappId}…`)
         await ctx.uninstall(app.nappId)
         ctx.setStatus?.(`Apps: ${label} finished for ${app.nappId}`)
+        // The app is gone, so its detail goes with it.
+        if (detailOverlay.contains(del)) closeDetail()
       } catch (err: any) {
         ctx.setStatus?.(`Apps: ${label} failed for ${app.nappId}: ${err?.message || String(err)}`)
         del.disabled = false
