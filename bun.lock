@@ -10,7 +10,7 @@
         "@fontsource-variable/source-sans-3": "^5.2.9",
         "@fontsource-variable/source-serif-4": "^5.2.9",
         "@noble/hashes": "^2.2.0",
-        "@nostr/gadgets": "npm:@jsr/nostr__gadgets@^0.20.14",
+        "@nostr/gadgets": "npm:@jsr/nostr__gadgets@^0.21.0",
         "@nostr/tools": "npm:@jsr/nostr__tools@^2.25.2",
         "flexsearch": "^0.8.212",
         "nostr-wasm": "0.1.0",
@@ -91,7 +91,7 @@
 
     "@noble/hashes": ["@noble/hashes@2.2.0", "", {}, "sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg=="],
 
-    "@nostr/gadgets": ["@jsr/nostr__gadgets@0.20.14", "https://npm.jsr.io/~/11/@jsr/nostr__gadgets/0.20.14.tgz", { "dependencies": { "@jsr/fiatjaf__lru-cache": "^0.0.1", "@jsr/henrygd__semaphore": "^0.0.2", "@jsr/nostr__tools": "^2.23.12", "@noble/hashes": "2.0.1", "idb-keyval": "^6.2.1" } }, "sha512-MSulcDMmEiuGiWS+80HPkf1DG5Bx/xBpC5ts9BW+o92taszF/KDjCB6SLkh2AMZ3UFPhTQzOsVppfgiKXrZOrg=="],
+    "@nostr/gadgets": ["@jsr/nostr__gadgets@0.21.0", "https://npm.jsr.io/~/11/@jsr/nostr__gadgets/0.21.0.tgz", { "dependencies": { "@jsr/fiatjaf__lru-cache": "^0.0.1", "@jsr/henrygd__semaphore": "^0.0.2", "@jsr/nostr__tools": "^2.23.12", "@noble/hashes": "2.0.1", "idb-keyval": "^6.2.1" } }, "sha512-qA1VKkbzjy5U5rOm8dzNx79xk9/bIRZPdhpXjZBxsOT15h9IDYlvTAtDt5YGSqW1c4lmgO/jnBVvd4Q3/RUh5w=="],
 
     "@nostr/tools": ["@jsr/nostr__tools@2.25.2", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.25.2.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-Yhe1ppPZWWd52mSqdYDd+Zq9gm4e+B7CMQ62gGXPpkBvfCXXCiTUWlctEEVzam6TGZaeHXcgiYj+zzKW02bAig=="],
 
