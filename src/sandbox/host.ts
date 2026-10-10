@@ -25,7 +25,7 @@ import { openDialog } from "../dialog.js"
 import { nappNameEl } from "../napp-name.js"
 import { dispatchAction } from "../handlers.js"
 import { setPointer } from "../pointer.js"
-import { getStore, safeQueryEvents } from "../store.js"
+import { getStore, onStoreSaved, safeQueryEvents } from "../store.js"
 import { sync as syncAuthors } from "../sync.js"
 import { createNappWindow, fitWindowHeight } from "./napp-window.js"
 import { startWasmNapp, type WasmCall, type WasmNapp } from "./wasm-canvas.js"
@@ -4402,11 +4402,11 @@ async function runRpc(
 }
 
 // ─── store subscriptions (nostrdb.subscribe) ────────────────────
-// Filters a napp holds open on the store: every event saved here from then on
-// that matches one of them is handed over, one by one. Each store.saveEvent
-// in this file is followed by notifyStoreSubs; what was stored before comes
-// from a query. They live in feedRequests beside the relay subscriptions, so
-// they end with them (nostrdb.unsubscribe, the window closing or reloading).
+// Filters a napp holds open on the store: every event saved from then on that
+// matches one of them is handed over, one by one, whatever saved it (this file,
+// a sync, the gadgets loaders). What was stored before comes from a query.
+// They live in feedRequests beside the relay subscriptions, so they end with
+// them (nostrdb.unsubscribe, the window closing or reloading).
 
 type StoreSub = { filters: Filter[]; deliver: (event: NostrEvent) => void }
 const storeSubs = new Set<StoreSub>()
@@ -4422,6 +4422,7 @@ function notifyStoreSubs(event: NostrEvent) {
     }
   }
 }
+onStoreSaved(notifyStoreSubs)
 
 // Where a store subscription's events go: the window's iframe, or its wasm
 // module as stored messages under the call id that started it.
@@ -4532,11 +4533,7 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
     else deliver({ type: "event", event })
     store
       .saveEvent(event)
-      .then(isNew => {
-        if (!isNew) return
-        notifyStoreSubs(event)
-        return applyDeletionLocally(event)
-      })
+      .then(isNew => (isNew ? applyDeletionLocally(event) : undefined))
       .catch(() => {})
   }
   const relayEosed = () => {
@@ -4695,11 +4692,7 @@ async function startOutboxSubscription(nappId: string, instanceId: string, param
       else deliver({ type: "event", event })
       store
         .saveEvent(event)
-        .then(isNew => {
-          if (!isNew) return
-          notifyStoreSubs(event)
-          return applyDeletionLocally(event)
-        })
+        .then(isNew => (isNew ? applyDeletionLocally(event) : undefined))
         .catch(() => {})
     },
     oneose: eose,
@@ -4834,7 +4827,6 @@ async function dispatch(
       // must not get in.
       if (!params?.event || !verifyEvent(params.event)) return false
       const saved = await store.saveEvent(params.event)
-      if (saved) notifyStoreSubs(params.event)
       await applyDeletionLocally(params.event)
       return saved
     }
@@ -5027,10 +5019,7 @@ async function dispatch(
         since,
         until,
         limit,
-        onNew: async event => {
-          notifyStoreSubs(event)
-          await applyDeletionLocally(event)
-        }
+        onNew: event => applyDeletionLocally(event)
       })
     }
     case "napp.publish":
@@ -5417,7 +5406,7 @@ async function fetchEvent(params: {
     const results = await pool.querySync(relays, filter, { maxWait: 4000 })
     if (isReplaceable) results.sort((a, b) => b.created_at - a.created_at)
     const evt = results[0]
-    if (evt && (await store.saveEvent(evt))) notifyStoreSubs(evt)
+    if (evt) await store.saveEvent(evt)
     return evt || null
   }
 }
@@ -5437,7 +5426,7 @@ export async function loadEvents(ids: unknown): Promise<NostrEvent[]> {
   for (const e of fromRelays) {
     if (seen.has(e.id)) continue
     seen.add(e.id)
-    if (await store.saveEvent(e)) notifyStoreSubs(e)
+    await store.saveEvent(e)
     found.push(e)
   }
   return found
@@ -5491,7 +5480,7 @@ async function publishEvent(
   // answer from this store, and relays alone cannot clean it.
   if (event.kind === 5 && verifyEvent(event)) {
     try {
-      if (await store.saveEvent(event)) notifyStoreSubs(event)
+      await store.saveEvent(event)
     } catch {}
     await applyDeletionLocally(event)
   }

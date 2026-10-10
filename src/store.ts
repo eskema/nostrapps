@@ -101,7 +101,49 @@ async function guardedSave(
     await loadDeletions()
     recordDeletion(event)
   } else if (await isDeleted(event)) return false
-  return instance.saveEvent(event, opts)
+  const saved = await instance.saveEvent(event, opts)
+  if (saved) savedHere(event)
+  return saved
+}
+
+// Told of every event the store took in, whatever brought it: a napp's
+// relays, a sync, the gadgets loaders, another tab.
+const savedListeners = new Set<(event: NostrEvent) => void>()
+
+export function onStoreSaved(fn: (event: NostrEvent) => void): () => void {
+  savedListeners.add(fn)
+  return () => savedListeners.delete(fn)
+}
+
+function tellSaved(event: NostrEvent) {
+  for (const fn of savedListeners) {
+    try {
+      fn(event)
+    } catch (err) {
+      console.warn("[store] saved listener failed", err)
+    }
+  }
+}
+
+// The store worker is shared by every tab, what saves to it is not: each tab
+// passes on what it saved, one message per batch.
+const savedChannel =
+  typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("nostrapps:store-saved") : null
+savedChannel?.addEventListener("message", ({ data }) => {
+  if (Array.isArray(data)) for (const event of data) tellSaved(event)
+})
+let outgoing: NostrEvent[] = []
+
+function savedHere(event: NostrEvent) {
+  tellSaved(event)
+  if (!savedChannel) return
+  const { id, pubkey, created_at, kind, tags, content, sig } = event
+  // a save batch resolves all at once: one message for it
+  if (outgoing.push({ id, pubkey, created_at, kind, tags, content, sig }) === 1)
+    setTimeout(() => {
+      savedChannel.postMessage(outgoing)
+      outgoing = []
+    }, 0)
 }
 
 // bfcache keeps a navigated-away page's dedicated worker ALIVE (heartbeating,
