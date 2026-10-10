@@ -358,15 +358,16 @@ function fetchPage(
       clearTimeout(timer)
       resolve(ok ? { count, oldest } : undefined)
     }
+    // No alreadyHaveEvent: an event another relay sent first still counts for
+    // this one's page, or a page of only those reads as this relay running
+    // out, and what it has further down is never asked for.
     const sub = relay.subscribe([filter], {
       label: "napp-sync",
       eoseTimeout: MAX_WAIT + 1000,
-      alreadyHaveEvent(id) {
-        return seen.has(id)
-      },
       onevent: event => {
         count++
         if (event.created_at < oldest) oldest = event.created_at
+        if (seen.has(event.id)) return
         seen.add(event.id)
         collect(event)
       },
