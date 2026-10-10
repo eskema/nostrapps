@@ -320,6 +320,12 @@
   color: inherit;
 }
 
+/* WebKit draws a search field as its own rounded box otherwise. */
+.ui-input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .ui-input:focus {
   outline: none;
 }
@@ -506,12 +512,17 @@ a.ui-author:hover > .ui-author-name {
   display: grid;
   grid-template-columns: 1fr auto;
   cursor: pointer;
+  list-style: none;
   font-size: var(--text-l);
   font-weight: 700;
   user-select: none;
   padding: var(--space-xs) var(--space-s);
   padding-left: 0;
   opacity: var(--dim-l);
+}
+
+.ui-details > summary::-webkit-details-marker {
+  display: none;
 }
 
 .ui-details[open] > summary {
@@ -679,6 +690,7 @@ a.ui-author:hover > .ui-author-name {
    context's.
      <h2 class="ui-title">relays</h2> */
 .ui-title {
+  margin: 0;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1145,6 +1157,7 @@ a.ui-author:hover > .ui-author-name {
    blockquote, a quoted note, the note a reply answers. Class only.
      <blockquote class="ui-quote">…</blockquote> */
 .ui-quote {
+  margin: 0;
   padding: var(--space-xxs) 0 var(--space-xxs) var(--space-m);
   border-left: 2px solid color-mix(in srgb, currentColor 25%, transparent);
 }
