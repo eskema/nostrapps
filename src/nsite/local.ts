@@ -92,19 +92,22 @@ export async function collectLocalFolder(
 // index.html beside it. A page wins on any doubt — a folder with both is a
 // page that happens to ship a wasm file, not a module that happens to ship a
 // page — because the module's name is fixed and there is nothing to name.
+// Only the top level counts, as for a picked folder (isWasmDirHandle), and a
+// path may come with its leading slash or without (the uploader's don't).
 export function isWasmListing(paths: Array<{ path: string } | string>): boolean {
-  const names = paths.map(p => (typeof p === "string" ? p : p.path))
-  return names.some(p => p === `/${WASM_ENTRY}`) && !names.some(p => /(^|\/)index\.html$/i.test(p))
+  const names = paths.map(p => (typeof p === "string" ? p : p.path).replace(/^\//, ""))
+  return names.includes(WASM_ENTRY) && !names.some(p => /^index\.html$/i.test(p))
 }
 
 // isWasmDevUrl is the same question for a dev server, which cannot be
 // listed: /app.wasm answers, or this is a page. HEAD keeps it to headers;
 // a server that refuses HEAD is treated as having no module rather than as
-// broken, and launch says so if the file turns out to be needed.
+// broken, and launch says so if the file turns out to be needed. An html
+// answer is a single-page server's fallback (vite's, for one), not a module.
 export async function isWasmDevUrl(baseUrl: string): Promise<boolean> {
   try {
     const res = await fetch(new URL(WASM_ENTRY, baseUrl).toString(), { method: "HEAD" })
-    return res.ok
+    return res.ok && !/text\/html/i.test(res.headers.get("content-type") || "")
   } catch {
     return false
   }
