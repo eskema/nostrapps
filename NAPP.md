@@ -96,7 +96,7 @@ window.nostrdb.count(filters)
 window.nostrdb.event(id)
 window.nostrdb.remove(ids)
 window.nostrdb.replaceable(kind, author, identifier?)
-window.nostrdb.subscribe(filters) // async generator: for await (const event of ...)
+window.nostrdb.subscribe(filters) // async iterator: for await (const event of ...); return() ends it
 
 // Access to metadata for a given pubkey.
 // These are saved on local store and LRU-cached in memory, with automatic cache invalidation.

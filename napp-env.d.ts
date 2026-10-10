@@ -44,8 +44,9 @@ type NostrDB = {
   remove(ids: string[]): Promise<string[]>
   replaceable(kind: number, author: string, identifier?: string): Promise<NostrEvent | undefined>
   // Every event saved to the store from now on that matches filters, one by
-  // one. What is already stored comes from query(). Leaving the loop ends it.
-  subscribe(filters: Filter | Filter[]): AsyncGenerator<NostrEvent>
+  // one. What is already stored comes from query(). Leaving the loop, or
+  // return() on it, ends it.
+  subscribe(filters: Filter | Filter[]): AsyncIterableIterator<NostrEvent>
   supports(): string[]
 }
 type ListResult<T> = { event: NostrEvent | null; items: T[] }

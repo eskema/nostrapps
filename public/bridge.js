@@ -257,25 +257,43 @@
       rpc("nostrdb.replaceable", { kind, author, identifier }),
     // Every event saved to the store from now on that matches filters (one or
     // an array), one by one. What is already stored comes from query().
-    // Leaving the loop (break, return, throw) ends the subscription.
-    subscribe: async function* (filters) {
+    // Leaving the loop (break, return, throw) ends the subscription, and so
+    // does return() on it while it waits. Not a generator: one parked on an
+    // await can't be returned until its next event. It starts at once, so
+    // what is saved between this call and the loop is kept for it.
+    subscribe: filters => {
       const callbackId = subSerial++
       const queue = []
-      let wake = null
-      storeSubCallbacks.set(callbackId, event => {
-        queue.push(event)
-        wake?.()
-      })
-      try {
-        await rpc("nostrdb.subscribe", { filters, callbackId })
-        while (true) {
-          while (queue.length) yield queue.shift()
-          await new Promise(resolve => (wake = resolve))
-          wake = null
-        }
-      } finally {
+      const waiting = []
+      let done = false
+      const end = () => {
+        if (done) return
+        done = true
         storeSubCallbacks.delete(callbackId)
         rpc("nostrdb.unsubscribe", { callbackId }).catch(() => {})
+        for (const resolve of waiting.splice(0)) resolve({ value: undefined, done: true })
+      }
+      storeSubCallbacks.set(callbackId, event => {
+        const resolve = waiting.shift()
+        if (resolve) resolve({ value: event, done: false })
+        else queue.push(event)
+      })
+      const started = rpc("nostrdb.subscribe", { filters, callbackId })
+      started.catch(end)
+      return {
+        [Symbol.asyncIterator]() {
+          return this
+        },
+        async next() {
+          await started
+          if (queue.length) return { value: queue.shift(), done: false }
+          if (done) return { value: undefined, done: true }
+          return new Promise(resolve => waiting.push(resolve))
+        },
+        async return() {
+          end()
+          return { value: undefined, done: true }
+        }
       }
     },
     supports: async () => []
