@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite"
-import { iconInk, icons } from "./src/system-napps/ui.ts"
+import * as kit from "./src/system-napps/ui.ts"
+
+const { iconInk, icons } = kit
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
@@ -135,11 +137,13 @@ ${names.map(n => `.ui-icon-${n}`).join(",\n")} {
   const fonts = () =>
     FONTS_HEAD + FONTS.map(f => font(f.slot, f.pkg) + font(f.slot, f.pkg, "italic")).join("")
   // One line, the function the line calls: comments and whitespace go, and
-  // the statement's semicolons, so the line can wrap it in parens.
+  // the statement's semicolons, so the line can wrap it in parens. KIT is the
+  // kit's helpers, what the line checks a launcher's napp.ui for.
   const loader = async () => {
     const path = here("src/napp-ui-loader.js")
     const { code } = await transformWithEsbuild(readFileSync(path, "utf8"), path, {
       minifyWhitespace: true,
+      define: { KIT: JSON.stringify(Object.keys(kit).join(" ")) },
       sourcemap: false
     })
     return code.trim().replace(/^;|;$/g, "")

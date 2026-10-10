@@ -3,11 +3,14 @@
 // the line for a napp's head: this function called with window.napp, the
 // Blossom servers to try and the sha256 of napp-ui.css, napp-ui.js and,
 // optionally, napp-fonts.css. Pinned: a newer kit is a newer line.
-// A kit already there (the launcher's) is left alone, its fonts asked for if
-// the line has them; otherwise every server is asked at once. Either way
-// window.napp.ready is a promise to await before the first helper.
+// A kit already there with every helper of this one (the launcher's) is left
+// alone, its fonts asked for if the line has them; otherwise, no kit or
+// another launcher's, every server is asked at once and this kit takes
+// napp.ui. Either way window.napp.ready is a promise to await before the
+// first helper.
 ;(napp, servers, css, js, fonts) => {
-  if (napp.ui) {
+  // KIT, the helpers' names, is filled in by the build.
+  if (napp.ui && KIT.split(" ").every(name => name in napp.ui)) {
     napp.ready = Promise.resolve()
     if (fonts && napp.ui.fonts) napp.ui.fonts().catch(() => {})
     return
