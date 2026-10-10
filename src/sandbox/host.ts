@@ -2090,7 +2090,7 @@ export function reloadNappletWindows(nappId: string, html: string): number {
 
 export function reloadIframesByNappId(nappId: string): number {
   // A wasm napp has no iframe to reassign; its window is reloaded through the
-  // module runtime instead, and there is no stored action to replay.
+  // module runtime instead, which replays its stored actions itself.
   reloadWasmByNappId(nappId)
   let count = 0
   for (const win of openWindows.values()) {
@@ -2380,7 +2380,14 @@ async function runWasm(win: NappWindow, nappId: string, instanceId: string, modu
       module,
       canvas: win.canvas!,
       onLog: line => console.info(`[${nappId}] ${line}`),
-      onCall: (call, napp) => void wasmCall(nappId, instanceId, call, napp)
+      onCall: (call, napp) => void wasmCall(nappId, instanceId, call, napp),
+      // A crash mid-run gets the same note a failed start does, and reload
+      // starts it over.
+      onTrap: err => {
+        console.error(`[${nappId}] wasm napp crashed`, err)
+        stopWasm(instanceId)
+        showWasmFailure(win, `crashed: ${err instanceof Error ? err.message : err}`)
+      }
     })
     // The window may already be gone: the user closing it while the module
     // was still compiling.

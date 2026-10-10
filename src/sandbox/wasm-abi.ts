@@ -1,6 +1,6 @@
 // The contract between a wasm napp and whatever is hosting it.
 //
-// A napp declared with the "wasm" mode ships one WebAssembly module instead of
+// A wasm napp (kind 35131) ships one WebAssembly module, /app.wasm, instead of
 // a page, and is handed a window with a canvas buffer to paint into. There is
 // no DOM, no iframe and no JavaScript in the picture.
 //
@@ -134,10 +134,7 @@ export const NAPP_BUTTON = {
   middle: 4
 } as const
 
-/**
- * The module a wasm napp gets when its manifest does not name one: /app.wasm.
- * Otherwise the napp's only .wasm file is used.
- */
+/** A wasm napp's module, always /app.wasm: there is nothing to name. */
 export const WASM_DEFAULT_ENTRY = "app.wasm"
 
 /**

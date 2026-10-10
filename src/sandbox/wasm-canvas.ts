@@ -60,6 +60,9 @@ export type WasmNappOptions = {
    * call.id; without this every napp_call returns 0.
    */
   onCall?: (call: WasmCall, napp: WasmNapp) => void
+  /** The module trapped while running and is stopped; without this the trap
+   * is thrown from the frame. */
+  onTrap?: (err: unknown) => void
 }
 
 // What a napp may hand napp_call in one go, a saveFile payload being the
@@ -71,7 +74,8 @@ export async function startWasmNapp({
   module,
   canvas,
   onLog,
-  onCall
+  onCall,
+  onTrap
 }: WasmNappOptions): Promise<WasmNapp> {
   const ctx = canvas.getContext("2d", { alpha: true })
   if (!ctx) throw new Error("this browser will not give a napp a 2d canvas")
@@ -288,16 +292,18 @@ export async function startWasmNapp({
       }
 
       more = Number(frameFn?.(16.7) ?? 0)
+
+      const ptr = Number(ptrFn?.() ?? 0)
+      if (ptr && memory) blit(ctx as CanvasRenderingContext2D, memory, ptr, width, height)
     } catch (err) {
       // A trap is the napp's own crash. Take the window down rather than sit
       // on a half-drawn canvas.
       stopped = true
       onLog?.(`wasm napp trapped: ${err}`)
-      throw err
+      if (!onTrap) throw err
+      onTrap(err)
+      return 0
     }
-
-    const ptr = Number(ptrFn?.() ?? 0)
-    if (ptr && memory) blit(ctx as CanvasRenderingContext2D, memory, ptr, width, height)
 
     // A napp that says it wants more frames is animating; anything else waits
     // for an event, which is a lot cheaper than redrawing an unchanged canvas
