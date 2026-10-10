@@ -612,8 +612,8 @@
     },
     // Bring these authors' events of these kinds between since and until into
     // the store from their write relays. See NAPP.md.
-    sync: (authors, kinds, { since, until, limit, force = false } = {}) =>
-      rpc("napp.sync", { authors, kinds, since, until, limit, force }),
+    sync: (authors, kinds, { since, until, limit } = {}) =>
+      rpc("napp.sync", { authors, kinds, since, until, limit }),
     // A live subscription to filter (which must have authors) on each
     // author's write relays. Same opts as utils.subscribe. See NAPP.md.
     outbox: (filter, opts) => {

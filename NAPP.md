@@ -222,7 +222,7 @@ each author's write relays, their events of each kind created between `since`
 and `until`, and saves them to the store, where `nostrdb.query` reads them and
 `nostrdb.subscribe` sees each new one. The launcher remembers, per author and
 kind, the range already fetched, so a call asks the relays only for what lies
-outside it — and nothing at all for a range it already has, unless `force`.
+outside it — and nothing at all for a range it already has.
 `newEvents` counts the events the store did not have before; `success` is
 false when some author's relays could not be read, with `error` saying which.
 All syncs, from every napp, share at most 16 REQs open at a time.

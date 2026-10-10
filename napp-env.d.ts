@@ -388,14 +388,14 @@ type Napp = {
   relays: { health(urls: string[]): Promise<RelayHealth[]> }
   // Fetches into the store, from each author's write relays, their events of
   // these kinds between since and until (default now), skipping what an
-  // earlier sync already brought (unless force). With limit, only the newest
+  // earlier sync already brought. With limit, only the newest
   // that many per author and kind before until (and not before since), asking
   // relays just for what the store lacks; with neither since nor limit, limit
   // is 10. Read them back with nostrdb.query.
   sync(
     authors: string[],
     kinds: number[],
-    opts?: { since?: number; until?: number; limit?: number; force?: boolean }
+    opts?: { since?: number; until?: number; limit?: number }
   ): Promise<SyncResult>
   // A live subscription to filter, which must have authors, on each author's
   // write relays (outbox model). Every event is also saved to the store.
