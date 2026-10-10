@@ -7,7 +7,6 @@ const CLIENT_SECRET_KEY = "nostrapps:nip46:client-secret"
 const BUNKER_POINTER_KEY = "nostrapps:nip46:bunker-pointer"
 
 let activeSigner: any = null
-let restorePromise: Promise<string | null> | null = null
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("")
@@ -70,36 +69,24 @@ export async function connectBunkerInput(input: string) {
 }
 
 // Re-create the signer from the persisted pointer. Returns the pubkey or
-// null if no bunker is stored. Lazily memoized so concurrent callers share
-// one BunkerSigner instance.
+// null if no bunker is stored. The signer is installed synchronously, before
+// any round-trip, so a slow or offline bunker never leaves us without one —
+// BunkerSigner re-subscribes on each request, so later calls can still
+// succeed once the bunker is reachable. The pointer is kept on failure; only
+// an explicit disconnect removes it.
 export async function restoreBunkerSigner() {
-  if (activeSigner) return activeSigner.getPublicKey()
-  if (restorePromise) return restorePromise
-  const pointer = readBunkerPointer()
-  if (!pointer) return null
-  restorePromise = (async () => {
-    try {
-      const signer = BunkerSigner.fromBunker(getClientSecret(), pointer)
-      const pk = await signer.getPublicKey()
-      activeSigner = signer
-      return pk
-    } catch (err) {
-      // Bad pointer / unreachable bunker — wipe so the user is forced
-      // through the connect UI again.
-      localStorage.removeItem(BUNKER_POINTER_KEY)
-      throw err
-    } finally {
-      restorePromise = null
-    }
-  })()
-  return restorePromise
+  if (!activeSigner) {
+    const pointer = readBunkerPointer()
+    if (!pointer) return null
+    activeSigner = BunkerSigner.fromBunker(getClientSecret(), pointer)
+  }
+  return activeSigner.getPublicKey()
 }
 
 export async function disconnectBunkerSigner() {
   localStorage.removeItem(BUNKER_POINTER_KEY)
   const signer = activeSigner
   activeSigner = null
-  restorePromise = null
   await signer?.close?.()
 }
 
