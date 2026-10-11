@@ -4593,6 +4593,8 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
           sub = relay.subscribe([since !== filter.since ? { ...filter, since } : filter], {
             label,
             eoseTimeout: timeout,
+            // one another relay sent first is dropped before it is parsed
+            alreadyHaveEvent: id => seen.has(id),
             onevent,
             oneose() {
               interval = 3000

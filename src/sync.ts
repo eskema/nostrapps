@@ -325,7 +325,7 @@ async function fetchLatest(
 
 // Saves what a fetch brings, telling onNew of each event the store lacked.
 function collector(onNew: (event: NostrEvent) => Promise<void>) {
-  const seen = new Set<string>()
+  const seen = new Map<string, number>() // id -> created_at
   const saving: Promise<unknown>[] = []
   const store = getStore()
   const collect = (event: NostrEvent) => {
@@ -345,7 +345,7 @@ type Relay = Awaited<ReturnType<typeof pool.ensureRelay>>
 function fetchPage(
   relay: Relay,
   filter: Filter,
-  seen: Set<string>,
+  seen: Map<string, number>,
   collect: (event: NostrEvent) => void
 ): Promise<{ count: number; oldest: number } | undefined> {
   return new Promise(resolve => {
@@ -358,17 +358,25 @@ function fetchPage(
       clearTimeout(timer)
       resolve(ok ? { count, oldest } : undefined)
     }
-    // No alreadyHaveEvent: an event another relay sent first still counts for
-    // this one's page, or a page of only those reads as this relay running
-    // out, and what it has further down is never asked for.
     const sub = relay.subscribe([filter], {
       label: "napp-sync",
       eoseTimeout: MAX_WAIT + 1000,
+      // an event another relay sent first still counts for this one's page, or
+      // a page of only those reads as this relay running out, and what it has
+      // further down is never asked for. the id commits to created_at, so the
+      // one we kept is this event's too, without parsing or verifying it again
+      alreadyHaveEvent(id) {
+        const createdAt = seen.get(id)
+        if (createdAt === undefined) return false
+        count++
+        if (createdAt < oldest) oldest = createdAt
+        return true
+      },
       onevent: event => {
         count++
         if (event.created_at < oldest) oldest = event.created_at
         if (seen.has(event.id)) return
-        seen.add(event.id)
+        seen.set(event.id, event.created_at)
         collect(event)
       },
       oneose: () => {
