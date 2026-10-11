@@ -4676,8 +4676,19 @@ async function startOutboxSubscription(nappId: string, instanceId: string, param
   // tracked before the relay lists load, so a close in the meantime counts
   trackFeedRequest(instanceId, callbackId, { controller })
 
+  // Every author's relay list, loaded together first: outboxFilterRelayBatch
+  // awaits them one after another, which made each its own store read and,
+  // for a list not stored, its own relay round, one after the other. Together
+  // it is one of each, and the batch below finds them all loaded.
+  const started = performance.now()
+  const secs = () => ((performance.now() - started) / 1000).toFixed(1)
+  await Promise.all(authors.map(pk => loadRelayList(pk).catch(() => null)))
+  if (signal.aborted) return
   const maps = await outboxFilterRelayBatch(authors, base, { fallbackRelays: FALLBACK_RELAYS })
   if (signal.aborted) return
+  console.info(
+    `[outbox] ${label}: relay lists for ${authors.length} authors in ${secs()}s, asking ${new Set(maps.map(m => m.url)).size} relays`
+  )
 
   const seen = new Set<string>()
   let stored: NostrEvent[] | null = []
@@ -4685,6 +4696,7 @@ async function startOutboxSubscription(nappId: string, instanceId: string, param
     if (!stored) return
     const events = stored
     stored = null
+    console.info(`[outbox] ${label}: relays answered at ${secs()}s, ${events.length} events`)
     deliver({ type: "eose", events })
   }
   pool.subscribeMap(maps, {
