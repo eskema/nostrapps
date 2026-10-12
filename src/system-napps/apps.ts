@@ -19,10 +19,17 @@ import { getDevHandle } from "../sandbox/host.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { installedIconSources, nappletIconSrc, resolveCardIcon } from "../nsite/icon.js"
 import { detailField, renderAppCard, type AppCardOpts } from "./card.js"
+import { appFeedback } from "./app-feedback.js"
 import { dispatchAction } from "../handlers.js"
 import { currentSigner } from "../signers/index.js"
 import { SubCloser } from "@nostr/tools/abstract-pool"
-import { NAPP_RELAYS, NSITE_NAMED_KIND, NAPP_NAMED_KIND, WASM_NAMED_KIND } from "../nsite/fetch.js"
+import {
+  NAPP_RELAYS,
+  NSITE_NAMED_KIND,
+  NAPP_NAMED_KIND,
+  WASM_NAMED_KIND,
+  blobServers
+} from "../nsite/fetch.js"
 import {
   NAPPLET_NAMED_KIND,
   declaredDomains,
@@ -156,8 +163,10 @@ export function mount(
   // inset:0) instead of replacing the list — closing it just hides the overlay,
   // so the list underneath keeps its scroll position and built state. Structure:
   // images (if any) → the list-item card (rebuilt, non-clickable, actions live)
-  // → remaining info → files <details>.
+  // → remaining info → files <details> → reactions and comments.
+  let feedbackAbort: AbortController | null = null
   function closeDetail() {
+    feedbackAbort?.abort()
     detailOverlay.hidden = true
     detailOverlay.replaceChildren()
     appsPanel.classList.remove("has-overlay")
@@ -200,8 +209,23 @@ export function mount(
     }
     detailOverlay.appendChild(card)
     detailOverlay.appendChild(detailInfo(req, nappRelays.get(req.nappId), ctx, updateRelayCounts))
+    // files and feedback stack as the kit's disclosures do, without the
+    // overlay's grid gap between them
+    const folds = document.createElement("div")
     const files = detailFiles(req.event, ctx)
-    if (files) detailOverlay.appendChild(files)
+    if (files) folds.appendChild(files)
+    feedbackAbort?.abort()
+    feedbackAbort = new AbortController()
+    const feedback =
+      req.event &&
+      appFeedback(
+        req.event,
+        ctx,
+        [...(nappRelays.get(req.nappId)?.keys() || [])],
+        feedbackAbort.signal
+      )
+    if (feedback) folds.appendChild(feedback)
+    if (folds.childElementCount) detailOverlay.appendChild(folds)
     // The card lives in the overlay (not the list), so load its icon here too.
     loadCardIcons(detailOverlay, [
       { nappId: req.nappId, evt: req.event, app: ctx.apps.get(req.nappId) }
@@ -1303,6 +1327,7 @@ export function mount(
   return {
     unmount() {
       unsub()
+      feedbackAbort?.abort()
       for (const url of [...subs.keys()]) closeRelaySub(url)
     }
   }
@@ -1733,8 +1758,9 @@ function detailInfo(
       )
     }
 
+    // a web page only: the tag is the publisher's, whatever they wrote
     const source = event.tags.find((t: any) => t[0] === "source")?.[1]
-    if (source) {
+    if (source && /^https?:\/\//i.test(source)) {
       btns.appendChild(
         button({
           label: "view source",
@@ -1843,12 +1869,24 @@ function detailInfo(
   return section
 }
 
+// The files a manifest names: its path tags, or a napplet's one html (its x).
+function manifestFiles(event: any | null): { path: string; sha: string }[] {
+  if (!event) return []
+  if (isNappletKind(event.kind)) {
+    const sha = event.tags.find((t: any) => t[0] === "x" && t[1])?.[1]
+    return sha ? [{ path: "/index.html", sha }] : []
+  }
+  return event.tags
+    .filter((t: any) => t[0] === "path" && t[1] && t[2])
+    .map((t: any) => ({ path: t[1], sha: t[2] }))
+}
+
 // Files <details> whose list is fetched (blossom round-trip) only on first
-// expand; null when the manifest has no path tags.
+// expand; null when the manifest names no files.
 function detailFiles(event: any | null, ctx?: SystemCtx): HTMLElement | null {
-  const pathTags = (event?.tags || []).filter((t: any) => t[0] === "path" && t[1] && t[2])
-  if (!pathTags.length) return null
-  const block = details({ summary: `files (${pathTags.length})` })
+  const files = manifestFiles(event)
+  if (!files.length) return null
+  const block = details({ summary: `files (${files.length})` })
   const list = document.createElement("ul")
   list.className = "apps-detail-files"
   block.appendChild(list)
@@ -1856,18 +1894,21 @@ function detailFiles(event: any | null, ctx?: SystemCtx): HTMLElement | null {
   block.addEventListener("toggle", () => {
     if (!block.open || loaded) return
     loaded = true
-    renderFiles(event, list, ctx)
+    renderFiles(event, files, list, ctx)
   })
   return block
 }
 
-async function renderFiles(evt: any, list: HTMLElement, ctx?: SystemCtx) {
-  const pathTags = evt.tags.filter((t: any) => t[0] === "path" && t[1] && t[2])
-  const serverTagUrls = evt.tags.filter((t: any) => t[0] === "server" && t[1]).map((t: any) => t[1])
-  const blossomServers = (
-    await loadBlossomServers(evt.pubkey).catch(() => ({ items: [] as string[] }))
-  ).items
-  const servers = [...new Set([...serverTagUrls, ...blossomServers])].map(normalizeServer)
+async function renderFiles(
+  evt: any,
+  files: { path: string; sha: string }[],
+  list: HTMLElement,
+  ctx?: SystemCtx
+) {
+  // Where fetching looks: ours first, then the author's and the manifest's.
+  const servers = (
+    await blobServers(evt, evt.pubkey).catch(() => [...DEFAULT_BLOSSOM_SERVERS])
+  ).map(normalizeServer)
   const host = (u: string) => {
     try {
       return new URL(u).host
@@ -1877,10 +1918,9 @@ async function renderFiles(evt: any, list: HTMLElement, ctx?: SystemCtx) {
   }
 
   const lisBySha = new Map<string, HTMLElement[]>()
-  for (const t of pathTags as string[][]) {
-    const sha = t[2]
+  for (const { path, sha } of files) {
     const li = document.createElement("li")
-    li.appendChild(code(t[1]))
+    li.appendChild(code(path))
 
     // The per-file links are folded behind a "links" button: clicking it builds
     // the blossom links for this file and swaps itself out for them.

@@ -34,6 +34,16 @@ export function normalizeServer(s: string): string {
   return u.startsWith("http") ? u : `https://${u}`
 }
 
+// How long ago, in a few words: a recent row, a comment.
+export function ago(at: number): string {
+  const s = Math.max(0, (Date.now() - at) / 1000)
+  if (s < 60) return "just now"
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)} d ago`
+  return new Date(at).toLocaleDateString()
+}
+
 // Window instance ids are the serial from the sandbox host — "1", "2", … —
 // system windows are prefixed with "system:". Only
 // the serial tells two windows of one app apart; the others are an app's name
