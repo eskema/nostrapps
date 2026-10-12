@@ -28,6 +28,9 @@ const RETRY_AFTER = 5 * 60_000 // ms, when the monitors didn't answer at all
 const BATCH = 25
 const QUERY_CAP = 500
 const BATCH_DELAY = 3000 // ms
+// batches asked at once: the monitors refuse more concurrent requests than a
+// few ("too many concurrent REQs"), and a follows list names hundreds of relays
+const MONITOR_PARALLEL = 2
 
 export type RelayStatus = "online" | "offline" | "unknown"
 
@@ -146,13 +149,29 @@ async function ask(urls: string[]): Promise<void> {
   }
 }
 
+let asking = 0
+const waiting: (() => void)[] = []
+
+async function withMonitorSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (asking >= MONITOR_PARALLEL) await new Promise<void>(r => waiting.push(r))
+  else asking++
+  try {
+    return await fn()
+  } finally {
+    // the slot passes straight to the next batch waiting, or is freed
+    const next = waiting.shift()
+    if (next) next()
+    else asking--
+  }
+}
+
 function flush() {
   timer = null
   const urls = [...queue]
   queue.clear()
   for (let i = 0; i < urls.length; i += BATCH) {
     const batch = urls.slice(i, i + BATCH)
-    const p = ask(batch)
+    const p = withMonitorSlot(() => ask(batch))
       .catch(err => console.warn("[relay-health] asking the monitors failed", err))
       .finally(() => {
         for (const u of batch) if (inflight.get(u) === p) inflight.delete(u)
