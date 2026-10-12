@@ -4823,6 +4823,23 @@ function mergeQueryResults(lists: NostrEvent[][], filters: Filter[]): NostrEvent
   return merged.slice(0, cap)
 }
 
+// Lookups from napps arrive one message at a time, and the gadgets loaders
+// close a batch on the next timer tick, which falls between messages: a
+// feed's few hundred lookups went out as dozens of small batches, each with
+// its own requests to the same relays. Held a moment and let go together,
+// whatever arrived meanwhile is one batch: one request per relay.
+const LOOKUP_WINDOW_MS = 100
+const BATCHED_LOOKUP = /^napp\.load(?!Events?$|RelayInfo$)/
+let lookupGate: Promise<void> | null = null
+function lookupWindow(): Promise<void> {
+  return (lookupGate ??= new Promise(resolve =>
+    window.setTimeout(() => {
+      lookupGate = null
+      resolve()
+    }, LOOKUP_WINDOW_MS)
+  ))
+}
+
 async function dispatch(
   signer: Signer,
   method: string,
@@ -4830,6 +4847,7 @@ async function dispatch(
   callerNappId: string,
   instanceId?: string
 ) {
+  if (BATCHED_LOOKUP.test(method)) await lookupWindow()
   switch (method) {
     case "getPublicKey":
       return signer.getPublicKey()
