@@ -87,6 +87,15 @@
   // hook further down doesn't echo it back to the launcher.
   let fromHost = false
 
+  // Give the initial entry an index too, so popstate can compare it with
+  // entries pushed later.
+  const popstateIdx = "__action_popstate_idx"
+  if (typeof history.state?.[popstateIdx] !== "number") {
+    const state = history.state && typeof history.state === "object" ? history.state : {}
+    history.replaceState({ ...state, [popstateIdx]: 0 }, "")
+  }
+  let popstateLastIdx = history.state[popstateIdx]
+
   window.addEventListener("message", event => {
     const data = event.data
     if (!data) return
@@ -141,7 +150,13 @@
         }
 
         // regardless of whether we have a callback registered or not, always call popstate
-        const state = { action: { name: data.name, payload: data.payload } }
+        const state = {
+          [popstateIdx]:
+            (typeof history.state?.[popstateIdx] === "number"
+              ? history.state[popstateIdx]
+              : 0) + 1,
+          action: { name: data.name, payload: data.payload }
+        }
         fromHost = true
         try {
           history.pushState(state, "", location.href)
@@ -201,12 +216,30 @@
   for (const method of ["pushState", "replaceState"]) {
     const original = history[method].bind(history)
     history[method] = function (state, ...rest) {
+      if (state === null || typeof state === "object") {
+        const idx =
+          typeof history.state?.[popstateIdx] === "number" ? history.state[popstateIdx] : 0
+        state = {
+          ...(state || {}),
+          [popstateIdx]: method === "pushState" ? idx + 1 : idx
+        }
+      }
       const result = original(state, ...rest)
+      if (typeof state?.[popstateIdx] === "number") popstateLastIdx = state[popstateIdx]
       reportActionState(state)
       return result
     }
   }
-  window.addEventListener("popstate", e => reportActionState(e.state))
+  window.addEventListener("popstate", e => {
+    reportActionState(e.state)
+    const idx = e.state?.[popstateIdx]
+    if (typeof idx === "number") {
+      // Keep the previous value visible throughout synchronous napp popstate handlers.
+      queueMicrotask(() => {
+        popstateLastIdx = idx
+      })
+    }
+  })
 
   const nostrShim = {
     getPublicKey: () => rpc("getPublicKey"),
@@ -583,6 +616,9 @@
 
   const napp = {
     instance: window.name,
+    get __popstate_last_idx() {
+      return popstateLastIdx
+    },
     action: (name, payload, options) =>
       rpc("napp.action", { name, payload, options, pointer: __pointer }),
     registerAction(pattern, fn) {

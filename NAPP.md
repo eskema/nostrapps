@@ -281,11 +281,16 @@ The app can also receive action state through `popstate`:
 
 ```js
 addEventListener("popstate", event => {
+  const wentBack =
+    event.state?.__action_popstate_idx < window.napp.__popstate_last_idx
   const action = event.state?.action
-  if (action) render(action.name, action.payload)
+  if (action) render(action.name, action.payload, wentBack ? "back" : "forward")
 })
 history.pushState({ action: { name: "profile", payload: pubkey } }, "")
 ```
+
+The bridge adds `__action_popstate_idx` to object history states. During each
+`popstate` handler, `window.napp.__popstate_last_idx` holds previous index.
 
 ## Permissions
 

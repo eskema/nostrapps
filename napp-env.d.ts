@@ -374,6 +374,7 @@ type Ui = {
 }
 type Napp = {
   instance: string
+  readonly __popstate_last_idx: number
   registerAction(
     pattern: string,
     handler?: (name: string, payload: unknown) => Promise<unknown>
