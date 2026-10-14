@@ -343,6 +343,13 @@ function showOne<T>(opts: DialogOptions<T>): Promise<T> {
     // rest go inert without blurring it first.
     el.show()
     inertOthers(el)
+    // Enter takes the primary action: focus on what a caller marked autofocus,
+    // else the card's primary button, from `actions` or built by the caller.
+    // No scroll: a card can bring its own part into view.
+    const initial =
+      card.querySelector<HTMLElement>("[autofocus]") ??
+      card.querySelector<HTMLElement>(".btn-primary")
+    initial?.focus({ preventScroll: true })
     document.addEventListener("keydown", onKey)
     if ("CloseWatcher" in window) {
       watcher = new CloseWatcher()
