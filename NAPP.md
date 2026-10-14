@@ -136,6 +136,7 @@ window.napp.utils.loadRelayInfo(url)
 window.napp.utils.subscribe(relays, filter, opts?) // a plain REQ to exactly these relays; returns the closer
 window.napp.utils.searchUserLocal(term)
 window.napp.utils.searchUser(term)
+window.napp.utils.findAuthors(term, { limit, remote, nip05 }) // ranked, follows first: what pickers list
 window.napp.utils.loadEvent(code, relays?, author?) // code: nip19/URI/hex, or a decoded pointer (nevent/naddr)
 window.napp.utils.loadEvents(ids)
 window.napp.utils.verifyEvent(event)
@@ -179,6 +180,7 @@ window.napp.ui.icons // the glyphs, by name; add your own
 window.napp.ui.appIcon({ src, size, fade }) // .img
 window.napp.ui.author(pubkey, { picture, petname, follows, prefix, link, onClick })
 window.napp.ui.authors // .set(pubkey, user), .viewer(kind3), .name(pubkey), .follows(pubkey)
+window.napp.ui.authorPicker(textOrField, { trigger, onPick, limit, remote, nip05 }) // "@" mentions or a who field, local unless asked; .close(), .detach()
 window.napp.ui.badge(text, { tone })
 window.napp.ui.empty(text)
 window.napp.ui.notice(text, { tone })

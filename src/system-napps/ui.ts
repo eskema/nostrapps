@@ -909,6 +909,14 @@ export interface AuthorsConfig {
   npub?: (pubkey: string) => string
   /** What a click on an author does: open the profile. */
   open?: (pubkey: string) => void
+  /** Who an authorPicker lists for a term: rows of { pubkey, follows, …a kind
+   *  0's content }, best first; remote: relay search may fill up the rest.
+   *  nip05: names resolved and each row's nip-05 checked. Napps get the
+   *  launcher's findAuthors. */
+  search?: (
+    term: string,
+    opts: { limit?: number; remote?: boolean; nip05?: boolean }
+  ) => Promise<unknown[]>
 }
 
 interface AuthorInfo {
@@ -1104,6 +1112,353 @@ export function author(pubkey: string, opts: AuthorOpts = {}): HTMLElement {
   authorPaint(a)
   authorAsk(pubkey)
   return a
+}
+
+// ─── author picker ────────────────────────────────────────────────
+// People to pick from as one types, the same in every napp. Attached to a
+// text box with a trigger ("@"), the trigger after a space or at a line's
+// start opens a list at it and what follows filters it; attached to a field
+// without one, the field's value is the query (a pasted npub, nprofile, hex
+// or nip-05 is that one person). The focus stays in the text: ↑/↓ move, Enter
+// or Tab picks, Esc shuts it until the word is left. What a pick puts in the
+// text is onPick's to say. The list is a top-layer popover, so no container
+// clips it. Its rows come from authors.use({ search }): known profiles only,
+// unless the build asks for relay search (remote) or nip-05 checks (nip05) —
+// then a second pass, once typing pauses, brings what those add.
+
+export interface PickedAuthor {
+  pubkey: string
+  name?: string
+  display_name?: string
+  picture?: string
+  nip05?: string
+  follows?: boolean
+}
+
+export interface AuthorPickerOpts {
+  /** Text box mode: a word starting with this opens the list. Without it,
+   *  field mode: the whole value is the query. */
+  trigger?: string
+  /** A pick. Text box mode: what replaces the trigger and the query;
+   *  field mode: the field's new value. Nothing returned: left as typed. */
+  onPick: (author: PickedAuthor) => string | void
+  /** Rows at most, 8 by default. */
+  limit?: number
+  /** Relay search fills up a list the known profiles don't. Off by default. */
+  remote?: boolean
+  /** A typed name@domain resolves to its person, and a row's nip-05 shows
+   *  only once it's checked to point back at them. Off by default: the
+   *  nip-05 a profile claims shows as it is. */
+  nip05?: boolean
+  class?: string
+}
+
+export interface AuthorPicker {
+  close(): void
+  /** Takes the listeners and the list away. */
+  detach(): void
+}
+
+let pickerSerial = 0
+
+const CARET_STYLE = [
+  "boxSizing",
+  "width",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "borderTopWidth",
+  "borderRightWidth",
+  "borderBottomWidth",
+  "borderLeftWidth",
+  "borderStyle",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "fontStyle",
+  "fontVariant",
+  "fontStretch",
+  "lineHeight",
+  "letterSpacing",
+  "wordSpacing",
+  "textTransform",
+  "textIndent",
+  "tabSize"
+] as const
+
+// Where a character of a text box sits on screen: a hidden copy of the box
+// with the text up to it, and a marker there.
+function caretPoint(field: HTMLTextAreaElement | HTMLInputElement, index: number) {
+  const cs = getComputedStyle(field)
+  const copy = document.createElement("div")
+  const style = copy.style as unknown as Record<string, string>
+  for (const prop of CARET_STYLE) style[prop] = cs[prop]
+  Object.assign(copy.style, {
+    position: "absolute",
+    visibility: "hidden",
+    top: "0",
+    left: "-9999px",
+    height: "auto",
+    overflow: "hidden",
+    whiteSpace: field instanceof HTMLTextAreaElement ? "pre-wrap" : "pre",
+    overflowWrap: "break-word"
+  })
+  copy.textContent = field.value.slice(0, index)
+  const mark = document.createElement("span")
+  mark.textContent = field.value.slice(index).split(/\s/)[0] || "."
+  copy.append(mark)
+  document.body.append(copy)
+  const box = field.getBoundingClientRect()
+  const top = box.top + mark.offsetTop - field.scrollTop
+  const left = box.left + mark.offsetLeft - field.scrollLeft
+  const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2
+  copy.remove()
+  return { left, top, bottom: top + line }
+}
+
+export function authorPicker(
+  target: HTMLTextAreaElement | HTMLInputElement,
+  opts: AuthorPickerOpts
+): AuthorPicker {
+  const limit = Math.max(1, opts.limit ?? 8)
+  const trigger = opts.trigger || ""
+  const remote = opts.remote === true
+  const nip05 = opts.nip05 === true
+  const list = el("div", `ui-author-picker${opts.class ? ` ${opts.class}` : ""}`)
+  list.id = `ui-author-picker-${pickerSerial++}`
+  list.setAttribute("role", "listbox")
+  const layered = typeof list.showPopover === "function"
+  if (layered) list.popover = "manual"
+  list.hidden = !layered
+  let rows: PickedAuthor[] = []
+  let active = 0
+  let query: { start: number; end: number; text: string } | null = null
+  let ask = 0 // the current question; an answer to an older one is dropped
+  let settled = 0 // the question whose second pass has answered
+  let localTimer = 0
+  let remoteTimer = 0
+  let shut = -1 // Esc: the trigger at this position stays shut while it's being typed
+  let quiet = false // our own input event, after a pick
+
+  const isOpen = () => (layered ? list.matches(":popover-open") : !list.hidden)
+  const show = () => {
+    if (!list.isConnected) document.body.append(list)
+    if (layered && !isOpen()) list.showPopover()
+    if (!layered) list.hidden = false
+    place()
+  }
+  const close = () => {
+    ask++
+    clearTimeout(localTimer)
+    clearTimeout(remoteTimer)
+    query = null
+    rows = []
+    if (isOpen()) {
+      if (layered) list.hidePopover()
+      else list.hidden = true
+    }
+    target.removeAttribute("aria-activedescendant")
+  }
+
+  function currentQuery() {
+    const value = target.value
+    const caret = target.selectionStart ?? value.length
+    if (target.selectionEnd !== caret) return null
+    if (!trigger) return { start: 0, end: value.length, text: value.trim() }
+    const before = value.slice(0, caret)
+    const at = before.lastIndexOf(trigger)
+    if (at < 0 || (at > 0 && !/\s/.test(before[at - 1]))) return null
+    const text = before.slice(at + trigger.length)
+    if (/\s/.test(text) || text.length > 64) return null
+    return { start: at, end: caret, text }
+  }
+
+  function refresh() {
+    if (quiet) return
+    const q = currentQuery()
+    if (!q) shut = -1
+    if (!q || q.start === shut || document.activeElement !== target) return close()
+    // Nothing is looked up before a character follows the trigger: the list
+    // opens at it with just that said (a field waits for its first character).
+    if (!q.text) {
+      close()
+      if (!trigger) return
+      query = q
+      list.replaceChildren(empty("type to search"))
+      show()
+      return
+    }
+    query = q
+    const n = ++ask
+    clearTimeout(localTimer)
+    clearTimeout(remoteTimer)
+    localTimer = window.setTimeout(() => lookup(q.text, false, n), 60)
+    if (remote || nip05) remoteTimer = window.setTimeout(() => lookup(q.text, true, n), 450)
+  }
+
+  // First pass: known profiles. Second (when asked for): what relay search
+  // and nip-05 checks add, replacing the first's rows.
+  async function lookup(text: string, second: boolean, n: number) {
+    const search = authorsConfig.search
+    if (!search) return
+    // nothing for a second pass to add: a full list, and no nip-05s to check
+    if (second && !nip05 && rows.length >= limit) return
+    let found: unknown[] = []
+    try {
+      found = await search(text, second ? { limit, remote, nip05 } : { limit })
+    } catch {}
+    if (n !== ask || (!second && settled === n)) return
+    if (second) settled = n
+    const picked = rows[active]?.pubkey
+    rows = (Array.isArray(found) ? found : [])
+      .filter(
+        (r): r is PickedAuthor =>
+          !!r &&
+          typeof (r as PickedAuthor).pubkey === "string" &&
+          /^[0-9a-f]{64}$/.test((r as PickedAuthor).pubkey)
+      )
+      .slice(0, limit)
+    // unchecked nip-05s wait for the second pass
+    if (nip05 && !second) rows = rows.map(r => ({ ...r, nip05: "" }))
+    for (const r of rows) authors.set(r.pubkey, r)
+    active = Math.max(
+      0,
+      rows.findIndex(r => r.pubkey === picked)
+    )
+    if (rows.length) render()
+    else if (second || !(remote || nip05)) {
+      list.replaceChildren(empty("no one found"))
+      show()
+    }
+  }
+
+  function render() {
+    list.replaceChildren(
+      ...rows.map((r, i) => {
+        const row = el("div", "ui-author-pick", author(r.pubkey, { picture: "s", link: false }))
+        row.id = `${list.id}-${i}`
+        row.setAttribute("role", "option")
+        if (r.nip05) row.append(code(r.nip05, "ui-author-pick-nip05"))
+        if (r.follows) {
+          const mark = el("span", "ui-author-follows", icon("check"))
+          mark.title = "you follow them"
+          row.append(mark)
+        }
+        // mousedown, not click: the text keeps its focus and its caret
+        row.addEventListener("mousedown", e => {
+          e.preventDefault()
+          pick(i)
+        })
+        row.addEventListener("mousemove", () => {
+          if (active !== i) setActive(i)
+        })
+        return row
+      })
+    )
+    setActive(active)
+    show()
+  }
+
+  function setActive(i: number) {
+    active = i
+    list.querySelectorAll(".ui-author-pick").forEach((row, j) => {
+      row.classList.toggle("active", j === i)
+      row.setAttribute("aria-selected", String(j === i))
+      if (j === i) {
+        row.scrollIntoView({ block: "nearest" })
+        target.setAttribute("aria-activedescendant", row.id)
+      }
+    })
+  }
+
+  function pick(i: number) {
+    const r = rows[i]
+    const q = query
+    close()
+    if (!r || !q) return
+    const out = opts.onPick(r)
+    if (typeof out !== "string") return
+    if (trigger) target.setRangeText(out, q.start, q.end, "end")
+    else target.value = out
+    quiet = true
+    target.dispatchEvent(new Event("input", { bubbles: true }))
+    quiet = false
+  }
+
+  // Under the trigger (text box mode) or the field, above it when the room
+  // below runs out, and never past the window's edges.
+  function place() {
+    const box = target.getBoundingClientRect()
+    let left = box.left
+    let below = box.bottom
+    let above = box.top
+    if (trigger && query) {
+      const at = caretPoint(target, query.start)
+      left = at.left
+      below = at.bottom
+      above = at.top
+    }
+    const w = list.offsetWidth
+    const h = list.offsetHeight
+    const top = below + h > window.innerHeight - 4 && above - h >= 4 ? above - h : below
+    list.style.left = `${Math.max(4, Math.min(left, window.innerWidth - w - 4))}px`
+    list.style.top = `${Math.max(4, top)}px`
+  }
+
+  function onKey(e: KeyboardEvent) {
+    if (!isOpen() || e.isComposing) return
+    const n = rows.length
+    if (e.key === "Escape") {
+      if (trigger && query) shut = query.start
+      close()
+    } else if (!n) {
+      return
+    } else if (e.key === "ArrowDown") setActive((active + 1) % n)
+    else if (e.key === "ArrowUp") setActive((active - 1 + n) % n)
+    else if ((e.key === "Enter" || e.key === "Tab") && !e.metaKey && !e.ctrlKey && !e.altKey)
+      pick(active)
+    else return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+  }
+
+  const onScroll = () => {
+    if (isOpen()) place()
+  }
+  const onBlur = () => close()
+  // the caret moved without typing: in or out of a trigger's word
+  const onKeyUp = (e: KeyboardEvent) => {
+    if (/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) refresh()
+  }
+  // the listeners on the element as such: the field union types events loosely
+  const node: HTMLElement = target
+  node.addEventListener("input", refresh)
+  node.addEventListener("keyup", onKeyUp)
+  node.addEventListener("click", refresh)
+  node.addEventListener("focus", refresh)
+  node.addEventListener("keydown", onKey, true)
+  node.addEventListener("blur", onBlur)
+  node.addEventListener("scroll", onScroll)
+  window.addEventListener("resize", onScroll)
+  target.setAttribute("aria-controls", list.id)
+
+  return {
+    close,
+    detach() {
+      close()
+      node.removeEventListener("input", refresh)
+      node.removeEventListener("keyup", onKeyUp)
+      node.removeEventListener("click", refresh)
+      node.removeEventListener("focus", refresh)
+      node.removeEventListener("keydown", onKey, true)
+      node.removeEventListener("blur", onBlur)
+      node.removeEventListener("scroll", onScroll)
+      window.removeEventListener("resize", onScroll)
+      target.removeAttribute("aria-controls")
+      list.remove()
+    }
+  }
 }
 
 // ─── sticky ───────────────────────────────────────────────────────

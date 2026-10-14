@@ -62,11 +62,16 @@ if (src && new URL(src).pathname.endsWith("/napp-ui.js")) {
 `
 
 // author() finds its profiles, npubs and the profile action through the
-// bridge, looked up when used: the bridge may land after this script.
+// bridge, and authorPicker() its people, looked up when used: the bridge may
+// land after this script (an old one has no findAuthors: no one to list).
 const AUTHORS = `__nappUi.authors.use({
   load: pubkey => window.napp.utils.loadNostrUser(pubkey),
   npub: pubkey => window.napp.nip19.npubEncode(pubkey),
-  open: pubkey => void window.napp.action?.("profile", pubkey)?.catch(() => {})
+  open: pubkey => void window.napp.action?.("profile", pubkey)?.catch(() => {}),
+  search: (term, opts) =>
+    window.napp.utils.findAuthors
+      ? window.napp.utils.findAuthors(term, opts)
+      : Promise.resolve([])
 })
 `
 

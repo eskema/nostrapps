@@ -67,6 +67,7 @@ import {
 import { loadEmojiSets, loadFollowSets, loadRelaySets } from "@nostr/gadgets/sets"
 import { outboxFilterRelayBatch } from "@nostr/gadgets/outbox"
 import {
+  findAuthors,
   loadNostrUserIndexed as loadNostrUser,
   searchUser,
   searchUserLocal
@@ -5025,6 +5026,12 @@ async function dispatch(
       return searchUserLocal(typeof params === "string" ? params : String(params?.term ?? ""))
     case "napp.searchUser":
       return searchUser(typeof params === "string" ? params : String(params?.term ?? ""))
+    case "napp.findAuthors":
+      return findAuthors(String(params?.term ?? ""), {
+        limit: params?.limit,
+        remote: params?.remote === true,
+        nip05: params?.nip05 === true
+      })
     case "napp.saveFile":
       return saveFileForNapp(params)
     case "napp.copyText":

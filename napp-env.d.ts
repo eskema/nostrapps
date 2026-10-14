@@ -125,6 +125,14 @@ type Utils = {
   loadNostrUser(request: string | { pubkey: string; relays?: string[] }): Promise<unknown>
   searchUserLocal(term: string): Promise<unknown[]>
   searchUser(term: string): Promise<unknown[]>
+  // what an author picker lists: an identifier's one person (npub, nprofile,
+  // hex), else known profiles, follows first. remote: relay search fills up the
+  // rest; nip05: a name@domain resolves, and each row's nip-05 is checked (one
+  // that doesn't point back comes blank). "" lists the follows; muted never
+  findAuthors(
+    term: string,
+    opts?: { limit?: number; remote?: boolean; nip05?: boolean }
+  ): Promise<FoundAuthor[]>
   loadEvent(
     code: string | EventPointer | AddressPointer,
     relays?: string[],
@@ -144,6 +152,14 @@ type Utils = {
     event: NostrEvent,
     relays?: string[]
   ): Promise<{ published: number; failed: number; relays: Record<string, unknown> }>
+}
+type FoundAuthor = {
+  pubkey: string
+  name: string
+  display_name: string
+  picture: string
+  nip05: string
+  follows: boolean
 }
 // The kit, with `requires: ["ui"]`: the launcher's controls as elements wearing
 // its classes. Appearance is the class's; layout (width, margins, placement)
@@ -246,6 +262,11 @@ type Ui = {
       load?: ((pubkey: string) => Promise<unknown>) | null
       npub?: (pubkey: string) => string
       open?: (pubkey: string) => void
+      // who authorPicker lists for a term; napps get utils.findAuthors
+      search?: (
+        term: string,
+        opts: { limit?: number; remote?: boolean; nip05?: boolean }
+      ) => Promise<unknown[]>
     }): void
     // a profile in hand (what loadNostrUser gives, or a kind 0's content): repaints its authors
     set(pubkey: string, user: unknown): void
@@ -255,6 +276,24 @@ type Ui = {
     name(pubkey: string): string
     follows(pubkey: string): boolean
   }
+  // people to pick as one types. With a trigger ("@"), a text box: the trigger
+  // after a space or at a line's start opens a list at it, what follows filters
+  // it, and onPick's string replaces both. Without, a who field: the value is
+  // the query (an npub, nprofile, hex or nip-05 is that one person) and onPick's
+  // string becomes the value. ↑/↓, Enter/Tab, Esc; the focus stays in the text.
+  // Known profiles only by default; remote adds relay search, nip05 resolves a
+  // name@domain and shows a row's nip-05 only once it's checked
+  authorPicker(
+    target: HTMLTextAreaElement | HTMLInputElement,
+    opts: {
+      trigger?: string
+      onPick: (author: Partial<FoundAuthor> & { pubkey: string }) => string | void
+      limit?: number
+      remote?: boolean
+      nip05?: boolean
+      class?: string
+    }
+  ): { close(): void; detach(): void }
   // a short label in small sans capitals, dimmed; a tone colors it
   badge(
     text: string,

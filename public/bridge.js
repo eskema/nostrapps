@@ -721,6 +721,10 @@
       searchUserLocal: term => rpc("napp.searchUserLocal", term),
       // Remote NIP-50 search for kind:0 on the user's search relays.
       searchUser: term => rpc("napp.searchUser", term),
+      // What an author picker lists: an identifier's one person, else known
+      // profiles ranked (follows first), relay search filling up when
+      // { remote: true }; follows for "". Muted people left out.
+      findAuthors: (term, opts) => rpc("napp.findAuthors", { term, ...(opts || {}) }),
       // ── event fetching ────────────────────────────
       // code: nip19 code / `nostr:` URI / bare hex id, or a decoded pointer
       // ({id,…} for nevent, {identifier,pubkey,kind,…} for naddr)

@@ -490,6 +490,60 @@ a.ui-author:hover > .ui-author-name {
   display: inline-grid;
 }
 
+/* ─── Author picker ───────────────────────────────────────────────
+   The list authorPicker() opens at a text's @ or under a who field: author
+   rows, the active one lit, the nip-05 dimmed after the name and a check for
+   someone followed. A top-layer popover placed at the caret (the UA's
+   popover inset and margin undone), the launcher's dropdown look.
+     <div class="ui-author-picker" popover>
+       <div class="ui-author-pick active">
+         <span class="ui-author">…</span><code class="ui-code ui-author-pick-nip05">…</code>
+       </div>
+     </div> */
+.ui-author-picker {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 200000;
+  box-sizing: border-box;
+  min-width: 14rem;
+  max-width: min(24rem, calc(100vw - 8px));
+  max-height: min(18rem, 50vh);
+  overflow-y: auto;
+  padding: var(--space-xxs) 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--surface) 95%, currentColor 2%);
+  color: var(--text);
+  box-shadow: var(--shadow-dropdown);
+  font-size: var(--text-s);
+}
+.ui-author-picker > .ui-empty {
+  padding: var(--space-xs) var(--space-s);
+}
+.ui-author-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  padding: var(--space-xs) var(--space-s);
+  cursor: pointer;
+}
+.ui-author-pick.active {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.ui-author-pick > .ui-author {
+  flex: 0 1 auto;
+}
+.ui-author-pick-nip05 {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: var(--dim-m);
+}
+
 /* ─── Disclosure ──────────────────────────────────────────────────
    A collapsible <details>: bold dimmed summary, a +/– at its end, a rule
    below. details() in ui.ts builds it, the summary and then the content.
