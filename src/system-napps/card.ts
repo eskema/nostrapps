@@ -1,5 +1,5 @@
 import type { AppType } from "../types.js"
-import { appIcon, author, badge, ring } from "./ui.js"
+import { appIcon, author, badge, button, ring } from "./ui.js"
 
 // ─── Unified app card ────────────────────────────────────────────
 // The one card shape the app shows for a napp: the Apps window renders it in
@@ -25,8 +25,10 @@ export interface AppCardOpts {
   // `requires` domains this launcher can't provide, named on the card badge.
   unsupported?: string[]
   search: string
+  // The main action (install, launch, update), at most two.
   buttons: HTMLElement[]
-  menuTrigger?: HTMLElement | null
+  // Everything else, folded under ···.
+  menu?: HTMLElement[]
   onAuthorClick?: () => void
   onOpen?: () => void // clicking the card (away from buttons/author) opens full info
 }
@@ -125,7 +127,7 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
   const actions = document.createElement("div")
   actions.className = "apps-actions"
   for (const b of o.buttons) actions.appendChild(b)
-  if (o.menuTrigger) actions.appendChild(o.menuTrigger)
+  if (o.menu?.length) actions.appendChild(cardMenu(card, o.menu))
   card.appendChild(actions)
 
   if (o.temporary) {
@@ -144,6 +146,62 @@ export function renderAppCard(o: AppCardOpts): HTMLElement {
   }
 
   return card
+}
+
+let menuSerial = 0
+
+// The ··· trigger and its menu: a popover, so it renders in the top layer
+// (never clipped or mis-stacked under the card), light-dismisses on outside
+// click / Esc for free, and sits right under its trigger. It lives in the card
+// so it goes with it.
+function cardMenu(card: HTMLElement, items: HTMLElement[]): HTMLButtonElement {
+  const menu = document.createElement("div")
+  menu.className = "apps-card-menu"
+  menu.popover = "auto"
+  menu.append(...items)
+  // An item closes the menu before it runs, so what it asks shows on its own.
+  menu.addEventListener(
+    "click",
+    e => {
+      if ((e.target as Element).closest("button")) menu.hidePopover()
+    },
+    true
+  )
+  menu.addEventListener("click", e => e.stopPropagation()) // don't open app-info
+  // Anything scrolling closes it, as a native menu does.
+  let scrollOff: AbortController | null = null
+  menu.addEventListener("toggle", ev => {
+    scrollOff?.abort()
+    scrollOff = null
+    if ((ev as ToggleEvent).newState !== "open") return
+    scrollOff = new AbortController()
+    document.addEventListener(
+      "scroll",
+      () => {
+        if (menu.matches(":popover-open")) menu.hidePopover()
+      },
+      { capture: true, passive: true, once: true, signal: scrollOff.signal }
+    )
+  })
+  card.appendChild(menu)
+
+  const trigger = button({ label: "···", variant: "ghost", class: "apps-card-menu-trigger" })
+  trigger.popoverTargetElement = menu
+  // Anchored to the trigger (launcher.css). An engine without anchor
+  // positioning places it under the trigger as it opens.
+  if (CSS.supports("anchor-name: --a")) {
+    const name = `--apps-card-menu-${++menuSerial}`
+    trigger.style.setProperty("anchor-name", name)
+    menu.style.setProperty("position-anchor", name)
+  } else {
+    menu.addEventListener("beforetoggle", ev => {
+      if ((ev as ToggleEvent).newState !== "open") return
+      const r = trigger.getBoundingClientRect()
+      menu.style.top = `${Math.round(r.bottom + 4)}px`
+      menu.style.right = `${Math.round(Math.max(8, window.innerWidth - r.right))}px`
+    })
+  }
+  return trigger
 }
 
 // ─── app metadata fields ─────────────────────────────────────────

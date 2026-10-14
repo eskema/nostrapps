@@ -2543,34 +2543,35 @@ body.popover-open .napp-body iframe {
   color: color-mix(in srgb, currentColor 70%, transparent);
 }
 
-/* Popover (top layer). The UA gives it position:fixed + inset:0 + margin:auto
-   (centred); reset that so the JS-set top/right anchor it under the trigger.
-   The single action fills the popover as a solid (primary-look) danger button. */
+/* Popover (top layer, card.ts cardMenu). The UA gives it position:fixed +
+   inset:0 + margin:auto (centred); reset that so the JS-set top/right anchor it
+   under the trigger. Its buttons stack full width, each the kit's own. */
 .apps-card-menu {
   margin: 0;
   inset: auto;
-  padding: 0;
+  padding: var(--space-s);
   border: none;
-  border-radius: var(--radius-m);
-  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  color: inherit;
   box-shadow: var(--shadow-menu);
 }
 
-.apps-card-menu .btn {
-  width: 100%;
-  border-radius: 0;
+.apps-card-menu:popover-open {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 9rem;
 }
 
-.apps-card-menu .btn-danger {
-  background: var(--danger);
-  color: white;
-  border-color: var(--danger);
-}
-
-.apps-card-menu .btn-danger:hover:not(:disabled) {
-  background: var(--danger);
-  color: white;
-  opacity: 0.85;
+/* Under its trigger and right-aligned to it; above it when there's no room
+   below. */
+@supports (anchor-name: --a) {
+  .apps-card-menu {
+    top: anchor(bottom);
+    right: anchor(right);
+    margin-top: 4px;
+    position-try-fallbacks: flip-block;
+  }
 }
 
 /* ─── action-handler picker (body content inside .app-dialog) ─────── */

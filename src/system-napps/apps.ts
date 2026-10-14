@@ -277,7 +277,7 @@ export function mount(
   // The card's danger button: asks (when there's a warning to put), then
   // closes the app's windows and erases what the launcher keeps of it. `busy`
   // is the verb while it runs.
-  function deleteButton(app: any, label: string, busy: string, warning?: string): HTMLElement {
+  function uninstallButton(app: any, label: string, busy: string, warning?: string): HTMLElement {
     const del = button({ label, variant: "danger" })
     del.addEventListener("click", async () => {
       if (warning) {
@@ -309,12 +309,13 @@ export function mount(
     return del
   }
 
-  function installedButtons(app: any): HTMLElement[] {
+  // The card's main action, and the rest for its ··· menu.
+  function installedButtons(app: any): { buttons: HTMLElement[]; menu: HTMLElement[] } {
     if (app.nappId.startsWith("dev~")) {
       // Its files are the developer's, on disk or at a URL: removing it only
       // drops what the launcher made of them, and a reload drops that anyway —
       // so no asking.
-      return [
+      const menu = [
         button({
           label: "publish",
           variant: "outline",
@@ -324,8 +325,9 @@ export function mount(
               persistent: false
             })
         }),
-        deleteButton(app, "remove", "removing")
+        uninstallButton(app, "remove", "removing")
       ]
+      return { buttons: [], menu }
     }
     if (app.nappId.startsWith("temp~") || app.temporary) {
       // A temporary app (a share link's, or one opened from the input): kept
@@ -351,7 +353,7 @@ export function mount(
           }, 3000)
         }
       })
-      return [keep]
+      return { buttons: [keep], menu: [] }
     }
     const perms = button({ label: "permissions", variant: "outline" })
     perms.addEventListener("click", () => {
@@ -368,12 +370,13 @@ export function mount(
             })
         })
       : null
-    const del = deleteButton(
+    const del = uninstallButton(
       app,
-      "delete",
-      "deleting",
-      `Delete ${app.petname || app.title || app.nappId}?\n\nThis closes every open window of this app and erases all of its data — files, settings, permissions, and any storage it created. This cannot be undone.`
+      "uninstall",
+      "uninstalling",
+      `Uninstall ${app.petname || app.title || app.nappId}?\n\nThis closes every open window of this app and erases all of its data — files, settings, permissions, and any storage it created. This cannot be undone.`
     )
+    const launch = launchButton(ctx, app.nappId)
     // Local napplet (loaded via /folder): its index.html is stored in the
     // record. The flavor was the user's choice at load time, so tell the
     // uploader explicitly instead of having it re-guess from the html.
@@ -396,9 +399,9 @@ export function mount(
             persistent: false
           })
       })
-      return cfg ? [pub, cfg, perms, del] : [pub, perms, del]
+      return { buttons: [launch], menu: cfg ? [pub, cfg, perms, del] : [pub, perms, del] }
     }
-    return cfg ? [cfg, perms, del] : [perms, del]
+    return { buttons: [launch], menu: cfg ? [cfg, perms, del] : [perms, del] }
   }
 
   // The newest discovered manifest strictly newer than the one we installed, or
@@ -490,9 +493,8 @@ export function mount(
       actions: app.actions
     })
     const upd = latestUpdateFor(app)
-    const buttons = upd
-      ? [makeInstalledUpdateBtn(app, upd), ...installedButtons(app)]
-      : installedButtons(app)
+    const { buttons, menu } = installedButtons(app)
+    if (upd) buttons.unshift(makeInstalledUpdateBtn(app, upd))
     const description =
       (app.event && manifestDescription(app.event)) ||
       app.event?.tags.find((t: any) => t[0] === "summary")?.[1] ||
@@ -517,6 +519,7 @@ export function mount(
       ),
       search,
       buttons,
+      menu,
       onAuthorClick: author
         ? () => dispatchAction("apps", "profile", author).catch(() => {})
         : undefined
@@ -696,7 +699,7 @@ export function mount(
       unsupported: unsupportedRequires(requiredDomains(event)),
       search: "",
       buttons: [button({ label: "keep", variant: "primary" })],
-      menuTrigger: button({ label: "···", variant: "ghost", class: "apps-card-menu-trigger" })
+      menu: [button({ label: "request delete", variant: "danger" })]
     })
     return renderAppCard({
       ...opts(),
@@ -1333,6 +1336,26 @@ export function mount(
   }
 }
 
+// An installed app's window, opened as the launcher input would open it.
+function launchButton(ctx: SystemCtx, nappId: string): HTMLButtonElement {
+  const b = button({ label: "launch", variant: "primary" })
+  b.addEventListener("click", async () => {
+    const app = ctx.apps.get(nappId)
+    b.disabled = true
+    b.textContent = "launching…"
+    try {
+      await ctx.launchNapp(nappId, app?.petname || app?.title)
+    } catch (err: any) {
+      ctx.setStatus?.(
+        `Apps: couldn't launch ${app?.petname || app?.title || nappId}: ${err?.message || String(err)}`
+      )
+    }
+    b.disabled = false
+    b.textContent = "launch"
+  })
+  return b
+}
+
 // ─── Discover card rendering ─────────────────────────────────────
 
 function renderCard(
@@ -1358,19 +1381,11 @@ function renderCard(
 
   const currentUser = ctx.account?.getPubkey()
   const isOwn = currentUser && evt.pubkey === currentUser
-  // Own-app menu (request delete). Built as a popover so it renders in the top
-  // layer (never clipped or mis-stacked under the card), light-dismisses on
-  // outside-click / Esc for free, and is anchored right under its trigger.
-  let menuEl: HTMLDivElement | null = null
-  let menuTrigger: HTMLButtonElement | null = null
+  // Own app: request delete, under ···.
+  const menu: HTMLElement[] = []
   if (isOwn) {
-    menuEl = document.createElement("div")
-    menuEl.className = "apps-card-menu"
-    menuEl.popover = "auto"
-    menuEl.addEventListener("click", e => e.stopPropagation()) // don't open app-info
     const delBtn = button({ label: "request delete", variant: "danger" })
     delBtn.addEventListener("click", async () => {
-      menuEl?.hidePopover()
       ctx.setStatus?.("Requesting deletion of app event…")
       try {
         const signer = currentSigner()
@@ -1399,17 +1414,7 @@ function renderCard(
         ctx.setStatus?.(`Deletion failed — ${err.message}`)
       }
     })
-    menuEl.appendChild(delBtn)
-
-    menuTrigger = button({ label: "···", variant: "ghost", class: "apps-card-menu-trigger" })
-    menuTrigger.popoverTargetElement = menuEl
-    // Place it under the trigger (right-aligned) just before it opens.
-    menuEl.addEventListener("beforetoggle", (ev: Event) => {
-      if ((ev as ToggleEvent).newState !== "open" || !menuTrigger) return
-      const r = menuTrigger.getBoundingClientRect()
-      menuEl!.style.top = `${Math.round(r.bottom + 4)}px`
-      menuEl!.style.right = `${Math.round(Math.max(8, window.innerWidth - r.right))}px`
-    })
+    menu.push(delBtn)
   }
 
   const performAction = async (btn: HTMLButtonElement, action: string) => {
@@ -1431,7 +1436,7 @@ function renderCard(
         // NOTE: an "uninstall" action used to live here, calling ctx.uninstall(nappId)
         // with no confirm. It was never wired to any button (makeActionBtn is only
         // ever called with "update"/"install"), so it's commented out to avoid an
-        // unconfirmed wipe path. The confirmed Installed-tab `delete` button is the
+        // unconfirmed wipe path. The confirmed Installed-tab `uninstall` button is the
         // sole entry point for wiping an app.
         // } else if (action === "uninstall") {
         //   await ctx.uninstall(nappId)
@@ -1473,21 +1478,10 @@ function renderCard(
     return b
   }
 
-  const makeDisabledBtn = (label: string) => {
-    const b = button({ label, variant: "outline", disabled: true })
-    b.setAttribute("aria-disabled", "true")
-    return b
-  }
-
   const buttons: HTMLElement[] = []
-  // An update says installed already: it stands alone.
-  if (updateAvailable) {
-    buttons.push(makeActionBtn("update", "warning"))
-  } else if (installed) {
-    buttons.push(makeDisabledBtn("installed"))
-  } else {
-    buttons.push(makeActionBtn("install", "primary"))
-  }
+  if (updateAvailable) buttons.push(makeActionBtn("update", "warning"))
+  if (installed) buttons.push(launchButton(ctx, nappId))
+  else buttons.push(makeActionBtn("install", "primary"))
 
   card = renderAppCard({
     nappId,
@@ -1501,7 +1495,7 @@ function renderCard(
     unsupported: unsupportedRequires(requiredDomains(evt)),
     search: searchHaystack(evt),
     buttons,
-    menuTrigger,
+    menu,
     onAuthorClick: () => {
       dispatchAction("apps", "profile", evt.pubkey).catch(() => {})
     },
@@ -1516,10 +1510,6 @@ function renderCard(
           })
       : undefined
   })
-
-  // The menu popover lives in the card so it's removed with it; top-layer
-  // rendering means its DOM position doesn't affect where it shows.
-  if (menuEl) card.appendChild(menuEl)
 
   // Ties the card back to its napp address so applyFilter can hide it when
   // every relay it was seen on is disabled, and so a newer version's card
