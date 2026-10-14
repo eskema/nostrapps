@@ -209,8 +209,7 @@ export function mount(
     }
     detailOverlay.appendChild(card)
     detailOverlay.appendChild(detailInfo(req, nappRelays.get(req.nappId), ctx, updateRelayCounts))
-    // files and feedback stack as the kit's disclosures do, without the
-    // overlay's grid gap between them
+    // feedback right under files, without the overlay's grid gap between them
     const folds = document.createElement("div")
     const files = detailFiles(req.event, ctx)
     if (files) folds.appendChild(files)
@@ -218,12 +217,7 @@ export function mount(
     feedbackAbort = new AbortController()
     const feedback =
       req.event &&
-      appFeedback(
-        req.event,
-        ctx,
-        [...(nappRelays.get(req.nappId)?.keys() || [])],
-        feedbackAbort.signal
-      )
+      appFeedback(req.event, [...(nappRelays.get(req.nappId)?.keys() || [])], feedbackAbort.signal)
     if (feedback) folds.appendChild(feedback)
     if (folds.childElementCount) detailOverlay.appendChild(folds)
     // The card lives in the overlay (not the list), so load its icon here too.

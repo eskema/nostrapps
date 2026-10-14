@@ -2386,62 +2386,40 @@ body.popover-open .napp-body iframe {
   gap: var(--space-xs);
 }
 
-/* Reactions and comments on the app, under files (app-feedback.ts): the
-   filter, a chip per emoji and who used the picked one, then the comments,
-   newest thread first, its replies one level in. */
-.apps-feedback {
+/* Reactions and comments on the app, under files (app-feedback.ts): a row
+   each, the author and what they said in a line, a comment's replies one
+   level in. */
+.apps-feedback,
+.apps-feedback-replies {
   display: grid;
-  gap: var(--space-m);
+  gap: var(--space-s);
+}
+
+.apps-feedback[hidden],
+.apps-feedback-replies:empty {
+  display: none;
+}
+
+.apps-feedback-row {
+  display: grid;
+  gap: var(--space-s);
+  min-width: 0;
+}
+
+.apps-feedback-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.apps-feedback-replies {
+  padding-left: var(--space-l);
+  border-left: 1px solid var(--rule);
 }
 
 .apps-reaction-emoji {
   height: 1.2em;
   width: auto;
   vertical-align: middle;
-}
-
-.apps-comments {
-  display: grid;
-  gap: var(--space-l);
-}
-
-.apps-comment {
-  display: grid;
-  gap: var(--space-xs);
-  min-width: 0;
-}
-
-.apps-comment[hidden] {
-  display: none;
-}
-
-.apps-comment-head {
-  display: grid;
-  grid-auto-flow: column;
-  justify-content: start;
-  align-items: baseline;
-  gap: var(--space-s);
-}
-
-.apps-comment-when {
-  opacity: var(--dim-m);
-}
-
-.apps-comment-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.apps-comment-replies {
-  display: grid;
-  gap: var(--space-m);
-  margin-top: var(--space-s);
-  padding-left: var(--space-l);
-  border-left: 1px solid var(--rule);
-}
-
-.apps-comment-replies:not(:has(> .apps-comment:not([hidden]))) {
-  display: none;
 }
 
 /* ─── store toolbar / search / relays config ────────────────── */

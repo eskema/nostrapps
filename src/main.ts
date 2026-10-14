@@ -79,7 +79,7 @@ import {
   type ShareLink
 } from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
-import { ago, formatPayload, isInstanceSerial } from "./utils.js"
+import { formatPayload, isInstanceSerial } from "./utils.js"
 import {
   fetchNsite,
   manifestRelays,
@@ -1236,6 +1236,16 @@ function buildSuggestionItems(): SuggestionItem[] {
   }
 
   return out
+}
+
+// How long ago, the way a recent row says it.
+function ago(at: number): string {
+  const s = Math.max(0, (Date.now() - at) / 1000)
+  if (s < 60) return "just now"
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)} d ago`
+  return new Date(at).toLocaleDateString()
 }
 
 // `app` spares the storage read when the caller already holds the record.
