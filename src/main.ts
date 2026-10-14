@@ -270,6 +270,7 @@ function floatNewWithoutRoom(): boolean {
   clearPackNew()
   packModeOn = false
   applyPackMode()
+  scheduleSpacesBar()
   setStatus("Grid full, switched to free mode")
   return true
 }
@@ -292,6 +293,7 @@ function applyPackMode() {
 packToggleBtn?.addEventListener("click", () => {
   packModeOn = !packModeOn
   applyPackMode()
+  scheduleSpacesBar()
 })
 
 applyPackMode()
@@ -1775,6 +1777,7 @@ function persistDomOrder() {
     if (!used.has(s.instanceId)) nextOrder.push(s)
   }
   persist.writeOpen(nextOrder)
+  scheduleSpacesBar()
 }
 
 function makeLaunchOpts() {
@@ -2023,11 +2026,56 @@ function openMoveToSpace(instanceId: string, x: number, y: number) {
   })
 }
 
-// Commit the current windows as this space's saved layout.
+// Commit the current windows as this space's saved layout. The button shows a
+// check for a moment, lit, then dims: nothing left to save.
+let saveFlash = 0
 function saveCurrentSpace() {
   persist.commitSpaceSaved(currentSpaceId)
   setStatus("Space saved")
+  spacesSaveBtn.replaceChildren(icon("check"))
+  spacesSaveBtn.classList.add("just-saved")
+  clearTimeout(saveFlash)
+  saveFlash = window.setTimeout(() => {
+    spacesSaveBtn.replaceChildren(icon("save"))
+    spacesSaveBtn.classList.remove("just-saved")
+  }, 1200)
   renderSpacesBar()
+}
+
+// Whether the space moved on from its saved layout: a window opened, closed,
+// reordered, moved, resized, minimized, pinned or renamed, or the pack mode.
+// Not a focus (the stacking) nor what a napp loaded inside its window. A rect
+// counts as a share of the stage it was placed on, so a viewport resize alone
+// isn't a change.
+function spaceUnsaved(id: string): boolean {
+  const sp = persist.getSpace(id)
+  if (!sp) return false
+  if (sp.packMode !== sp.savedPackMode || sp.open.length !== sp.saved.length) return true
+  const { padL, padT } = getStageBounds(stage)
+  const ident = (w: NappWindowState) =>
+    JSON.stringify([
+      w.nappId,
+      w.petname,
+      w.systemId,
+      w.params,
+      w.status?.minimized,
+      w.status?.pinned
+    ])
+  // Pixels where the stage isn't known (mobile).
+  const rect = (p?: Position) => {
+    if (!p) return []
+    const sw = p.stage?.width
+    const sh = p.stage?.height
+    if (!sw || !sh) return [p.left, p.top, p.width, p.height ?? -1]
+    return [(p.left - padL) / sw, (p.top - padT) / sh, p.width / sw, (p.height ?? -sh) / sh]
+  }
+  return sp.open.some((w, i) => {
+    const s = sp.saved[i]
+    if (ident(w) !== ident(s)) return true
+    const a = rect(w.position)
+    const b = rect(s.position)
+    return a.length !== b.length || a.some((v, j) => Math.abs(v - b[j]) > 0.002)
+  })
 }
 
 // Revert this space's windows to its last saved layout (loses unsaved changes).
@@ -2187,8 +2235,11 @@ function renderSpacesBar() {
   const ephemeral = !!cur?.ephemeral
   spacesNameEl.textContent = cur?.name || "space"
   spacesNameEl.classList.toggle("ephemeral", ephemeral)
+  // Save lights up and reset shows while there's something to save or revert.
+  const unsaved = !ephemeral && spaceUnsaved(currentSpaceId)
   spacesSaveBtn.hidden = ephemeral
-  spacesResetBtn.hidden = ephemeral
+  spacesSaveBtn.disabled = !unsaved
+  spacesResetBtn.hidden = !unsaved
   spacesKeepBtn.hidden = !ephemeral
   spacesTrashBtn.title = ephemeral ? "Discard this shared space" : "Delete this space"
 

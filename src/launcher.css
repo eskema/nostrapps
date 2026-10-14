@@ -184,6 +184,11 @@ h1 span {
   display: none;
 }
 
+/* Save's check stays lit a moment before it dims (main.ts saveCurrentSpace). */
+.spaces-controls .btn.just-saved:disabled {
+  opacity: 1;
+}
+
 /* While a space tab is pressed or dragged (pointer-based), force the grabbing
    cursor everywhere and stop accidental text selection. Added on pointerdown so
    the cursor responds to the press immediately, before the drag threshold. */

@@ -372,6 +372,11 @@ export function getSpaceOpen(id: string): NappWindowState[] {
   return findSpace(ensureSpaces(), id)?.open ?? []
 }
 
+// The whole record in one read: live and saved side by side.
+export function getSpace(id: string): SpaceData | undefined {
+  return findSpace(ensureSpaces(), id)
+}
+
 export function getSpacePackMode(id: string): boolean {
   return findSpace(ensureSpaces(), id)?.packMode ?? false
 }
