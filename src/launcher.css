@@ -2369,11 +2369,10 @@ body.popover-open .napp-body iframe {
 
 /* Blob availability marks in the files list: amber = some server still has
    the bytes (re-seedable), red = no known server does. */
-.apps-file-missing {
-  color: #f59e0b;
-}
-
-.apps-file-lost {
+/* What the blob probe found (apps.ts renderFiles): a server that answered it
+   hasn't got the file, and a file no server handed over. */
+.apps-detail-files-links a.apps-file-gone,
+.apps-detail-files .apps-file-lost .ui-code {
   color: var(--danger);
 }
 

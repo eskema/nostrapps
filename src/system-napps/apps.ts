@@ -1907,7 +1907,23 @@ async function renderFiles(
     }
   }
 
+  // What each server said about each blob: has it, or answered it hasn't. A
+  // server that didn't answer is in neither.
   const lisBySha = new Map<string, HTMLElement[]>()
+  const have = new Map<string, Set<string>>()
+  const gone = new Map<string, Set<string>>()
+  const asked = new Map<string, number>()
+  // A server that says it hasn't got a file shows red in the file's links; a
+  // file no server has handed over shows its path red.
+  const paint = (sha: string) => {
+    const lost = asked.get(sha) === servers.length && !have.get(sha)!.size
+    for (const li of lisBySha.get(sha) || []) {
+      li.classList.toggle("apps-file-lost", lost)
+      for (const a of li.querySelectorAll<HTMLAnchorElement>("a[data-server]"))
+        a.classList.toggle("apps-file-gone", gone.get(sha)!.has(a.dataset.server!))
+    }
+  }
+
   for (const { path, sha } of files) {
     const li = document.createElement("li")
     li.appendChild(code(path))
@@ -1928,53 +1944,45 @@ async function renderFiles(
         a.target = "_blank"
         a.rel = "noopener noreferrer"
         a.textContent = host(url)
+        a.dataset.server = url
         span.appendChild(a)
       }
       linksBtn.replaceWith(span)
+      paint(sha)
     })
     li.appendChild(linksBtn)
     list.appendChild(li)
     lisBySha.set(sha, [...(lisBySha.get(sha) || []), li])
+    have.set(sha, new Set())
+    gone.set(sha, new Set())
+    asked.set(sha, 0)
   }
 
   if (!servers.length) return
 
   // Availability probe (heal's ranged GET) — a links list that doesn't say
-  // who actually has the bytes is how blobs quietly rot.
+  // who actually has the bytes is how blobs quietly rot. Painted as each answer
+  // lands. A server that doesn't answer once isn't asked the rest: each would
+  // only wait out the same timeout.
   const shas = [...lisBySha.keys()]
-  const have = new Map<string, Set<string>>(shas.map(s => [s, new Set<string>()]))
   await Promise.allSettled(
     servers.map(async server => {
-      for (const sha of shas) if (await hasBytes(server, sha)) have.get(sha)!.add(server)
+      let answering = true
+      for (const sha of shas) {
+        const r = answering ? await hasBytes(server, sha) : null
+        if (r) have.get(sha)!.add(server)
+        else if (r === false) gone.get(sha)!.add(server)
+        else answering = false
+        asked.set(sha, asked.get(sha)! + 1)
+        paint(sha)
+      }
     })
   )
 
-  // "missing on: …" (amber, recoverable) vs "missing everywhere" (red — no
-  // known server holds the bytes). Re-rendered after a re-seed run.
-  const marks: HTMLElement[] = []
-  const refreshMarks = () => {
-    for (const m of marks.splice(0)) m.remove()
-    for (const [sha, lis] of lisBySha) {
-      const got = have.get(sha)!
-      const missingOn = servers.filter(s => !got.has(s))
-      if (!missingOn.length) continue
-      for (const li of lis) {
-        const mark = document.createElement("span")
-        mark.className = got.size ? "apps-file-missing" : "apps-file-lost"
-        mark.textContent = got.size
-          ? ` — missing on: ${missingOn.map(host).join(", ")}`
-          : " — missing everywhere"
-        li.appendChild(mark)
-        marks.push(mark)
-      }
-    }
-  }
-  refreshMarks()
-
-  // Blobs missing somewhere but present elsewhere — re-seedable.
+  // Blobs a server answered it hasn't got, while another has them: re-seedable.
   const seedable = () => {
     let n = 0
-    for (const got of have.values()) if (got.size) n += servers.length - got.size
+    for (const [sha, got] of have) if (got.size) n += gone.get(sha)!.size
     return n
   }
 
@@ -1996,9 +2004,8 @@ async function renderFiles(
     b.textContent = "re-seeding…"
     let failed = 0
     for (const [sha, got] of have) {
-      if (!got.size) continue
-      const missingOn = servers.filter(s => !got.has(s))
-      if (!missingOn.length) continue
+      const missingOn = [...gone.get(sha)!]
+      if (!got.size || !missingOn.length) continue
       let blob: Blob
       const src = [...got][0]
       try {
@@ -2019,13 +2026,14 @@ async function renderFiles(
           try {
             await new BlossomClient(server, signer as any).uploadBlob(blob, blob.type || undefined)
             got.add(server)
+            gone.get(sha)!.delete(server)
           } catch {
             failed++
           }
         })
       )
+      paint(sha)
     }
-    refreshMarks()
     toSeed = seedable()
     if (failed) {
       ctx?.setStatus?.(`Re-seed: ${failed} upload${failed === 1 ? "" : "s"} refused`)
