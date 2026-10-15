@@ -451,7 +451,7 @@ export function createNappWindow({
   }
 
   function setIframe(src: string, sandboxVal?: string) {
-    body.innerHTML = ""
+    body.replaceChildren()
     const newIframe = document.createElement("iframe")
     newIframe.sandbox = sandboxVal || sandbox
     applyCsp(newIframe)

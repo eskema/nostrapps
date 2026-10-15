@@ -12,40 +12,33 @@ import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
 import { loginControls } from "../login.js"
 import { nappName, nappNameEl } from "../napp-name.js"
-import { author, badge, busy, button, check, code, details, empty, item, itemList } from "./ui.js"
+import { author, badge, busy, button, check, code, details, el, empty, item, itemList } from "./ui.js"
 import { backupSection } from "./backup-section.js"
 import { permissionsSection } from "./permissions-section.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): void } = {}) {
-  container.innerHTML = `
-    <div class="settings-panel">
-      <details class="ui-details sticky settings-user" open>
-        <summary>user</summary>
-        <div class="settings-account">
-          <div class="settings-account-connected" hidden>
-            <span class="settings-pubkey"></span>
-            <span class="ui-badge settings-account-type"></span>
-            <button type="button" class="btn btn-outline settings-disconnect-btn">disconnect</button>
-          </div>
-          <div class="settings-account-disconnected"></div>
-        </div>
-      </details>
-
-      <div class="settings-build-row">
-        <span class="settings-build">build ${APP_VERSION}</span>
-        <button type="button" class="btn btn-danger settings-reset-btn">
-          erase all data
-        </button>
-      </div>
-    </div>
-  `
-
-  const connectedEl = container.querySelector(".settings-account-connected") as HTMLElement
-  const disconnectedEl = container.querySelector(".settings-account-disconnected") as HTMLElement
-  const pubkeyEl = container.querySelector(".settings-pubkey") as HTMLElement
-  const accountTypeEl = container.querySelector(".settings-account-type") as HTMLElement
-  const disconnectBtn = container.querySelector(".settings-disconnect-btn") as HTMLElement
-  const resetBtn = container.querySelector(".settings-reset-btn") as HTMLElement
+  const pubkeyEl = el("span", "settings-pubkey")
+  const accountTypeEl = badge("", { class: "settings-account-type" })
+  const disconnectBtn = button({
+    label: "disconnect",
+    class: "settings-disconnect-btn",
+    onClick: () => ctx.disconnect()
+  })
+  const connectedEl = el("div", "settings-account-connected", pubkeyEl, accountTypeEl, disconnectBtn)
+  connectedEl.hidden = true
+  const disconnectedEl = el("div", "settings-account-disconnected")
+  const resetBtn = button({ label: "erase all data", variant: "danger", class: "settings-reset-btn" })
+  const buildRow = el("div", "settings-build-row", el("span", "settings-build", `build ${APP_VERSION}`), resetBtn)
+  const panel = el(
+    "div",
+    "settings-panel",
+    details(
+      { summary: "user", sticky: true, open: true, class: "settings-user" },
+      el("div", "settings-account", connectedEl, disconnectedEl)
+    ),
+    buildRow
+  )
+  container.replaceChildren(panel)
 
   // The three ways in, from login.ts — the same block the prompt a napp raises
   // is built from. Rebuilt on logout so a stale form doesn't sit there.
@@ -75,8 +68,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     }
   }
 
-  disconnectBtn.addEventListener("click", () => ctx.disconnect())
-
   resetBtn.addEventListener("click", () => {
     const ok = window.confirm(
       "Erase all nostrapps data?\n\n" +
@@ -98,9 +89,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   const unsubAccount = ctx.account.subscribe(renderAccount)
 
   // ─── Permissions + actions (collapsible disclosures) ────────────
-
-  const panel = container.querySelector(".settings-panel") as HTMLElement
-  const buildRow = container.querySelector(".settings-build-row") as HTMLElement
 
   const permissions = permissionsSection({
     napp: nappName,
@@ -142,7 +130,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   }
 
   function renderRelays() {
-    relaysEl.innerHTML = ""
+    relaysEl.replaceChildren()
     const decisions = ctx.relayAuth.decisions()
     relaysSummary.textContent =
       `relays (${decisions.length})` + (ctx.relayAuth.getAuto() ? " · auto" : "")
@@ -186,7 +174,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   }
 
   function renderHandlerPrefs() {
-    handlersEl.innerHTML = ""
+    handlersEl.replaceChildren()
     const snapshot = handlers.snapshotActionMap()
     actionsSummary.textContent = `actions (${snapshot.length})`
     if (snapshot.length === 0) {

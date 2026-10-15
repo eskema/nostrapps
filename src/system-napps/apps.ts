@@ -53,7 +53,9 @@ import {
   check,
   code,
   details,
+  el,
   empty,
+  input,
   list,
   overline,
   tabs,
@@ -135,21 +137,6 @@ export function mount(
   const relayEose = new Set<string>()
   const nappRelays = new Map<string, Map<string, number>>()
 
-  container.innerHTML = `
-    <div class="apps-panel">
-      <div class="apps-tabs"></div>
-      <div class="apps-content">
-        <div class="apps-pane apps-pane-installed"></div>
-        <div class="apps-pane apps-pane-discover" hidden></div>
-      </div>
-      <div class="apps-detail-overlay" hidden></div>
-    </div>
-  `
-
-  const appsPanel = container.querySelector(".apps-panel") as HTMLElement
-  const installedPane = container.querySelector(".apps-pane-installed") as HTMLElement
-  const discoverPane = container.querySelector(".apps-pane-discover") as HTMLElement
-  const detailOverlay = container.querySelector(".apps-detail-overlay") as HTMLElement
   const sections = tabs<"installed" | "discover">({
     segmented: true,
     class: "apps-tabs",
@@ -157,7 +144,19 @@ export function mount(
     active: "installed",
     onChange: tab => switchTab(tab)
   })
-  container.querySelector(".apps-tabs")!.replaceWith(sections)
+  const installedPane = el("div", "apps-pane apps-pane-installed")
+  const discoverPane = el("div", "apps-pane apps-pane-discover")
+  discoverPane.hidden = true
+  const detailOverlay = el("div", "apps-detail-overlay")
+  detailOverlay.hidden = true
+  const appsPanel = el(
+    "div",
+    "apps-panel",
+    sections,
+    el("div", "apps-content", installedPane, discoverPane),
+    detailOverlay
+  )
+  container.replaceChildren(appsPanel)
 
   // Clicking a card lays the app-info detail over the whole panel (absolute,
   // inset:0) instead of replacing the list — closing it just hides the overlay,
@@ -702,17 +701,12 @@ export function mount(
   }
 
   function renderInstalled() {
-    installedPane.innerHTML = `
-      <div class="apps-toolbar">
-        <input class="ui-input apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
-      </div>
-      <div class="apps-list"></div>
-    `
-    const searchEl = installedPane.querySelector(".apps-search") as HTMLInputElement
-    _installedListEl = installedPane.querySelector(".apps-list") as HTMLElement
-    if (MOCK_CARD) installedPane.insertBefore(mockTemporaryCard(), _installedListEl)
+    const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
+    _installedListEl = el("div", "apps-list")
+    installedPane.replaceChildren(el("div", "apps-toolbar", buildTypeSegments(), searchEl))
+    if (MOCK_CARD) installedPane.appendChild(mockTemporaryCard())
+    installedPane.appendChild(_installedListEl)
     installedCards.clear() // a new list element — the old cards went with the old one
-    installedPane.querySelector(".apps-toolbar")?.prepend(buildTypeSegments())
     searchEl.value = installedFilter
     searchEl.addEventListener("input", () => {
       installedFilter = searchEl.value
@@ -1232,17 +1226,10 @@ export function mount(
   }
 
   function renderDiscover() {
-    discoverPane.innerHTML = `
-      <div class="apps-toolbar">
-        <input class="ui-input apps-search" type="search" placeholder="${SEARCH_PLACEHOLDER}" />
-      </div>
-      <div class="apps-list"></div>
-    `
-
-    _listEl = discoverPane.querySelector(".apps-list") as HTMLElement
+    const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
+    _listEl = el("div", "apps-list")
+    discoverPane.replaceChildren(el("div", "apps-toolbar", buildTypeSegments(), searchEl), _listEl)
     discoverCards.clear()
-    const searchEl = discoverPane.querySelector(".apps-search") as HTMLInputElement
-    discoverPane.querySelector(".apps-toolbar")?.prepend(buildTypeSegments())
 
     // System disclosure whose summary doubles as the status line (relays-napp
     // style): "relays (N)" + an overline badge with event count / loading.
