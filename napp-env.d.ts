@@ -120,8 +120,10 @@ type Utils = {
   loadRelaySets(pubkey: string): Promise<unknown>
   loadEmojiSets(pubkey: string): Promise<unknown>
   loadRelayInfo(url: string): Promise<unknown>
-  // A plain REQ to exactly these relays (no outbox logic). Returns the closer.
-  subscribe(relays: string[], filter: object, opts?: SubscribeOpts): () => void
+  // A plain REQ to exactly these relays (no outbox logic), kept open (and
+  // reopened when a connection drops) until the closer it returns is called.
+  // Every event is also saved to the store.
+  subscribe(relays: string[], filter: Filter, opts?: SubscribeOpts): () => void
   loadNostrUser(request: string | { pubkey: string; relays?: string[] }): Promise<unknown>
   searchUserLocal(term: string): Promise<unknown[]>
   searchUser(term: string): Promise<unknown[]>

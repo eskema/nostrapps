@@ -237,6 +237,28 @@ event to `liveEventCallback`, and `closedCallback` if every relay ends it.
 Every event it brings is also saved to the store, where `nostrdb.subscribe`
 sees it.
 
+`window.napp.utils.subscribe(relays, filter, opts)` is for when the napp
+already knows which relays to ask (someone's read relays for their inbox, a
+thread root author's relays, a group's relay): one REQ with one `filter` to
+exactly those `relays`, with no outbox logic, kept open until the closer it
+returns is called. Several filters mean several calls.
+
+```js
+const close = window.napp.utils.subscribe(relays, filter, {
+  label, // subscription id prefix the relays see; defaults to "<author prefix>-<napp d tag>"
+  maxEoseTimeout, // ms to wait for every relay's EOSE; defaults to 20000
+  eoseEventsCallback(events) {}, // once: everything stored, deduplicated, at EOSE (or the timeout)
+  liveEventCallback(event) {}, // once per new event after that
+  closedCallback(reasons) {} // { [relay]: reason } once every relay has ended it on its own
+})
+close() // nothing is delivered after this, and closedCallback is not called
+```
+
+A relay connection that drops after EOSE is reopened for what is new since.
+Every event is also saved to the store, so the napp does not need to
+`nostrdb.add` them, and `nostrdb.subscribe` sees them. For "fetch what is
+stored and stop", call the closer from `eoseEventsCallback`.
+
 `window.napp.log(message)` appends a line to the launcher's logs window,
 prefixed with the napp's id — for reports (a publish and what each relay
 answered, say), not prompts. One printable line of up to 400 characters, at
