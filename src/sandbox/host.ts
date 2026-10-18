@@ -4460,9 +4460,6 @@ function startStoreSub(instanceId: string, callbackId: string, filters: Filter[]
 // EOSE, and after that every live event is handed over on its own. It lives in
 // feedRequests beside the feeds, so it ends with them (napp.unsubscribe, the
 // window closing or reloading).
-//
-// The pool folds a relay's CLOSED into its EOSE and never reconnects, so each
-// relay is driven here directly.
 
 // How long a subscription waits for every relay's EOSE before handing over
 // what it has anyway.
@@ -4508,6 +4505,36 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
     params.maxEoseTimeout > 0 ? Number(params.maxEoseTimeout) : DEFAULT_MAX_EOSE_TIMEOUT
   const callbackId: string = params.callbackId
   const controller = new AbortController()
+  trackFeedRequest(instanceId, callbackId, { controller })
+  streamRelays(
+    nappId,
+    instanceId,
+    callbackId,
+    controller,
+    new Map(relays.map(url => [url, [filter]])),
+    { label, timeout }
+  )
+}
+
+// Each relay's filters, streamed to the napp as subscription messages.
+//
+// The pool folds a relay's CLOSED into its EOSE and never reconnects, so each
+// relay is driven here directly.
+function streamRelays(
+  nappId: string,
+  instanceId: string,
+  callbackId: string,
+  controller: AbortController,
+  requests: Map<string, Filter[]>,
+  opts: {
+    label: string
+    timeout: number
+    // skip the relays in the pool's purgatory, and tell it how connecting went
+    purgatory?: boolean
+    oneose?: (count: number) => void
+  }
+) {
+  const { label, timeout } = opts
   const signal = controller.signal
   const sink = subscriptionSink(instanceId)
   const isOpen = () => feedRequests.get(instanceId)?.get(callbackId)?.controller === controller
@@ -4517,8 +4544,8 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
 
   const seen = new Set<string>()
   let stored: NostrEvent[] | null = []
-  let pending = relays.length // relays that have not sent EOSE (or ended) yet
-  let live = relays.length // relays that have not ended yet
+  let pending = requests.size // relays that have not sent EOSE (or ended) yet
+  let live = requests.size // relays that have not ended yet
   const reasons: Record<string, string> = {}
 
   // everything stored, once: when the last relay sends its EOSE, or when the
@@ -4528,10 +4555,11 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
     const events = stored
     stored = null
     clearTimeout(timer)
+    opts.oneose?.(events.length)
     deliver({ type: "eose", events })
   }
   const timer = setTimeout(eose, timeout)
-  trackFeedRequest(instanceId, callbackId, { controller, cleanup: () => clearTimeout(timer) })
+  signal.addEventListener("abort", () => clearTimeout(timer))
 
   const onevent = (event: NostrEvent) => {
     if (signal.aborted || seen.has(event.id)) return
@@ -4558,9 +4586,14 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
 
   // One relay's REQ, kept open until the napp lets go or the relay ends it. A
   // connection that drops after EOSE is reopened for what is new since.
-  const drive = async (url: string) => {
+  const drive = async (url: string, filters: Filter[]) => {
+    if (opts.purgatory && pool.allowConnectingToRelay?.(url, ["read", filters]) === false) {
+      relayEosed()
+      relayEnded(url, "connection skipped by allowConnectingToRelay")
+      return
+    }
     let eosed = false
-    let since = filter.since
+    let since: number | undefined
     let interval = 3000
     while (!signal.aborted) {
       let relay: AbstractRelay
@@ -4572,6 +4605,7 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
       } catch (err) {
         if (signal.aborted) return
         if (!eosed) {
+          if (opts.purgatory) pool.onRelayConnectionFailure?.(url)
           relayEosed()
           relayEnded(url, "error: " + String((err as any)?.message || err))
           return
@@ -4579,6 +4613,7 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
         await reconnectWait()
         continue
       }
+      if (opts.purgatory) pool.onRelayConnectionSuccess?.(url)
 
       // what ended this REQ: a reason when the relay closed it, null when the
       // connection went away
@@ -4590,7 +4625,8 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
           if (signal.aborted) return resolve(null)
           if (!relay.connected) return resolve(null)
           signal.addEventListener("abort", stop)
-          sub = relay.subscribe([since !== filter.since ? { ...filter, since } : filter], {
+          const asked = since === undefined ? filters : filters.map(f => ({ ...f, since }))
+          sub = relay.subscribe(asked, {
             label,
             eoseTimeout: timeout,
             // one another relay sent first is dropped before it is parsed
@@ -4647,14 +4683,15 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
     }
   }
 
-  for (const url of relays) void drive(url)
+  for (const [url, filters] of requests) void drive(url, filters)
 }
 
 // ─── outbox subscriptions (napp.outbox) ─────────────────────────
 // A filter with authors, sent to each author's write relays as
 // outboxFilterRelayBatch picks them, each relay asked only for its own
-// authors. Speaks the same subscription messages as napp.utils.subscribe and
-// ends the same way (napp.unsubscribe, the window closing or reloading).
+// authors. Streams like napp.utils.subscribe, a dropped relay reopened the
+// same way, and ends the same way (napp.unsubscribe, the window closing or
+// reloading).
 async function startOutboxSubscription(nappId: string, instanceId: string, params: any) {
   const filter: Filter | null = Array.isArray(params?.filter)
     ? null
@@ -4670,11 +4707,6 @@ async function startOutboxSubscription(nappId: string, instanceId: string, param
   const callbackId: string = params.callbackId
   const controller = new AbortController()
   const signal = controller.signal
-  const sink = subscriptionSink(instanceId)
-  const isOpen = () => feedRequests.get(instanceId)?.get(callbackId)?.controller === controller
-  const deliver = (msg: SubscriptionMsg) => {
-    if (isOpen()) sink(callbackId, msg)
-  }
   // tracked before the relay lists load, so a close in the meantime counts
   trackFeedRequest(instanceId, callbackId, { controller })
 
@@ -4688,46 +4720,18 @@ async function startOutboxSubscription(nappId: string, instanceId: string, param
   if (signal.aborted) return
   const maps = await outboxFilterRelayBatch(authors, base, { fallbackRelays: FALLBACK_RELAYS })
   if (signal.aborted) return
+  const requests = new Map<string, Filter[]>()
+  for (const { url, filter } of maps) requests.set(url, [...(requests.get(url) ?? []), filter])
   console.info(
-    `[outbox] ${label}: relay lists for ${authors.length} authors in ${secs()}s, asking ${new Set(maps.map(m => m.url)).size} relays`
+    `[outbox] ${label}: relay lists for ${authors.length} authors in ${secs()}s, asking ${requests.size} relays`
   )
 
-  const seen = new Set<string>()
-  let stored: NostrEvent[] | null = []
-  const eose = () => {
-    if (!stored) return
-    const events = stored
-    stored = null
-    console.info(`[outbox] ${label}: relays answered at ${secs()}s, ${events.length} events`)
-    deliver({ type: "eose", events })
-  }
-  pool.subscribeMap(maps, {
+  streamRelays(nappId, instanceId, callbackId, controller, requests, {
     label,
-    maxWait: timeout,
-    abort: signal,
-    onauth: relayAuthSigner(nappId),
-    onevent(event) {
-      if (signal.aborted || seen.has(event.id)) return
-      seen.add(event.id)
-      if (stored) stored.push(event)
-      else deliver({ type: "event", event })
-      store
-        .saveEvent(event)
-        .then(isNew => (isNew ? applyDeletionLocally(event) : undefined))
-        .catch(() => {})
-    },
-    oneose: eose,
-    onclose(closes: (string | { url: string; reason: string })[]) {
-      if (signal.aborted) return
-      eose()
-      // older nostr-tools hands over bare reasons, in the order of the relays
-      const urls = [...new Set(maps.map(m => m.url))]
-      const reasons = Object.fromEntries(
-        closes.map((c, i) => (typeof c === "string" ? [urls[i], c] : [c.url, c.reason]))
-      )
-      deliver({ type: "closed", reasons })
-      if (isOpen()) finishFeedRequest(instanceId, callbackId)
-    }
+    timeout,
+    purgatory: true,
+    oneose: count =>
+      console.info(`[outbox] ${label}: relays answered at ${secs()}s, ${count} events`)
   })
 }
 
