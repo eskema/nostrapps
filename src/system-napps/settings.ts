@@ -2,10 +2,6 @@ export const id = "settings"
 export const title = "Settings"
 export const slash = "/settings"
 
-// Manual build marker shown in Settings. Bump the integer by hand whenever we
-// want to confirm we're looking at a fresh build; the date is just a note.
-const APP_VERSION = "1 · 2026-06-06"
-
 import type { SystemCtx } from "../types.js"
 import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
@@ -28,7 +24,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   connectedEl.hidden = true
   const disconnectedEl = el("div", "settings-account-disconnected")
   const resetBtn = button({ label: "erase all data", variant: "danger", class: "settings-reset-btn" })
-  const buildRow = el("div", "settings-build-row", el("span", "settings-build", `build ${APP_VERSION}`), resetBtn)
+  const buildRow = el("div", "settings-build-row", buildLine(), resetBtn)
   const panel = el(
     "div",
     "settings-panel",
@@ -221,4 +217,17 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
       backup.unmount()
     }
   }
+}
+
+// What this build was made from, the commit and its date, opening the commit
+// on the repo.
+function buildLine(): HTMLButtonElement {
+  const { id, date, url } = __BUILD__
+  return button({
+    label: `build ${id}${date ? ` · ${date}` : ""}`,
+    variant: "link",
+    class: "settings-build",
+    disabled: !url,
+    onClick: () => window.open(url, "_blank", "noopener,noreferrer")
+  })
 }

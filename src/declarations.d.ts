@@ -7,6 +7,9 @@ interface HTMLElement {
   disabled: boolean
 }
 
+// The commit the build is made from (vite.config.ts buildStamp).
+declare const __BUILD__: { id: string; dirty: boolean; date: string; url: string }
+
 // Esc / back-gesture close requests (dialog.ts). Chrome 120, Firefox 132; not
 // in lib.dom yet.
 interface CloseWatcher extends EventTarget {

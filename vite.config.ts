@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite"
@@ -191,6 +192,47 @@ function fontSlots(): Plugin {
   }
 }
 
+// The commit the build is made from: its short id, whether there were
+// uncommitted changes, its date and its page on the repo. __BUILD__ in the
+// launcher, and a build meta on the page, so curl tells what a server runs.
+function buildStamp(): Plugin {
+  const git = (args: string) => {
+    try {
+      return execSync(`git ${args}`, {
+        cwd: here("."),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"]
+      }).trim()
+    } catch {
+      return ""
+    }
+  }
+  const hash = git("rev-parse HEAD")
+  const repo = git("remote get-url origin")
+    .replace(/^git@([^:]+):/, "https://$1/")
+    .replace(/\.git$/, "")
+  const stamp = {
+    id: hash ? git("rev-parse --short HEAD") : "unknown",
+    dirty: !!hash && git("status --porcelain") !== "",
+    date: hash ? git("log -1 --format=%cs") : "",
+    url: hash && repo.startsWith("https://") ? `${repo}/commit/${hash}` : ""
+  }
+  return {
+    name: "build-stamp",
+    config: () => ({ define: { __BUILD__: JSON.stringify(stamp) } }),
+    transformIndexHtml: () => [
+      {
+        tag: "meta",
+        attrs: {
+          name: "build",
+          content: `${stamp.id}${stamp.dirty ? "-dirty" : ""} ${stamp.date}`.trim()
+        },
+        injectTo: "head"
+      }
+    ]
+  }
+}
+
 // Avatars and icons come from arbitrary nostr events: the build upgrades
 // http:// loads so one stale picture URL can't flag the whole origin as
 // insecure. Not in dev: the server has no TLS, and Safari upgrades localhost
@@ -210,7 +252,7 @@ function upgradeInsecureRequests(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [nappUi(), fontSlots(), upgradeInsecureRequests()],
+  plugins: [nappUi(), fontSlots(), buildStamp(), upgradeInsecureRequests()],
   server: {
     port: 5173,
     strictPort: true,

@@ -154,6 +154,8 @@ import { buildUserIndex, loadNostrUserIndexed } from "./user-search.js"
 import { verifyEvent } from "./verify.js"
 import { destroyStore } from "./store.js"
 
+console.info(`nostrapps build ${__BUILD__.id}${__BUILD__.dirty ? "-dirty" : ""} ${__BUILD__.date}`)
+
 pool.trackRelays = true
 // Relays capture pool.verifyEvent when they connect: set it before any does.
 pool.verifyEvent = verifyEvent

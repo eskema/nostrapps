@@ -2638,7 +2638,6 @@ body.popover-open .napp-body iframe {
   padding-top: var(--space-s);
 }
 
-/* Build stamp — de-emphasized via opacity, not a smaller font. */
 /* Footer row: build stamp on the left, reset button pushed to the right. */
 .settings-build-row {
   display: flex;
@@ -2647,11 +2646,10 @@ body.popover-open .napp-body iframe {
   margin-top: var(--space-xs);
 }
 
+/* The build stamp, a link button: the kit dims it until hover. */
 .settings-build {
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  opacity: 0.5;
-  user-select: text;
+  font-weight: 400;
   margin-right: auto;
 }
 
