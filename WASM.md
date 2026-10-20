@@ -42,8 +42,8 @@ uses.
 
 | name                 | signature                                                      |                                                                            |
 | -------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `napp_canvas_width`  | `() -> i32`                                                    | canvas width, in device pixels                                             |
-| `napp_canvas_height` | `() -> i32`                                                    | canvas height, in device pixels                                            |
+| `napp_canvas_width`  | `() -> i32`                                                    | canvas width, in canvas pixels                                             |
+| `napp_canvas_height` | `() -> i32`                                                    | canvas height, in canvas pixels                                            |
 | `napp_now_ms`        | `() -> f64`                                                    | milliseconds since the window opened                                       |
 | `napp_log`           | `(offset: i32, length: i32) -> ()`                             | write one line to the launcher's log                                       |
 | `napp_call`          | `(method_ptr, method_len, params_ptr, params_len: i32) -> i32` | call the launcher; see [Talking to the launcher](#talking-to-the-launcher) |
@@ -113,7 +113,11 @@ A module may leave `napp_event` out entirely if it only draws.
 - Rows **top-down**, and the stride is exactly `width * 4`: no padding.
 
 That is egui's `Color32` byte for byte, which is where most napp toolkits
-most napp toolkits already live, and it is what a GPU wants to be handed.
+already live, and it is what a GPU wants to be handed.
+
+A canvas pixel is a CSS pixel, not a device pixel. A napp has no idea of
+screen density, so on a 2x screen it would draw everything at half size; the
+launcher scales the canvas up to the screen instead.
 
 The napp owns the pixels and the launcher reads them. That direction is not a
 choice: a launcher cannot hand a wasm module a pointer to memory the module

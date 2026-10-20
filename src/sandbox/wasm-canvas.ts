@@ -185,17 +185,23 @@ export async function startWasmNapp({
       pending.push([kind, x, y, buttons, a, b])
       request()
     }
-    const rect = () => canvas.getBoundingClientRect()
+    // Where the pointer is in canvas pixels, which are what the napp laid out
+    // in, whatever the element measures.
+    const at = (e: MouseEvent): [number, number] => {
+      const r = canvas.getBoundingClientRect()
+      return [
+        Math.round(((e.clientX - r.left) * width) / (r.width || 1)),
+        Math.round(((e.clientY - r.top) * height) / (r.height || 1))
+      ]
+    }
     canvas.addEventListener("pointermove", e => {
-      const r = rect()
-      post(NAPP_EVENT.pointerMove, e.clientX - r.left, e.clientY - r.top, buttonsOf(e), 0, 0)
+      post(NAPP_EVENT.pointerMove, ...at(e), buttonsOf(e), 0, 0)
     })
     canvas.addEventListener("pointerdown", e => {
-      const r = rect()
       // Queued before the capture: setPointerCapture throws for a pointer the
       // browser is not tracking, and losing the press to that would lose the
       // click with it.
-      post(NAPP_EVENT.pointerDown, e.clientX - r.left, e.clientY - r.top, buttonsOf(e), 0, 0)
+      post(NAPP_EVENT.pointerDown, ...at(e), buttonsOf(e), 0, 0)
       // Capture keeps a drag that leaves the canvas coming back to it, which
       // is what a window does with a drag that leaves its frame.
       try {
@@ -203,8 +209,7 @@ export async function startWasmNapp({
       } catch {}
     })
     const up = (e: PointerEvent) => {
-      const r = rect()
-      post(NAPP_EVENT.pointerUp, e.clientX - r.left, e.clientY - r.top, buttonsOf(e), 0, 0)
+      post(NAPP_EVENT.pointerUp, ...at(e), buttonsOf(e), 0, 0)
     }
     canvas.addEventListener("pointerup", up)
     canvas.addEventListener("pointercancel", up)
@@ -212,8 +217,7 @@ export async function startWasmNapp({
       "wheel",
       e => {
         e.preventDefault()
-        const r = rect()
-        post(NAPP_EVENT.scroll, e.clientX - r.left, e.clientY - r.top, 0, -e.deltaX, -e.deltaY)
+        post(NAPP_EVENT.scroll, ...at(e), 0, -e.deltaX, -e.deltaY)
       },
       { passive: false }
     )
@@ -268,9 +272,13 @@ export async function startWasmNapp({
 
     // The element's size is the truth, and it is not the canvas's: a window
     // that is not on screen has no layout, so the last size stands.
+    //
+    // In CSS pixels, not device pixels: a napp has no idea of screen density,
+    // so at a retina screen's real resolution it would draw everything at half
+    // size. The browser scales the canvas up to the screen instead.
     const box = canvas.getBoundingClientRect()
-    const w = Math.max(1, Math.round(box.width * dpr()))
-    const h = Math.max(1, Math.round(box.height * dpr()))
+    const w = Math.max(1, Math.round(box.width))
+    const h = Math.max(1, Math.round(box.height))
     if (w !== width || h !== height) {
       width = w
       height = h
@@ -426,11 +434,6 @@ function modsOf(e: KeyboardEvent): number {
   if (e.altKey) mask |= NAPP_MOD.alt
   if (e.metaKey) mask |= NAPP_MOD.meta
   return mask
-}
-
-/** dpr is how many device pixels a CSS pixel is, which the canvas counts in. */
-function dpr(): number {
-  return Math.min(3, Math.max(1, Math.round(window.devicePixelRatio || 1)))
 }
 
 /** readBytes copies n bytes out of the module's memory, or null if they are not there. */

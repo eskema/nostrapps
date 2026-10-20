@@ -699,8 +699,8 @@ button {
 }
 
 /* A wasm napp's window content: one canvas, sized to the body, painting the
-   whole of it. The backing store is set from the device pixel ratio in
-   wasm-canvas.ts; this is the CSS half, which is what gives it a size to have. */
+   whole of it. The backing store is in CSS pixels, set in wasm-canvas.ts;
+   this is the CSS half, which is what gives it a size to have. */
 .napp-body > canvas.napp-canvas {
   display: block;
   width: 100%;
@@ -709,6 +709,14 @@ button {
      nothing to select. */
   touch-action: none;
   user-select: none;
+}
+
+/* Scaled up a whole number of times, each canvas pixel is a square of screen
+   pixels and stays sharp; smoothing would only blur the text. */
+@media (resolution: 2dppx), (resolution: 3dppx) {
+  .napp-body > canvas.napp-canvas {
+    image-rendering: pixelated;
+  }
 }
 
 /* It takes keys once clicked, and the napp draws its own focus (a caret, a

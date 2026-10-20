@@ -15,9 +15,9 @@ export const NAPP_IMPORT_MODULE = "env"
 
 /** Imports: the host calling into the napp. */
 export const NAPP_IMPORTS = {
-  /** How wide the canvas is, in device pixels. */
+  /** How wide the canvas is, in canvas pixels (CSS pixels here). */
   canvasWidth: "napp_canvas_width",
-  /** How tall the canvas is, in device pixels. */
+  /** How tall the canvas is, in canvas pixels (CSS pixels here). */
   canvasHeight: "napp_canvas_height",
   /** Milliseconds since the window opened. */
   nowMs: "napp_now_ms",
