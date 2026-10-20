@@ -157,6 +157,9 @@ import { destroyStore } from "./store.js"
 pool.trackRelays = true
 // Relays capture pool.verifyEvent when they connect: set it before any does.
 pool.verifyEvent = verifyEvent
+// A socket that died quietly (wifi off, sleep) still reads as open, and its
+// subscriptions wait on it for good. Pinged, it closes and they can reopen.
+pool.enablePing = true
 
 // gadgets' list fetchers (lists.ts) fill their relay set with
 // randomPick(hardcodedRelays), and every loader except kind 3 and 10002 is

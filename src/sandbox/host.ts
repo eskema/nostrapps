@@ -4626,6 +4626,7 @@ function streamRelays(
           if (!relay.connected) return resolve(null)
           signal.addEventListener("abort", stop)
           const asked = since === undefined ? filters : filters.map(f => ({ ...f, since }))
+          const askedAt = Math.floor(Date.now() / 1000)
           sub = relay.subscribe(asked, {
             label,
             eoseTimeout: timeout,
@@ -4634,6 +4635,9 @@ function streamRelays(
             onevent,
             oneose() {
               interval = 3000
+              // what the relay held when this REQ went out is here: a drop,
+              // however late it is noticed, asks again from then
+              since = askedAt
               if (!eosed) {
                 eosed = true
                 relayEosed()
@@ -4664,8 +4668,7 @@ function streamRelays(
         relayEnded(url, ended)
         return
       }
-      // the connection went away: ask again for whatever comes from now on
-      since = Math.floor(Date.now() / 1000)
+      // the connection went away: ask again
       await reconnectWait()
     }
 
@@ -4673,9 +4676,12 @@ function streamRelays(
       await new Promise<void>(resolve => {
         const t = setTimeout(done, interval)
         signal.addEventListener("abort", done)
+        // the network is back: no waiting out the backoff
+        window.addEventListener("online", done)
         function done() {
           clearTimeout(t)
           signal.removeEventListener("abort", done)
+          window.removeEventListener("online", done)
           resolve()
         }
       })
