@@ -280,12 +280,20 @@ function matchesActionPattern(pattern: string, name: string): boolean {
   return false
 }
 
+// An exact registration wins over the "view" wildcard.
 function findRegisteredAction(instanceId: string, name: string) {
+  const list = registeredActions.get(instanceId) || []
   return (
-    (registeredActions.get(instanceId) || []).find(entry =>
-      matchesActionPattern(entry.pattern, name)
-    ) || null
+    list.find(entry => entry.pattern === name) ||
+    list.find(entry => matchesActionPattern(entry.pattern, name)) ||
+    null
   )
+}
+
+// The name a napp gets an action under: the one it listens for, so a napp
+// listening for the raw "view" gets every view:<kind> as "view".
+function deliveredName(pattern: string, name: string): string {
+  return pattern === "view" ? "view" : name
 }
 
 function addRegisteredAction(
@@ -2014,13 +2022,13 @@ export async function callIframe(
       name: actionName
     })
     ;(async () => {
-      const { idx } = await waitForRegisteredAction(instanceId, actionName)
+      const { idx, pattern } = await waitForRegisteredAction(instanceId, actionName)
       win.iframe!.contentWindow?.postMessage(
         {
           __nostrapps: "napp-dispatch-action",
           requestId,
           idx,
-          name: actionName,
+          name: deliveredName(pattern, actionName),
           payload: actionPayload
         },
         origin
@@ -2648,7 +2656,7 @@ function callWasm(instanceId: string, actionName: string, actionPayload: unknown
   return new Promise<unknown>((resolve, reject) => {
     pendingDispatches.set(`${requestId}`, { instanceId, resolve, reject })
     ;(async () => {
-      const { idx } = await waitForRegisteredAction(instanceId, actionName)
+      const { idx, pattern } = await waitForRegisteredAction(instanceId, actionName)
       const napp = wasmNapps.get(instanceId)?.napp
       if (!napp) throw new Error(`No wasm napp running for instance ${instanceId}`)
       // A napp that registered with -1 will not answer: like a web napp with
@@ -2657,7 +2665,11 @@ function callWasm(instanceId: string, actionName: string, actionPayload: unknown
       napp.deliver(
         NAPP_MSG.action,
         answering ? requestId : -1,
-        JSON.stringify({ name: actionName, payload: actionPayload ?? null, idx: idx ?? -1 })
+        JSON.stringify({
+          name: deliveredName(pattern, actionName),
+          payload: actionPayload ?? null,
+          idx: idx ?? -1
+        })
       )
     })().catch(err => {
       pendingDispatches.delete(`${requestId}`)
