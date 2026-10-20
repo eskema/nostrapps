@@ -4,6 +4,8 @@ dist
 *.log
 .claude/
 tsconfig.tsbuildinfo
+# vite's copy of the config while it loads it
+vite.config.ts.timestamp-*
 
 # the wasm harness runs whatever module is dropped next to it
 harness/app.wasm
