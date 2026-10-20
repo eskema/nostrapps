@@ -1552,27 +1552,41 @@ async function nappletRelaySubscribe(
   const filters: any[] = Array.isArray(data?.filters) ? data.filters : []
   const controller = openNappletSub(nappId, instanceId, subId)
   const relays = data?.relay ? [String(data.relay)] : await nappletReadRelays(getPubkey())
-  let eosed = false
   const clean = filters.map(f => sanitizeFilter(f)).filter(Boolean) as any[]
   if (clean.length === 0) {
     post({ type: "relay.eose", subId })
     return
   }
-  for (const filter of clean) {
-    pool.subscribeMany(relays, filter, {
-      label: `napplet-${nappShortName(nappId)}-${subId}`,
-      abort: controller.signal,
-      onevent(event: NostrEvent) {
-        if (controller.signal.aborted) return
-        post({ type: "relay.event", subId, result: { event } })
-      },
-      oneose() {
-        if (!eosed && !controller.signal.aborted) {
-          eosed = true
-          post({ type: "relay.eose", subId })
-        }
-      }
-    })
+  streamRelays(nappId, new Map(relays.map(url => [url, clean])), controller.signal, {
+    label: `napplet-${nappShortName(nappId)}-${subId}`,
+    timeout: NAPPLET_EOSE_TIMEOUT,
+    purgatory: true,
+    send: nappletStreamSend("relay", instanceId, subId, post)
+  })
+}
+
+// How long a napplet's stream waits for every relay's EOSE before relay.eose.
+const NAPPLET_EOSE_TIMEOUT = 5000
+
+// A napplet stream's messages on its wire, relay.* or outbox.* (which has no
+// eose). The closing ends the sub.
+function nappletStreamSend(
+  wire: "relay" | "outbox",
+  instanceId: string,
+  subId: string,
+  post: (msg: object) => void
+) {
+  return (msg: SubscriptionMsg) => {
+    if (msg.type === "event") post({ type: `${wire}.event`, subId, result: { event: msg.event } })
+    else if (msg.type === "eose") {
+      if (wire === "relay") post({ type: "relay.eose", subId })
+    } else {
+      const reason = Object.entries(msg.reasons)
+        .map(([url, why]) => `${url}: ${why}`)
+        .join(", ")
+      post({ type: `${wire}.closed`, subId, reason })
+      nappletSubs.delete(nappletSubKey(instanceId, subId))
+    }
   }
 }
 
@@ -1608,9 +1622,6 @@ async function nappletOutboxSubscribe(
       ...authorsFromFilters(clean)
     ])
   ]
-  const emit = (event: NostrEvent) => {
-    if (!controller.signal.aborted) post({ type: "outbox.event", subId, result: { event } })
-  }
   try {
     const maps = authors.length
       ? await outboxFilterRelayBatch(
@@ -1620,14 +1631,15 @@ async function nappletOutboxSubscribe(
         )
       : []
     if (controller.signal.aborted) return
-    const label = `napplet-outbox-${nappShortName(nappId)}-${subId}`
-    if (maps.length) {
-      pool.subscribeMap(maps, { label, abort: controller.signal, onevent: emit })
-    } else {
-      const relays = [...hints, ...FALLBACK_RELAYS]
-      for (const filter of clean)
-        pool.subscribeMany(relays, filter, { label, abort: controller.signal, onevent: emit })
-    }
+    const requests = new Map<string, Filter[]>()
+    for (const { url, filter } of maps) requests.set(url, [...(requests.get(url) ?? []), filter])
+    if (!maps.length) for (const url of [...hints, ...FALLBACK_RELAYS]) requests.set(url, clean)
+    streamRelays(nappId, requests, controller.signal, {
+      label: `napplet-outbox-${nappShortName(nappId)}-${subId}`,
+      timeout: NAPPLET_EOSE_TIMEOUT,
+      purgatory: true,
+      send: nappletStreamSend("outbox", instanceId, subId, post)
+    })
   } catch (err: any) {
     post({ type: "outbox.closed", subId, reason: err?.message ?? String(err) })
     nappletSubs.delete(key)
@@ -4506,40 +4518,50 @@ function startSubscription(nappId: string, instanceId: string, params: any) {
   const callbackId: string = params.callbackId
   const controller = new AbortController()
   trackFeedRequest(instanceId, callbackId, { controller })
-  streamRelays(
-    nappId,
-    instanceId,
-    callbackId,
-    controller,
-    new Map(relays.map(url => [url, [filter]])),
-    { label, timeout }
-  )
+  streamRelays(nappId, new Map(relays.map(url => [url, [filter]])), controller.signal, {
+    label,
+    timeout,
+    batch: true,
+    save: true,
+    send: nappSubscriptionSend(instanceId, callbackId, controller)
+  })
 }
 
-// Each relay's filters, streamed to the napp as subscription messages.
+// A napp subscription's messages go to its window while it is the one tracked
+// under its callback id, and the closing untracks it.
+function nappSubscriptionSend(instanceId: string, callbackId: string, controller: AbortController) {
+  const sink = subscriptionSink(instanceId)
+  const isOpen = () => feedRequests.get(instanceId)?.get(callbackId)?.controller === controller
+  return (msg: SubscriptionMsg) => {
+    if (!isOpen()) return
+    sink(callbackId, msg)
+    if (msg.type === "closed") finishFeedRequest(instanceId, callbackId)
+  }
+}
+
+// Each relay's filters, streamed through `send` as subscription messages.
 //
 // The pool folds a relay's CLOSED into its EOSE and never reconnects, so each
 // relay is driven here directly.
 function streamRelays(
   nappId: string,
-  instanceId: string,
-  callbackId: string,
-  controller: AbortController,
   requests: Map<string, Filter[]>,
+  signal: AbortSignal,
   opts: {
     label: string
     timeout: number
+    send: (msg: SubscriptionMsg) => void
+    // the stored events held for the eose message, not sent one by one
+    batch?: boolean
+    // what comes saved to the store as it comes
+    save?: boolean
     // skip the relays in the pool's purgatory, and tell it how connecting went
     purgatory?: boolean
-    oneose?: (count: number) => void
   }
 ) {
   const { label, timeout } = opts
-  const signal = controller.signal
-  const sink = subscriptionSink(instanceId)
-  const isOpen = () => feedRequests.get(instanceId)?.get(callbackId)?.controller === controller
   const deliver = (msg: SubscriptionMsg) => {
-    if (isOpen()) sink(callbackId, msg)
+    if (!signal.aborted) opts.send(msg)
   }
 
   const seen = new Set<string>()
@@ -4555,7 +4577,6 @@ function streamRelays(
     const events = stored
     stored = null
     clearTimeout(timer)
-    opts.oneose?.(events.length)
     deliver({ type: "eose", events })
   }
   const timer = setTimeout(eose, timeout)
@@ -4564,8 +4585,9 @@ function streamRelays(
   const onevent = (event: NostrEvent) => {
     if (signal.aborted || seen.has(event.id)) return
     seen.add(event.id)
-    if (stored) stored.push(event)
+    if (stored && opts.batch) stored.push(event)
     else deliver({ type: "event", event })
+    if (!opts.save) return
     store
       .saveEvent(event)
       .then(isNew => (isNew ? applyDeletionLocally(event) : undefined))
@@ -4581,7 +4603,6 @@ function streamRelays(
     // stored events always come before the closing
     eose()
     deliver({ type: "closed", reasons })
-    if (isOpen()) finishFeedRequest(instanceId, callbackId)
   }
 
   // One relay's REQ, kept open until the napp lets go or the relay ends it. A
@@ -4732,12 +4753,20 @@ async function startOutboxSubscription(nappId: string, instanceId: string, param
     `[outbox] ${label}: relay lists for ${authors.length} authors in ${secs()}s, asking ${requests.size} relays`
   )
 
-  streamRelays(nappId, instanceId, callbackId, controller, requests, {
+  const send = nappSubscriptionSend(instanceId, callbackId, controller)
+  streamRelays(nappId, requests, signal, {
     label,
     timeout,
+    batch: true,
+    save: true,
     purgatory: true,
-    oneose: count =>
-      console.info(`[outbox] ${label}: relays answered at ${secs()}s, ${count} events`)
+    send: msg => {
+      if (msg.type === "eose")
+        console.info(
+          `[outbox] ${label}: relays answered at ${secs()}s, ${msg.events.length} events`
+        )
+      send(msg)
+    }
   })
 }
 
