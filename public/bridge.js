@@ -762,6 +762,13 @@
       copyText: text => rpc("napp.copyText", { text }),
       // ── publishing ──────────────────────────────
       publish: (event, relays) => rpc("napp.publish", { event, relays })
+    },
+    // ── dev, with `requires: ["dev"]` ────────────────
+    dev: {
+      // Install (or replace) a local app from files: [{ path, data, type? }],
+      // data a Blob, ArrayBuffer, typed array or string, metadata.json among
+      // them. Resolves to { nappId }, or null if the user cancelled.
+      installLocal: files => rpc("napp.dev.installLocal", { files })
     }
   }
 

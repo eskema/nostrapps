@@ -48,7 +48,9 @@ import {
   syncStageBottomSpacer,
   getStageBounds,
   readNappFiles,
-  setNappLogSink
+  setNappLogSink,
+  setLocalInstaller,
+  findOpenWindowByNappId
 } from "./sandbox/host.js"
 import {
   appIcon,
@@ -102,6 +104,7 @@ import {
 } from "./nsite/napplet.js"
 import {
   collectLocalFolder,
+  collectLocalFiles,
   isWasmDevUrl,
   isWasmDirHandle,
   isWasmListing,
@@ -430,6 +433,11 @@ setLoginStatusSink(setStatus)
 // log, prefixed with the source.
 setNappLogSink((source, msg) =>
   pushLog(source, `[${source === "launcher" ? source : nappNameText(source)}] ${msg}`)
+)
+// napp.dev.installLocal: a napp granted `dev` hands over an app's files, and
+// they install the way a picked folder does.
+setLocalInstaller(async files =>
+  installLocalApp(await collectLocalFiles(files, "local", setStatus))
 )
 
 // The kit's author(): profiles through the loader that feeds the search
@@ -3140,138 +3148,7 @@ localFolderInput.addEventListener("change", async (e: Event) => {
   if (!inputFiles || inputFiles.length === 0) return
   console.debug("[launch] local folder selected", { fileCount: inputFiles.length })
   try {
-    const { nappId, files, metadata, skipped, single } = await collectLocalFolder(
-      inputFiles!,
-      setStatus
-    )
-    console.debug("[launch] local folder collected", {
-      nappId,
-      fileCount: files.length,
-      skipped,
-      metadata
-    })
-
-    // A lone index.html: declaring `requires` (or a napplet meta) makes it a
-    // napplet outright — only a file declaring nothing is ambiguous, and then
-    // the permission screen asks. A previous load's choice is remembered
-    // (napplet~ record with html, or a plain local~ one).
-    if (single) {
-      const nappletId = `napplet~${nappId}`
-      const label = metadata.title || metadata.id
-      const impliedNapplet = single.napplet || (metadata.requires?.length ?? 0) > 0
-      let type: string
-      if (persist.getInstalledApp(nappletId)?.html) type = "napplet"
-      else if (persist.getInstalledApp(nappId)) type = "nsite"
-      else if (impliedNapplet) {
-        const granted = await resolvePolicyForLaunch(nappletId, {
-          title: label,
-          icon: directIconSrc(metadata.icon),
-          iconBlob: iconBlobFrom(metadata.icon, files),
-          type: "napplet",
-          declaredDomains: metadata.requires || [],
-          optionalDomains: metadata.optional || []
-        })
-        if (!granted) {
-          setStatus("Cancelled")
-          return
-        }
-        type = "napplet"
-      } else {
-        const granted = await promptNappPolicy({
-          title: label,
-          icon: directIconSrc(metadata.icon),
-          iconBlob: iconBlobFrom(metadata.icon, files),
-          type: "nsite",
-          chooseType: true,
-          declaredDomains: []
-        })
-        if (!granted) {
-          setStatus("Cancelled")
-          return
-        }
-        type = granted.type === "napplet" ? "napplet" : "nsite"
-        persist.setPolicy(type === "napplet" ? nappletId : nappId, granted)
-      }
-
-      if (type === "napplet") {
-        persist.storeInstalledLocalApp({
-          nappId: nappletId,
-          title: metadata.title || null,
-          icon: metadata.icon || null,
-          petname: label,
-          description: metadata.description || null,
-          requires: metadata.requires || [],
-          html: single.html
-        })
-        handlers.addApp(nappletId, [])
-        // Re-picking the folder while a window is open hot-swaps it onto the
-        // new bytes instead of opening a second window.
-        const reloaded = reloadNappletWindows(nappletId, single.html)
-        if (!reloaded) {
-          const win = launchNapplet(stage, nappletId, single.html, {
-            ...makeLaunchOpts(),
-            petname: label
-          })
-          syncDOM(win)
-          win.focus()
-        }
-        setStatus(
-          `Launched ${label}` +
-            (reloaded ? ` — reloaded ${reloaded} window${reloaded === 1 ? "" : "s"}` : "")
-        )
-        return
-      }
-      // nsite: fall through to the normal local install (the policy stored
-      // above makes resolvePolicyForLaunch a no-prompt pass-through).
-    }
-
-    // install(), but from local, not fetching an nsite. An /app.wasm with
-    // no index.html beside it is a wasm napp here the same way it is
-    // published.
-    const wasm = isWasmListing(files)
-    const origin = nappOriginFor(nappId)
-    const onProgress = setStatus
-    const label = metadata.title || nappId
-
-    const policy = await resolvePolicyForLaunch(nappId, {
-      title: label,
-      icon: directIconSrc(metadata?.icon),
-      iconBlob: iconBlobFrom(metadata?.icon, files),
-      type: wasm ? "napp" : metaAppType(metadata),
-      declaredDomains: metadata?.requires || []
-    })
-    if (!policy) {
-      setStatus("Cancelled")
-      return
-    }
-
-    console.debug("[sandbox] install", { nappId, label, origin, wasm })
-    setStatus(`Booting ${label}…`)
-    await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId))
-
-    const petname = metadata?.title || nappId
-
-    persist.storeInstalledLocalApp({
-      nappId,
-      title: metadata?.title || null,
-      icon: metadata?.icon || null,
-      petname,
-      description: metadata?.description || null,
-      actions: metadata?.actions || [],
-      requires: metadata?.requires || [],
-      modes: metadata?.modes,
-      initialSize: persist.initialSizeFromMeta(metadata),
-      ...(wasm ? { kind: WASM_NAMED_KIND } : {})
-    })
-    handlers.addApp(nappId, metadata?.actions || [])
-
-    const win = await launch(stage, nappId, {
-      ...makeLaunchOpts(),
-      petname
-    })
-    syncDOM(win)
-    win.focus()
-    setStatus(`Launched ${petname}`)
+    await installLocalApp(await collectLocalFolder(inputFiles!, setStatus))
   } catch (err: any) {
     setStatus(`Error: ${err.message}`)
     console.error(err)
@@ -3279,6 +3156,152 @@ localFolderInput.addEventListener("change", async (e: Event) => {
     ;(e.target as HTMLInputElement).value = ""
   }
 })
+
+// Install a collected local app (a picked folder, or the files a dev napp
+// handed over with napp.dev.installLocal) and open it. One already open is
+// reloaded onto the new files instead of getting a second window. Resolves to
+// the app's id, or null if the user cancelled its permission screen.
+async function installLocalApp(
+  collected: Awaited<ReturnType<typeof collectLocalFiles>>
+): Promise<string | null> {
+  const { nappId, files, metadata, skipped, single } = collected
+  console.debug("[launch] local folder collected", {
+    nappId,
+    fileCount: files.length,
+    skipped,
+    metadata
+  })
+  // A lone index.html: declaring `requires` (or a napplet meta) makes it a
+  // napplet outright — only a file declaring nothing is ambiguous, and then
+  // the permission screen asks. A previous load's choice is remembered
+  // (napplet~ record with html, or a plain local~ one).
+  if (single) {
+    const nappletId = `napplet~${nappId}`
+    const label = metadata.title || metadata.id
+    const impliedNapplet = single.napplet || (metadata.requires?.length ?? 0) > 0
+    let type: string
+    if (persist.getInstalledApp(nappletId)?.html) type = "napplet"
+    else if (persist.getInstalledApp(nappId)) type = "nsite"
+    else if (impliedNapplet) {
+      const granted = await resolvePolicyForLaunch(nappletId, {
+        title: label,
+        icon: directIconSrc(metadata.icon),
+        iconBlob: iconBlobFrom(metadata.icon, files),
+        type: "napplet",
+        declaredDomains: metadata.requires || [],
+        optionalDomains: metadata.optional || []
+      })
+      if (!granted) {
+        setStatus("Cancelled")
+        return null
+      }
+      type = "napplet"
+    } else {
+      const granted = await promptNappPolicy({
+        title: label,
+        icon: directIconSrc(metadata.icon),
+        iconBlob: iconBlobFrom(metadata.icon, files),
+        type: "nsite",
+        chooseType: true,
+        declaredDomains: []
+      })
+      if (!granted) {
+        setStatus("Cancelled")
+        return null
+      }
+      type = granted.type === "napplet" ? "napplet" : "nsite"
+      persist.setPolicy(type === "napplet" ? nappletId : nappId, granted)
+    }
+
+    if (type === "napplet") {
+      persist.storeInstalledLocalApp({
+        nappId: nappletId,
+        title: metadata.title || null,
+        icon: metadata.icon || null,
+        petname: label,
+        description: metadata.description || null,
+        requires: metadata.requires || [],
+        html: single.html
+      })
+      handlers.addApp(nappletId, [])
+      // Re-picking the folder while a window is open hot-swaps it onto the
+      // new bytes instead of opening a second window.
+      const reloaded = reloadNappletWindows(nappletId, single.html)
+      if (!reloaded) {
+        const win = launchNapplet(stage, nappletId, single.html, {
+          ...makeLaunchOpts(),
+          petname: label
+        })
+        syncDOM(win)
+        win.focus()
+      }
+      setStatus(
+        `Launched ${label}` +
+          (reloaded ? ` — reloaded ${reloaded} window${reloaded === 1 ? "" : "s"}` : "")
+      )
+      return nappletId
+    }
+    // nsite: fall through to the normal local install (the policy stored
+    // above makes resolvePolicyForLaunch a no-prompt pass-through).
+  }
+
+  // install(), but from local, not fetching an nsite. An /app.wasm with
+  // no index.html beside it is a wasm napp here the same way it is
+  // published.
+  const wasm = isWasmListing(files)
+  const origin = nappOriginFor(nappId)
+  const onProgress = setStatus
+  const label = metadata.title || nappId
+
+  const policy = await resolvePolicyForLaunch(nappId, {
+    title: label,
+    icon: directIconSrc(metadata?.icon),
+    iconBlob: iconBlobFrom(metadata?.icon, files),
+    type: wasm ? "napp" : metaAppType(metadata),
+    declaredDomains: metadata?.requires || []
+  })
+  if (!policy) {
+    setStatus("Cancelled")
+    return null
+  }
+
+  console.debug("[sandbox] install", { nappId, label, origin, wasm })
+  setStatus(`Booting ${label}…`)
+  await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId))
+
+  const petname = metadata?.title || nappId
+
+  persist.storeInstalledLocalApp({
+    nappId,
+    title: metadata?.title || null,
+    icon: metadata?.icon || null,
+    petname,
+    description: metadata?.description || null,
+    actions: metadata?.actions || [],
+    requires: metadata?.requires || [],
+    modes: metadata?.modes,
+    initialSize: persist.initialSizeFromMeta(metadata),
+    ...(wasm ? { kind: WASM_NAMED_KIND } : {})
+  })
+  handlers.addApp(nappId, metadata?.actions || [])
+
+  if (findOpenWindowByNappId(nappId)) {
+    const reloaded = reloadIframesByNappId(nappId)
+    setStatus(
+      `Installed ${petname}` +
+        (reloaded ? ` — reloaded ${reloaded} window${reloaded === 1 ? "" : "s"}` : "")
+    )
+    return nappId
+  }
+  const win = await launch(stage, nappId, {
+    ...makeLaunchOpts(),
+    petname
+  })
+  syncDOM(win)
+  win.focus()
+  setStatus(`Launched ${petname}`)
+  return nappId
+}
 
 function syncDOM(win: NappWindow) {
   bringToTopOfStack(win.root)

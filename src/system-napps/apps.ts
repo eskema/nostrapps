@@ -15,7 +15,7 @@ import type { AppType, InstalledApp, SystemCtx } from "../types.js"
 import { classifyEvent, classifyInstalled, getNappletConfig } from "../persistence.js"
 import { unsupportedRequires } from "../napp-permissions.js"
 import { openNappConfigSettings } from "../napp-config.js"
-import { getDevHandle } from "../sandbox/host.js"
+import { getDevHandle, readNappFiles } from "../sandbox/host.js"
 import { START_HEIGHT } from "../sandbox/napp-window.js"
 import { installedIconSources, nappletIconSrc, resolveCardIcon } from "../nsite/icon.js"
 import { detailField, renderAppCard, type AppCardOpts } from "./card.js"
@@ -391,6 +391,32 @@ export function mount(
             },
             persistent: false
           })
+      })
+      return { buttons: [launch], menu: cfg ? [pub, cfg, perms, del] : [pub, perms, del] }
+    }
+    // Local napp (a picked folder, or a dev napp's installLocal): its files
+    // live only in its origin, so they're read back out of there to publish.
+    if (app.nappId.startsWith("local~")) {
+      const pub = button({ label: "publish", variant: "outline" })
+      pub.addEventListener("click", async () => {
+        pub.disabled = true
+        try {
+          const files = await readNappFiles(app.nappId)
+          ctx.launchSystemNapp("uploader", {
+            params: files.map(f => {
+              const path = f.path.replace(/^\//, "")
+              return {
+                path,
+                file: new File([f.body], path.split("/").pop()!, { type: f.mime || f.body.type })
+              }
+            }),
+            persistent: false
+          })
+        } catch (err: any) {
+          ctx.setStatus?.(`Apps: couldn't read ${app.nappId}: ${err?.message || String(err)}`)
+        } finally {
+          pub.disabled = false
+        }
       })
       return { buttons: [launch], menu: cfg ? [pub, cfg, perms, del] : [pub, perms, del] }
     }

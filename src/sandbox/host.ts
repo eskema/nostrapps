@@ -2628,6 +2628,21 @@ async function wasmAnswer(
       )
   }
 
+  if (method === "napp.dev.installLocal") {
+    // Same as saveFile: each file's data comes as base64.
+    const files = Array.isArray(params?.files) ? params.files : []
+    if (files.some((f: any) => typeof f?.data !== "string")) {
+      throw new Error("installLocal: data must be base64")
+    }
+    return runRpc(
+      currentSigner,
+      method,
+      { ...params, files: files.map((f: any) => ({ ...f, data: base64Bytes(f.data) })) },
+      nappId,
+      instanceId
+    )
+  }
+
   if (method === "nostrdb.subscribe" || method === "napp.subscribe" || method === "napp.outbox") {
     // The call's own id is the subscription's callbackId: what it brings
     // comes back under the id the napp already has.
@@ -4394,6 +4409,10 @@ async function runRpc(
   if (SIGNER_METHODS.has(method) && !getPolicy(nappId).domains.includes("identity")) {
     throw new Error(`identity access not granted: ${method}`)
   }
+  // Installing apps from a napp's files: only with the `dev` grant.
+  if (method.startsWith("napp.dev.") && !getPolicy(nappId).domains.includes("dev")) {
+    throw new Error(`dev access not granted: ${method}`)
+  }
   // Granted but nobody is logged in — the case where a napp opened from a
   // link asks on load and gets "No NIP-07 extension detected" back, which it
   // swallows. Ask first, and ask before the signing approval below: consent
@@ -5089,6 +5108,8 @@ async function dispatch(
       return copyTextForNapp(params)
     case "napp.log":
       return logForNapp(callerNappId, params)
+    case "napp.dev.installLocal":
+      return installLocalForNapp(callerNappId, params)
     case "napp.relays.health": {
       const urls = (Array.isArray(params?.urls) ? params.urls : [])
         .filter((u: unknown) => typeof u === "string")
@@ -5161,6 +5182,56 @@ export function describeSaveFile(params: any): string | undefined {
   }
   const pretty = `${u === 0 ? n : n.toFixed(1)} ${units[u]}`
   return `“${name}” (${pretty}) to your downloads folder.`
+}
+
+// ─── napp.dev.installLocal ──────────────────────────────────────
+// A napp granted `dev` hands over an app's files — metadata.json among them —
+// and main.ts installs them as a local app, the way a picked folder is: the
+// new app's own permission screen on its first install, its open windows
+// reloaded on a later one.
+type LocalInstaller = (files: Array<{ path: string; body: Blob }>) => Promise<string | null>
+let localInstaller: LocalInstaller | null = null
+export function setLocalInstaller(fn: LocalInstaller) {
+  localInstaller = fn
+}
+
+const INSTALL_LOCAL_MAX_FILES = 5000
+
+async function installLocalForNapp(
+  callerNappId: string,
+  params: { files?: unknown }
+): Promise<{ nappId: string } | null> {
+  if (!localInstaller) throw new Error("installLocal: not available")
+  const raw = params?.files
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error("installLocal: no files")
+  if (raw.length > INSTALL_LOCAL_MAX_FILES) {
+    throw new Error(`installLocal: at most ${INSTALL_LOCAL_MAX_FILES} files`)
+  }
+  const seen = new Set<string>()
+  const files = raw.map((f: any) => {
+    const segments = String(f?.path ?? "")
+      .split("/")
+      .filter(Boolean)
+    if (segments.length === 0 || segments.some(s => s === "." || s === "..")) {
+      throw new Error(`installLocal: bad path ${JSON.stringify(f?.path)}`)
+    }
+    const path = `/${segments.join("/")}`
+    if (path === "/__policy__") throw new Error("installLocal: /__policy__ is reserved")
+    if (seen.has(path)) throw new Error(`installLocal: ${path} given twice`)
+    seen.add(path)
+    const type = typeof f?.type === "string" ? f.type : ""
+    const data = f?.data
+    let body: Blob
+    if (data instanceof Blob) body = type && data.type !== type ? new Blob([data], { type }) : data
+    else if (typeof data === "string" || data instanceof ArrayBuffer || ArrayBuffer.isView(data))
+      body = new Blob([data as BlobPart], { type })
+    else throw new Error(`installLocal: ${path} has no data`)
+    return { path, body }
+  })
+  if (!seen.has("/metadata.json")) throw new Error("installLocal: missing metadata.json")
+  const nappId = await localInstaller(files)
+  if (nappId) hostLog(callerNappId, `installed ${nappId}`)
+  return nappId ? { nappId } : null
 }
 
 // ─── the logs window ────────────────────────────────────────────

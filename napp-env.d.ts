@@ -445,6 +445,17 @@ type Napp = {
   outbox(filter: Filter, opts?: SubscribeOpts): { close(): void }
   utils: Utils
   ui: Ui
+  // With `requires: ["dev"]`: install (or replace) a local app from files,
+  // metadata.json among them. Null if the user cancelled its permission screen.
+  dev: {
+    installLocal(
+      files: Array<{
+        path: string
+        data: Blob | ArrayBuffer | ArrayBufferView | string
+        type?: string
+      }>
+    ): Promise<{ nappId: string } | null>
+  }
   // Set by the kit's loader line (the nostrapps ui kit napp shows it): resolves
   // once the kit is in; await it before the first helper. Absent without the line.
   ready?: Promise<void>

@@ -208,10 +208,22 @@ window.napp.ui.stack(...children)
 window.napp.ui.bar(...children)
 window.napp.ui.flow(...children)
 
+// Dev, with `requires: ["dev"]`
+window.napp.dev.installLocal(files) // [{ path, data, type? }] => { nappId } or null
+
 window.napp.close()
 window.napp.link(url)
 window.napp.log(message)
 ```
+
+`window.napp.dev.installLocal(files)` installs a local app from files the
+napp has, as if the user had picked a folder holding them: `path` is relative
+to the app's root, `data` a Blob, ArrayBuffer, typed array or string, `type`
+the MIME type (guessed from the path when absent). `metadata.json` must be
+among them; its `id` names the app (`local~<id>`). The first install shows the
+new app's permission screen and resolves to `null` if the user cancels;
+installing the same id again replaces its files and reloads its open windows.
+The app can then be published from its card like any other local app.
 
 `window.napp.relays.health(urls)` answers, per relay, what the NIP-66 monitors
 say: `status` (`online` if checked in the last 2 hours, `offline` if checked
@@ -329,7 +341,8 @@ override it; its classes (`btn btn-primary`, `ui-input`, `ui-details`, …) are
 documented in it for markup that doesn't go through the helpers. The
 nostrapps ui kit napp shows every element with its call and its HTML. Napps
 without `ui` are unaffected. `network` controls direct connections from the
-app's own origin; Nostr bridge calls do not require direct relay access.
+app's own origin; Nostr bridge calls do not require direct relay access. `dev`
+lets the napp install and replace local apps (`window.napp.dev`).
 
 ## Runtime
 

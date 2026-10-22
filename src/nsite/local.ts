@@ -13,19 +13,39 @@ export async function collectLocalFolder(
   const rootName = picked[0].webkitRelativePath.split("/")[0]
   if (!rootName) throw new Error("Could not determine folder name")
 
+  return collectLocalFiles(
+    picked.map(file => ({ path: file.webkitRelativePath.slice(rootName.length), body: file })),
+    rootName,
+    onProgress
+  )
+}
+
+// collectLocalFiles is collectLocalFolder for files that come with their paths
+// already (a dev napp's napp.dev.installLocal): paths are relative to the
+// app's root, with or without the leading slash. `rootName` names the app when
+// nothing else does (a lone index.html with no id).
+export async function collectLocalFiles(
+  entries: Array<{ path: string; body: Blob }>,
+  rootName: string,
+  onProgress: (msg: string) => void = () => {}
+) {
+  if (entries.length === 0) throw new Error("No files selected")
+  const normalized = entries.map(e => ({
+    path: e.path.startsWith("/") ? e.path : `/${e.path}`,
+    body: e.body
+  }))
+
   // Drop OS/editor/toolchain junk before anything is read, so it never reaches
   // napp storage (and the progress count reflects what's actually being read).
-  const files = picked.filter(f => !isIgnoredPath(f.webkitRelativePath))
+  const files = normalized.filter(f => !isIgnoredPath(f.path.slice(1)))
   if (files.length === 0) throw new Error("Nothing to install — every file was a system file")
-  const skipped = picked.length - files.length
+  const skipped = normalized.length - files.length
 
   const out = []
   let metadata = null
   let i = 0
-  for (const file of files) {
+  for (const { path, body: file } of files) {
     i++
-    const relative = file.webkitRelativePath.slice(rootName.length)
-    const path = relative.startsWith("/") ? relative : `/${relative}`
     onProgress(`Reading ${i}/${files.length}: ${path}`)
     const mime = file.type || guessMime(path)
     out.push({ path, body: file, mime })

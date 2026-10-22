@@ -25,7 +25,9 @@ const CAP_INFO: Record<string, { title: string; desc: string }> = {
   config: { title: "config", desc: "settings you edit in the launcher" },
   // Not relay access — nostr reads/writes always go through the launcher. This
   // is the app opening its OWN connections to the wider web.
-  network: { title: "network", desc: "connects directly to the web (nostr works without it)" }
+  network: { title: "network", desc: "connects directly to the web (nostr works without it)" },
+  // Napps only (no NAP domain): napp.dev.installLocal.
+  dev: { title: "dev", desc: "installs and replaces local apps from files it makes" }
 }
 
 // Whether this browser holds a napp to the network lock the launcher sets on its
@@ -50,7 +52,7 @@ const CAP_ORDER = [
 
 // Everything the launcher can actually provide: the NAP domains we implement,
 // plus the launcher-local extensions (ui auto-granted, network toggle).
-const SUPPORTED_REQUIRES = new Set([...CAP_ORDER, "ui", "network"])
+const SUPPORTED_REQUIRES = new Set([...CAP_ORDER, "ui", "network", "dev"])
 
 // The subset of a napp's declared `requires` this launcher doesn't implement —
 // features that will silently not work. Shared with the Apps window so the card
@@ -286,8 +288,12 @@ function policySection(
   // re-render: napplet = exactly its declared NAP domains, no network (sealed);
   // nsite/napp = identity + declared + network, all default ON, deselectable.
   let type = opts.type || "nsite"
+  // dev is a row only when declared, and never for a napplet (no bridge for it).
+  const declaredDev = opts.declaredDomains.includes("dev") ? ["dev"] : []
   const rowsFor = () =>
-    type === "napplet" ? declaredCaps : [...new Set(["identity", ...declaredCaps, "network"])]
+    type === "napplet"
+      ? declaredCaps
+      : [...new Set(["identity", ...declaredCaps, ...declaredDev, "network"])]
 
   const el = document.createElement("div")
   el.className = "napp-perms-app"
