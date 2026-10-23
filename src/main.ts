@@ -757,6 +757,17 @@ async function runNappAction(
   let auxWin: NappWindow | null = null
 
   let instanceId = options?.instance
+  if (!instanceId && name === "view") {
+    // A generic view whose event we can load is routed as view:<kind>, so it
+    // reaches the napps for that kind too (those listening for "view" still
+    // get it as "view").
+    if (typeof payload === "string") {
+      const event = await resolveViewPayload(payload)
+      if (event) payload = event
+    }
+    const kind = (payload as { kind?: unknown } | null)?.kind
+    if (typeof kind === "number") name = `view:${kind}`
+  }
   if (!instanceId) {
     // no instance specified, will open a new window, often prompting the user first
     const [candidates, openCandidates] = handlers.findHandlersForAction(name, { auxiliary })

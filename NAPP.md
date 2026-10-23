@@ -310,6 +310,9 @@ There is no restriction on what actions are allowed, but these are some of the c
 before delivery, and drops the dispatch when the event can't be fetched. A
 generic `view` is resolved the same way when possible; an unresolvable
 reference is delivered as-is, so generic handlers must still accept strings.
+A generic `view` whose event resolves is routed as `view:<kind-number>`, so the
+apps handling that kind are offered it alongside those handling `view` (which
+still receive it named `view`).
 Pass `{ instance: "..." }` as the third argument to target one running window, or
 `{ auxiliary: true }` to use auxiliary handlers.
 
