@@ -391,10 +391,37 @@ export function createNappWindow({
     toggleMaximize()
   })
   // Double-click / double-tap the empty header area (not the title or the
-  // controls) to toggle maximize.
+  // controls) to toggle maximize. Touch browsers don't reliably fire dblclick,
+  // so taps are counted here and dblclick is left to the mouse.
+  const DOUBLE_TAP_MS = 300
+  const TAP_SLOP = 10
+  const onBar = (e: Event) => !(e.target as HTMLElement).closest(".napp-title, .napp-controls, .napp-nav")
+  let pointerType = ""
+  let downX = 0
+  let downY = 0
+  let tapAt = 0
+  let tapX = 0
+  let tapY = 0
+  header.addEventListener("pointerdown", e => {
+    pointerType = e.pointerType
+    downX = e.clientX
+    downY = e.clientY
+  })
   header.addEventListener("dblclick", e => {
-    if ((e.target as HTMLElement).closest(".napp-title, .napp-controls, .napp-nav")) return
-    toggleMaximize()
+    if (pointerType === "mouse" && onBar(e)) toggleMaximize()
+  })
+  header.addEventListener("pointerup", e => {
+    if (e.pointerType === "mouse" || !onBar(e)) return
+    // A drag isn't a tap.
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) > TAP_SLOP) return
+    if (e.timeStamp - tapAt < DOUBLE_TAP_MS && Math.hypot(e.clientX - tapX, e.clientY - tapY) < TAP_SLOP * 2) {
+      tapAt = 0
+      toggleMaximize()
+      return
+    }
+    tapAt = e.timeStamp
+    tapX = e.clientX
+    tapY = e.clientY
   })
   btnPin.addEventListener("click", e => {
     e.stopPropagation()
@@ -1141,6 +1168,15 @@ function setupDrag(
   }
   handle.addEventListener("pointerup", end)
   handle.addEventListener("pointercancel", end)
+  // On a phone the bar lets a swipe scroll the stack (touch-action: pan-y), so
+  // once the hold is up the touch is kept from scrolling, to reorder instead.
+  handle.addEventListener(
+    "touchmove",
+    e => {
+      if (mode === "reorder" && holdReady && e.cancelable) e.preventDefault()
+    },
+    { passive: false }
+  )
 }
 
 function setupResize(

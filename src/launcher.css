@@ -967,6 +967,12 @@ body.popover-open .napp-body iframe {
     min-height: 40px;
     padding: 0 var(--space-s) 0 var(--space-l);
   }
+  /* A swipe on the bar scrolls the stack; reordering takes a hold first, and
+     setupDrag stops the scroll once the hold is up. Not when maximized: the
+     stack behind would scroll unseen. */
+  .napp-window:not(.maximized) .napp-header {
+    touch-action: pan-y;
+  }
   .napp-btn {
     width: 32px;
     height: 32px;
