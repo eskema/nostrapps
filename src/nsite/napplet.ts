@@ -17,6 +17,16 @@ export function isNappletKind(kind: number): boolean {
   return NAPPLET_KINDS.includes(kind)
 }
 
+// A napplet manifest in the old shape (path tags and an aggregate x tag). It
+// carries one x tag too, but that names no blob: such a napplet can't load,
+// its author has to republish it.
+export function isOldNappletFormat(event: { kind: number; tags: string[][] }): boolean {
+  return (
+    isNappletKind(event.kind) &&
+    event.tags.some(t => t[0] === "path" || (t[0] === "x" && t[2] === "aggregate"))
+  )
+}
+
 // A napplet splits its domains into R (needed for full functionality) and O
 // (optional, never in the way of loading); a napp lists all of them as requires.
 export function nappletDomains(event: { tags: string[][] }): {
@@ -225,9 +235,8 @@ export async function loadNappletFromManifest(
 ): Promise<ResolvedNapplet> {
   if (!verifyEvent(manifest)) throw new Error("napplet manifest signature is invalid")
 
-  // The old shape (path tags and an aggregate x) carries one x tag too, but it
-  // names no blob: turned away here rather than asked of every server.
-  if (manifest.tags.some(t => t[0] === "path" || (t[0] === "x" && t[2] === "aggregate"))) {
+  // Turned away here rather than asking every server for a blob that isn't one.
+  if (isOldNappletFormat(manifest)) {
     throw new Error("napplet published in the old format, its author has to republish it")
   }
   const xTags = manifest.tags.filter(t => t[0] === "x")

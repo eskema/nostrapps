@@ -34,6 +34,7 @@ import {
   NAPPLET_NAMED_KIND,
   declaredDomains,
   isNappletKind,
+  isOldNappletFormat,
   manifestDescription,
   requiredDomains
 } from "../nsite/napplet.js"
@@ -454,6 +455,9 @@ export function mount(
       })
       return { buttons: [launch], menu: cfg ? [pub, cfg, perms, del] : [pub, perms, del] }
     }
+    // Can't launch; uninstall stays under ···.
+    if (app.event && isOldNappletFormat(app.event))
+      return { buttons: [oldFormatButton()], menu: cfg ? [cfg, perms, del] : [perms, del] }
     return { buttons: [launch], menu: cfg ? [cfg, perms, del] : [perms, del] }
   }
 
@@ -1397,6 +1401,16 @@ function launchButton(ctx: SystemCtx, nappId: string): HTMLButtonElement {
   return b
 }
 
+// In place of install/update/launch on a napplet published in the old format.
+function oldFormatButton(): HTMLButtonElement {
+  return button({
+    label: "old format",
+    variant: "outline",
+    disabled: true,
+    title: "Published in the old napplet format. Its author has to republish it."
+  })
+}
+
 // ─── Discover card rendering ─────────────────────────────────────
 
 function renderCard(
@@ -1520,9 +1534,12 @@ function renderCard(
   }
 
   const buttons: HTMLElement[] = []
-  if (updateAvailable) buttons.push(makeActionBtn("update", "warning"))
-  if (installed) buttons.push(launchButton(ctx, nappId))
-  else buttons.push(makeActionBtn("install", "primary"))
+  if (isOldNappletFormat(evt)) buttons.push(oldFormatButton())
+  else {
+    if (updateAvailable) buttons.push(makeActionBtn("update", "warning"))
+    if (installed) buttons.push(launchButton(ctx, nappId))
+    else buttons.push(makeActionBtn("install", "primary"))
+  }
 
   card = renderAppCard({
     nappId,
