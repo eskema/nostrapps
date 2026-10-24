@@ -83,6 +83,7 @@ import {
 import { resolveInput } from "./nsite/resolve.js"
 import { formatPayload, isInstanceSerial } from "./utils.js"
 import {
+  fetchManifest,
   fetchNsite,
   manifestRelays,
   blobServers,
@@ -991,6 +992,7 @@ const systemCtx: SystemCtx = {
   isInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
   wasInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
   install: (raw: string, opts?: { launch?: boolean }) => install(raw, opts),
+  tryApp: (raw: string) => tryAddress(raw),
   uninstall: (nappId: string) => uninstall(nappId),
   editPermissions: (nappId: string) => editPermissions(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
@@ -3135,8 +3137,8 @@ async function launchFromInput(raw: string): Promise<boolean | void> {
     return true
   }
 
-  // An address (naddr, nsite host): the app, as a temp unless it's here already.
-  await launchAddress(raw)
+  // An address (naddr, nsite host): the app if it's here, else its card.
+  return launchAddress(raw)
 }
 
 form.addEventListener("submit", async (e: SubmitEvent) => {
@@ -3670,22 +3672,41 @@ async function launchSharedApp(
   return launch(stage, nappId, opts)
 }
 
-// An address in the launcher input. An app that's here — installed, or a temp
-// still running — is its own launch. Any other opens as a link's app would: a
-// temp under its real id, in the current space, kept from its card (the Apps
-// card's keep goes through install). The window is up while the fetch runs.
-async function launchAddress(raw: string) {
+// An app that's here — installed, or a temp still running — by its id.
+async function launchHere(nappId: string) {
+  const win = await launch(stage, nappId, {
+    ...makeLaunchOpts(),
+    petname: friendlyNameFor(nappId)
+  })
+  syncDOM(win)
+  win.focus()
+}
+
+// An address in the launcher input. An app that's here is its own launch. Any
+// other shows its card in the Apps window first, to try or install. Resolves
+// true when it set the status itself.
+async function launchAddress(raw: string): Promise<boolean | void> {
   const target = resolveInput(raw)
   const nappId = nappIdFor(target)
-  if (persist.getInstalledApp(nappId)) {
-    const win = await launch(stage, nappId, {
-      ...makeLaunchOpts(),
-      petname: friendlyNameFor(nappId)
-    })
-    syncDOM(win)
-    win.focus()
-    return
-  }
+  if (persist.getInstalledApp(nappId)) return launchHere(nappId)
+  setStatus(`Looking up ${target.dTag}…`)
+  const { manifest } = await fetchManifest(target)
+  if (!manifest) throw new Error(`app "${target.dTag}" not found`)
+  const apps = await invokeSystemNapp("apps")
+  await callIframe(apps.getState().instanceId, "detail", manifest)
+  const title = manifest.tags.find(t => t[0] === "title")?.[1] || target.dTag
+  setStatus(`${title}: try or install it from its card`)
+  return true
+}
+
+// Try an address: the app opens as a link's app would, a temp under its real
+// id, in the current space, kept from its card (the Apps card's keep goes
+// through install). The window is up while the fetch runs. An app that's here
+// is its own launch.
+async function tryAddress(raw: string) {
+  const target = resolveInput(raw)
+  const nappId = nappIdFor(target)
+  if (persist.getInstalledApp(nappId)) return launchHere(nappId)
   // A wasm napp is a module, no page: nothing to show before its bytes are
   // in, and no placeholder iframe to show them in.
   if (target.kind === WASM_NAMED_KIND) {

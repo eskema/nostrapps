@@ -23,38 +23,46 @@ export const NAPP_RELAYS = ["wss://relay.nostrapps.com", "wss://relay.nostrapps.
 
 const COLLECT_TIMEOUT_MS = 10000
 
+// The newest manifest for an address, and the relays it was asked of; files
+// are not fetched.
+export async function fetchManifest(target: {
+  pubkey: string
+  dTag: string
+  relayHints: string[]
+  kind?: number
+}): Promise<{ manifest: NostrEvent | null; relays: string[] }> {
+  const { pubkey, dTag, relayHints, kind = NSITE_NAMED_KIND } = target
+  if (!pubkey) throw new Error("fetchManifest: no pubkey")
+
+  // By author, not just by d tag: every author publishes to the napp relays,
+  // and two "profile" napps by two authors are two different apps.
+  const filter: Filter = { kinds: [kind], authors: [pubkey], "#d": [dTag] }
+
+  // Prefer the explicit hints (e.g. the relays the Apps napp found this event
+  // on) — only without them fan out to the author's write relays and the napp
+  // relays.
+  const relays = relayHints.length ? [...relayHints] : await manifestRelays(pubkey)
+  const events = await collect(relays.map((url: string) => ({ url, filter })))
+
+  // Relays are trusted with the filter but not blindly: the one asked for is
+  // the one launched.
+  return { manifest: latest(events.filter(e => e.pubkey === pubkey)), relays }
+}
+
 export async function fetchNsite(
   target: { pubkey: string; dTag: string; relayHints: string[]; kind?: number },
   onProgress: (msg: string) => void = () => {}
 ): Promise<NsiteResult> {
   console.debug("fetching nsite", target)
 
-  const { pubkey, dTag, relayHints, kind = NSITE_NAMED_KIND } = target
+  const { pubkey, dTag } = target
   if (!pubkey) throw new Error("fetchNsite: no pubkey")
 
-  // 1. build filter from input
-  // By author, not just by d tag: every author publishes to the napp relays,
-  // and two "profile" napps by two authors are two different apps.
-  const filter: Filter = { kinds: [kind], authors: [pubkey], "#d": [dTag] }
-
   onProgress("Querying relays…")
-
-  // 2. Resolve which relays to query for the manifest. Prefer the explicit
-  // hints (e.g. the relays the Apps napp found this event on) — only without
-  // them fan out to the author's write relays and the napp relays.
-  const relays = relayHints.length ? [...relayHints] : await manifestRelays(pubkey)
-  const reqs = relays.map((url: string) => ({ url, filter }))
-
-  // 3. collect events
-  const events = await collect(reqs)
-
-  // 4. find manifest
-  // Relays are trusted with the filter but not blindly: the one asked for is
-  // the one launched.
-  const manifest = latest(events.filter(e => e.pubkey === pubkey))
+  const { manifest, relays } = await fetchManifest(target)
   if (!manifest) throw new Error(`napp "${dTag}" not found`)
 
-  // 5. have manifest — download files
+  // have manifest — download files
   const nappId = `${pubkey.slice(0, 16)}~${dTag}`
 
   const paths = manifestPaths(manifest)

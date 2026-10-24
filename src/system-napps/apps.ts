@@ -60,6 +60,7 @@ import {
   input,
   list,
   overline,
+  ring,
   sticky,
   tabs,
   authors
@@ -605,9 +606,10 @@ export function mount(
   const installedCards = new Map<string, { el: HTMLElement; sig: string }>()
   // The installed set as a whole — membership and versions — for spotting a
   // change worth a pass over the lists.
+  // A temp kept is a change too: its card loses the temp look and its keep.
   const installedSetSig = () =>
     installedApps()
-      .map(a => `${a.nappId}:${a.event?.id ?? ""}`)
+      .map(a => `${a.nappId}:${a.event?.id ?? ""}:${a.temporary ? "temp" : ""}`)
       .join(",")
   function installedCardSig(app: InstalledApp): string {
     return [
@@ -1007,6 +1009,7 @@ export function mount(
       const sig = [
         evt.id,
         installed,
+        !!ctx.apps.get(addr)?.temporary,
         installed && mine && mine.created_at < evt.created_at,
         me === evt.pubkey
       ].join(" ")
@@ -1377,6 +1380,17 @@ export function mount(
       unsub()
       feedbackAbort?.abort()
       for (const url of [...subs.keys()]) closeRelaySub(url)
+    },
+    // detail: a manifest event (a pasted address's), shown as its card's
+    // detail view whichever tab is up.
+    action(name: string, payload: unknown) {
+      if (name !== "detail" || !payload || typeof payload !== "object") return
+      const evt = payload as NostrEvent
+      showDetail({
+        buildCard: () => renderCard(evt, ctx, enabledRelays(), null, showDetail),
+        event: evt,
+        nappId: computeNappId(evt)
+      })
     }
   }
 }
@@ -1427,6 +1441,8 @@ function renderCard(
   const installedEvents = ctx.apps.events?.() ?? []
   const installedEvent = installedEvents.find((e: any) => computeNappId(e) === nappId)
   const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
+  // Tried and not kept: the temp look, and keep, as on the installed tab.
+  const temporary = !!ctx.apps.get(nappId)?.temporary
 
   const title = tag("title")
   const { sha: iconSha, url: iconUrl } = resolveCardIcon(evt)
@@ -1472,9 +1488,21 @@ function renderCard(
     menu.push(delBtn)
   }
 
+  // The temp look from the moment try is clicked: the window and the
+  // permission screen take a while. The card rendered once the try settles
+  // shows how it went.
+  const markTemp = (on: boolean) => {
+    card.classList.toggle("temp", on)
+    const r = card.querySelector(":scope > .ui-ring")
+    if (on && !r) card.appendChild(ring("temporary"))
+    if (!on) r?.remove()
+  }
+
   const performAction = async (btn: HTMLButtonElement, action: string) => {
     btn.disabled = true
-    btn.textContent = action === "update" ? "updating…" : "launching…"
+    btn.textContent =
+      action === "update" ? "updating…" : action === "keep" ? "keeping…" : "launching…"
+    if (action === "try") markTemp(true)
     try {
       // Relay hints: where the event was actually seen, falling back to the
       // enabled discover relays (subscribeMany doesn't always populate seenOn,
@@ -1495,15 +1523,21 @@ function renderCard(
         // sole entry point for wiping an app.
         // } else if (action === "uninstall") {
         //   await ctx.uninstall(nappId)
-      } else if (action === "install") {
+      } else if (action === "install" || action === "try") {
         const raw = naddrEncode({
           pubkey: evt.pubkey,
           kind: evt.kind, // 35130 napp → install(); 35129 napplet → installNapplet()
           identifier: dTag,
           relays: relayHints
         })
-        // Opens where its screen said — a space of the user's pick, or not at all.
-        await ctx.install(raw)
+        // Install opens where its screen said — a space of the user's pick, or
+        // not at all. Try opens a temp in the current space, as a pasted
+        // address used to.
+        if (action === "try") await ctx.tryApp!(raw)
+        else await ctx.install(raw)
+      } else if (action === "keep") {
+        // a temp's id: install keeps it
+        await ctx.install(nappId)
       }
       if (onChange) {
         onChange()
@@ -1512,6 +1546,7 @@ function renderCard(
         card.replaceWith(replacement)
       }
     } catch (err) {
+      if (action === "try") markTemp(false)
       const message = (err as any)?.message || String(err)
       console.error(err)
       // Surface the failure in /logs, not just the console — an install that
@@ -1535,16 +1570,22 @@ function renderCard(
 
   const buttons: HTMLElement[] = []
   if (isOldNappletFormat(evt)) buttons.push(oldFormatButton())
+  else if (temporary) buttons.push(makeActionBtn("keep", "primary"))
   else {
     if (updateAvailable) buttons.push(makeActionBtn("update", "warning"))
     if (installed) buttons.push(launchButton(ctx, nappId))
-    else buttons.push(makeActionBtn("install", "primary"))
+    else {
+      // try: a temp run first, as a pasted address or a share link gives
+      if (ctx.tryApp) buttons.push(makeActionBtn("try", "outline"))
+      buttons.push(makeActionBtn("install", "primary"))
+    }
   }
 
   card = renderAppCard({
     nappId,
     title: title || `(${dTag})`,
     type: classifyEvent(evt.kind),
+    temporary,
     description: manifestDescription(evt) || tag("summary"),
     iconUrl: iconSha ? null : iconUrl,
     authorPubkey: evt.pubkey,
