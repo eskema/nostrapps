@@ -1867,31 +1867,30 @@ body.popover-open .napp-body iframe {
 }
 
 /* apps */
-/* Apps napp fills the window body and scrolls inside its pane (not the body),
-   so the detail overlay can cover a bounded content area and stay put while the
-   list keeps its scroll position behind it. */
+/* Apps napp fills the window body and scrolls inside its panel (not the body),
+   so the detail overlay, beside the panel, can cover a bounded content area
+   and stay put while the list keeps its scroll position behind it. */
 .system-napp-apps {
   height: 100%;
-  min-height: 0;
-}
-
-.apps-panel {
-  display: grid;
-  grid-gap: var(--space-l);
-  grid-template-rows: auto 1fr;
-  flex: 1;
   min-height: 0;
   position: relative; /* positioning context for the detail overlay */
 }
 
-/* Holds both tab panes (one visible). The pane itself lays out its toolbar +
-   list — switching tabs just toggles [hidden] rather than rebuilding. */
+/* Tabs, then the pane; its toolbar sticks to the top as the rest scrolls. */
+.apps-panel {
+  display: grid;
+  grid-gap: var(--space-l);
+  align-content: start;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+}
+
+/* Holds both tab panes (one visible); switching tabs just toggles [hidden]
+   rather than rebuilding. */
 .apps-content {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  position: relative;
-  min-height: 0;
-  overflow: hidden;
 }
 
 /* While the detail overlay is up (.has-overlay on .apps-panel), hide the panel
@@ -1922,7 +1921,7 @@ body.popover-open .napp-body iframe {
 }
 
 /* Hide the scrollbar on the store's scroll areas (scroll still works). */
-.apps-pane::-webkit-scrollbar,
+.apps-panel::-webkit-scrollbar,
 .apps-detail-overlay::-webkit-scrollbar {
   display: none;
 }
@@ -1933,11 +1932,7 @@ body.popover-open .napp-body iframe {
 
 .apps-pane {
   display: grid;
-  /* grid-gap: 2rem; */
-  overflow-y: auto;
-  min-height: 0;
   align-content: start;
-  scrollbar-width: none; /* Firefox */
 }
 
 /* Beat the UA [hidden]{display:none}, which our .apps-pane display:grid would
@@ -2100,6 +2095,20 @@ body.popover-open .napp-body iframe {
   grid-gap: var(--space-s);
 }
 
+/* Grid view (the toolbar's toggle): the cards in as many columns as fit, each
+   packed at its top rather than spread to the row's tallest; the empty line
+   across them all. */
+.apps-grid .apps-list {
+  grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
+  column-gap: var(--space-l);
+}
+.apps-grid .apps-card {
+  align-content: start;
+}
+.apps-grid .apps-empty {
+  grid-column: 1 / -1;
+}
+
 /* ─── Apps card ──────────────────────────────────────────────────
    Flat structure: icon, title, author/label, date, handlers, and actions are
    all direct children of .apps-card. Styling left as placeholders to fill in. */
@@ -2208,11 +2217,11 @@ body.popover-open .napp-body iframe {
   /* align-self: end; */
 }
 
-/* Segmented type filter in the toolbar (all · nsites · napps · napplets) —
+/* Segmented type filter over the search (all · nsites · napps · napplets) —
    .ui-tab rows, so only the layout lives here. */
 .apps-typeseg {
   justify-content: center;
-  margin-bottom: var(--space-xs);
+  margin-bottom: var(--space-m);
 }
 
 .apps-detail-overlay .apps-author,
@@ -2430,21 +2439,25 @@ body.popover-open .napp-body iframe {
   vertical-align: middle;
 }
 
-/* ─── store toolbar / search / relays config ────────────────── */
+/* ─── toolbar / search / relays config ──────────────────────── */
+/* Type filter over the search and the view toggle, the kit's sticky: opaque,
+   with room under the field, so the list goes under it. */
 .apps-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  align-items: stretch;
-  padding-bottom: var(--space-xxs);
-  margin-bottom: var(--space-xxs);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-xs);
+  padding-bottom: var(--space-xs);
+  margin-bottom: var(--space-xs);
+  background: var(--surface);
 }
 
-/* Appearance from .ui-input; only the toolbar layout lives here. */
+.apps-toolbar > .apps-typeseg {
+  grid-column: 1 / -1;
+}
+
+/* Appearance from .ui-input. */
 .apps-search {
-  flex: 1;
   min-width: 0;
-  margin-bottom: var(--space-xs);
 }
 
 /* Relay editor: a .ui-details below the search whose summary doubles as the

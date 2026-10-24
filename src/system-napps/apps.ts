@@ -55,9 +55,11 @@ import {
   details,
   el,
   empty,
+  icon,
   input,
   list,
   overline,
+  sticky,
   tabs,
   authors
 } from "./ui.js"
@@ -110,6 +112,32 @@ export function mount(
     })
   }
 
+  // List or grid, for both tabs, kept with the window (params).
+  let view: "list" | "grid" = opts.params?.view === "grid" ? "grid" : "list"
+  // Turns the lists to the other view; its glyph is that view's. One per pane,
+  // repainted in place when either is clicked.
+  function buildViewToggle(): HTMLButtonElement {
+    const b = button({
+      variant: "ghost",
+      class: "apps-view",
+      onClick: () => setView(view === "grid" ? "list" : "grid")
+    })
+    paintViewToggle(b)
+    return b
+  }
+  function paintViewToggle(b: HTMLButtonElement) {
+    const other = view === "grid" ? "list" : "grid"
+    b.replaceChildren(icon(other === "grid" ? "tile" : "list"))
+    b.title = other
+    b.setAttribute("aria-label", other)
+  }
+  function setView(v: "list" | "grid") {
+    view = v
+    appsContent.classList.toggle("apps-grid", v === "grid")
+    for (const b of appsContent.querySelectorAll<HTMLButtonElement>(".apps-view")) paintViewToggle(b)
+    emitParams()
+  }
+
   // ─── Discover tab state ───
   let filter = ""
   // Newest manifest per napp address (computeNappId). Relays replace
@@ -117,7 +145,7 @@ export function mount(
   // relay the newer publish didn't reach — the collapse happens here.
   const manifests = new Map<string, any>()
   let pending: any[] = [] // events arrived since the last incremental flush
-  // Restore a previously-saved custom relay list. emitDiscoverState persists it
+  // Restore a previously-saved custom relay list. emitParams persists it
   // under the session's `params`, which restore feeds back in via opts.params.
   // Empty / absent → fall back to the defaults. `disabled` is the subset the
   // user has toggled off — still listed in the editor, but not subscribed, and
@@ -149,14 +177,12 @@ export function mount(
   discoverPane.hidden = true
   const detailOverlay = el("div", "apps-detail-overlay")
   detailOverlay.hidden = true
-  const appsPanel = el(
-    "div",
-    "apps-panel",
-    sections,
-    el("div", "apps-content", installedPane, discoverPane),
-    detailOverlay
-  )
-  container.replaceChildren(appsPanel)
+  const appsContent = el("div", "apps-content", installedPane, discoverPane)
+  appsContent.classList.toggle("apps-grid", view === "grid")
+  // The panel scrolls: tabs and list go by under the toolbar. The overlay is
+  // beside it, so it covers the window whatever the scroll.
+  const appsPanel = el("div", "apps-panel", sections, appsContent)
+  container.replaceChildren(appsPanel, detailOverlay)
 
   // Clicking a card lays the app-info detail over the whole panel (absolute,
   // inset:0) instead of replacing the list — closing it just hides the overlay,
@@ -229,7 +255,7 @@ export function mount(
   }
 
   // Both panes are built once and kept in the DOM; switching tabs just toggles
-  // visibility (no rebuild) so each list, its scroll, and inputs persist. The
+  // visibility (no rebuild) so each list and its inputs persist. The
   // discover pane — and the relay subscription that feeds it — start lazily on
   // the first view of the discover tab, and stay connected thereafter.
   let installedBuilt = false
@@ -258,12 +284,20 @@ export function mount(
     discoverPane.hidden = tab !== "discover"
   }
 
-  // The window body is the scroller. Clicking a section — the other one or the
-  // one already showing — starts it at the top.
-  const scrollTop = () => container.closest(".napp-body-system")?.scrollTo({ top: 0 })
+  // Clicking a section — the other one or the one already showing — starts it
+  // at the top.
+  const scrollTop = (behavior: ScrollBehavior = "auto") => appsPanel.scrollTo({ top: 0, behavior })
   sections.addEventListener("click", e => {
     if ((e.target as Element).closest(".ui-segment")) scrollTop()
   })
+
+  // The type filter over the search and the view toggle, stuck to the top
+  // while the rest scrolls. Focusing the search glides back to the top, where
+  // the results start.
+  function toolbar(searchEl: HTMLInputElement): HTMLElement {
+    searchEl.addEventListener("focus", () => scrollTop("smooth"))
+    return sticky(el("div", "apps-toolbar", buildTypeSegments(), searchEl, buildViewToggle()))
+  }
 
   // ─── Installed tab ─────────────────────────────────────────────
 
@@ -729,7 +763,7 @@ export function mount(
   function renderInstalled() {
     const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
     _installedListEl = el("div", "apps-list")
-    installedPane.replaceChildren(el("div", "apps-toolbar", buildTypeSegments(), searchEl))
+    installedPane.replaceChildren(toolbar(searchEl))
     if (MOCK_CARD) installedPane.appendChild(mockTemporaryCard())
     installedPane.appendChild(_installedListEl)
     installedCards.clear() // a new list element — the old cards went with the old one
@@ -771,10 +805,10 @@ export function mount(
     return stale ? `${total} · ${stale} stale` : String(total)
   }
 
-  function emitDiscoverState() {
+  function emitParams() {
     // Persist under `params` so it round-trips: the host merges this into the
     // session entry, and restore passes session.params back into mount.
-    opts.onStateChange?.({ params: { relays: [...relays], disabled: [...disabled] } })
+    opts.onStateChange?.({ params: { relays: [...relays], disabled: [...disabled], view } })
   }
 
   // Each author's blossom list, looked up once per mount: the servers a card
@@ -1181,7 +1215,7 @@ export function mount(
     _relayListEl
       ?.querySelector(`.ui-item[data-relay="${CSS.escape(url)}"]`)
       ?.classList.toggle("disabled", !on)
-    emitDiscoverState()
+    emitParams()
     // Events already collected keep their sighting record while the relay is
     // off — so hiding (and un-hiding on re-enable) is just a filter pass.
     applyFilter()
@@ -1202,7 +1236,7 @@ export function mount(
     }
     pending = pending.filter(e => manifests.get(computeNappId(e)) === e)
     renderRelayRows()
-    emitDiscoverState()
+    emitParams()
     renderList()
     updateStatus()
   }
@@ -1216,7 +1250,7 @@ export function mount(
     if (relays.includes(url)) return "already in list"
     relays.push(url)
     renderRelayRows()
-    emitDiscoverState()
+    emitParams()
     if (discoveryStarted) openRelaySub(url)
     updateStatus()
   }
@@ -1254,7 +1288,7 @@ export function mount(
   function renderDiscover() {
     const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
     _listEl = el("div", "apps-list")
-    discoverPane.replaceChildren(el("div", "apps-toolbar", buildTypeSegments(), searchEl), _listEl)
+    discoverPane.replaceChildren(toolbar(searchEl), _listEl)
     discoverCards.clear()
 
     // System disclosure whose summary doubles as the status line (relays-napp
@@ -1281,7 +1315,7 @@ export function mount(
           relays = [...DEFAULT_RELAYS]
           disabled.clear()
           renderRelayRows()
-          emitDiscoverState()
+          emitParams()
           if (discoveryStarted) startDiscoverSubscription()
         }
       })
@@ -1306,7 +1340,7 @@ export function mount(
     // after this (see switchTab), so there's nothing to paint yet.
     renderList()
     updateStatus()
-    emitDiscoverState()
+    emitParams()
   }
 
   // ─── Render ────────────────────────────────────────────────────
