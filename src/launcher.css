@@ -2095,15 +2095,20 @@ body.popover-open .napp-body iframe {
   grid-gap: var(--space-s);
 }
 
-/* Grid view (the toolbar's toggle): the cards in as many columns as fit, each
-   packed at its top rather than spread to the row's tallest; the empty line
-   across them all. */
+/* Grid view (the toolbar's toggle): the cards in as many columns as fit, four
+   at most, each packed at its top rather than spread to the row's tallest;
+   the empty line across them all. */
 .apps-grid .apps-list {
-  grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
-  column-gap: var(--space-l);
+  --apps-grid-gap: var(--space-l);
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(max(min(16rem, 100%), (100% - 3 * var(--apps-grid-gap)) / 4), 1fr)
+  );
+  column-gap: var(--apps-grid-gap);
 }
 .apps-grid .apps-card {
   align-content: start;
+  padding-inline: var(--space-l);
 }
 .apps-grid .apps-empty {
   grid-column: 1 / -1;
@@ -2303,6 +2308,7 @@ body.popover-open .napp-body iframe {
 
 .apps-description {
   grid-area: about;
+  max-width: 960px;
   margin: 0;
   font-size: var(--text-m);
   hyphens: auto;
