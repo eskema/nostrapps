@@ -983,27 +983,37 @@ async function pickHandler(
     setStatus(`No handler for action "${actionName}" from ${friendlyNameFor(callerNappId)}`)
   }
 
-  const pointer = getPointer()
-  const choice = await openPopover<[string, string | undefined] | null>({
-    x: pointer.x,
-    y: pointer.y,
-    class: "handler-popover",
-    build: resolve =>
-      buildHandlerBody({
-        actionName,
-        payload,
-        candidates,
-        openCandidates,
-        apps: {
-          list: () => persist.getInstalledApps(),
-          get: (nappId: string) => persist.getInstalledApp(nappId)
-        },
-        onSelect: (nappId, instanceId) => {
-          if (candidates.includes(nappId)) resolve([nappId, instanceId])
-        }
-      }),
-    dismissValue: null // click outside / Esc cancels
-  })
+  type Choice = [string, string | undefined] | null
+  const build = (resolve: (choice: Choice) => void) =>
+    buildHandlerBody({
+      actionName,
+      payload,
+      candidates,
+      openCandidates,
+      apps: {
+        list: () => persist.getInstalledApps(),
+        get: (nappId: string) => persist.getInstalledApp(nappId)
+      },
+      onSelect: (nappId, instanceId) => {
+        if (candidates.includes(nappId)) resolve([nappId, instanceId])
+      }
+    })
+  // A napp's action opens the picker where it was clicked. The launcher
+  // input's and a link's have no click to open at: a dialog.
+  const choice =
+    callerNappId === "launcher" || callerNappId === "link"
+      ? await openDialog<Choice>({
+          title: "Choose a napp to open this",
+          queue: { kind: "action", name: actionName },
+          build,
+          dismissValue: null // Esc / backdrop cancels
+        })
+      : await openPopover<Choice>({
+          ...getPointer(),
+          class: "handler-popover",
+          build,
+          dismissValue: null // click outside / Esc cancels
+        })
 
   if (!choice) throw new Error("Action handler selection cancelled")
   return choice
