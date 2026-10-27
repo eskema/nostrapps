@@ -142,6 +142,14 @@ export function mount(
 
   // ─── Discover tab state ───
   let filter = ""
+  // An action nothing installed takes (the launcher's `handlers` action): the
+  // list is only what handles it, the exact ones first — `view:<kind>` before
+  // a generic `view`, and a card's try and install are one choose. Cleared
+  // from its bar, never kept with the window.
+  let actionFilter: string | null = null
+  // The action's payload as text, for the bar to show what's being opened.
+  let actionPayload = ""
+  let _actionBarEl: HTMLElement | null = null
   // Newest manifest per napp address (computeNappId). Relays replace
   // addressable events on write, but a stale version still arrives from any
   // relay the newer publish didn't reach — the collapse happens here.
@@ -296,9 +304,53 @@ export function mount(
   // The type filter over the search and the view toggle, stuck to the top
   // while the rest scrolls. Focusing the search glides back to the top, where
   // the results start.
-  function toolbar(searchEl: HTMLInputElement): HTMLElement {
+  function toolbar(searchEl: HTMLInputElement, ...below: HTMLElement[]): HTMLElement {
     searchEl.addEventListener("focus", () => scrollTop("smooth"))
-    return sticky(el("div", "apps-toolbar", buildTypeSegments(), searchEl, buildViewToggle()))
+    return sticky(
+      el("div", "apps-toolbar", buildTypeSegments(), searchEl, buildViewToggle(), ...below)
+    )
+  }
+
+  // What the user is here for: "choose a napp to open this", the action and
+  // its payload under it, and an × that gives up (the filter lifted, the
+  // action dropped).
+  function paintActionBar() {
+    if (!_actionBarEl) return
+    _actionBarEl.hidden = !actionFilter
+    if (!actionFilter) return _actionBarEl.replaceChildren()
+    const payload = code(actionPayload.replace(/\s+/g, " "), "apps-actionbar-payload")
+    payload.title = actionPayload.slice(0, 1000)
+    _actionBarEl.replaceChildren(
+      el("strong", "apps-actionbar-title", "Choose a napp to open this"),
+      button({
+        variant: "ghost",
+        icon: "close",
+        class: "apps-actionbar-clear",
+        title: "cancel",
+        onClick: () => {
+          setActionFilter(null)
+          ctx.dropPendingAction?.()
+        }
+      }),
+      el("div", "apps-actionbar-request", code(actionFilter), payload)
+    )
+  }
+
+  function setActionFilter(name: string | null, payload = "") {
+    actionFilter = name
+    actionPayload = payload
+    paintActionBar()
+    renderList() // the order changes with the filter, not just what's shown
+  }
+
+  // How well a manifest handles the filter's action: 0 by name, 1 as the
+  // generic `view` a `view:<kind>` falls back to, -1 not at all.
+  function actionRank(evt: any): number {
+    if (!actionFilter || !evt) return -1
+    const declared = actionsOf(evt)
+    if (declared.includes(actionFilter)) return 0
+    if (actionFilter.startsWith("view:") && declared.includes("view")) return 1
+    return -1
   }
 
   // ─── Installed tab ─────────────────────────────────────────────
@@ -944,7 +996,11 @@ export function mount(
   function sortedManifests(evts: any[]) {
     return evts
       .filter(e => DISCOVER_KINDS.includes(e.kind))
-      .sort((a, b) => b.created_at - a.created_at)
+      .sort((a, b) =>
+        actionFilter
+          ? actionRank(a) - actionRank(b) || b.created_at - a.created_at
+          : b.created_at - a.created_at
+      )
   }
 
   // Add / update / remove the placeholder based on whether there are any cards
@@ -955,7 +1011,13 @@ export function mount(
     const hasAnyCard = !!_listEl.querySelector(".apps-card")
     const hasVisible = !!_listEl.querySelector(".apps-card:not([hidden])")
     const existing = _listEl.querySelector(".apps-empty") as HTMLElement | null
-    const msg = !hasAnyCard ? "No napps found." : !hasVisible ? "No matches." : null
+    const msg = !hasAnyCard
+      ? "No napps found."
+      : hasVisible
+        ? null
+        : actionFilter && !filter.trim()
+          ? `No napp here handles ${actionFilter}.`
+          : "No matches."
     if (!msg) {
       existing?.remove()
       return
@@ -977,7 +1039,8 @@ export function mount(
     for (const card of cards) {
       const typeOk = typeFilter === "all" || card.dataset.type === typeFilter
       const searchOk = !needle || (card.dataset.search || "").includes(needle)
-      card.hidden = !typeOk || !searchOk || !seenOnEnabled(card.dataset.addr)
+      const actionOk = !actionFilter || actionRank(manifests.get(card.dataset.addr!)) >= 0
+      card.hidden = !typeOk || !searchOk || !actionOk || !seenOnEnabled(card.dataset.addr)
     }
     refreshEmptyState()
   }
@@ -1011,11 +1074,12 @@ export function mount(
         installed,
         !!ctx.apps.get(addr)?.temporary,
         installed && mine && mine.created_at < evt.created_at,
-        me === evt.pubkey
+        me === evt.pubkey,
+        !!actionFilter
       ].join(" ")
       let card = discoverCards.get(addr)
       if (!card || card.sig !== sig) {
-        const el = renderCard(evt, ctx, enabledRelays(), renderList, showDetail)
+        const el = renderCard(evt, ctx, enabledRelays(), renderList, showDetail, !!actionFilter)
         if (card) card.el.replaceWith(el)
         card = { el, sig }
         discoverCards.set(addr, card)
@@ -1295,7 +1359,9 @@ export function mount(
   function renderDiscover() {
     const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
     _listEl = el("div", "apps-list")
-    discoverPane.replaceChildren(toolbar(searchEl), _listEl)
+    _actionBarEl = el("div", "apps-actionbar")
+    paintActionBar()
+    discoverPane.replaceChildren(toolbar(searchEl, _actionBarEl), _listEl)
     discoverCards.clear()
 
     // System disclosure whose summary doubles as the status line (relays-napp
@@ -1378,16 +1444,25 @@ export function mount(
   return {
     unmount() {
       unsub()
+      if (actionFilter) ctx.dropPendingAction?.()
       feedbackAbort?.abort()
       for (const url of [...subs.keys()]) closeRelaySub(url)
     },
     // detail: a manifest event (a pasted address's), shown as its card's
-    // detail view whichever tab is up.
+    // detail view whichever tab is up. handlers: { action, payload } (the
+    // payload as text), discover filtered down to the napps that take it.
     action(name: string, payload: unknown) {
+      const req = payload as { action?: unknown; payload?: unknown } | null
+      if (name === "handlers" && typeof req?.action === "string" && req.action) {
+        switchTab("discover")
+        setActionFilter(req.action, typeof req.payload === "string" ? req.payload : "")
+        scrollTop()
+        return
+      }
       if (name !== "detail" || !payload || typeof payload !== "object") return
       const evt = payload as NostrEvent
       showDetail({
-        buildCard: () => renderCard(evt, ctx, enabledRelays(), null, showDetail),
+        buildCard: () => renderCard(evt, ctx, enabledRelays(), null, showDetail, !!actionFilter),
         event: evt,
         nappId: computeNappId(evt)
       })
@@ -1432,7 +1507,10 @@ function renderCard(
   ctx: SystemCtx,
   relays: string[],
   onChange: any = null,
-  onOpenDetail?: (req: DetailReq) => void
+  onOpenDetail?: (req: DetailReq) => void,
+  // Picking a handler for a held action: try and install are one "choose"
+  // (a try — the action lands in its window, keep is on the card after).
+  choosing = false
 ) {
   const tag = (k: string) => evt.tags.find((t: any) => t[0] === k)?.[1] || ""
   const dTag = tag("d")
@@ -1498,7 +1576,7 @@ function renderCard(
     if (!on) r?.remove()
   }
 
-  const performAction = async (btn: HTMLButtonElement, action: string) => {
+  const performAction = async (btn: HTMLButtonElement, action: string, label: string) => {
     btn.disabled = true
     btn.textContent =
       action === "update" ? "updating…" : action === "keep" ? "keeping…" : "launching…"
@@ -1542,7 +1620,7 @@ function renderCard(
       if (onChange) {
         onChange()
       } else {
-        const replacement = renderCard(evt, ctx, relays, null, onOpenDetail)
+        const replacement = renderCard(evt, ctx, relays, null, onOpenDetail, choosing)
         card.replaceWith(replacement)
       }
     } catch (err) {
@@ -1556,15 +1634,15 @@ function renderCard(
       btn.textContent = "error"
       btn.disabled = false
       setTimeout(() => {
-        btn.textContent = action
+        btn.textContent = label
         btn.removeAttribute("title")
       }, 3000)
     }
   }
 
-  const makeActionBtn = (action: string, variant: ButtonVariant) => {
-    const b = button({ label: action, variant })
-    b.addEventListener("click", () => performAction(b, action))
+  const makeActionBtn = (action: string, variant: ButtonVariant, label = action) => {
+    const b = button({ label, variant })
+    b.addEventListener("click", () => performAction(b, action, label))
     return b
   }
 
@@ -1574,6 +1652,7 @@ function renderCard(
   else {
     if (updateAvailable) buttons.push(makeActionBtn("update", "warning"))
     if (installed) buttons.push(launchButton(ctx, nappId))
+    else if (choosing && ctx.tryApp) buttons.push(makeActionBtn("try", "primary", "choose"))
     else {
       // try: a temp run first, as a pasted address or a share link gives
       if (ctx.tryApp) buttons.push(makeActionBtn("try", "outline"))
@@ -1603,7 +1682,7 @@ function renderCard(
     onOpen: onOpenDetail
       ? () =>
           onOpenDetail({
-            buildCard: () => renderCard(evt, ctx, relays),
+            buildCard: () => renderCard(evt, ctx, relays, null, undefined, choosing),
             event: evt,
             nappId
           })

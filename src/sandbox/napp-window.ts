@@ -502,7 +502,10 @@ export function createNappWindow({
 
   return {
     root,
-    iframe: iframeRef.current,
+    // Read through: a loading window gets its iframe later (setIframe).
+    get iframe() {
+      return iframeRef.current
+    },
     canvas: canvasRef.current,
     body,
     titleEl,

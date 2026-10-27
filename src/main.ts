@@ -772,6 +772,12 @@ async function runNappAction(
   if (!instanceId) {
     // no instance specified, will open a new window, often prompting the user first
     const [candidates, openCandidates] = handlers.findHandlersForAction(name, { auxiliary })
+    // No app takes it (a system napp's fallback doesn't count): the napps that
+    // do, out there, and the action waits for the one the user tries.
+    const any = [...candidates, ...openCandidates.map(w => w.nappId)]
+    if (!auxiliary && !any.some(id => !handlers.systemIdOf(id))) {
+      return showHandlersInApps(callerNappId, name, payload)
+    }
     try {
       // One way to go: the one app, or the one open window (an open system
       // napp, which isn't offered again as a new one).
@@ -889,6 +895,68 @@ function makeEphemeralLaunchOpts() {
   }
 }
 
+// An action no app here takes, held for the first app tried or installed from
+// the Apps window it opened (filtered to the napps that take it). The caller
+// waits on it as it would on a picker: the handler's answer once one gets it,
+// undefined if it's dropped (the filter lifted, Apps closed, a later action
+// held in its place) — a cancelled picker's answer.
+let pendingAction: {
+  caller: string
+  name: string
+  payload: unknown
+  resolve(result: unknown): void
+  reject(err: unknown): void
+} | null = null
+
+async function showHandlersInApps(caller: string, name: string, payload: unknown) {
+  dropPendingAction()
+  const answer = new Promise<unknown>((resolve, reject) => {
+    pendingAction = { caller, name, payload, resolve, reject }
+  })
+  try {
+    const apps = await invokeSystemNapp("apps")
+    await callIframe(apps.getState().instanceId, "handlers", {
+      action: name,
+      payload: formatPayload(payload)
+    })
+  } catch (err) {
+    dropPendingAction()
+    throw err
+  }
+  setStatus(`No app here handles "${name}": choose one in Apps to open it with`)
+  return answer
+}
+
+function dropPendingAction() {
+  const p = pendingAction
+  pendingAction = null
+  p?.resolve(undefined)
+}
+
+// The held action, to an app just tried or installed that takes it: its
+// window here if it opened one, else wherever the dispatch puts it.
+async function deliverPendingAction(nappId: string) {
+  const p = pendingAction
+  if (!p || !handlesAction(persist.getInstalledApp(nappId)?.actions ?? [], p.name)) return
+  pendingAction = null
+  const win = persist
+    .readOpen()
+    .filter(w => w.nappId === nappId)
+    .at(-1)
+  try {
+    p.resolve(
+      await runNappAction(
+        p.caller,
+        p.name,
+        p.payload,
+        win ? { instance: win.instanceId } : undefined
+      )
+    )
+  } catch (err) {
+    p.reject(err)
+  }
+}
+
 async function replayLoadedActions(instanceId: string) {
   for (const action of persist.getLoadedActions(instanceId)) {
     await callIframe(instanceId, action.name, action.payload)
@@ -991,8 +1059,16 @@ const systemCtx: SystemCtx = {
   // Use a thunk so the reference resolves to the function declared later.
   isInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
   wasInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
-  install: (raw: string, opts?: { launch?: boolean }) => install(raw, opts),
-  tryApp: (raw: string) => tryAddress(raw),
+  install: async (raw: string, opts?: { launch?: boolean }) => {
+    const nappId = await install(raw, opts)
+    void deliverPendingAction(nappId)
+    return nappId
+  },
+  dropPendingAction,
+  tryApp: async (raw: string) => {
+    await tryAddress(raw)
+    void deliverPendingAction(nappIdFor(resolveInput(raw)))
+  },
   uninstall: (nappId: string) => uninstall(nappId),
   editPermissions: (nappId: string) => editPermissions(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
@@ -3438,11 +3514,35 @@ type LinkEntry = {
 async function importShareLink(hash: string) {
   const link = parseShareLink(hash)
   if (!link) return
+  const loose = link.actions ?? []
   // Out of the address bar right away: a reload lands on the user's own spaces,
   // and a cancelled import leaves nothing behind — but the link stays, in the
   // history (a recent row of the launcher input) and the log.
   history.replaceState(null, "", location.pathname + location.search)
-  persist.addHistory({ kind: "link", name: link.name, link: hash })
+  persist.addHistory({
+    kind: "link",
+    name: link.windows.length ? link.name : loose.map(a => a.name).join(", "),
+    link: hash
+  })
+  // Apps: their space first. Just actions: no space, they go where they're run.
+  if (link.windows.length && !(await importSharedSpace(link, hash))) return
+  await runLinkActions(loose)
+}
+
+// The actions of no app in the link, as if typed in the input: each goes to
+// the app picked for it (the one app or window that takes it, else a choice).
+async function runLinkActions(actions: LinkAction[]) {
+  for (const a of actions) {
+    try {
+      await runNappAction("link", a.name, decodePayload(a.name, a.payload))
+    } catch (err: any) {
+      setStatus(`${a.name} failed: ${err.message}`)
+    }
+  }
+}
+
+// The link's apps in a new ephemeral space. False when it didn't open.
+async function importSharedSpace(link: ShareLink, hash: string): Promise<boolean> {
   setStatus(`Opening shared space "${link.name}" — ${hash}`)
   // The space right away, empty: its tab and the input's "loading…" are the
   // progress while the apps are fetched. Not opened, it goes, and the user is
@@ -3468,6 +3568,7 @@ async function importShareLink(hash: string) {
       renderSpacesBar()
     }
   }
+  return opened
 }
 
 // The link's apps into the space: fetched, granted on one screen, opened,

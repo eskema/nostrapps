@@ -341,6 +341,9 @@ export interface SystemCtx {
   // Opens an address as a temp app, without installing it (or the app, when
   // it's here already).
   tryApp?(raw: string): Promise<void>
+  // Lets go of the action held for an app tried or installed from Apps (its
+  // caller gets undefined, as from a cancelled picker).
+  dropPendingAction?(): void
   uninstall(nappId: string): Promise<void>
   editPermissions(nappId: string): Promise<void>
   update(target: {

@@ -5,13 +5,17 @@
 //   #space=<slug>&app=<naddr|nsite host>&action=<name>~<payload>&app=…
 //
 // Order is the layout (an equal grid, reading order); each `action` goes to the
-// `app` before it. No spaces, no JSON, no `>`: `~` separates name from payload
+// `app` before it. Actions before any `app` belong to no app: whoever opens the
+// link picks one to run them in, the same as an action typed in the input — a
+// link can be just that (`#action=profile~npub1…`), and then opens no space.
+// No spaces, no JSON, no `>`: `~` separates name from payload
 // (unreserved, and no action name has one), lists are comma-separated.
 import { decode, neventEncode, npubEncode } from "@nostr/tools/nip19"
 
 export type LinkAction = { name: string; payload: string }
 export type LinkWindow = { input: string; actions: LinkAction[] }
-export type ShareLink = { name: string; windows: LinkWindow[] }
+// `actions`: the ones before any app, handler picked on arrival.
+export type ShareLink = { name: string; windows: LinkWindow[]; actions?: LinkAction[] }
 
 export const DEFAULT_SPACE_NAME = "shared"
 const SLUG = /^[a-z0-9-]{1,32}$/
@@ -34,13 +38,14 @@ export function slugify(name: string): string {
   return SLUG.test(s) ? s : DEFAULT_SPACE_NAME
 }
 
-// Tolerant: unknown keys are ignored, an `action` before any `app` is dropped,
-// a name that isn't a slug falls back to the default. Null when there's no app.
+// Tolerant: unknown keys are ignored, a name that isn't a slug falls back to
+// the default. Null when there's neither an app nor an action.
 export function parseShareLink(hash: string): ShareLink | null {
   const raw = hash.startsWith("#") ? hash.slice(1) : hash
   if (!raw) return null
   let name = DEFAULT_SPACE_NAME
   const windows: LinkWindow[] = []
+  const actions: LinkAction[] = []
   for (const [key, value] of new URLSearchParams(raw)) {
     if (key === "space") {
       if (SLUG.test(value)) name = value
@@ -49,18 +54,21 @@ export function parseShareLink(hash: string): ShareLink | null {
       if (input) windows.push({ input, actions: [] })
     } else if (key === "action") {
       const win = windows[windows.length - 1]
-      if (!win) continue
       const i = value.indexOf("~")
       const nm = (i === -1 ? value : value.slice(0, i)).trim()
       if (!ACTION_NAME.test(nm)) continue
-      win.actions.push({ name: nm, payload: i === -1 ? "" : value.slice(i + 1) })
+      ;(win ? win.actions : actions).push({
+        name: nm,
+        payload: i === -1 ? "" : value.slice(i + 1)
+      })
     }
   }
-  return windows.length ? { name, windows } : null
+  return windows.length || actions.length ? { name, windows, actions } : null
 }
 
 export function buildShareLink(link: ShareLink, base: string): string {
   const parts = [`space=${slugify(link.name)}`]
+  for (const a of link.actions ?? []) parts.push(`action=${a.name}~${a.payload}`)
   for (const w of link.windows) {
     parts.push(`app=${w.input}`)
     for (const a of w.actions) parts.push(`action=${a.name}~${a.payload}`)

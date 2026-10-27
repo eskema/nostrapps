@@ -2467,6 +2467,40 @@ body.popover-open .napp-body iframe {
   grid-column: 1 / -1;
 }
 
+/* "Choose a napp to open this": the prompt a held action opened discover
+   with, under the search — the title and its × on a line, the action and its
+   payload (one line, cut short) under them. */
+.apps-actionbar {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-xs);
+  margin-top: var(--space-xs);
+  padding: var(--space-xs) var(--space-s);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.apps-actionbar[hidden] {
+  display: none;
+}
+
+.apps-actionbar-request {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.apps-actionbar-payload {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* Appearance from .ui-input. */
 .apps-search {
   min-width: 0;
