@@ -127,6 +127,7 @@ window.napp.utils.loadAuthoredPodcasts(pubkey) // kind 10064
 window.napp.utils.fetchFavoriteRelaysWithSets(pubkey)
 window.napp.utils.fetchEmojisWithSets(pubkey)
 window.napp.utils.fetchFavoriteFollowSetsWithSets(pubkey)
+window.napp.utils.fetchInstalledSlashCommands(pubkey) // kind 10992 → parsed kind 31992 definitions
 window.napp.utils.loadFollowSets(pubkey)
 window.napp.utils.loadRelaySets(pubkey)
 window.napp.utils.loadEmojiSets(pubkey)

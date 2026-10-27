@@ -60,6 +60,19 @@ type AddressPointer = {
   relays?: string[]
 }
 type RelayItem = { url: string; read: boolean; write: boolean }
+// a parsed kind 31992 slash command definition
+type SlashCommand = {
+  pointer: AddressPointer
+  event: NostrEvent
+  pubkey: string
+  d: string
+  command: string
+  title?: string
+  description?: string
+  args: { name: string; type: string; required: boolean; label?: string; choices: string[] }[]
+  scopes: string[]
+  ignores: string[]
+}
 type RelayHealth = {
   url: string
   // online: a monitor checked it in the last 2 hours; offline: checked this
@@ -116,6 +129,7 @@ type Utils = {
   fetchFavoriteRelaysWithSets(pubkey: string): Promise<unknown[]>
   fetchEmojisWithSets(pubkey: string): Promise<unknown[]>
   fetchFavoriteFollowSetsWithSets(pubkey: string): Promise<unknown[]>
+  fetchInstalledSlashCommands(pubkey: string): Promise<SlashCommand[]>
   loadFollowSets(pubkey: string): Promise<unknown>
   loadRelaySets(pubkey: string): Promise<unknown>
   loadEmojiSets(pubkey: string): Promise<unknown>

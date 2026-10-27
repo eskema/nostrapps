@@ -41,6 +41,7 @@ import {
   fetchEmojisWithSets,
   fetchFavoriteFollowSetsWithSets,
   fetchFavoriteRelaysWithSets,
+  fetchInstalledSlashCommands,
   loadAuthoredPodcasts,
   loadBlockedRelays,
   loadBlossomServers,
@@ -54,6 +55,7 @@ import {
   loadFollowsList,
   loadGitAuthors,
   loadGitRepositories,
+  loadInstalledSlashCommandsList,
   loadMediaFollows,
   loadMuteList,
   loadPins,
@@ -5063,6 +5065,8 @@ async function dispatch(
       return fetchEmojisWithSets(resolvePubkey(params))
     case "napp.fetchFavoriteFollowSetsWithSets":
       return fetchFavoriteFollowSetsWithSets(resolvePubkey(params))
+    case "napp.fetchInstalledSlashCommands":
+      return fetchInstalledSlashCommands(resolvePubkey(params))
     case "napp.loadEmojiSets":
       return loadEmojiSets(resolvePubkey(params))
     case "napp.loadFollowSets":
@@ -5764,6 +5768,9 @@ async function publishEventToRelays(
       break
     case 10102:
       loadWikiRelays(event.pubkey, undefined, event).catch(() => {})
+      break
+    case 10992:
+      loadInstalledSlashCommandsList(event.pubkey, undefined, event).catch(() => {})
       break
     case 30000:
       loadFollowSets(event.pubkey).catch(() => {})
