@@ -261,6 +261,9 @@
   } catch {}
 
   window.addEventListener("message", event => {
+    // Only the launcher, our parent, talks to us here. Any other napp can
+    // reach this window through parent.frames and post whatever it likes.
+    if (event.source !== window.parent) return
     const data = event.data
     if (!data) return
 

@@ -160,6 +160,9 @@
   }
 
   window.addEventListener("message", event => {
+    // Only the shell, our parent, talks to us here; a sibling can post too,
+    // through parent.frames.
+    if (event.source !== window.parent) return
     const data = event.data
     if (data && typeof data.type === "string" && !data.__nostrapps) handleNappletMessage(data)
   })

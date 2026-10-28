@@ -292,9 +292,11 @@ export function createNappWindow({
         return
       }
       if (!origin || event.origin !== origin) return
-      // Legacy dialect (__nostrapps) is demuxed by instanceId. NIP-5D messages
-      // (a `type` field) carry no instanceId — a spec napplet doesn't know our
-      // window.name — so the origin, unique per napp, identifies the window.
+      // A napp's windows all share its origin, so the Window reference says
+      // which one spoke, as for napplets above. NIP-5D messages carry no
+      // instanceId (a spec napplet doesn't know our window.name); the legacy
+      // dialect (__nostrapps) still has to name this window's.
+      if (event.source !== iframe.contentWindow) return
       const isNip5d = typeof data.type === "string" && !data.__nostrapps
       if (!isNip5d && data.instanceId !== instanceId) return
       onMessage(data, iframe)

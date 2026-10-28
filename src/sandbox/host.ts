@@ -2776,19 +2776,17 @@ const NAPPLET_CSP =
   "child-src 'none'; frame-src 'none'; media-src 'none'; object-src 'none'; " +
   "manifest-src 'none'; base-uri 'none'; form-action 'none'"
 
-// Wrap the verified bytes with the runtime injection — CSP meta FIRST in <head>,
-// then the granted-domain declaration, then the napplet bridge. All of this is
-// outside the bytes that were hashed (per NIP-5D), so it doesn't affect identity.
+// Wrap the verified bytes with the runtime injection — CSP meta first, then the
+// granted-domain declaration, then the napplet bridge — ahead of all of them. A
+// CSP meta counts only in the real <head>, and one placed after the napplet's
+// own "<head" could be steered out of it (a "<head>" in a comment, text before
+// the head). The napplet's <html>/<head> tags fold into ours. None of this is in
+// the bytes that were hashed (per NIP-5D), so it doesn't affect identity.
 function buildNappletDoc(html: string, domains: string[]): string {
   const inject =
     `<meta http-equiv="Content-Security-Policy" content="${NAPPLET_CSP}">` +
     `<script>window.__nappletDomains=${JSON.stringify(domains).replace(/</g, "\\u003c")}</script>` +
     `<script>${nappletBridgeSource}</script>`
-  const headMatch = html.match(/<head[^>]*>/i)
-  if (headMatch) {
-    const idx = headMatch.index! + headMatch[0].length
-    return html.slice(0, idx) + inject + html.slice(idx)
-  }
   return `<!doctype html><head>${inject}</head>${html}`
 }
 
@@ -4394,13 +4392,15 @@ async function handleRpc(
 ) {
   const { id, method, instanceId } = data
   let { params } = data
+  // To the napp's origin, not "*": a frame that navigated elsewhere gets nothing.
+  const target = iframeTargetOrigin(iframe)
   try {
     const result = await runRpc(signer, method!, params, nappId, instanceId)
-    iframe.contentWindow?.postMessage({ __nostrapps: "rpc-result", id, result }, "*")
+    iframe.contentWindow?.postMessage({ __nostrapps: "rpc-result", id, result }, target)
   } catch (err: any) {
     iframe.contentWindow?.postMessage(
       { __nostrapps: "rpc-error", id, error: err?.message ?? String(err) },
-      "*"
+      target
     )
   }
 }
@@ -4486,13 +4486,16 @@ function notifyStoreSubs(event: NostrEvent) {
 }
 onStoreSaved(notifyStoreSubs)
 
-// Where a store subscription's events go: the window's iframe, or its wasm
-// module as stored messages under the call id that started it.
+// Where a store subscription's events go: the window's iframe (at its origin
+// only, so a frame that navigated elsewhere gets nothing), or its wasm module
+// as stored messages under the call id that started it.
 function storeSubSink(instanceId: string): (callbackId: string, event: NostrEvent) => void {
-  const frame = openWindows.get(instanceId)?.iframe?.contentWindow
-  if (frame) {
+  const iframe = openWindows.get(instanceId)?.iframe
+  const frame = iframe?.contentWindow
+  if (iframe && frame) {
+    const target = iframeTargetOrigin(iframe)
     return (callbackId, event) =>
-      frame.postMessage({ __nostrapps: "nostrdb-sub-event", callbackId, event }, "*")
+      frame.postMessage({ __nostrapps: "nostrdb-sub-event", callbackId, event }, target)
   }
   const napp = wasmNapps.get(instanceId)?.napp
   return (callbackId, event) =>
@@ -4525,13 +4528,16 @@ type SubscriptionMsg =
   | { type: "event"; event: NostrEvent }
   | { type: "closed"; reasons: Record<string, string> }
 
-// Where a subscription's news goes: the window's iframe, or its wasm module as
-// subscription messages under the call id that started it.
+// Where a subscription's news goes: the window's iframe (at its origin, as
+// storeSubSink), or its wasm module as subscription messages under the call id
+// that started it.
 function subscriptionSink(instanceId: string): (callbackId: string, msg: SubscriptionMsg) => void {
-  const frame = openWindows.get(instanceId)?.iframe?.contentWindow
-  if (frame) {
+  const iframe = openWindows.get(instanceId)?.iframe
+  const frame = iframe?.contentWindow
+  if (iframe && frame) {
+    const target = iframeTargetOrigin(iframe)
     return (callbackId, msg) =>
-      frame.postMessage({ __nostrapps: "napp-sub-callback", callbackId, msg }, "*")
+      frame.postMessage({ __nostrapps: "napp-sub-callback", callbackId, msg }, target)
   }
   const napp = wasmNapps.get(instanceId)?.napp
   return (callbackId, msg) =>
@@ -5007,12 +5013,16 @@ async function dispatch(
     case "napp.action": {
       // The bridge forwards the in-iframe pointer; convert it to screen coords via
       // this napp's iframe rect so cursor-anchored UI (the handler popover) opens
-      // under the cursor instead of wherever the launcher cursor last was.
+      // under the cursor instead of wherever the launcher cursor last was. Kept
+      // inside that rect: the napp picks the point, and the popover is launcher
+      // UI it could otherwise put over anything.
       const pt = params?.pointer
       const iframe = instanceId ? openWindows.get(instanceId)?.iframe : null
-      if (pt && iframe) {
+      if (pt && iframe && Number.isFinite(pt.x) && Number.isFinite(pt.y)) {
         const r = iframe.getBoundingClientRect()
-        setPointer(r.left + pt.x, r.top + pt.y)
+        const x = Math.min(Math.max(pt.x, 0), r.width)
+        const y = Math.min(Math.max(pt.y, 0), r.height)
+        setPointer(r.left + x, r.top + y)
       }
       return dispatchAction(callerNappId, params?.name ?? "", params?.payload, params?.options)
     }
