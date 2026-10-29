@@ -96,7 +96,7 @@ import {
   getInstalledApp,
   getLoadedActions,
   isWasmApp,
-  setLoadedAction,
+  setLoadedActions,
   getNappletConfig,
   getPolicy,
   getStoredPolicy,
@@ -1970,11 +1970,16 @@ export async function resolveViewPayload(payload: string): Promise<unknown | nul
   return loadEvent({ code: s })
 }
 
+// `delivered` resolves once the action is posted instead of when the napp
+// answers: a replay waits on nothing a napp that takes actions through
+// popstate alone never sends.
 export async function callIframe(
   instanceId: string,
   actionName: string,
-  actionPayload: unknown
+  actionPayload: unknown,
+  { delivered = false }: { delivered?: boolean } = {}
 ): Promise<unknown> {
+  const record = { name: actionName, payload: actionPayload }
   // resolve references (nevent/naddr/URI/JSON) for view actions before delivery
   if (isViewAction(actionName) && typeof actionPayload === "string") {
     const event = await resolveViewPayload(actionPayload)
@@ -2031,10 +2036,15 @@ export async function callIframe(
           requestId,
           idx,
           name: deliveredName(pattern, actionName),
-          payload: actionPayload
+          payload: actionPayload,
+          record
         },
         origin
       )
+      if (delivered) {
+        pendingDispatches.delete(requestId)
+        resolve(undefined)
+      }
     })().catch(fail)
   })
 }
@@ -2050,21 +2060,41 @@ function settleDispatch(
   else p.reject(new Error(data.error || "dispatch failed"))
 }
 
-// Re-dispatch every stored action for an instance (see
-// persist.appendLoadedAction). callIframe waits for the reloaded document's
-// napp-ready + fresh action registrations, so this runs fire-and-forget right
-// after triggering the reload.
+// Re-dispatch every stored action for an instance, its history rebuilt in
+// order, then step back to where the window was (see
+// persist.setLoadedActions). Read now, before the reloaded document reports
+// its fresh history over it; callIframe waits for that document's napp-ready
+// + fresh action registrations.
+export async function replayActions(instanceId: string) {
+  const { actions, ahead } = getLoadedActions(instanceId)
+  for (const action of actions) {
+    await callIframe(instanceId, action.name, action.payload, { delivered: true })
+  }
+  const iframe = openWindows.get(instanceId)?.iframe
+  if (ahead > 0 && iframe) {
+    iframe.contentWindow?.postMessage(
+      { __nostrapps: "napp-nav", dir: "go", delta: -ahead },
+      new URL(iframe.src).origin
+    )
+  }
+}
+
+// replayActions fire-and-forget, right after triggering a reload.
 function replayStoredActions(instanceId: string) {
-  void (async () => {
-    try {
-      const actions = getLoadedActions(instanceId)
-      for (const action of actions) {
-        await callIframe(instanceId, action.name, action.payload)
-      }
-    } catch (err) {
-      console.warn("[sandbox] replayStoredActions failed", { instanceId, err })
-    }
-  })()
+  replayActions(instanceId).catch(err => {
+    console.warn("[sandbox] replayStoredActions failed", { instanceId, err })
+  })
+}
+
+// The napp's history changed (bridge.js): the window's actions from now on —
+// restored with the space, replayed after a reload, carried by a share link.
+function takeNappHistory(
+  instanceId: string,
+  data: Extract<MessageData, { __nostrapps: "napp-history" }>
+) {
+  if (!Array.isArray(data.actions)) return
+  const ahead = Math.max(0, Math.trunc(Number(data.ahead)) || 0)
+  setLoadedActions(instanceId, data.actions, ahead)
 }
 
 function resetAndReplay(instanceId: string, reason: string) {
@@ -2243,18 +2273,8 @@ function mount(
           addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
           return
         }
-        case "napp-action-state": {
-          // The napp navigated on its own and pushed where it went as history
-          // state (bridge.js): the window's current action for that name from
-          // now on — restored with the space, carried by a share link. Bounded,
-          // since it's persisted and the napp picks the payload.
-          if (typeof data.name === "string" && data.name && data.name.length <= 64) {
-            let size = 0
-            try {
-              size = JSON.stringify(data.payload ?? null).length
-            } catch {}
-            if (size > 0 && size <= 8192) setLoadedAction(instanceId, data.name, data.payload)
-          }
+        case "napp-history": {
+          takeNappHistory(instanceId, data)
           return
         }
         case "rpc": {
@@ -2876,18 +2896,8 @@ export function mountWithLoading(
           addRegisteredAction(instanceId, { idx: data.idx, pattern: data.pattern })
           return
         }
-        case "napp-action-state": {
-          // The napp navigated on its own and pushed where it went as history
-          // state (bridge.js): the window's current action for that name from
-          // now on — restored with the space, carried by a share link. Bounded,
-          // since it's persisted and the napp picks the payload.
-          if (typeof data.name === "string" && data.name && data.name.length <= 64) {
-            let size = 0
-            try {
-              size = JSON.stringify(data.payload ?? null).length
-            } catch {}
-            if (size > 0 && size <= 8192) setLoadedAction(instanceId, data.name, data.payload)
-          }
+        case "napp-history": {
+          takeNappHistory(instanceId, data)
           return
         }
         case "rpc": {

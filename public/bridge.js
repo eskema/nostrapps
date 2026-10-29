@@ -83,18 +83,182 @@
 
   // The NIP-5D window.napplet surface lives in its own file (napplet-bridge.js),
   // injected alongside this one; bridge.js owns only the napp surface below.
-  // Set while the dispatch below pushes its own history entry, so the report
-  // hook further down doesn't echo it back to the launcher.
-  let fromHost = false
-
-  // Give the initial entry an index too, so popstate can compare it with
-  // entries pushed later.
+  // ── The napp's own history ──────────────────────────────────────────
+  // The browser keeps one history for the whole tab: a real pushState in
+  // here would be a step of the launcher's back button, and history.back()
+  // would walk back whichever frame moved last — another napp's, or the
+  // launcher itself away. So the entries live in this array, and the real
+  // history only ever holds the current one (replaceState), which keeps
+  // location reading as usual. Every entry gets its index as
+  // __action_popstate_idx, so popstate handlers can tell back from forward.
   const popstateIdx = "__action_popstate_idx"
-  if (typeof history.state?.[popstateIdx] !== "number") {
-    const state = history.state && typeof history.state === "object" ? history.state : {}
-    history.replaceState({ ...state, [popstateIdx]: 0 }, "")
+  // The real entry's state is the whole list, under this key: it outlives a
+  // reload the napp does itself (location.reload() can't be wrapped), so the
+  // next document picks up where this one was. history.state is patched to
+  // read the current entry's own state instead.
+  const stackKey = "__napp_history"
+  const realReplace = history.replaceState.bind(history)
+  const realStateGet = Object.getOwnPropertyDescriptor(History.prototype, "state").get
+  const realReload = () => location.reload()
+  const withIdx = (state, idx) =>
+    state === null || typeof state === "object" ? { ...(state || {}), [popstateIdx]: idx } : state
+  // The action an entry stands for, for the launcher: the one the launcher
+  // dispatched into it (as it was sent, before view resolution), or the
+  // napp's own { action: { name, payload } } state.
+  const actionOf = state => {
+    const a = state && state.action
+    return a && typeof a.name === "string" && a.name ? { name: a.name, payload: a.payload } : null
   }
-  let popstateLastIdx = history.state[popstateIdx]
+
+  // A list found in the real state is this window's, from before the napp
+  // reloaded itself. Otherwise this is a fresh start — a new window, or the
+  // launcher's reload, which resets the real state on its way out (see
+  // napp-nav reload) so the replay it does next starts from nothing.
+  let entries
+  let pos
+  const saved = (() => {
+    const raw = realStateGet.call(history)
+    return raw && typeof raw === "object" ? raw[stackKey] : null
+  })()
+  if (
+    saved &&
+    Array.isArray(saved.entries) &&
+    Number.isInteger(saved.pos) &&
+    saved.pos >= 0 &&
+    saved.pos < saved.entries.length
+  ) {
+    entries = saved.entries
+    pos = saved.pos
+  } else {
+    const state = withIdx(realStateGet.call(history), 0)
+    entries = [{ state, url: location.href, action: actionOf(state) }]
+    pos = 0
+  }
+  try {
+    Object.defineProperty(History.prototype, "state", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        const raw = realStateGet.call(this)
+        return raw && typeof raw === "object" && stackKey in raw ? entries[pos].state : raw
+      }
+    })
+  } catch {}
+
+  // Writes the list into the real entry, at the current entry's location.
+  // Too big to keep whole (the browser caps a state's size), the current
+  // entry alone goes: a reload then keeps where the napp is, not how it got
+  // there.
+  function save(title) {
+    const url = entries[pos].url
+    try {
+      realReplace({ [stackKey]: { entries, pos } }, title ?? "", url)
+    } catch (err) {
+      if (err?.name === "SecurityError") throw err
+      realReplace({ [stackKey]: { entries: [entries[pos]], pos: 0 } }, title ?? "", url)
+    }
+  }
+  // An entry as the napp's pushState/replaceState hands it: its state cloned
+  // (and an uncloneable one thrown, as the real call would) and its url
+  // resolved, before anything changed.
+  function makeEntry(state, url, idx, action) {
+    const cloned = structuredClone(withIdx(state, idx))
+    const href = url == null ? location.href : new URL(url, location.href).href
+    return { state: cloned, url: href, action: action ?? actionOf(cloned) }
+  }
+  // Applies a change to the list and writes it, or puts the list back as it
+  // was if the real call refuses it (a url off the napp's origin, say).
+  function commit(change, title) {
+    const before = { entries: entries.slice(), pos }
+    change()
+    try {
+      save(title)
+    } catch (err) {
+      entries = before.entries
+      pos = before.pos
+      throw err
+    }
+    report()
+  }
+  save()
+
+  // The index the popstate being dispatched comes from, while it runs.
+  let firingFrom = null
+
+  // Where the napp is, as the launcher keeps it: the actions of its entries
+  // in order and how many of them are ahead of the current one — restored
+  // with the space, replayed after a reload. Sent only when it changed.
+  let lastReport = ""
+  const report = () => {
+    const actions = []
+    let ahead = 0
+    entries.forEach((e, i) => {
+      if (!e.action) return
+      actions.push(e.action)
+      if (i > pos) ahead++
+    })
+    const msg = { __nostrapps: "napp-history", instanceId: window.name, actions, ahead }
+    let key
+    try {
+      key = JSON.stringify([actions, ahead])
+    } catch {
+      return
+    }
+    if (key === lastReport) return
+    lastReport = key
+    try {
+      window.parent.postMessage(msg, "*")
+    } catch {} // a payload that can't be cloned stays the napp's own business
+  }
+
+  function pushEntry(state, title, url, action) {
+    const entry = makeEntry(state, url, pos + 1, action)
+    commit(() => {
+      entries = entries.slice(0, pos + 1)
+      entries.push(entry)
+      pos++
+    }, title)
+  }
+
+  function firePopstate(state, from) {
+    firingFrom = from
+    try {
+      window.dispatchEvent(new PopStateEvent("popstate", { state }))
+    } finally {
+      firingFrom = null
+    }
+  }
+
+  function go(delta) {
+    delta = Math.trunc(Number(delta)) || 0
+    if (!delta) return realReload()
+    const to = pos + delta
+    if (to < 0 || to >= entries.length) return
+    const from = pos
+    commit(() => {
+      pos = to
+    })
+    const state = history.state
+    // popstate comes after the call returns, as the browser's does.
+    setTimeout(() => firePopstate(state, from))
+  }
+
+  history.pushState = function (state, title, url) {
+    pushEntry(state, title, url)
+  }
+  history.replaceState = function (state, title, url) {
+    const entry = makeEntry(state, url, pos)
+    commit(() => {
+      entries = entries.slice()
+      entries[pos] = entry
+    }, title)
+  }
+  history.back = () => go(-1)
+  history.forward = () => go(1)
+  history.go = delta => go(delta)
+  try {
+    Object.defineProperty(history, "length", { configurable: true, get: () => entries.length })
+  } catch {}
 
   window.addEventListener("message", event => {
     const data = event.data
@@ -150,30 +314,30 @@
         }
 
         // regardless of whether we have a callback registered or not, always call popstate
-        const state = {
-          [popstateIdx]:
-            (typeof history.state?.[popstateIdx] === "number"
-              ? history.state[popstateIdx]
-              : 0) + 1,
-          action: { name: data.name, payload: data.payload }
-        }
-        fromHost = true
-        try {
-          history.pushState(state, "", location.href)
-          window.dispatchEvent(new PopStateEvent("popstate", { state }))
-        } finally {
-          fromHost = false
-        }
+        const from = pos
+        pushEntry(
+          { action: { name: data.name, payload: data.payload } },
+          "",
+          location.href,
+          data.record && actionOf({ action: data.record })
+        )
+        firePopstate(history.state, from)
 
         return
       }
       case "napp-nav": {
-        // The launcher can't drive a cross-origin frame's history, so it asks
-        // us (running inside the napp) to do it. reload() reloads the CURRENT
-        // location (client-side route included), not the original src.
-        if (data.dir === "back") history.back()
-        else if (data.dir === "forward") history.forward()
-        else if (data.dir === "reload") location.reload()
+        // The window's back/forward/reload buttons, and the launcher putting a
+        // replayed history back where it was (go).
+        if (data.dir === "back") go(-1)
+        else if (data.dir === "forward") go(1)
+        else if (data.dir === "go") go(data.delta)
+        else if (data.dir === "reload") {
+          // The launcher replays the window's actions into the new document, so
+          // it starts from where this one started — the first entry's location,
+          // no state — not from wherever the history had got to.
+          realReplace({ [popstateIdx]: 0 }, "", entries[0].url)
+          realReload()
+        }
         return
       }
       case "napp-theme-change": {
@@ -189,55 +353,6 @@
         }
         return
       }
-    }
-  })
-
-  // A napp that navigates on its own can push where it went as a history state
-  // of the shape the dispatch above pushes — { action: { name, payload } } —
-  // and the launcher takes it as the window's current action for that name:
-  // restored with the space, carried by a share link. Back/forward report the
-  // entry landed on; the dispatch's own push is skipped (fromHost).
-  const reportActionState = state => {
-    if (fromHost) return
-    const a = state && state.action
-    if (!a || typeof a.name !== "string" || !a.name) return
-    try {
-      window.parent.postMessage(
-        {
-          __nostrapps: "napp-action-state",
-          instanceId: window.name,
-          name: a.name,
-          payload: a.payload
-        },
-        "*"
-      )
-    } catch {} // a payload that can't be cloned stays the napp's own business
-  }
-  for (const method of ["pushState", "replaceState"]) {
-    const original = history[method].bind(history)
-    history[method] = function (state, ...rest) {
-      if (state === null || typeof state === "object") {
-        const idx =
-          typeof history.state?.[popstateIdx] === "number" ? history.state[popstateIdx] : 0
-        state = {
-          ...(state || {}),
-          [popstateIdx]: method === "pushState" ? idx + 1 : idx
-        }
-      }
-      const result = original(state, ...rest)
-      if (typeof state?.[popstateIdx] === "number") popstateLastIdx = state[popstateIdx]
-      reportActionState(state)
-      return result
-    }
-  }
-  window.addEventListener("popstate", e => {
-    reportActionState(e.state)
-    const idx = e.state?.[popstateIdx]
-    if (typeof idx === "number") {
-      // Keep the previous value visible throughout synchronous napp popstate handlers.
-      queueMicrotask(() => {
-        popstateLastIdx = idx
-      })
     }
   })
 
@@ -617,7 +732,7 @@
   const napp = {
     instance: window.name,
     get __popstate_last_idx() {
-      return popstateLastIdx
+      return firingFrom ?? pos
     },
     action: (name, payload, options) =>
       rpc("napp.action", { name, payload, options, pointer: __pointer }),

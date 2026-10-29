@@ -237,8 +237,19 @@ export function moveOpenToSpace(instanceId: string, targetId: string) {
   if (!isEphemeralSpace(cur.id) || !isEphemeralSpace(targetId)) writeJson(SPACES_KEY, state)
 }
 
-export function getLoadedActions(instanceId: string): Array<{ name: string; payload: unknown }> {
-  return readOpen().find(n => n.instanceId === instanceId)?.loadedActions || []
+export function getLoadedActions(instanceId: string): {
+  actions: Array<{ name: string; payload: unknown }>
+  ahead: number
+} {
+  const entry = readOpen().find(n => n.instanceId === instanceId)
+  const actions = entry?.loadedActions || []
+  return { actions, ahead: Math.min(actions.length, entry?.actionsAhead || 0) }
+}
+
+// The actions up to where the window is: what a share link carries.
+export function currentActions(entry: NappWindowState): Array<{ name: string; payload: unknown }> {
+  const actions = entry.loadedActions || []
+  return actions.slice(0, actions.length - Math.min(actions.length, entry.actionsAhead || 0))
 }
 
 // ─── Remembered window sizes ───────────────────────────────────────
@@ -573,11 +584,15 @@ export function findSpaceOfSystemNapp(systemId: string): string | null {
 type LoadedAction = { name: string; payload: unknown }
 
 // Rewrite a window's loaded actions wherever it lives — any space, or ephemeral.
-function editLoadedActions(instanceId: string, edit: (list: LoadedAction[]) => LoadedAction[]) {
-  const withEdit = (entry: NappWindowState): NappWindowState => ({
-    ...entry,
-    loadedActions: edit(Array.isArray(entry.loadedActions) ? entry.loadedActions : [])
-  })
+function editLoadedActions(
+  instanceId: string,
+  edit: (list: LoadedAction[], ahead: number) => { actions: LoadedAction[]; ahead: number }
+) {
+  const withEdit = (entry: NappWindowState): NappWindowState => {
+    const list = Array.isArray(entry.loadedActions) ? entry.loadedActions : []
+    const { actions, ahead } = edit(list, Math.min(list.length, entry.actionsAhead || 0))
+    return { ...entry, loadedActions: actions, actionsAhead: ahead || undefined }
+  }
   for (const arr of devOpenBySpace.values()) {
     const i = arr.findIndex(n => n.instanceId === instanceId)
     if (i >= 0) {
@@ -596,24 +611,46 @@ function editLoadedActions(instanceId: string, edit: (list: LoadedAction[]) => L
   }
 }
 
-// An action dispatched to the window: appended, replayed in order on restore.
-// Bounded: the last LOADED_ACTIONS_KEEP, none over 8 KB (the size a napp's own
-// state gets, see setLoadedAction's caller). A window taking actions all day
-// would otherwise grow the spaces document until localStorage refuses it.
+// Bounded: the last LOADED_ACTIONS_KEEP, none over 8 KB. A window taking
+// actions all day would otherwise grow the spaces document until
+// localStorage refuses it.
 const LOADED_ACTIONS_KEEP = 20
-export function appendLoadedAction(instanceId: string, name: string, payload: unknown) {
-  let size = 0
+const LOADED_ACTION_MAX = 8192
+function fits(payload: unknown) {
   try {
-    size = JSON.stringify(payload ?? null).length
-  } catch {}
-  if (size > 8192) return
-  editLoadedActions(instanceId, list => [...list, { name, payload }].slice(-LOADED_ACTIONS_KEEP))
+    return JSON.stringify(payload ?? null).length <= LOADED_ACTION_MAX
+  } catch {
+    return false
+  }
 }
 
-// Where the napp took itself (its own history state): the latest of that
-// action wins and goes last, so a restore ends where the napp was.
-export function setLoadedAction(instanceId: string, name: string, payload: unknown) {
-  editLoadedActions(instanceId, list => [...list.filter(a => a.name !== name), { name, payload }])
+// An action dispatched to the window: a new entry where it is, dropping
+// those that were ahead, as a navigation does. For a napp with a page the
+// history it reports (setLoadedActions) follows and has the last word.
+export function appendLoadedAction(instanceId: string, name: string, payload: unknown) {
+  if (!fits(payload)) return
+  editLoadedActions(instanceId, (list, ahead) => ({
+    actions: [...list.slice(0, list.length - ahead), { name, payload }].slice(-LOADED_ACTIONS_KEEP),
+    ahead: 0
+  }))
+}
+
+// The window's history as the napp reports it (bridge.js): its entries'
+// actions in order, `ahead` of them past the current one.
+export function setLoadedActions(instanceId: string, actions: LoadedAction[], ahead: number) {
+  const kept: LoadedAction[] = []
+  let keptAhead = 0
+  actions.forEach((a, i) => {
+    if (!a || typeof a.name !== "string" || !a.name || a.name.length > 64) return
+    if (!fits(a.payload)) return
+    kept.push({ name: a.name, payload: a.payload })
+    if (i >= actions.length - ahead) keptAhead++
+  })
+  const bounded = kept.slice(-LOADED_ACTIONS_KEEP)
+  editLoadedActions(instanceId, () => ({
+    actions: bounded,
+    ahead: Math.min(bounded.length, keptAhead)
+  }))
 }
 
 export function findSessionByPetname(petname: string): NappWindowState | null {

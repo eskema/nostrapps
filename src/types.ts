@@ -41,7 +41,10 @@ export type NappWindowState = {
   status: Status
   position?: Position
   params?: any
+  // The window's history as actions, replayed in order on restore; the last
+  // `actionsAhead` of them are forward of where the window is.
   loadedActions?: Array<{ name: string; payload: unknown }>
+  actionsAhead?: number
 }
 
 // A saved window configuration (a "space" / workspace).
@@ -111,13 +114,12 @@ export type MessageData =
       pattern: string
     }
   | {
-      // The napp navigated on its own and pushed where it went as history
-      // state `{ action: { name, payload } }` (see bridge.js) — the window's
-      // current action for that name from then on.
-      __nostrapps: "napp-action-state"
+      // The napp's history changed (bridge.js keeps it): the actions of its
+      // entries in order, `ahead` of them past the current one.
+      __nostrapps: "napp-history"
       instanceId: string
-      name: string
-      payload: unknown
+      actions: Array<{ name: string; payload: unknown }>
+      ahead: number
     }
   | {
       __nostrapps: "napp-dispatch-action"
@@ -125,6 +127,9 @@ export type MessageData =
       idx: number | undefined
       name: string
       payload: unknown
+      // The action as dispatched (before view resolution), which is what the
+      // window's history keeps for the launcher.
+      record: { name: string; payload: unknown }
     }
   | {
       __nostrapps: "napp-dispatch-result"

@@ -15,6 +15,7 @@ import {
   reinstallFiles,
   reloadIframesByNappId,
   callIframe,
+  replayActions,
   tileWindows,
   bestFitPack,
   setStageSettling,
@@ -954,12 +955,6 @@ async function deliverPendingAction(nappId: string) {
     )
   } catch (err) {
     p.reject(err)
-  }
-}
-
-async function replayLoadedActions(instanceId: string) {
-  for (const action of persist.getLoadedActions(instanceId)) {
-    await callIframe(instanceId, action.name, action.payload)
   }
 }
 
@@ -2022,8 +2017,8 @@ async function restoreAllInner() {
       if (!win) continue
       const restoredState = win.getState()
       persist.updateOpen(state.instanceId, restoredState)
-      void replayLoadedActions(restoredState.instanceId).catch((err: any) => {
-        console.warn("[launch] replayLoadedActions failed", {
+      void replayActions(restoredState.instanceId).catch((err: any) => {
+        console.warn("[launch] replayActions failed", {
           instanceId: restoredState.instanceId,
           err
         })
@@ -3960,14 +3955,14 @@ function addressFor(nappId: string): string | null {
 }
 
 // The current space as a link, for the history: its windows with the last
-// payload each got per action. Null when nothing in it has an address.
+// payload each got per action, up to where each window is. Null when nothing in it has an address.
 function spaceAsLink(name: string): string | null {
   const windows: LinkWindow[] = []
   for (const w of windowsInReadingOrder()) {
     const input = addressFor(w.nappId)
     if (!input) continue
     const last = new Map<string, unknown>()
-    for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
+    for (const a of persist.currentActions(w)) last.set(a.name, a.payload)
     const actions: LinkAction[] = []
     for (const [n, p] of last) {
       const payload = encodePayload(n, p)
@@ -3997,7 +3992,7 @@ async function shareCurrentSpace() {
         ? await withTimeout(iconSrcFor(installed, true), 1500, "icon").catch(() => null)
         : null
       const last = new Map<string, unknown>()
-      for (const a of w.loadedActions ?? []) last.set(a.name, a.payload)
+      for (const a of persist.currentActions(w)) last.set(a.name, a.payload)
       return {
         key: w.nappId,
         title: w.petname,

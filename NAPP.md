@@ -332,6 +332,13 @@ history.pushState({ action: { name: "profile", payload: pubkey } }, "")
 The bridge adds `__action_popstate_idx` to object history states. During each
 `popstate` handler, `window.napp.__popstate_last_idx` holds previous index.
 
+Each window has its own history: `history.pushState`, `back`, `forward`, `go`
+and `length` work on the napp's entries alone, walked by the window's back and
+forward buttons, and never touch the browser's (whose back button the launcher
+keeps). The entries with an `action` state are the window's history for the
+launcher: replayed in order when the space is restored or the window
+reloaded, which starts from the napp's first location with no history.
+
 ## Permissions
 
 Declare required domains in `requires`. The launcher asks for permission on first launch and stores the grant. Sensitive operations such as signing, clipboard access, and file saving prompt separately.
