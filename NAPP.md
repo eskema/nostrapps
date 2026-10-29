@@ -94,7 +94,7 @@ window.nostrdb.add(event)
 window.nostrdb.query(filters)
 window.nostrdb.count(filters)
 window.nostrdb.event(id)
-window.nostrdb.remove(ids)
+window.nostrdb.remove(ids) // throws: the store is shared; a kind 5 through add() takes back your own
 window.nostrdb.replaceable(kind, author, identifier?)
 window.nostrdb.subscribe(filters) // async iterator: for await (const event of ...); return() ends it
 

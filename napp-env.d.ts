@@ -41,6 +41,8 @@ type NostrDB = {
   query(filters: unknown): Promise<NostrEvent[]>
   count(filters: unknown): Promise<number>
   event(id: string): Promise<NostrEvent | undefined>
+  // Throws: the store is shared by every napp. A kind 5 through add() takes
+  // back your own events.
   remove(ids: string[]): Promise<string[]>
   replaceable(kind: number, author: string, identifier?: string): Promise<NostrEvent | undefined>
   // Every event saved to the store from now on that matches filters, one by

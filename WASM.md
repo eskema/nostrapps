@@ -176,7 +176,7 @@ prompts a wasm napp too.
 | `nostrdb.query`                            | `{filters}` (one or an array)               | events                               | `nostrdb.query`                        |
 | `nostrdb.count`                            | `{filters}`                                 | number                               | `nostrdb.count`                        |
 | `nostrdb.event`                            | `{id}`                                      | event or null                        | `nostrdb.event`                        |
-| `nostrdb.remove`                           | `{ids}`                                     | removed ids                          | `nostrdb.remove`                       |
+| `nostrdb.remove`                           | `{ids}`                                     | an error: not available to napps     | `nostrdb.remove`                       |
 | `nostrdb.replaceable`                      | `{kind, author, identifier?}`               | event or null                        | `nostrdb.replaceable`                  |
 | `nostrdb.subscribe`                        | `{filters}` (one or an array)               | null, then stored messages           | `nostrdb.subscribe`                    |
 | `nostrdb.unsubscribe`                      | `{callbackId}`                              | null                                 | leaving the `for await` loop           |

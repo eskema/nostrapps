@@ -4992,18 +4992,11 @@ async function dispatch(
       const res = await store.queryEvents({ ids: [params.id] }, 1)
       return res[0]
     }
-    case "nostrdb.remove": {
-      // Non-hex ids panic the wasm codec (and poison the store), so drop them.
-      const ids = [
-        ...new Set(
-          (Array.isArray(params.ids) ? params.ids : []).filter((x: unknown) =>
-            isHex64(x)
-          ) as string[]
-        )
-      ]
-      if (ids.length === 0) return []
-      return store.deleteEvents(ids)
-    }
+    case "nostrdb.remove":
+      // The store is shared by every napp and the launcher: a removal leaves a
+      // hole for all of them, and napp.sync won't refetch a range it holds. A
+      // napp takes back its own events with a kind 5 through nostrdb.add.
+      throw new Error("nostrdb.remove: not available to napps")
     case "nostrdb.replaceable":
       // loadReplaceables returns [lastAttempt, event] tuples; napps are
       // promised the bare event.
