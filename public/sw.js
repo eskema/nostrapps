@@ -302,8 +302,8 @@ function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
     "<script>window.__nappletDomains=" +
     JSON.stringify(domainList).replace(/</g, "\\u003c") +
     "</script>"
-  // Injected at the top of <head>, so the shared stylesheet lands BEFORE the
-  // napp's own styles and the napp can still override it. __nappletDomains must
+  // Injected ahead of the napp's own tags, so the shared stylesheet lands BEFORE
+  // the napp's styles and the napp can still override it. __nappletDomains must
   // precede napplet-bridge.js (which reads it). bridge.js owns window.nostr /
   // window.napp; napplet-bridge.js owns window.napplet; napp-ui.js puts the
   // kit's helpers on window.napp.ui, so it follows bridge.js.
@@ -317,23 +317,14 @@ function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
   const readyTag =
     '<script>window.parent.postMessage({ __nostrapps: "napp-ready", instanceId: window.name }, "*")</script>'
 
-  let result = html
-  const headMatch = result.match(/<head[^>]*>/i)
-  if (headMatch) {
-    const idx = headMatch.index + headMatch[0].length
-    result = result.slice(0, idx) + headInject + result.slice(idx)
-  } else {
-    result = headInject + result
-  }
-
-  const endIdx = result.indexOf("</html>")
-  if (endIdx >= 0) {
-    result = result.slice(0, endIdx) + readyTag + result.slice(endIdx)
-  } else {
-    result = result + readyTag
-  }
-
-  return result
+  // Placed by position, not by searching for the napp's tags: a "<header>", or a
+  // "<head>" / "</html>" in a comment or a string, would land them in the wrong
+  // place. The parser puts leading scripts in the head and folds the napp's
+  // <html>/<head> tags into it. A leading doctype stays first, or the page
+  // drops into quirks mode.
+  const doctype = html.match(/^(?:\s|<!--[\s\S]*?-->)*<!doctype[^>]*>/i)
+  const idx = doctype ? doctype[0].length : 0
+  return html.slice(0, idx) + headInject + html.slice(idx) + readyTag
 }
 
 // The wrapper design system is a granted capability (`ui`) read from the
