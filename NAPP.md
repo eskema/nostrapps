@@ -224,6 +224,8 @@ the MIME type (guessed from the path when absent). `metadata.json` must be
 among them; its `id` names the app (`local~<id>`). The first install shows the
 new app's permission screen and resolves to `null` if the user cancels;
 installing the same id again replaces its files and reloads its open windows.
+Replacing an app the napp didn't install (a picked folder, another napp's)
+asks the user first, on that app's permission screen.
 The app can then be published from its card like any other local app.
 
 `window.napp.relays.health(urls)` answers, per relay, what the NIP-66 monitors

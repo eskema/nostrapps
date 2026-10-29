@@ -737,6 +737,8 @@ export function storeInstalledLocalApp(app: {
   // A local wasm napp's kind, since it carries no manifest event. Absent
   // means a page.
   kind?: number
+  // The dev napp that handed the files over; absent for a picked folder.
+  installedBy?: string
 }) {
   if (!app?.nappId) return
   const all = readInstalled()
@@ -752,6 +754,7 @@ export function storeInstalledLocalApp(app: {
     initialSize: sanitizeInitialSize(app.initialSize),
     ...(app.html ? { html: app.html } : {}),
     ...(app.kind === WASM_NAMED_KIND ? { kind: WASM_NAMED_KIND } : {}),
+    ...(app.installedBy ? { installedBy: app.installedBy } : {}),
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)

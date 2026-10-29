@@ -438,8 +438,8 @@ setNappLogSink((source, msg) =>
 )
 // napp.dev.installLocal: a napp granted `dev` hands over an app's files, and
 // they install the way a picked folder does.
-setLocalInstaller(async files =>
-  installLocalApp(await collectLocalFiles(files, "local", setStatus))
+setLocalInstaller(async (files, by) =>
+  installLocalApp(await collectLocalFiles(files, "local", setStatus), by)
 )
 
 // The kit's author(): profiles through the loader that feeds the search
@@ -3254,9 +3254,11 @@ localFolderInput.addEventListener("change", async (e: Event) => {
 // Install a collected local app (a picked folder, or the files a dev napp
 // handed over with napp.dev.installLocal) and open it. One already open is
 // reloaded onto the new files instead of getting a second window. Resolves to
-// the app's id, or null if the user cancelled its permission screen.
+// the app's id, or null if the user cancelled its permission screen. `by` is
+// the dev napp handing the files over; absent for a picked folder.
 async function installLocalApp(
-  collected: Awaited<ReturnType<typeof collectLocalFiles>>
+  collected: Awaited<ReturnType<typeof collectLocalFiles>>,
+  by?: string
 ): Promise<string | null> {
   const { nappId, files, metadata, skipped, single } = collected
   console.debug("[launch] local folder collected", {
@@ -3347,6 +3349,26 @@ async function installLocalApp(
   const onProgress = setStatus
   const label = metadata.title || nappId
 
+  // A dev napp replacing an app it didn't install (a picked folder, another
+  // dev napp's) asks first: the new files would run with that app's grants
+  // and data. The rows are what the new metadata declares, ticked as granted.
+  const old = persist.getInstalledApp(nappId)
+  if (by && persist.hasPolicy(nappId) && old?.installedBy !== by) {
+    const granted = await promptNappPolicy({
+      title: old?.petname || label,
+      icon: old ? installedIconSrc(old) : undefined,
+      type: wasm ? "napp" : metaAppType(metadata),
+      declaredDomains: metadata?.requires || [],
+      current: persist.getPolicy(nappId),
+      replacedBy: by
+    })
+    if (!granted) {
+      setStatus("Cancelled")
+      return null
+    }
+    persist.setPolicy(nappId, granted)
+  }
+
   const policy = await resolvePolicyForLaunch(nappId, {
     title: label,
     icon: directIconSrc(metadata?.icon),
@@ -3375,7 +3397,8 @@ async function installLocalApp(
     requires: metadata?.requires || [],
     modes: metadata?.modes,
     initialSize: persist.initialSizeFromMeta(metadata),
-    ...(wasm ? { kind: WASM_NAMED_KIND } : {})
+    ...(wasm ? { kind: WASM_NAMED_KIND } : {}),
+    installedBy: by
   })
   handlers.addApp(nappId, metadata?.actions || [])
 

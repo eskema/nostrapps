@@ -242,6 +242,10 @@ export type InstalledApp = {
   // Unix seconds of the last update, a newer manifest over an installed one.
   // Lifts the app to the top of the installed list; installedAt stays put.
   updatedAt?: number
+  // Local apps a dev napp installed (napp.dev.installLocal): that napp's id.
+  // It replaces them without asking; any other napp asks first. Absent for a
+  // picked folder.
+  installedBy?: string
 }
 
 export interface SuggestionItem {

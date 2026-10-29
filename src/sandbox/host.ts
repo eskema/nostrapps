@@ -2149,6 +2149,8 @@ export function reloadIframesByNappId(nappId: string): number {
     if (win.root.dataset.nappId === nappId && win.iframe) {
       const instanceId = win.root.dataset.instanceId || ""
       resetInstanceRuntimeState(instanceId, "Window reloaded before action registered")
+      // The grant may have changed with the files (a dev napp's replace).
+      win.refreshCsp?.()
       win.iframe.src = win.iframe.src
       replayStoredActions(instanceId)
       count++
@@ -5212,8 +5214,12 @@ export function describeSaveFile(params: any): string | undefined {
 // A napp granted `dev` hands over an app's files — metadata.json among them —
 // and main.ts installs them as a local app, the way a picked folder is: the
 // new app's own permission screen on its first install, its open windows
-// reloaded on a later one.
-type LocalInstaller = (files: Array<{ path: string; body: Blob }>) => Promise<string | null>
+// reloaded on a later one. `by` is the calling napp: replacing an app it
+// didn't install asks first.
+type LocalInstaller = (
+  files: Array<{ path: string; body: Blob }>,
+  by: string
+) => Promise<string | null>
 let localInstaller: LocalInstaller | null = null
 export function setLocalInstaller(fn: LocalInstaller) {
   localInstaller = fn
@@ -5253,7 +5259,7 @@ async function installLocalForNapp(
     return { path, body }
   })
   if (!seen.has("/metadata.json")) throw new Error("installLocal: missing metadata.json")
-  const nappId = await localInstaller(files)
+  const nappId = await localInstaller(files, callerNappId)
   if (nappId) hostLog(callerNappId, `installed ${nappId}`)
   return nappId ? { nappId } : null
 }

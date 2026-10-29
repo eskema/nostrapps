@@ -6,7 +6,7 @@
 // screen with a single set of grants for every app the link runs.
 import { openDialog } from "./dialog.js"
 import { appIcon, type AppIconSize, button, check, input, radio, tabs } from "./system-napps/ui.js"
-import { nameEl } from "./napp-name.js"
+import { nameEl, nappNameEl } from "./napp-name.js"
 import type { NappPolicy } from "./types.js"
 
 // Title + short description per grantable capability. Keys are the requires
@@ -94,6 +94,10 @@ export interface PolicyPromptOpts {
   // the current one preselected, or a new one — or nowhere, installed only.
   // Absent, the screen grants and nothing more (a dev app, a temp one, an edit).
   placement?: { spaces: Array<{ id: string; name: string }>; current: string }
+  // A dev napp replacing the files of an app it didn't install: its id. The
+  // screen names it, `current` pre-ticks the grants, and it confirms with
+  // Replace.
+  replacedBy?: string
 }
 
 // Resolves to the granted policy (plus the chosen `type` when chooseType was
@@ -106,7 +110,7 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<GrantedPolicy 
     dismissValue: null,
     class: "napp-perms-dialog",
     queue: {
-      kind: edit ? "permissions" : "install",
+      kind: opts.replacedBy ? "replace" : edit ? "permissions" : "install",
       name: nameEl(opts.title, opts.author),
       // Undecided while the screen is still asking which it is.
       type: opts.chooseType ? undefined : opts.type
@@ -118,7 +122,7 @@ export function promptNappPolicy(opts: PolicyPromptOpts): Promise<GrantedPolicy 
       const place = opts.placement ? placementRow(opts.placement) : null
       const actions = actionRow(
         resolve,
-        edit ? "Save" : opts.mode === "install" ? "Install" : "Open",
+        opts.replacedBy ? "Replace" : edit ? "Save" : opts.mode === "install" ? "Install" : "Open",
         () => (place ? { ...section.read(), spaceId: place.read() } : section.read())
       )
       if (place) {
@@ -298,6 +302,15 @@ function policySection(
   const el = document.createElement("div")
   el.className = "napp-perms-app"
   if (head) el.appendChild(head)
+  if (opts.replacedBy) {
+    const by = document.createElement("p")
+    by.className = "napp-perms-reqs"
+    by.append(
+      nappNameEl(opts.replacedBy),
+      " wants to replace it. The new files keep its data and the grants below."
+    )
+    el.appendChild(by)
+  }
 
   // Ambiguous load: a one-of-two pick in the same row language as the
   // capability rows below, radio at the left.
