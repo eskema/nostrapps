@@ -190,10 +190,11 @@ async function syncPairLatest(
     b = await extendBound(author, kind, coveredDownTo, until)
   }
 
-  // [oldestBound, until] is in the store; below it is unknown
+  // [oldestBound, until] is in the store; below it is unknown. A bound down to
+  // since, or to 0 without one, leaves nothing below to ask for.
   const held = b && b[0] <= until && until <= b[1]
   const oldestBound = held ? b![0] : until
-  if (held && since !== undefined && since >= oldestBound) return
+  if (held && (since ?? 0) >= oldestBound) return
 
   let have = 0
   if (held) {
