@@ -522,7 +522,8 @@ export function mount(
     const base = app.event?.created_at
     if (!base) return null // local/dev/temp apps have no manifest → no updates
     const best = manifests.get(app.nappId)
-    return best && best.created_at > base ? best : null
+    // The id holds 16 hex of the key: another author's can land on it.
+    return best && best.pubkey === app.event.pubkey && best.created_at > base ? best : null
   }
 
   // An "update" button for an installed app, pointed at the newer manifest `evt`.
@@ -1518,7 +1519,11 @@ function renderCard(
   const installed = ctx.isInstalled?.(nappId) ?? false
   const installedEvents = ctx.apps.events?.() ?? []
   const installedEvent = installedEvents.find((e: any) => computeNappId(e) === nappId)
-  const updateAvailable = installed && installedEvent && installedEvent.created_at < evt.created_at
+  const updateAvailable =
+    installed &&
+    installedEvent &&
+    installedEvent.pubkey === evt.pubkey &&
+    installedEvent.created_at < evt.created_at
   // Tried and not kept: the temp look, and keep, as on the installed tab.
   const temporary = !!ctx.apps.get(nappId)?.temporary
 

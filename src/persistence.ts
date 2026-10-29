@@ -659,11 +659,6 @@ export function findSessionByPetname(petname: string): NappWindowState | null {
 }
 
 export function computeNappId(event: { kind: number; pubkey: string; tags: string[][] }): string {
-  const source = event.tags.find(t => t[0] === "source")?.[1]
-  if (source === "local") {
-    const dTag = event.tags.find(t => t[0] === "d")?.[1]
-    return `local-${dTag || ""}`
-  }
   const dTag = event.tags.find(t => t[0] === "d")?.[1]
   const base = `${event.pubkey.slice(0, 16)}~${dTag || ""}`
   if (event.kind === 5129 || event.kind === 15129 || event.kind === 35129) {
@@ -695,12 +690,21 @@ function readInstalled(): Record<string, Omit<InstalledApp, "nappId">> {
   return parsed
 }
 
+// An id carries only 16 hex of its author's key, so another author's manifest
+// can compute an installed app's id. It never takes that app's place: the
+// grants, data and origin stay with the author who has them.
+export function assertSameAuthor(nappId: string, pubkey: string) {
+  const had = getInstalledApp(nappId)?.event?.pubkey
+  if (had && had !== pubkey) throw new Error("another author's app is installed under the same id")
+}
+
 // `installedAt` seeds the first-install time for a record that has none —
 // a temp app kept for real keeps its place in the list.
 export function storeInstalledEvent(event: NostrEvent, petname?: string, installedAt?: number) {
   if (!event?.id) return
   const all = readInstalled()
   const nappId = computeNappId(event)
+  assertSameAuthor(nappId, event.pubkey)
   const existing = all[nappId]
   const now = Math.floor(Date.now() / 1000)
   const updated = !!existing?.event && existing.event.id !== event.id

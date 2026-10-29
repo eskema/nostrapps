@@ -707,6 +707,8 @@ async function updateNapp(target: {
   setStatus(`Checking update…`)
   const updateResult = (await fetchNsite(target, setStatus)) as unknown as NsiteResult
   const { nappId, files, title, manifest } = updateResult
+  // Before the files land on the installed app's origin.
+  if (manifest) persist.assertSameAuthor(nappId, manifest.pubkey)
   const label = title || nappId
   setStatus(`Updating ${label}…`)
   await reinstallFiles(nappId, files, setStatus, label)
@@ -2814,6 +2816,9 @@ async function installFetched(
   { launch = true, installedAt }: { launch?: boolean; installedAt?: number } = {}
 ): Promise<string> {
   const { nappId, files, title, manifest } = fetched
+  // Before the grant lookup and the boot: another author's app under this id
+  // would get the installed one's grants and origin.
+  if (manifest) persist.assertSameAuthor(nappId, manifest.pubkey)
   const dTag = manifest?.tags.find((t: any) => t[0] === "d")?.[1]
   const petname = title || dTag || raw
   console.debug("[install] installing napp with opts", { nappId, petname })
@@ -2857,6 +2862,7 @@ async function installNapplet(
   setStatus("Resolving napplet…")
   const resolved = await resolveNapplet(target, setStatus)
   const nappId = persist.computeNappId(resolved.manifest)
+  persist.assertSameAuthor(nappId, resolved.manifest.pubkey)
 
   const placed = await resolvePlacementForInstall(
     nappId,
