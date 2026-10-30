@@ -3,6 +3,7 @@ import { guessMime } from "./mime.js"
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
 import { onRelayAuth } from "../relay-auth.js"
 import { Filter } from "@nostr/tools/filter"
+import { normalizeURL } from "@nostr/tools/utils"
 import { NostrEvent } from "@nostr/tools/pure"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex } from "@noble/hashes/utils.js"
@@ -91,6 +92,26 @@ export async function fetchNsite(
   const title = getTag(manifest, "title") || null
 
   return { nappId, files, title, manifest }
+}
+
+// The event a pasted pointer (nevent, naddr, nsite host) names: asked of its
+// relay hints first and, when they don't have it, of the author's write relays
+// plus the napp relays — the napp relays alone when the author isn't known.
+// The caller checks what comes back is what was asked for.
+export async function fetchPointed(
+  filter: Filter,
+  relayHints: string[],
+  author?: string
+): Promise<NostrEvent | null> {
+  const ask = async (relays: string[]) =>
+    relays.length
+      ? latest(await collect(relays.map(url => ({ url, filter }))).catch(() => []))
+      : null
+  const hinted = await ask(relayHints)
+  if (hinted) return hinted
+  const asked = new Set(relayHints.map(normalizeURL))
+  const rest = author ? await manifestRelays(author) : NAPP_RELAYS
+  return ask(rest.filter(r => !asked.has(normalizeURL(r))))
 }
 
 // ─── helpers ──────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ export const height = START_HEIGHT
 
 import { pool, purgatory } from "@nostr/gadgets/global"
 import { loadBlossomServers } from "@nostr/gadgets/lists"
-import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
+import { decode, naddrEncode, npubEncode } from "@nostr/tools/nip19"
 import { normalizeURL } from "@nostr/tools/utils"
 import { loadNostrUser } from "@nostr/gadgets/metadata"
 
@@ -28,8 +28,11 @@ import {
   NSITE_NAMED_KIND,
   NAPP_NAMED_KIND,
   WASM_NAMED_KIND,
-  blobServers
+  blobServers,
+  fetchPointed
 } from "../nsite/fetch.js"
+import { resolveInput } from "../nsite/resolve.js"
+import type { Filter } from "@nostr/tools/filter"
 import {
   NAPPLET_NAMED_KIND,
   declaredDomains,
@@ -174,6 +177,11 @@ export function mount(
   const subs = new Map<string, SubCloser>()
   const relayEose = new Set<string>()
   const nappRelays = new Map<string, Map<string, number>>()
+  // A pointer pasted in the discover search (nevent, naddr, nsite host): the
+  // card it names is all the list shows, and the event is looked up on relays
+  // once per pointer — `lookups` holds how that went.
+  let pointer: Pointer | null = null
+  const lookups = new Map<string, "looking" | "missing" | "notapp" | NostrEvent>()
 
   const sections = tabs<"installed" | "discover">({
     segmented: true,
@@ -1012,13 +1020,21 @@ export function mount(
     const hasAnyCard = !!_listEl.querySelector(".apps-card")
     const hasVisible = !!_listEl.querySelector(".apps-card:not([hidden])")
     const existing = _listEl.querySelector(".apps-empty") as HTMLElement | null
-    const msg = !hasAnyCard
-      ? "No napps found."
-      : hasVisible
-        ? null
-        : actionFilter && !filter.trim()
-          ? `No napp here handles ${actionFilter}.`
-          : "No matches."
+    const lookup = pointer && !hasVisible ? lookups.get(pointer.key) : null
+    const msg =
+      lookup === "looking"
+        ? "Looking it up…"
+        : lookup === "missing"
+          ? "Not found on its relays."
+          : lookup === "notapp"
+            ? "That event isn't an app."
+            : !hasAnyCard
+              ? "No napps found."
+              : hasVisible
+                ? null
+                : actionFilter && !filter.trim()
+                  ? `No napp here handles ${actionFilter}.`
+                  : "No matches."
     if (!msg) {
       existing?.remove()
       return
@@ -1036,10 +1052,13 @@ export function mount(
   function applyFilter() {
     if (!_listEl) return
     const needle = filter.trim().toLowerCase()
+    const target = pointerAddr()
     const cards = _listEl.querySelectorAll(".apps-card") as NodeListOf<HTMLElement>
     for (const card of cards) {
       const typeOk = typeFilter === "all" || card.dataset.type === typeFilter
-      const searchOk = !needle || (card.dataset.search || "").includes(needle)
+      const searchOk = pointer
+        ? card.dataset.addr === target
+        : !needle || (card.dataset.search || "").includes(needle)
       const actionOk = !actionFilter || actionRank(manifests.get(card.dataset.addr!)) >= 0
       card.hidden = !typeOk || !searchOk || !actionOk || !seenOnEnabled(card.dataset.addr)
     }
@@ -1173,6 +1192,67 @@ export function mount(
     _relaysStatusEl.textContent = `${total} napp${total === 1 ? "" : "s"}${loading ? " — loading…" : ""}`
   }
 
+  // A manifest seen on `urls`: the sightings recorded, and the event kept when
+  // it's the newest version of its address (NIP-01 tie: lowest id). A
+  // superseded version still buffered is dropped before its card is ever
+  // built; one already rendered is replaced by flushPending.
+  function addManifest(event: NostrEvent, urls: string[]) {
+    const addr = computeNappId(event)
+    let seen = nappRelays.get(addr)
+    if (!seen) nappRelays.set(addr, (seen = new Map()))
+    for (const url of urls) seen.set(url, Math.max(seen.get(url) || 0, event.created_at))
+    const cur = manifests.get(addr)
+    if (
+      !cur ||
+      event.created_at > cur.created_at ||
+      (event.created_at === cur.created_at && event.id < cur.id)
+    ) {
+      if (cur) pending = pending.filter(e => e !== cur)
+      manifests.set(addr, event)
+      pending.push(event)
+    }
+    // Even for an already-known event the flush matters: the new sighting
+    // may unhide its card (applyFilter) and bumps this relay's count.
+    scheduleFlush()
+    updateStatus()
+  }
+
+  // The search text read as a pointer, and its event looked up on relays — the
+  // hints, then the author's outbox — unless it already was. What comes back
+  // joins the list like any discovered manifest, so a newer version than the
+  // discovery relays have replaces theirs.
+  function setPointer(text: string) {
+    const p = (pointer = parsePointer(text))
+    if (!p || lookups.has(p.key)) return
+    lookups.set(p.key, "looking")
+    fetchPointed(p.filter, p.hints, p.author)
+      .then(evt => {
+        if (!evt || (p.id ? evt.id !== p.id : computeNappId(evt) !== p.addr)) {
+          lookups.set(p.key, "missing")
+        } else if (!DISCOVER_KINDS.includes(evt.kind)) {
+          lookups.set(p.key, "notapp")
+        } else {
+          lookups.set(p.key, evt)
+          addManifest(
+            evt,
+            Array.from(pool.seenOn.get(evt.id) || []).map((r: any) => r.url)
+          )
+        }
+      })
+      .catch(() => lookups.set(p.key, "missing"))
+      .finally(() => {
+        if (pointer?.key === p.key) applyFilter()
+      })
+  }
+
+  // The address of the card the pasted pointer names: an nevent's is known
+  // once its event is.
+  function pointerAddr(): string | null {
+    if (!pointer) return null
+    const got = lookups.get(pointer.key)
+    return typeof got === "object" ? computeNappId(got) : pointer.addr
+  }
+
   // Reopened, backing off, when it ends without closeRelaySub: a failed or
   // dropped connection, or a relay that sends auth-required before its AUTH
   // challenge, which nostr-tools gives up on. Purgatory is cleared first: after
@@ -1190,27 +1270,7 @@ export function mount(
       {
         label: "napps",
         onevent(event: any) {
-          const addr = computeNappId(event)
-          let seen = nappRelays.get(addr)
-          if (!seen) nappRelays.set(addr, (seen = new Map()))
-          seen.set(url, Math.max(seen.get(url) || 0, event.created_at))
-          // Keep only the newest version per address (NIP-01 tie: lowest id).
-          // A superseded version still buffered is dropped before its card is
-          // ever built; one already rendered is replaced by flushPending.
-          const cur = manifests.get(addr)
-          if (
-            !cur ||
-            event.created_at > cur.created_at ||
-            (event.created_at === cur.created_at && event.id < cur.id)
-          ) {
-            if (cur) pending = pending.filter(e => e !== cur)
-            manifests.set(addr, event)
-            pending.push(event)
-          }
-          // Even for an already-known event the flush matters: the new sighting
-          // may unhide its card (applyFilter) and bumps this relay's count.
-          scheduleFlush()
-          updateStatus()
+          addManifest(event, [url])
         },
         oneose() {
           relayEose.add(url)
@@ -1260,6 +1320,9 @@ export function mount(
     pending = []
     renderList()
     for (const url of enabledRelays()) openRelaySub(url)
+    // A pasted pointer's event went with the rest: looked up again.
+    lookups.clear()
+    setPointer(filter)
     updateStatus()
   }
 
@@ -1400,12 +1463,14 @@ export function mount(
     // Re-seed the search box from the persisted filter so switching away to the
     // Installed tab and back keeps the input in sync with the (still-filtered) list.
     searchEl.value = filter
+    setPointer(filter)
 
     searchEl.addEventListener("input", () => {
       // Keep the raw text as typed (casing preserved for re-seeding the input);
       // applyFilter normalizes when comparing. Toggles card visibility instead
       // of rebuilding the list.
       filter = searchEl.value
+      setPointer(filter)
       applyFilter()
     })
 
@@ -1700,6 +1765,47 @@ function renderCard(
   card.dataset.addr = nappId
 
   return card
+}
+
+// A pasted nevent, naddr or nsite hostname: what to ask relays for and where,
+// and the card it names — by address, or for an nevent by id until its event
+// says which address that is.
+type Pointer = {
+  key: string
+  filter: Filter
+  hints: string[]
+  author?: string
+  addr: string | null
+  id?: string
+}
+
+function parsePointer(text: string): Pointer | null {
+  const s = text.trim().replace(/^nostr:/i, "")
+  if (/^nevent1/i.test(s)) {
+    try {
+      const d = decode(s.toLowerCase())
+      if (d.type !== "nevent") return null
+      const { id, relays = [], author, kind } = d.data
+      if (kind !== undefined && !DISCOVER_KINDS.includes(kind)) return null
+      return { key: id, filter: { ids: [id] }, hints: relays, author, addr: null, id }
+    } catch {
+      return null
+    }
+  }
+  let t: ReturnType<typeof resolveInput>
+  try {
+    t = resolveInput(s)
+  } catch {
+    return null
+  }
+  const kind = t.kind ?? NSITE_NAMED_KIND
+  return {
+    key: `${kind}:${t.pubkey}:${t.dTag}`,
+    filter: { kinds: [kind], authors: [t.pubkey], "#d": [t.dTag] },
+    hints: t.relayHints,
+    author: t.pubkey,
+    addr: computeNappId({ pubkey: t.pubkey, kind, tags: [["d", t.dTag]] })
+  }
 }
 
 function computeNappId(evt: any) {
