@@ -87,8 +87,10 @@ export function backupTags(theme: string, parts: BackupParts): string[][] {
     const tag = ["app", `a ${addr}`]
     for (const r of pool.seenOn.get(app.event!.id) || []) tag.push(`relay ${r.url}`)
     if (app.petname) tag.push(`petname ${app.petname}`)
-    const grants = persist.getPolicy(app.nappId).domains
-    if (grants.length) tag.push(`grant ${grants.join(" ")}`)
+    const policy = persist.getPolicy(app.nappId)
+    if (policy.domains.length) tag.push(`grant ${policy.domains.join(" ")}`)
+    if (policy.ask?.length) tag.push(`ask ${policy.ask.join(" ")}`)
+    tag.push(`grant-version ${persist.POLICY_VERSION}`)
     for (const [method, decision] of Object.entries(decisions[app.nappId] ?? {})) {
       tag.push(`perm ${method} ${decision}`)
     }
@@ -258,6 +260,10 @@ export interface ParsedApp {
   relays: string[]
   petname: string | null
   grants: string[]
+  ask: string[]
+  // What the grants mean (persistence's POLICY_VERSION); 2 for backups from
+  // before it was written.
+  grantVersion: number
   perms: Array<{ method: string; decision: string }>
   size: { width: number; height?: number } | null
   config: Record<string, string>
@@ -317,6 +323,8 @@ export function parseBackup(content: string): ParsedBackup {
         relays: all("relay"),
         petname: one("petname"),
         grants: all("grant").flatMap(g => g.split(" ").filter(Boolean)),
+        ask: all("ask").flatMap(g => g.split(" ").filter(Boolean)),
+        grantVersion: Number(one("grant-version")) || 2,
         perms: all("perm").map(p => {
           const [method, decision] = pair(p)
           return { method, decision }
@@ -535,7 +543,7 @@ export async function restoreBackup(
     const name = a.petname || d || "app"
     // The grant first: an install that finds one stored skips its permission
     // screen.
-    persist.setPolicy(nappId, { domains: a.grants })
+    persist.setPolicy(nappId, { domains: a.grants, ask: a.ask }, a.grantVersion)
     if (!persist.getInstalledApp(nappId)) {
       io.onStep?.(`installing ${name} (${i + 1}/${b.apps.length})…`)
       try {

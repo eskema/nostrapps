@@ -42,6 +42,10 @@
     }
   } catch {}
 
+  // An nsite gets window.nostr and its history, nothing of the napp surface:
+  // no window.napp, window.nostrdb or theme.
+  const nsite = window.__nsite === true
+
   const pending = new Map()
   const storeSubCallbacks = new Map()
   const subCallbacks = new Map()
@@ -344,6 +348,7 @@
         return
       }
       case "napp-theme-change": {
+        if (nsite) return
         document.documentElement.dataset.theme = data.theme
         // Apply the launcher's resolved color tokens as inline custom properties.
         // Inline styles on :root outrank any stylesheet `:root[data-theme=...]`
@@ -359,30 +364,28 @@
     }
   })
 
-  const nostrShim = {
-    getPublicKey: () => rpc("getPublicKey"),
-    signEvent: evt => rpc("signEvent", evt),
-    nip04: {
-      encrypt: (pubkey, plaintext) => rpc("nip04.encrypt", { pubkey, plaintext }),
-      decrypt: (pubkey, ciphertext) => rpc("nip04.decrypt", { pubkey, ciphertext })
-    },
-    nip44: {
-      encrypt: (pubkey, plaintext) => rpc("nip44.encrypt", { pubkey, plaintext }),
-      decrypt: (pubkey, ciphertext) => rpc("nip44.decrypt", { pubkey, ciphertext })
-    }
+  // window.nostr (NIP-07) follows the identity rows the shell declares via
+  // window.__nappletDomains before this runs: none without read (`identity`),
+  // then only the methods granted, so a napp can tell by looking.
+  const granted = Array.isArray(window.__nappletDomains) ? window.__nappletDomains : []
+  const identityGranted = granted.includes("identity")
+  const nostrShim = { getPublicKey: () => rpc("getPublicKey") }
+  if (granted.includes("write")) nostrShim.signEvent = evt => rpc("signEvent", evt)
+  for (const nip of ["nip04", "nip44"]) {
+    const cipher = {}
+    if (granted.includes("encrypt"))
+      cipher.encrypt = (pubkey, plaintext) => rpc(nip + ".encrypt", { pubkey, plaintext })
+    if (granted.includes("decrypt"))
+      cipher.decrypt = (pubkey, ciphertext) => rpc(nip + ".decrypt", { pubkey, ciphertext })
+    if (Object.keys(cipher).length) nostrShim[nip] = cipher
   }
-  // window.nostr (NIP-07) is GATED on the granted `identity` capability — the
-  // shell declares the grant via window.__nappletDomains before this runs.
-  //
   // We ALWAYS pin window.nostr non-writable/non-configurable, whether we grant it
   // or not. If granted, it's our shim (routing signer traffic through the host).
   // If NOT granted, it's pinned to `undefined` — otherwise a NIP-07 browser
   // extension (Alby, nos2x…) would inject its own window.nostr into the frame and
   // hand the site a signer anyway, bypassing the denial. Pinning blocks that; the
-  // host also refuses the signer rpc when identity is ungranted (defense in depth
-  // — a site could postMessage the rpc directly).
-  const identityGranted =
-    Array.isArray(window.__nappletDomains) && window.__nappletDomains.includes("identity")
+  // host also refuses each rpc whose row is ungranted (defense in depth — a site
+  // could postMessage the rpc directly).
   try {
     Object.defineProperty(window, "nostr", {
       value: identityGranted ? nostrShim : undefined,
@@ -398,7 +401,8 @@
     }
   }
 
-  window.nostrdb = {
+  // The shared store goes with read: what's in it tells who you are.
+  const nostrdb = {
     add: event => rpc("nostrdb.add", { event }),
     query: filters => rpc("nostrdb.query", { filters }),
     count: filters => rpc("nostrdb.count", { filters }),
@@ -449,6 +453,7 @@
     },
     supports: async () => []
   }
+  if (identityGranted && !nsite) window.nostrdb = nostrdb
 
   // Inter-app calling. Everything is an action.
   //   window.napp.action(name, payload, options?) - call a registered action handler
@@ -891,5 +896,5 @@
     }
   }
 
-  window.napp = napp
+  if (!nsite) window.napp = napp
 })()

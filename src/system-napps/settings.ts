@@ -8,9 +8,11 @@ import * as handlers from "../handlers.js"
 import { dispatchAction } from "../handlers.js"
 import { loginControls } from "../login.js"
 import { nappName, nappNameEl } from "../napp-name.js"
+import { installDefaultsRows } from "../napp-permissions.js"
+import { getPolicy } from "../persistence.js"
 import { author, badge, busy, button, check, code, details, el, empty, item, itemList } from "./ui.js"
 import { backupSection } from "./backup-section.js"
-import { permissionsSection } from "./permissions-section.js"
+import { permissionsSection, type Grants } from "./permissions-section.js"
 
 export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): void } = {}) {
   const pubkeyEl = el("span", "settings-pubkey")
@@ -89,6 +91,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   const permissions = permissionsSection({
     napp: nappName,
     icon: perms.nappIcon,
+    edit: nappId => void ctx.editPermissions(nappId).then(renderGrants),
+    defaults: installDefaultsRows(),
     forget: (nappId, method) => perms.forgetDecision(nappId, method),
     forgetAll: () => perms.forgetAllDecisions()
   })
@@ -192,8 +196,29 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     }
   }
 
+  // Every installed napp, with what its install screen granted, by the rows'
+  // names there: a napp's identity grant is its read row.
+  function grants(): Grants {
+    const out: Grants = {}
+    for (const app of ctx.apps.list()) {
+      const p = getPolicy(app.nappId)
+      const napplet = app.nappId.startsWith("napplet~")
+      out[app.nappId] = p.domains
+        .filter(d => d !== "ui")
+        .map(
+          d =>
+            (d === "identity" && !napplet ? "read" : d) + (p.ask?.includes(d) ? " (ask)" : "")
+        )
+    }
+    return out
+  }
+
+  function renderGrants() {
+    permissions.render(perms.listDecisions(), grants())
+  }
+
   function renderPerms() {
-    permissions.render(perms.listDecisions())
+    renderGrants()
     renderHandlerPrefs()
   }
 
@@ -203,6 +228,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
 
   renderPerms()
   const unsubPerms = perms.subscribe(renderPerms)
+  // An install, a removal, or grants edited from an Apps card.
+  const unsubApps = ctx.apps.subscribe(renderGrants)
   const unsubHandlers = handlers.subscribe(renderHandlerPrefs)
 
   renderRelays()
@@ -212,6 +239,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     unmount() {
       unsubAccount()
       unsubPerms()
+      unsubApps()
       unsubHandlers()
       unsubRelays()
       backup.unmount()

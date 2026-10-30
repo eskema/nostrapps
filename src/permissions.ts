@@ -1,9 +1,63 @@
 import { openDialog, type DialogAction } from "./dialog.js"
 import { nappByline, nappName, nappNameEl, type NappName } from "./napp-name.js"
-import { getInstalledApp } from "./persistence.js"
+import { getInstalledApp, getPolicy, setPolicy } from "./persistence.js"
 import { appIcon, code, el, overline } from "./system-napps/ui.js"
 
 const STORAGE_KEY = "nostrapps:permissions"
+
+// The install screen's rows these methods fall under. A granted row answers
+// at once, or asks each time when its ask box is ticked; an unticked row
+// refuses. Files and the clipboard have no row: they ask, and what the prompt
+// is told to remember is kept by method.
+const ROW_OF: Record<string, string> = {
+  signEvent: "write",
+  "napp.publish": "write",
+  "nip04.encrypt": "encrypt",
+  "nip44.encrypt": "encrypt",
+  "nip04.decrypt": "decrypt",
+  "nip44.decrypt": "decrypt",
+  "relay.publish": "relay",
+  "relay.publishEncrypted": "relay",
+  "outbox.publish": "outbox",
+  "common.react": "common",
+  "common.report": "common",
+  "common.follow": "common",
+  "common.unfollow": "common",
+  "link.open": "link"
+}
+
+// The rows that have an ask box.
+export const ASKABLE = new Set(Object.values(ROW_OF))
+
+const holds = (nappId: string, row: string) => getPolicy(nappId).domains.includes(row)
+const asks = (nappId: string, row: string) => !!getPolicy(nappId).ask?.includes(row)
+
+// What answers a request without a prompt: its row, or a decision kept for a
+// method with none. Null: ask.
+function settled(nappId: string, method: string): boolean | null {
+  const row = ROW_OF[method]
+  if (row) return holds(nappId, row) ? (asks(nappId, row) ? null : true) : false
+  const cached = getDecision(nappId, method)
+  return cached ? cached === "allow" : null
+}
+
+// A prompt's "always", written back to the row: allow clears its ask, deny
+// unticks it.
+function answerRow(nappId: string, row: string, allow: boolean) {
+  const p = getPolicy(nappId)
+  setPolicy(nappId, {
+    domains: allow ? p.domains : p.domains.filter(d => d !== row),
+    ask: (p.ask ?? []).filter(d => d !== row)
+  })
+  if (!allow) revoked(nappId)
+  notify()
+}
+
+// Who carries an unticked row to the napp's origin (its window.nostr).
+let revoked: (nappId: string) => void = () => {}
+export function onRowRevoked(fn: (nappId: string) => void) {
+  revoked = fn
+}
 
 const GATED_METHODS = new Set([
   "signEvent",
@@ -58,8 +112,15 @@ export function clearDecisions(nappId: string) {
   notify()
 }
 
-export function listDecisions() {
-  return readAll()
+// The decisions that still answer something: a method with a row has its
+// answer on the row, whatever an older prompt or a backup left here.
+export function listDecisions(): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {}
+  for (const [id, methods] of Object.entries(readAll() as Record<string, Record<string, string>>)) {
+    const kept = Object.entries(methods).filter(([m]) => !(m in ROW_OF))
+    if (kept.length) out[id] = Object.fromEntries(kept)
+  }
+  return out
 }
 
 // Drop every napp's decisions at once (settings' "forget all"). One write, one
@@ -124,10 +185,16 @@ const coolingDown = (key: string) => Date.now() - (deniedAt.get(key) ?? 0) < DEN
 // Whether a request would be refused without a prompt: callers check this
 // before any work that only a prompt needs (a publish looks up relays).
 export function wouldRefuse(nappId: string, method: string): boolean {
-  const cached = getDecision(nappId, method)
-  if (cached) return cached === "deny"
+  const answer = settled(nappId, method)
+  if (answer !== null) return !answer
   const key = lineKey(nappId, method)
   return coolingDown(key) || (waiting.get(key) ?? 0) >= LINE_MAX
+}
+
+// Whether the row answers a request on its own, so no prompt and no details
+// to build for one.
+export function coveredByGrant(nappId: string, method: string): boolean {
+  return settled(nappId, method) === true
 }
 
 // The napp's last window closed: what it still has waiting is refused (a
@@ -137,9 +204,8 @@ export function cancelApprovals(nappId: string) {
 }
 
 export async function requireApproval(nappId: string, method: string, detail?: ApprovalDetail) {
-  const cached = getDecision(nappId, method)
-  if (cached === "allow") return true
-  if (cached === "deny") return false
+  const answer = settled(nappId, method)
+  if (answer !== null) return answer
   const key = lineKey(nappId, method)
   if (coolingDown(key)) return false
   const ahead = waiting.get(key) ?? 0
@@ -155,9 +221,9 @@ export async function requireApproval(nappId: string, method: string, detail?: A
     await prev
     // What changed while waiting: the napp gone, an "always", a denial.
     if ((generation.get(nappId) ?? 0) !== gen) return false
-    const now = getDecision(nappId, method)
-    if (now === "allow") return true
-    if (now === "deny" || coolingDown(key)) return false
+    const now = settled(nappId, method)
+    if (now !== null) return now
+    if (coolingDown(key)) return false
 
     const decision = await openDialog<string>({
       title: "Permission request",
@@ -167,8 +233,12 @@ export async function requireApproval(nappId: string, method: string, detail?: A
       actions: PERMISSION_ACTIONS,
       dismissValue: "deny-once" // Esc / backdrop → deny
     })
-    if (decision === "allow-always") setDecision(nappId, method, "allow")
-    if (decision === "deny-always") setDecision(nappId, method, "deny")
+    const row = ROW_OF[method]
+    if (decision === "allow-always" || decision === "deny-always") {
+      const allow = decision === "allow-always"
+      if (row) answerRow(nappId, row, allow)
+      else setDecision(nappId, method, allow ? "allow" : "deny")
+    }
     if (decision === "deny-once") deniedAt.set(key, Date.now())
     return decision === "allow-once" || decision === "allow-always"
   } finally {
@@ -191,10 +261,9 @@ export const PERMISSION_ACTIONS: DialogAction<string>[] = [
 ]
 
 // How Settings names a remembered decision: the prompt's verb, then what
-// tells apart the methods sharing it, and what the grant covers ("sign any
-// event": an always for signEvent is one for every kind).
+// tells apart the methods sharing it, and what the grant covers.
 const DECISION_WORDS: Record<string, string> = {
-  signEvent: "any event",
+  signEvent: "events",
   "napp.publish": "events",
   "relay.publish": "events",
   "relay.publishEncrypted": "encrypted events",

@@ -1,6 +1,6 @@
 // http_fetch and http_fetch_image: the web, for a napp with no page.
 //
-// A web napp granted `network` reaches the web with its own fetch(). A wasm
+// A web napp reaches the web with its own fetch(). A wasm
 // napp has no fetch and no sockets, so the launcher makes the request for it
 // and hands back what came: the raw response for http_fetch, and for
 // http_fetch_image the picture already decoded, so a napp can show an avatar

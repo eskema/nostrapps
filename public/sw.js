@@ -37,24 +37,24 @@ async function handleFetch(req, url) {
   if (path.endsWith("/")) path += "index.html"
 
   // The policy record is internal — it's how the launcher tells this worker the
-  // napp's network grant. Never serve it back to the napp as a file.
+  // napp's grants. Never serve it back to the napp as a file.
   if (path === "/__policy__") return new Response("not found", { status: 404 })
 
   if (path === "/boot.html") return passthrough(req, BOOT_CSP)
-  if (path === "/sw.js") return passthrough(req, LOCKED_CSP)
-  if (path === "/bridge.js") return passthrough(req, LOCKED_CSP)
-  if (path === "/napplet-bridge.js") return passthrough(req, LOCKED_CSP)
+  if (path === "/sw.js") return passthrough(req)
+  if (path === "/bridge.js") return passthrough(req)
+  if (path === "/napplet-bridge.js") return passthrough(req)
   // Signing companion lazy-imported by bridge.js (napp.utils.signWithKey /
   // generateKey) — generated from @nostr/tools/pure, served like bridge.js.
-  if (path === "/nostr-crypto.js") return passthrough(req, LOCKED_CSP)
+  if (path === "/nostr-crypto.js") return passthrough(req)
   // The kit (opt-in via metadata `requires: ["ui"]`, injected below), served
   // from the launcher origin for every napp subdomain like bridge.js. Its
   // fonts are their own stylesheet, for napp.ui.fonts(), the faces inlined as
   // data URIs (a separate font request is fetched in CORS mode, which fails
   // the napp-subdomain passthrough).
-  if (path === "/napp-ui.css") return passthrough(req, LOCKED_CSP)
-  if (path === "/napp-ui.js") return passthrough(req, LOCKED_CSP)
-  if (path === "/napp-fonts.css") return passthrough(req, LOCKED_CSP)
+  if (path === "/napp-ui.css") return passthrough(req)
+  if (path === "/napp-ui.js") return passthrough(req)
+  if (path === "/napp-fonts.css") return passthrough(req)
 
   if (url.host.startsWith("dev-") || url.host.startsWith("temp-")) {
     try {
@@ -66,10 +66,11 @@ async function handleFetch(req, url) {
             typeof devFile.body === "string" ? devFile.body : await new Blob([devFile.body]).text()
           const policy = await readDevPolicy()
           const grants = grantsFor(policy)
-          const wrapperUi = grants.includes("ui") || (await devWantsWrapper())
-          return new Response(injectBridge(text, { wrapperUi, domains: grants }), {
+          const nsite = policy?.nsite === true
+          const wrapperUi = !nsite && (grants.includes("ui") || (await devWantsWrapper()))
+          return new Response(injectBridge(text, { wrapperUi, domains: grants, nsite }), {
             status: 200,
-            headers: htmlHeaders(mime, policy)
+            headers: htmlHeaders(mime, nsite)
           })
         }
         return new Response(devFile.body, {
@@ -105,10 +106,11 @@ async function handleFetch(req, url) {
         const text = typeof record.body === "string" ? record.body : await record.body.text()
         const policy = await readInstalledPolicy()
         const grants = grantsFor(policy)
-        const wrapperUi = grants.includes("ui") || (await installedWantsWrapper())
-        return new Response(injectBridge(text, { wrapperUi, domains: grants }), {
+        const nsite = policy?.nsite === true
+        const wrapperUi = !nsite && (grants.includes("ui") || (await installedWantsWrapper()))
+        return new Response(injectBridge(text, { wrapperUi, domains: grants, nsite }), {
           status: 200,
-          headers: htmlHeaders(mime, policy)
+          headers: htmlHeaders(mime, nsite)
         })
       }
       return new Response(record.body, {
@@ -118,19 +120,12 @@ async function handleFetch(req, url) {
     }
   }
 
-  return new Response(`file ${url} not found`, {
-    status: 404,
-    headers: { "Content-Security-Policy": LOCKED_CSP }
-  })
+  return new Response(`file ${url} not found`, { status: 404 })
 }
 
-// The launcher's own files, fetched from the server. Opened as a page (a napp
-// framing one) each would be a page at the napp's origin with no lock at all,
-// so each carries a policy: the lock, or for boot.html what it needs (its
-// script, registering this worker) and no framing by anything but the
-// launcher. Chromium holds a napp's frames to the launcher's csp attribute
-// anyway; this is for engines that don't. A failed fetch is a network error,
-// not an uncaught rejection.
+// The launcher's own files, fetched from the server. boot.html carries what it
+// needs (its script, registering this worker) and no framing by anything but
+// the launcher. A failed fetch is a network error, not an uncaught rejection.
 async function passthrough(req, csp) {
   let res
   try {
@@ -141,7 +136,7 @@ async function passthrough(req, csp) {
   const headers = new Headers(res.headers)
   headers.delete("Content-Encoding")
   headers.delete("Content-Length")
-  headers.set("Content-Security-Policy", csp)
+  if (csp) headers.set("Content-Security-Policy", csp)
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
 }
 
@@ -168,53 +163,21 @@ async function requestFileFromHost(path) {
   })
 }
 
-// The Content-Security-Policy that SEALS a locked napp to its own origin. It's
-// not enough to pin connect-src: a napp — especially a full-website nsite —
-// reaches the network through resource tags connect-src never sees (<script
-// src>, <img>, <link>, nested <iframe>, <form>), and a cross-origin child frame
-// would then have its own unrestricted network. So the lock is default-src
-// 'self' with only LOCAL escape hatches (blob:/data:, both same-document), which
-// blocks every off-origin load and connection at once. 'unsafe-inline' stays for
-// script/style because inline code is ubiquitous in real napps and can't defeat
-// the seal — it still can't fetch, open a socket, pull an external script/image,
-// or embed an external frame. A napp's only route off-origin is then the
-// bridge's postMessage rpc (not CSP-governed) — the launcher's mediated
-// capabilities, which is the point. Granting network drops the CSP entirely.
-//
-// worker-src 'none' is load-bearing, not decorative: a document's connect-src
-// does NOT govern a service/web worker's network — a worker's connections are
-// bounded only by the CSP on its OWN script response, which we don't set. So a
-// same-origin worker (worker-src otherwise falls back to child-src 'self') could
-// open a wss:// to any relay, entirely outside this connect-src. Denying worker
-// creation while locked closes that bypass (matches napplets' NAPPLET_CSP).
-const LOCKED_CSP = [
-  "default-src 'self' blob: data:",
-  "script-src 'self' 'unsafe-inline' blob:",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self' blob: data:",
-  "frame-src 'self'",
-  "child-src 'self' blob:",
-  "worker-src 'none'",
-  "form-action 'self'",
-  "base-uri 'self'"
-].join("; ")
-
 // The granted domains, with version-aware back-fills applied so an upgrade
 // doesn't silently strip access that older policy records couldn't have named.
 // The SW only ever serves nsites/napps (napplets are srcdoc, never served), so
 // pre-v2 records — written before `identity` gated window.nostr — are treated
-// as identity-granted. New records (v>=2) are honored exactly, so unchecking
-// identity or network in the permission screen takes effect.
+// as identity-granted, and pre-v3 ones, from before identity was split, keep
+// write, encrypt and decrypt with it. Same as getPolicy in persistence.ts.
 function grantsFor(policy) {
   // No record: this install predates the policy system — it ran unrestricted,
   // so keep it that way. (The SW only ever serves nsites/napps; napplets are
   // srcdoc and born under the policy system.)
-  if (!policy) return ["identity", "network"]
+  if (!policy) return ["identity", "write", "encrypt", "decrypt"]
   const domains = Array.isArray(policy.domains) ? [...policy.domains] : []
-  if (policy.network === true && !domains.includes("network")) domains.push("network")
-  if ((policy.v || 0) < 2 && !domains.includes("identity")) domains.push("identity")
+  const v = policy.v || 0
+  if (v < 2 && !domains.includes("identity")) domains.push("identity")
+  if (v < 3 && domains.includes("identity")) domains.push("write", "encrypt", "decrypt")
   return domains
 }
 
@@ -231,26 +194,19 @@ const BOOT_CSP = [
   `frame-ancestors ${LAUNCHER_ORIGIN}`
 ].join("; ")
 
-function htmlHeaders(mime, policy) {
-  // A locked napp's iframe carries the lock as its `csp` attribute, and the
-  // browser only loads a document into it that accepts that from the embedder.
-  // Anything served without this (a helper file, the dev server's fallback)
-  // doesn't load there at all.
-  const headers = { "Content-Type": mime, "Allow-CSP-From": LAUNCHER_ORIGIN }
-  // Locked unless the user granted the `network` capability. Network-granted
-  // napps still get http:// loads upgraded — one stale image URL would
-  // otherwise flag the whole page as insecure (CSP is per-document, so the
-  // launcher's own upgrade meta doesn't reach napp frames).
-  headers["Content-Security-Policy"] = grantsFor(policy).includes("network")
-    ? "upgrade-insecure-requests"
-    : LOCKED_CSP + "; upgrade-insecure-requests"
-  return headers
+// A napp's http:// loads upgraded: one stale image URL would otherwise flag
+// the whole page as insecure (CSP is per-document, so the launcher's own
+// upgrade meta doesn't reach napp frames). An nsite is served as it is.
+function htmlHeaders(mime, nsite) {
+  return nsite
+    ? { "Content-Type": mime }
+    : { "Content-Type": mime, "Content-Security-Policy": "upgrade-insecure-requests" }
 }
 
 // What a policy record we couldn't read counts as. "No record" means an
 // install from before policies and runs unrestricted, so an unreadable one
 // must not come out as null too: a broken read would unlock the napp.
-const UNREADABLE_POLICY = { domains: [], v: 2 }
+const UNREADABLE_POLICY = { domains: [], v: 3 }
 
 function parsePolicy(text) {
   try {
@@ -292,15 +248,17 @@ async function readDevPolicy() {
   }
 }
 
-function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
+function injectBridge(html, { wrapperUi = false, domains = [], nsite = false } = {}) {
   // NIP-5D presence model: the shell declares the granted capability domains as
   // window.__nappletDomains BEFORE bridge.js runs; bridge.js then builds
   // window.napplet with exactly those domain objects. `<` is escaped so a domain
-  // string can never break out of the inline <script>.
+  // string can never break out of the inline <script>. An nsite gets bridge.js
+  // alone, told it's one: window.nostr and its history, nothing else.
   const domainList = Array.isArray(domains) ? domains : []
   const domainsScript =
     "<script>window.__nappletDomains=" +
     JSON.stringify(domainList).replace(/</g, "\\u003c") +
+    (nsite ? ";window.__nsite=true" : "") +
     "</script>"
   // Injected ahead of the napp's own tags, so the shared stylesheet lands BEFORE
   // the napp's styles and the napp can still override it. __nappletDomains must
@@ -309,7 +267,7 @@ function injectBridge(html, { wrapperUi = false, domains = [] } = {}) {
   // kit's helpers on window.napp.ui, so it follows bridge.js.
   const headInject =
     domainsScript +
-    '<script src="/napplet-bridge.js"></script>' +
+    (nsite ? "" : '<script src="/napplet-bridge.js"></script>') +
     '<script src="/bridge.js"></script>' +
     (wrapperUi
       ? '<link rel="stylesheet" href="/napp-ui.css"><script src="/napp-ui.js"></script>'

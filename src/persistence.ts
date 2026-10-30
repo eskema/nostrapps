@@ -1,5 +1,5 @@
 import { NostrEvent } from "@nostr/tools"
-import { WASM_NAMED_KIND } from "./nsite/fetch.js"
+import { NAPP_NAMED_KIND, NSITE_NAMED_KIND, WASM_NAMED_KIND } from "./nsite/fetch.js"
 import {
   AppType,
   InstalledApp,
@@ -757,7 +757,7 @@ export function storeInstalledLocalApp(app: {
     modes: sanitizeModes(app.modes),
     initialSize: sanitizeInitialSize(app.initialSize),
     ...(app.html ? { html: app.html } : {}),
-    ...(app.kind === WASM_NAMED_KIND ? { kind: WASM_NAMED_KIND } : {}),
+    ...(app.kind && LOCAL_KINDS.has(app.kind) ? { kind: app.kind } : {}),
     ...(app.installedBy ? { installedBy: app.installedBy } : {}),
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
@@ -847,17 +847,22 @@ export function initialSizeFromMeta(meta: any): NappInitialSize | undefined {
 
 // ─── Per-napp security policy ───────────────────────────────────
 // The default for a napplet without a stored entry: fully locked. Legacy
-// nsites/napps with no entry instead keep identity+network (see getPolicy) —
+// nsites/napps with no entry instead keep what they had (see getPolicy) —
 // they predate the policy system and ran unrestricted.
 export const DEFAULT_LOCKED_POLICY: NappPolicy = { domains: [] }
 
 // The declarable `requires` vocabulary. NAP_DOMAINS are real NIP-5D capability
-// domains serviced over the bridge; LAUNCHER_DOMAINS are our two extensions,
-// enforced by the service worker (ui = inject the component kit, network =
-// allow direct network). Keep NAP_DOMAINS in sync with NAPPLET_OFFERED (host).
+// domains serviced over the bridge; LAUNCHER_DOMAINS are our extension,
+// enforced by the service worker (ui = inject the component kit). Keep
+// NAP_DOMAINS in sync with NAPPLET_OFFERED (host).
 export const NAP_DOMAINS = ["identity", "theme", "storage", "resource", "relay"]
-export const LAUNCHER_DOMAINS = ["ui", "network"]
+export const LAUNCHER_DOMAINS = ["ui"]
 export const ALL_REQUIRES = [...NAP_DOMAINS, ...LAUNCHER_DOMAINS]
+
+// A napp's identity rows past reading it: none without `identity` (read).
+// Napplets don't have them: their identity domain is read only, and their
+// writes are relay, outbox and common.
+export const IDENTITY_ROWS = ["write", "encrypt", "decrypt"]
 
 // `ui` implies `theme`: the component kit is built on theme's color tokens, so a
 // napp that takes the kit must also get the colors — otherwise it renders
@@ -877,46 +882,87 @@ function readPolicies(): Record<string, any> {
 // Bumped whenever a stored policy's meaning changes so getPolicy can back-fill
 // grants that older entries couldn't have recorded. v2: `identity` gained a
 // meaning (it now gates window.nostr) — pre-v2 non-napplet policies had the
-// signer injected unconditionally, so treat them as identity-granted.
-const POLICY_VERSION = 2
+// signer injected unconditionally, so treat them as identity-granted. v3:
+// identity split into read (`identity`), write, encrypt and decrypt, napps got
+// a link row, and `network` is gone. An identity grant from before keeps
+// signing and encrypting; decrypting asked every time, so it still does. A
+// napp's links asked too, and now don't.
+export const POLICY_VERSION = 3
+
+// Keeps the rows a napp can't have without read, and asks only on what's
+// granted.
+function normalize(nappId: string, domains: string[], ask: unknown): NappPolicy {
+  domains = [...new Set(domains)]
+  if (!nappId.startsWith("napplet~") && !domains.includes("identity"))
+    domains = domains.filter(d => !IDENTITY_ROWS.includes(d))
+  const asked = Array.isArray(ask) ? ask.filter(d => domains.includes(d)) : []
+  return asked.length ? { domains, ask: asked } : { domains }
+}
 
 export function getPolicy(nappId: string): NappPolicy {
   const p = readPolicies()[nappId]
+  const napplet = nappId.startsWith("napplet~")
   if (!p || typeof p !== "object") {
     // No record at all: an install that predates the policy system. It ran
-    // unrestricted then — sealing it retroactively breaks it (CDN scripts,
-    // direct sockets, signer), so legacy nsites/napps keep what they had.
-    // Napplets are born under the policy system: absent means locked.
-    return nappId.startsWith("napplet~") ? { domains: [] } : { domains: ["identity", "network"] }
+    // unrestricted then, so legacy nsites/napps keep what they had. Napplets
+    // are born under the policy system: absent means locked.
+    return napplet
+      ? { domains: [] }
+      : { domains: ["identity", ...IDENTITY_ROWS, "link"], ask: ["decrypt"] }
   }
-  const domains = expandGrants(p.domains)
-  // Migrate the old {network:boolean} shape: a granted network boolean becomes
-  // the "network" domain entry.
-  if (p.network === true && !domains.includes("network")) domains.push("network")
+  const domains = expandGrants(p.domains).filter(d => d !== "network")
+  const ask: string[] = Array.isArray(p.ask) ? [...p.ask] : []
+  const v = p.v ?? 0
   // Pre-v2 non-napplet policies had window.nostr injected unconditionally — keep
   // their signer so upgrading doesn't strip it. New/edited policies (v2) record
   // identity explicitly, so unchecking it there is honored.
-  if ((p.v ?? 0) < 2 && !nappId.startsWith("napplet~") && !domains.includes("identity")) {
-    domains.push("identity")
+  if (v < 2 && !napplet && !domains.includes("identity")) domains.push("identity")
+  if (v < 3 && !napplet) {
+    if (domains.includes("identity")) {
+      domains.push(...IDENTITY_ROWS)
+      ask.push("decrypt")
+    }
+    domains.push("link")
   }
-  return { domains }
+  return normalize(nappId, domains, ask)
 }
 
-export function setPolicy(nappId: string, policy: NappPolicy) {
+// `v`: what the grants mean, for one from elsewhere (a backup) written before.
+export function setPolicy(nappId: string, policy: NappPolicy, v = POLICY_VERSION) {
   if (!nappId) return
   const all = readPolicies()
-  all[nappId] = { domains: expandGrants(policy.domains), v: POLICY_VERSION }
+  all[nappId] = { ...normalize(nappId, expandGrants(policy.domains), policy.ask), v }
   writeJson(POLICY_KEY, all)
 }
 
-// The raw stored record (domains + version) written verbatim into the napp's
-// /__policy__, so the service worker applies the same version-aware migration.
-export function getStoredPolicy(nappId: string): { domains: string[]; v: number } {
-  const p = readPolicies()[nappId]
-  return {
-    domains: expandGrants(p?.domains),
-    v: typeof p?.v === "number" ? p.v : 0
-  }
+// The record written into the napp's /__policy__ for its service worker: the
+// grants as getPolicy reads them, at this version, and whether it serves an
+// nsite (which gets only window.nostr and its history). Records written before
+// carry their own version, and the worker back-fills those the same way.
+// `nsite`: given by an install, which writes this before its app's record.
+export function getStoredPolicy(
+  nappId: string,
+  nsite = classifyNappId(nappId) === "nsite"
+): { domains: string[]; v: number; nsite?: true } {
+  const record = { domains: getPolicy(nappId).domains, v: POLICY_VERSION }
+  return nsite ? { ...record, nsite: true } : record
+}
+
+// What a new install's screen starts from: every row on except `off`, and
+// asking on `ask`. Set in Settings.
+export type InstallDefaults = { off: string[]; ask: string[] }
+const INSTALL_DEFAULTS_KEY = "nostrapps:install-defaults"
+
+export function getInstallDefaults(): InstallDefaults {
+  const raw = readJson(INSTALL_DEFAULTS_KEY, null)
+  const list = (v: unknown) =>
+    Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : []
+  if (!raw || typeof raw !== "object") return { off: ["decrypt"], ask: [] }
+  return { off: list(raw.off), ask: list(raw.ask) }
+}
+
+export function setInstallDefaults(d: InstallDefaults) {
+  writeJson(INSTALL_DEFAULTS_KEY, d)
 }
 
 export function hasPolicy(nappId: string): boolean {
@@ -1087,6 +1133,10 @@ export function forgetEphemeralOrigin(nappId: string) {
   else writeJson(EPHEMERAL_KEY, next)
 }
 
+// What a local or dev record can say it is, having no manifest event: a lone
+// index.html taken as an nsite, a folder with a metadata.json, a wasm one.
+const LOCAL_KINDS = new Set([NSITE_NAMED_KIND, NAPP_NAMED_KIND, WASM_NAMED_KIND])
+
 export function getInstalledApp(nappId: string): InstalledApp | undefined {
   const app = readInstalled()[nappId]
   if (app) return { nappId, ...app }
@@ -1105,9 +1155,10 @@ export function classifyEvent(kind: number): AppType {
 export function classifyInstalled(app: InstalledApp): AppType {
   if (app.nappId.startsWith("napplet~") || app.event?.kind === 35129) return "napplet"
   if (app.event) return classifyEvent(app.event.kind)
-  // dev/local/temp: no manifest event — classify from the stored declarations.
-  const caps = (app.actions?.length ?? 0) > 0 || (app.requires?.length ?? 0) > 0
-  return caps ? "napp" : "nsite"
+  if (app.kind) return classifyEvent(app.kind)
+  // A local or dev record from before kinds were stored: it came with a
+  // metadata.json, so a napp.
+  return "napp"
 }
 
 export function classifyNappId(nappId: string): AppType {
@@ -1218,7 +1269,7 @@ export function storeDevApp(app: {
     installedAt: devApps.get(app.nappId)?.installedAt || Math.floor(Date.now() / 1000),
     ...(app.temporary ? { temporary: true } : {}),
     ...(app.event ? { event: app.event } : {}),
-    ...(app.kind === WASM_NAMED_KIND ? { kind: WASM_NAMED_KIND } : {})
+    ...(app.kind && LOCAL_KINDS.has(app.kind) ? { kind: app.kind } : {})
   })
 }
 

@@ -16,6 +16,7 @@ import type {
 
 import {
   cancelApprovals,
+  coveredByGrant,
   isGated,
   requireApproval,
   wouldRefuse,
@@ -93,6 +94,7 @@ import {
 } from "@nostr/tools/nip19"
 import { verifyEvent } from "../verify.js"
 import {
+  classifyNappId,
   getInstalledApp,
   getLoadedActions,
   isWasmApp,
@@ -476,30 +478,11 @@ export function nappShortName(nappId: string): string {
   return nappId.split("~").pop()!.slice(0, 16) || nappId.slice(0, 16)
 }
 
-// The network lock, held by the browser: set on a locked napp's iframe as its
-// `csp` attribute, which the napp can't reach, and which also binds every frame
-// the napp opens inside itself. The service worker sends the same policy, but
-// it runs at the napp's origin, where the napp can reach its inputs; this is
-// the copy the napp can't undo (Chromium: other engines ignore the attribute).
-// Same policy as sw.js LOCKED_CSP.
-const NAPP_LOCK_CSP = [
-  "default-src 'self' blob: data:",
-  "script-src 'self' 'unsafe-inline' blob:",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self' blob: data:",
-  "frame-src 'self'",
-  "child-src 'self' blob:",
-  "worker-src 'none'",
-  "form-action 'self'",
-  "base-uri 'self'",
-  "upgrade-insecure-requests"
-].join("; ")
-
-function nappLockCsp(nappId: string): string | null {
-  return getPolicy(nappId).domains.includes("network") ? null : NAPP_LOCK_CSP
-}
+// An nsite's frame lets the site's own links, downloads and dialogs work, as
+// they would in a tab. Top navigation stays blocked.
+const NSITE_SANDBOX =
+  "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals"
+const isNsite = (nappId: string) => classifyNappId(nappId) === "nsite"
 
 export function nappOriginFor(nappId: string): string {
   return `${location.protocol}//${nappLabel(nappId)}.${location.host}`
@@ -580,7 +563,7 @@ export function broadcastTheme() {
       wasmNapps.get(instanceId)?.napp.deliver(NAPP_MSG.theme, 0, JSON.stringify(wasmTheme()))
       continue
     }
-    if (win.iframe?.contentWindow) {
+    if (win.iframe?.contentWindow && !isNsite(win.root.dataset.nappId || "")) {
       try {
         const origin = new URL(win.iframe.src).origin
         win.iframe.contentWindow.postMessage(payload, origin)
@@ -1494,8 +1477,8 @@ async function linkOpen(nappId: string, data: any): Promise<Record<string, unkno
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     return { type: resultType, error: "unsupported-scheme" }
   }
-  // A napp's origin opened as a tab runs it outside its window, where the
-  // launcher's network lock (the iframe's csp) doesn't reach.
+  // A napp's origin opened as a tab runs it outside its window and the
+  // launcher.
   if (url.host.endsWith(`.${location.host}`)) {
     return { type: resultType, error: "napp-origin" }
   }
@@ -2149,8 +2132,6 @@ export function reloadIframesByNappId(nappId: string): number {
     if (win.root.dataset.nappId === nappId && win.iframe) {
       const instanceId = win.root.dataset.instanceId || ""
       resetInstanceRuntimeState(instanceId, "Window reloaded before action registered")
-      // The grant may have changed with the files (a dev napp's replace).
-      win.refreshCsp?.()
       win.iframe.src = win.iframe.src
       replayStoredActions(instanceId)
       count++
@@ -2254,7 +2235,7 @@ function mount(
     instanceId,
     origin,
     src: `${origin}/`,
-    csp: () => nappLockCsp(nappId),
+    sandbox: isNsite(nappId) ? NSITE_SANDBOX : undefined,
     petname,
     position,
     status,
@@ -2268,7 +2249,7 @@ function mount(
       switch (data.__nostrapps) {
         case "napp-ready": {
           resolveReady(data.instanceId!)
-          iframe.contentWindow?.postMessage(themePayload(), origin)
+          if (!isNsite(nappId)) iframe.contentWindow?.postMessage(themePayload(), origin)
           return
         }
         case "napp-action-registered": {
@@ -2540,7 +2521,6 @@ async function wasmCall(nappId: string, instanceId: string, call: WasmCall, napp
   try {
     // A decoded image is no JSON: it goes back as the bitmap message.
     if (method === "http_fetch_image") {
-      requireNetwork(nappId, method)
       napp.deliver(NAPP_MSG.bitmap, id, await httpFetchImage(params))
       return
     }
@@ -2629,7 +2609,6 @@ async function wasmAnswer(
       return null
 
     case "http_fetch":
-      requireNetwork(nappId, method)
       return httpFetch(params)
 
     case "signEvent":
@@ -2678,14 +2657,6 @@ async function wasmAnswer(
   }
 
   return runRpc(currentSigner, method, params, nappId, instanceId)
-}
-
-/** requireNetwork is the `network` grant a web napp's fetch() is held to,
- * applied to the launcher fetching on a wasm napp's behalf. */
-function requireNetwork(nappId: string, method: string) {
-  if (!getPolicy(nappId).domains.includes("network")) {
-    throw new Error(`network access not granted: ${method}`)
-  }
 }
 
 /** callWasm is callIframe for a wasm window: the action goes in as a message,
@@ -2875,7 +2846,7 @@ export function mountWithLoading(
     nappId,
     instanceId,
     origin,
-    csp: () => nappLockCsp(nappId),
+    sandbox: isNsite(nappId) ? NSITE_SANDBOX : undefined,
     petname,
     loading: true,
     position,
@@ -2889,7 +2860,7 @@ export function mountWithLoading(
       switch (data.__nostrapps) {
         case "napp-ready": {
           resolveReady(data.instanceId!)
-          iframe.contentWindow?.postMessage(themePayload(), origin)
+          if (!isNsite(nappId)) iframe.contentWindow?.postMessage(themePayload(), origin)
           return
         }
         case "napp-action-registered": {
@@ -4070,7 +4041,7 @@ export async function bootNapp(
   onProgress: (msg: string) => void,
   label: string,
   // The versioned stored record (domains + v) — written verbatim to /__policy__.
-  policy?: { domains: string[]; v?: number }
+  policy?: { domains: string[]; v?: number; nsite?: true }
 ) {
   console.debug("[sandbox] bootNapp", { origin, fileCount: files.length, label })
   const boot = document.createElement("iframe")
@@ -4102,7 +4073,8 @@ export async function bootNapp(
 // so the SW re-serves their documents under the updated CSP. Spins up a
 // transient boot iframe (same channel as install) to write the record into the
 // napp-origin IDB, which the launcher can't touch directly (cross-origin).
-export async function applyNappPolicy(origin: string, nappId: string) {
+// `reload: false` leaves its open windows to pick it up at their next load.
+export async function applyNappPolicy(origin: string, nappId: string, { reload = true } = {}) {
   const boot = document.createElement("iframe")
   boot.src = `${origin}/boot.html`
   boot.style.display = "none"
@@ -4126,10 +4098,10 @@ export async function applyNappPolicy(origin: string, nappId: string) {
     boot.remove()
   }
 
-  // Reload every open window of this napp so the new CSP takes effect now.
+  // Reload every open window of this napp so the new grants take effect now.
+  if (!reload) return
   for (const [, win] of openWindows) {
     if (win.root?.dataset.nappId !== nappId) continue
-    win.refreshCsp?.()
     win.reload?.()
   }
 }
@@ -4313,7 +4285,7 @@ window.addEventListener("message", async event => {
       {
         __nostrapps: "napp-dev-file-result",
         requestId,
-        body: JSON.stringify(getPolicy(nappId)),
+        body: JSON.stringify(getStoredPolicy(nappId)),
         mime: "application/json"
       },
       "*"
@@ -4407,8 +4379,24 @@ async function handleRpc(
   }
 }
 
-// One rpc behind its gates: the identity grant, an account, the user's
-// approval. Shared by bridge.js's rpcs and a wasm napp's napp_call.
+// The row a napp's rpc is held to. The bridge leaves out what isn't granted
+// (window.nostr or its methods, window.nostrdb), but a napp could post the rpc
+// directly, so this is the real boundary. dev: installing apps from its files.
+const ROW_FOR: Record<string, string> = {
+  getPublicKey: "identity",
+  signEvent: "write",
+  "napp.publish": "write",
+  "nip04.encrypt": "encrypt",
+  "nip44.encrypt": "encrypt",
+  "nip04.decrypt": "decrypt",
+  "nip44.decrypt": "decrypt"
+}
+const rowFor = (method: string) =>
+  ROW_FOR[method] ??
+  (method.startsWith("nostrdb.") ? "identity" : method.startsWith("napp.dev.") ? "dev" : null)
+
+// One rpc behind its gates: the granted row, an account, the user's approval.
+// Shared by bridge.js's rpcs and a wasm napp's napp_call.
 async function runRpc(
   signer: Signer | SignerGetter,
   method: string,
@@ -4416,16 +4404,13 @@ async function runRpc(
   nappId: string,
   instanceId: string | undefined
 ): Promise<unknown> {
-  // Signer access (NIP-07 / window.nostr) requires the granted `identity`
-  // capability. The bridge pins window.nostr to undefined when it's ungranted,
-  // but a site could postMessage this rpc directly, so enforce it here too —
-  // this is the real boundary.
-  if (SIGNER_METHODS.has(method) && !getPolicy(nappId).domains.includes("identity")) {
-    throw new Error(`identity access not granted: ${method}`)
+  // An nsite has window.nostr and nothing else of the bridge.
+  if (!SIGNER_METHODS.has(method) && isNsite(nappId)) {
+    throw new Error(`not available to nsites: ${method}`)
   }
-  // Installing apps from a napp's files: only with the `dev` grant.
-  if (method.startsWith("napp.dev.") && !getPolicy(nappId).domains.includes("dev")) {
-    throw new Error(`dev access not granted: ${method}`)
+  const row = rowFor(method)
+  if (row && !getPolicy(nappId).domains.includes(row)) {
+    throw new Error(`${row} access not granted: ${method}`)
   }
   // Granted but nobody is logged in — the case where a napp opened from a
   // link asks on load and gets "No NIP-07 extension detected" back, which it
@@ -4439,9 +4424,9 @@ async function runRpc(
     })
     if (!pk) throw new Error(`not logged in: ${method}`)
   }
-  if (isGated(method)) {
-    // Refused without asking (a denial just now, too many waiting): skip
-    // the details only a prompt needs.
+  // Refused without asking (a denial just now, too many waiting) or allowed by
+  // its row: skip the details only a prompt needs.
+  if (isGated(method) && !coveredByGrant(nappId, method)) {
     if (wouldRefuse(nappId, method)) throw new Error(`Permission denied: ${method}`)
     let detail: ApprovalDetail | undefined
     let relays: (() => string[]) | undefined

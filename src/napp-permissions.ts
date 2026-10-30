@@ -1,42 +1,48 @@
 // The per-napp permission screen. Shown before an app first runs and re-openable
 // from an app card. It turns the app's `requires` declarations into the single
-// granted `domains` list — nothing is serviced or reachable until it's ticked.
+// granted `domains` list — nothing is serviced or reachable until it's ticked —
+// and the rows that still ask each time (permissions.ts). A new install starts
+// from the defaults set in Settings.
 // The capability rows use the design-system item list (the relays-napp look).
 // A share link opens several apps at once; promptSharedSpace lists them on one
 // screen with a single set of grants for every app the link runs.
 import { openDialog } from "./dialog.js"
 import { appIcon, type AppIconSize, button, check, input, radio, tabs } from "./system-napps/ui.js"
 import { nameEl, nappNameEl } from "./napp-name.js"
+import { ASKABLE } from "./permissions.js"
+import { getInstallDefaults, setInstallDefaults } from "./persistence.js"
 import type { NappPolicy } from "./types.js"
 
 // Title + short description per grantable capability. Keys are the requires
 // domain names. `ui` isn't here — it's auto-granted and only named in the
 // summary line, never a toggle.
 const CAP_INFO: Record<string, { title: string; desc: string }> = {
-  identity: { title: "identity", desc: "read your key and sign as you (NIP-07)" },
+  // A napplet's: NAP identity is read only.
+  identity: { title: "identity", desc: "knows who you are" },
   theme: { title: "theme", desc: "matches your colors" },
   storage: { title: "storage", desc: "keeps its own data" },
   resource: { title: "resource", desc: "loads files via the launcher" },
   relay: { title: "relay", desc: "reads and posts events" },
   outbox: { title: "outbox", desc: "finds the right relays for you" },
-  common: { title: "common", desc: "looks up profiles; follows/reacts/reports ask first" },
+  common: { title: "common", desc: "looks up profiles, follows, reacts and reports" },
   inc: { title: "inc", desc: "talks to other open napplets" },
-  link: { title: "link", desc: "opens links in new tabs (asks first)" },
+  link: { title: "link", desc: "opens links in new tabs" },
   config: { title: "config", desc: "settings you edit in the launcher" },
-  // Not relay access — nostr reads/writes always go through the launcher. This
-  // is the app opening its OWN connections to the wider web.
-  network: { title: "network", desc: "connects directly to the web (nostr works without it)" },
   // Napps only (no NAP domain): napp.dev.installLocal.
   dev: { title: "dev", desc: "installs and replaces local apps from files it makes" }
 }
 
-// Whether this browser holds a napp to the network lock the launcher sets on its
-// window (the iframe `csp` attribute; Chromium only). Elsewhere the lock is
-// best effort: a napp written to get around it can. Napplets are sealed in
-// every browser, so this is about napps only.
-const LOCK_ENFORCED = "csp" in HTMLIFrameElement.prototype
+// A napp's identity rows, under one heading: read is the `identity` grant, and
+// the others need it.
+const IDENTITY_INFO: Record<string, { title: string; desc: string }> = {
+  identity: { title: "read", desc: "knows who you are and reads nostrdb" },
+  write: { title: "write", desc: "signs and publishes as you" },
+  encrypt: { title: "encrypt", desc: "encrypts messages as you" },
+  decrypt: { title: "decrypt", desc: "reads your encrypted messages" }
+}
+const IDENTITY_GROUP = Object.keys(IDENTITY_INFO)
 
-// Grantable rows are the NAP domains (network is appended separately).
+// Grantable rows are the NAP domains.
 const CAP_ORDER = [
   "identity",
   "theme",
@@ -51,8 +57,8 @@ const CAP_ORDER = [
 ]
 
 // Everything the launcher can actually provide: the NAP domains we implement,
-// plus the launcher-local extensions (ui auto-granted, network toggle).
-const SUPPORTED_REQUIRES = new Set([...CAP_ORDER, "ui", "network", "dev"])
+// plus the launcher-local ones (ui auto-granted, network always open).
+const SUPPORTED_REQUIRES = new Set([...CAP_ORDER, ...IDENTITY_GROUP, "ui", "network", "dev"])
 
 // The subset of a napp's declared `requires` this launcher doesn't implement —
 // features that will silently not work. Shared with the Apps window so the card
@@ -273,8 +279,7 @@ function policySection(
   head: HTMLElement | null = sectionHead(opts)
 ): PolicySection {
   const cur = opts.current
-  // Declared caps we implement (order-stable), minus network (its own row) and
-  // ui (auto-granted). network is always offered so any app can be un-sealed.
+  // Declared caps we implement (order-stable), minus ui (auto-granted).
   const declaredCaps = CAP_ORDER.filter(d => opts.declaredDomains.includes(d))
   const declaredUi = opts.declaredDomains.includes("ui")
   // Required and optional apart: only a napplet names optional ones.
@@ -289,15 +294,24 @@ function policySection(
   const unsupported = unsupportedRequires(required)
   const unsupportedOptional = unsupportedRequires(optionals)
   // The effective type. With chooseType the user flips it live and the rows
-  // re-render: napplet = exactly its declared NAP domains, no network (sealed);
-  // nsite/napp = identity + declared + network, all default ON, deselectable.
+  // re-render: napplet = exactly its declared NAP domains; nsite = the
+  // identity rows (window.nostr is all it gets); napp = those, link and what
+  // it declares.
   let type = opts.type || "nsite"
   // dev is a row only when declared, and never for a napplet (no bridge for it).
   const declaredDev = opts.declaredDomains.includes("dev") ? ["dev"] : []
   const rowsFor = () =>
     type === "napplet"
       ? declaredCaps
-      : [...new Set(["identity", ...declaredCaps, ...declaredDev, "network"])]
+      : type === "nsite"
+        ? IDENTITY_GROUP
+        : [
+            ...IDENTITY_GROUP,
+            ...CAP_ORDER.filter(
+              d => d === "link" || (d !== "identity" && declaredCaps.includes(d))
+            ),
+            ...declaredDev
+          ]
 
   const el = document.createElement("div")
   el.className = "napp-perms-app"
@@ -357,22 +371,18 @@ function policySection(
     el.appendChild(note)
   }
 
-  // Capability rows, rebuilt when the type is flipped. Checkbox first,
-  // then the title with its short description below.
+  // Capability rows, rebuilt when the type is flipped.
   const body = document.createElement("div")
-  const boxes = new Map<string, HTMLInputElement>()
+  let rows!: ReturnType<typeof grantRows>
   function renderBody() {
-    boxes.clear()
-    body.replaceChildren()
-    for (const d of rowsFor()) {
-      const box = check({ checked: cur ? cur.domains.includes(d) : true })
-      boxes.set(d, box)
-      const desc =
-        d === "network" && !LOCK_ENFORCED && type !== "napplet"
-          ? `${CAP_INFO.network.desc}; this browser can't enforce leaving it off`
-          : CAP_INFO[d].desc
-      body.appendChild(permRow(box, CAP_INFO[d].title, desc))
-    }
+    const defaults = getInstallDefaults()
+    rows = grantRows(
+      rowsFor(),
+      d => (cur ? cur.domains.includes(d) : !defaults.off.includes(d)),
+      d => (cur ? !!cur.ask?.includes(d) : defaults.ask.includes(d)),
+      type
+    )
+    body.replaceChildren(rows.el)
   }
   renderBody()
   el.appendChild(body)
@@ -380,11 +390,108 @@ function policySection(
   return {
     el,
     read() {
-      const domains = [...boxes].filter(([, b]) => b.checked).map(([d]) => d)
+      const { domains, ask } = rows.read()
       if (declaredUi) domains.push("ui") // auto-granted, no toggle
-      return opts.chooseType ? { domains, type } : { domains }
+      const policy: NappPolicy = ask.length ? { domains, ask } : { domains }
+      return opts.chooseType ? { ...policy, type } : policy
     }
   }
+}
+
+// The grant rows: checkbox first, then the title with its short description
+// below, and an ask box at the line's end on the rows that have one. Ticking
+// ask ticks its row, unticking a row unticks its ask. A napp's identity rows
+// sit under one heading; unticking read unticks them, ticking one ticks read.
+// For a napplet identity is the one NAP row; an nsite's read has no nostrdb.
+function grantRows(
+  keys: string[],
+  on: (d: string) => boolean,
+  asking: (d: string) => boolean,
+  type?: string,
+  onChange?: () => void
+) {
+  const napplet = type === "napplet"
+  const el = document.createElement("div")
+  el.className = "napp-perms-rows"
+  const boxes = new Map<string, HTMLInputElement>()
+  const askBoxes = new Map<string, HTMLInputElement>()
+  const grouped = !napplet && keys.includes("identity")
+  const dropAsks = () => {
+    for (const [r, a] of askBoxes) if (!boxes.get(r)!.checked) a.checked = false
+  }
+  const changed = (d: string) => {
+    const box = boxes.get(d)!
+    if (grouped && d === "identity" && !box.checked)
+      for (const r of IDENTITY_GROUP) if (r !== d && boxes.has(r)) boxes.get(r)!.checked = false
+    if (grouped && d !== "identity" && IDENTITY_GROUP.includes(d) && box.checked)
+      boxes.get("identity")!.checked = true
+    dropAsks()
+    onChange?.()
+  }
+  for (const d of keys) {
+    const sub = grouped && IDENTITY_GROUP.includes(d)
+    if (sub && d === "identity") {
+      const heading = document.createElement("p")
+      heading.className = "napp-perms-group"
+      heading.textContent = "identity"
+      el.appendChild(heading)
+    }
+    const info =
+      sub && d === "identity" && type === "nsite"
+        ? { title: "read", desc: "knows who you are" }
+        : sub
+          ? IDENTITY_INFO[d]
+          : CAP_INFO[d]
+    const box = check({ checked: on(d), onChange: () => changed(d) })
+    boxes.set(d, box)
+    const line = document.createElement("div")
+    line.className = "napp-perms-line" + (sub ? " napp-perms-sub" : "")
+    line.appendChild(permRow(box, info.title, info.desc))
+    if (ASKABLE.has(d)) {
+      const ask = check({
+        label: "ask",
+        class: "napp-perms-ask",
+        checked: asking(d),
+        onChange: on => {
+          if (!on || box.checked) return onChange?.()
+          box.checked = true
+          changed(d)
+        }
+      })
+      askBoxes.set(d, ask.control as HTMLInputElement)
+      line.appendChild(ask)
+    }
+    el.appendChild(line)
+  }
+  if (grouped && !boxes.get("identity")!.checked)
+    for (const r of IDENTITY_GROUP) if (boxes.has(r)) boxes.get(r)!.checked = false
+  dropAsks()
+  return {
+    el,
+    read() {
+      const domains = [...boxes].filter(([, b]) => b.checked).map(([d]) => d)
+      const ask = [...askBoxes].filter(([d, a]) => a.checked && domains.includes(d)).map(([d]) => d)
+      return { domains, ask }
+    }
+  }
+}
+
+// Settings' defaults for new installs: every row an app can get, as the
+// install screen shows them, saved as they change.
+export function installDefaultsRows(): HTMLElement {
+  const d = getInstallDefaults()
+  const keys = [...IDENTITY_GROUP, ...CAP_ORDER.filter(k => k !== "identity"), "dev"]
+  const rows = grantRows(
+    keys,
+    k => !d.off.includes(k),
+    k => d.ask.includes(k),
+    undefined,
+    () => {
+      const { domains, ask } = rows.read()
+      setInstallDefaults({ off: keys.filter(k => !domains.includes(k)), ask })
+    }
+  )
+  return rows.el
 }
 
 // Icon + name, with the type as the kit's overline at the line's end. The name

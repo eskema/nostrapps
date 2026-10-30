@@ -271,9 +271,8 @@ window's actions into it, the way a web napp's reload does.
 
 ### The web
 
-A web napp granted `network` has `fetch()`. A wasm napp has no sockets, so the
-launcher fetches for it, behind the same `network` grant (a napp without it
-gets an error):
+A web napp has `fetch()`. A wasm napp has no sockets, so the launcher fetches
+for it:
 
 - `http_fetch` makes one request: `method` defaults to `GET`, `headers` is an
   object of strings and `body` a string (base64 bytes yourself if you need

@@ -98,8 +98,6 @@ export type NappWindow = {
   /** Reload the napp page (via bridge.js — the parent can't drive a
    *  cross-origin frame's history). No-op for system napps. */
   reload(): void
-  /** Re-read the iframe's `csp` policy (a changed grant); applies at the next load. */
-  refreshCsp(): void
   /** Take the window down without its close callbacks: nothing is recorded,
    *  nothing wiped. For erase all data, which does both itself. */
   unmount(): void
@@ -185,6 +183,8 @@ export type MessageData =
 // (it predates the policy system — see getPolicy).
 export type NappPolicy = {
   domains: string[]
+  // Granted rows that still ask on every call.
+  ask?: string[]
 }
 
 // nsite = kind 35128; napp = kind 35130; wasm napp = kind 35131; napplet =

@@ -123,7 +123,7 @@ import { reconnectIfNeeded } from "./signers/index.js"
 import { disconnectBunkerSigner } from "./signers/nip46.js"
 import { resetRefusal, setLoginStatusSink } from "./login.js"
 import * as account from "./account.js"
-import { clearDecisions } from "./permissions.js"
+import { clearDecisions, onRowRevoked } from "./permissions.js"
 import { openPopover } from "./popover.js"
 import { setPointer, getPointer } from "./pointer.js"
 import { moveBefore } from "./dom.js"
@@ -441,6 +441,12 @@ setNappLogSink((source, msg) =>
 setLocalInstaller(async (files, by) =>
   installLocalApp(await collectLocalFiles(files, "local", setStatus), by)
 )
+// A prompt's "deny always" unticked a row: an installed napp's origin learns
+// it, so its window.nostr drops the methods from the next load on.
+onRowRevoked(nappId => {
+  if (nappId.startsWith("napplet~") || !persist.getInstalledApp(nappId)) return
+  applyNappPolicy(nappOriginFor(nappId), nappId, { reload: false }).catch(() => {})
+})
 
 // The kit's author(): profiles through the loader that feeds the search
 // index, a click opens the profile, and the account's follow list gives the
@@ -1093,7 +1099,7 @@ async function editPermissions(nappId: string) {
     ? "napplet"
     : app.event
       ? manifestAppType(app.event)
-      : metaAppType(app)
+      : persist.classifyInstalled(app)
   const policy = await promptNappPolicy({
     title: app.petname || app.title || nappId,
     icon: installedIconSrc(app),
@@ -1106,6 +1112,8 @@ async function editPermissions(nappId: string) {
   })
   if (!policy) return
   persist.setPolicy(nappId, policy)
+  // Settings lists the grants.
+  notifyAppsChanged()
   try {
     await applyNappPolicy(nappOriginFor(nappId), nappId)
     setStatus(`Updated permissions for ${app.petname || nappId}`)
@@ -2688,10 +2696,6 @@ function manifestAppType(event: { kind: number; tags: string[][] } | null | unde
   if (event.kind === NAPP_NAMED_KIND || event.kind === WASM_NAMED_KIND) return "napp"
   return "nsite"
 }
-// Same, from a dev/local metadata.json.
-function metaAppType(m: any): string {
-  return m?.actions?.length || m?.requires?.length ? "napp" : "nsite"
-}
 
 // First-run-remembered permission gate, shared by every launch path (published,
 // dev, folder, temp). Shows the summary + grant screen the first time an app is
@@ -2836,7 +2840,13 @@ async function installFetched(
 
   console.debug("[sandbox] install", { nappId, label, origin })
   onProgress(`Booting ${label}…`)
-  await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId))
+  await bootNapp(
+    origin,
+    files,
+    onProgress,
+    label,
+    persist.getStoredPolicy(nappId, manifestAppType(manifest) === "nsite")
+  )
 
   if (manifest) persist.storeInstalledEvent(manifest, petname, installedAt)
   handlers.addApp(nappId, capabilitiesFromEvent(manifest))
@@ -3001,7 +3011,7 @@ async function installDevApp() {
       !(await resolvePolicyForLaunch(nappId, {
         title: label,
         iconBlob: await iconBlobFromDir(dirHandle, metadata.icon),
-        type: wasm ? "napp" : metaAppType(metadata),
+        type: "napp",
         declaredDomains: metadata.requires || []
       }))
     ) {
@@ -3024,7 +3034,7 @@ async function installDevApp() {
       requires: metadata.requires || [],
       modes: metadata.modes,
       initialSize: persist.initialSizeFromMeta(metadata),
-      ...(wasm ? { kind: WASM_NAMED_KIND } : {})
+      kind: wasm ? WASM_NAMED_KIND : NAPP_NAMED_KIND
     })
     handlers.addApp(nappId, metadata.actions || [])
 
@@ -3067,7 +3077,7 @@ async function installDevAppFromUrl(rawUrl: string) {
         icon: metadata.icon
           ? new URL(String(metadata.icon).replace(/^\//, ""), baseUrl).toString()
           : undefined,
-        type: wasm ? "napp" : metaAppType(metadata),
+        type: "napp",
         declaredDomains: metadata.requires || []
       }))
     ) {
@@ -3090,7 +3100,7 @@ async function installDevAppFromUrl(rawUrl: string) {
       requires: metadata.requires || [],
       modes: metadata.modes,
       initialSize: persist.initialSizeFromMeta(metadata),
-      ...(wasm ? { kind: WASM_NAMED_KIND } : {})
+      kind: wasm ? WASM_NAMED_KIND : NAPP_NAMED_KIND
     })
     handlers.addApp(nappId, metadata.actions || [])
 
@@ -3363,7 +3373,7 @@ async function installLocalApp(
     const granted = await promptNappPolicy({
       title: old?.petname || label,
       icon: old ? installedIconSrc(old) : undefined,
-      type: wasm ? "napp" : metaAppType(metadata),
+      type: single ? "nsite" : "napp",
       declaredDomains: metadata?.requires || [],
       current: persist.getPolicy(nappId),
       replacedBy: by
@@ -3379,7 +3389,7 @@ async function installLocalApp(
     title: label,
     icon: directIconSrc(metadata?.icon),
     iconBlob: iconBlobFrom(metadata?.icon, files),
-    type: wasm ? "napp" : metaAppType(metadata),
+    type: single ? "nsite" : "napp",
     declaredDomains: metadata?.requires || []
   })
   if (!policy) {
@@ -3389,7 +3399,7 @@ async function installLocalApp(
 
   console.debug("[sandbox] install", { nappId, label, origin, wasm })
   setStatus(`Booting ${label}…`)
-  await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId))
+  await bootNapp(origin, files, onProgress, label, persist.getStoredPolicy(nappId, !!single))
 
   const petname = metadata?.title || nappId
 
@@ -3403,7 +3413,9 @@ async function installLocalApp(
     requires: metadata?.requires || [],
     modes: metadata?.modes,
     initialSize: persist.initialSizeFromMeta(metadata),
-    ...(wasm ? { kind: WASM_NAMED_KIND } : {}),
+    // A lone index.html taken as an nsite; anything else came with a
+    // metadata.json, so a napp.
+    kind: wasm ? WASM_NAMED_KIND : single ? NSITE_NAMED_KIND : NAPP_NAMED_KIND,
     installedBy: by
   })
   handlers.addApp(nappId, metadata?.actions || [])
@@ -3766,7 +3778,7 @@ async function bootTempApp(nappId: string, input: string, fetched: NsiteResult, 
       files,
       setStatus,
       petname,
-      persist.getStoredPolicy(nappId)
+      persist.getStoredPolicy(nappId, manifestAppType(manifest) === "nsite")
     )
   }
   persist.storeDevApp({

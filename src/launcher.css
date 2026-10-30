@@ -1276,6 +1276,31 @@ body.popover-open .napp-body iframe {
   border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
 }
 
+/* A grant row with its ask box at the line's end. The rule above moves from
+   the row to the line, so it runs over the box too. */
+.napp-perms-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-s);
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.napp-perms-line > .napp-perms-row {
+  border-top: 0;
+}
+
+/* A napp's identity rows, indented under their heading. */
+.napp-perms-group {
+  margin: 0;
+  padding: var(--space-xs) 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.napp-perms-sub {
+  margin-left: var(--space-l);
+}
+
 /* Sticks to the bottom of a screen taller than the dialog: its own surface
    over what scrolls beneath, reaching into the card's bottom padding so at
    rest it sits where it always did, with the card's corners. */
@@ -2030,9 +2055,9 @@ body.popover-open .napp-body iframe {
 }
 
 /* Settings' permissions (permissionsSection): a napp each, room between
-   them. A napp: its title, the icon in line before it, "forget" at the
-   line's end, the Apps card's byline under; then a row per decision, the
-   prompt's words, the decision and a ×. */
+   them. A napp: its title, the icon in line before it, "edit" and "forget"
+   at the line's end, the Apps card's byline under; then what it's granted,
+   and a row per decision, the prompt's words, the decision and a ×. */
 .settings-permissions .perm-list {
   gap: var(--space-l);
 }
@@ -2051,6 +2076,16 @@ body.popover-open .napp-body iframe {
 
 .perm-napp-head > .napp-byline {
   grid-column: 1 / -1;
+}
+
+.perm-napp-actions {
+  display: grid;
+  grid-auto-flow: column;
+  column-gap: var(--space-s);
+}
+
+.perm-napp-grants {
+  margin: 0;
 }
 
 .perm-napp-title > .ui-app-icon {

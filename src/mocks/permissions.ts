@@ -14,7 +14,11 @@ import {
 } from "../approval-details.js"
 import { peopleList } from "../event-facts.js"
 import type { NappName } from "../napp-name.js"
-import { permissionsSection, type Decisions } from "../system-napps/permissions-section.js"
+import {
+  permissionsSection,
+  type Decisions,
+  type Grants
+} from "../system-napps/permissions-section.js"
 import { PERMISSION_ACTIONS, permissionBody, type ApprovalDetail } from "../permissions.js"
 import { appIcon, author, authors, button, code, el } from "../system-napps/ui.js"
 
@@ -456,47 +460,45 @@ const NAPPS: Record<string, NappName> = {
   }
 }
 const decisions: Decisions = {
-  [`${pk(50)}~notes`]: { signEvent: "allow", "nip44.encrypt": "allow", "napp.publish": "deny" },
-  "dev~my-napp": { "napp.copyText": "allow", "napp.saveFile": "deny" },
-  [`napplet~${pk(2)}~chat`]: {
-    "relay.publish": "allow",
-    "relay.publishEncrypted": "allow",
-    "common.follow": "allow",
-    "link.open": "deny"
-  },
-  [`${pk(3)}~blog`]: { signEvent: "deny" }
+  [`${pk(50)}~notes`]: { "napp.saveFile": "allow" },
+  "dev~my-napp": { "napp.copyText": "allow", "napp.saveFile": "deny" }
+}
+const grants: Grants = {
+  [`${pk(50)}~notes`]: ["read", "write", "encrypt", "decrypt (ask)", "link"],
+  "dev~my-napp": ["read", "write (ask)", "link", "dev"],
+  [`napplet~${pk(2)}~chat`]: ["relay", "common (ask)", "link"],
+  [`${pk(3)}~blog`]: []
 }
 const settings = permissionsSection({
   napp: nappId =>
     NAPPS[nappId] ?? { title: nappId, type: null, author: null, authorLabel: null, known: false },
   icon: () => appIcon({ src: ICON, size: "s" }),
+  edit() {},
   forget(nappId, method) {
     if (method) delete decisions[nappId]?.[method]
     if (!method || !Object.keys(decisions[nappId] ?? {}).length) delete decisions[nappId]
-    settings.render(decisions)
+    settings.render(decisions, grants)
   },
   forgetAll() {
     for (const k of Object.keys(decisions)) delete decisions[k]
-    settings.render(decisions)
+    settings.render(decisions, grants)
   }
 })
 settings.el.open = true
-settings.render(decisions)
+settings.render(decisions, grants)
 
 // A grant arriving while Settings is open: the next of these, into the list
 // as it stands.
 const GRANTS: Array<[string, string, string]> = [
   [`${pk(50)}~notes`, "napp.copyText", "allow"],
-  ["dev~my-napp", "signEvent", "allow"],
-  [`${pk(3)}~blog`, "link.open", "allow"],
-  [`napplet~${pk(2)}~chat`, "common.react", "deny"],
-  [`${pk(50)}~notes`, "nip44.decrypt", "allow"]
+  [`${pk(3)}~blog`, "napp.saveFile", "deny"],
+  [`napplet~${pk(2)}~chat`, "napp.copyText", "allow"]
 ]
 let granted = 0
 function grant() {
   const [id, method, decision] = GRANTS[granted++ % GRANTS.length]
   ;(decisions[id] ??= {})[method] = decision
-  settings.render(decisions)
+  settings.render(decisions, grants)
 }
 document.getElementById("settings")!.append(settings.el)
 

@@ -1,19 +1,27 @@
-// Settings' permissions: what the prompts were told to remember, by napp, in
-// the prompts' words ("SIGN any event"), each to forget. A napp reads as the
-// prompt's head does: its icon and title, the Apps card's byline under them.
-// It is handed the decisions and what a forget does, so the mock page
+// Settings' permissions: what a new install's screen starts from, then by
+// napp, what its install screen granted (edited on that screen), then what the
+// prompts were told to remember, in the prompts' words ("SAVE files"), each to
+// forget. A napp reads as the prompt's head
+// does: its icon and title, the Apps card's byline under them. It is handed
+// the grants, the decisions and what a forget does, so the mock page
 // (mocks/permissions.html) can lay it out with made-up ones. render() puts a
-// new set of decisions in place, a row or a napp added, gone or changed, the
-// rest left as it is.
+// new set in place, a row or a napp added, gone or changed, the rest left as
+// it is.
 import { nappByline, type NappName } from "../napp-name.js"
 import { decisionLabel } from "../permissions.js"
 import { badge, button, details, el, empty, item, itemList } from "./ui.js"
 
 export type Decisions = Record<string, Record<string, string>>
+// An installed napp's granted rows, as named on its screen, ui left out.
+export type Grants = Record<string, string[]>
 
 export interface PermissionsSectionOpts {
   napp(nappId: string): Pick<NappName, "title" | "author" | "authorLabel" | "type">
   icon?(nappId: string): HTMLElement | undefined
+  // Opens the napp's permission screen.
+  edit?(nappId: string): void
+  // The rows a new install starts from.
+  defaults?: HTMLElement
   forget(nappId: string, method?: string): void
   forgetAll(): void
 }
@@ -28,6 +36,9 @@ interface Group {
   el: HTMLElement
   items: HTMLElement
   rows: Map<string, Row>
+  grants: HTMLElement
+  edit?: HTMLElement
+  forget: HTMLElement
 }
 
 const decisionBadge = (decision: string) =>
@@ -39,10 +50,24 @@ export function permissionsSection(opts: PermissionsSectionOpts) {
   const top = el(
     "div",
     "perm-list-actions",
-    button({ label: "forget all", variant: "link", onClick: () => opts.forgetAll() })
+    button({
+      label: "forget all",
+      variant: "link",
+      title: "Forget every allow and deny the prompts remembered",
+      onClick: () => opts.forgetAll()
+    })
   )
   const none = empty("no permission was granted yet")
   const list = el("div", "perm-list", top, none)
+  if (opts.defaults)
+    list.prepend(
+      el(
+        "div",
+        "perm-napp",
+        el("div", "perm-napp-head", el("strong", "", "new installs")),
+        opts.defaults
+      )
+    )
   section.appendChild(list)
   const groups = new Map<string, Group>()
 
@@ -55,22 +80,41 @@ export function permissionsSection(opts: PermissionsSectionOpts) {
       ...(icon ? [icon] : []),
       el("strong", "", napp.title)
     )
+    const edit = opts.edit
+      ? button({
+          label: "edit",
+          variant: "link",
+          title: `Change what ${napp.title} is granted`,
+          onClick: () => opts.edit?.(nappId)
+        })
+      : undefined
     const forget = button({
       label: "forget",
       variant: "link",
       title: `Forget everything ${napp.title} was allowed or denied`,
       onClick: () => opts.forget(nappId)
     })
+    const grants = el("p", "perm-napp-grants")
     const items = itemList()
     return {
       el: el(
         "div",
         "perm-napp",
-        el("div", "perm-napp-head", title, forget, nappByline(napp)),
+        el(
+          "div",
+          "perm-napp-head",
+          title,
+          el("div", "perm-napp-actions", ...(edit ? [edit] : []), forget),
+          nappByline(napp)
+        ),
+        grants,
         items
       ),
       items,
-      rows: new Map()
+      rows: new Map(),
+      grants,
+      edit,
+      forget
     }
   }
 
@@ -90,13 +134,13 @@ export function permissionsSection(opts: PermissionsSectionOpts) {
     }
   }
 
-  function render(all: Decisions) {
-    const ids = Object.keys(all)
+  function render(all: Decisions, grants: Grants = {}) {
+    const ids = [...new Set([...Object.keys(grants), ...Object.keys(all)])]
     summary.textContent = `permissions (${ids.length})`
-    top.hidden = ids.length === 0
+    top.hidden = Object.keys(all).length === 0
     none.hidden = ids.length > 0
     for (const [id, g] of groups)
-      if (!(id in all)) {
+      if (!(id in all) && !(id in grants)) {
         g.el.remove()
         groups.delete(id)
       }
@@ -107,7 +151,19 @@ export function permissionsSection(opts: PermissionsSectionOpts) {
         groups.set(id, g)
         list.append(g.el)
       }
-      const methods = all[id]
+      // Only an installed napp has a screen to edit; one gone may still have
+      // decisions left to forget.
+      const installed = id in grants
+      const text = installed
+        ? grants[id].length
+          ? `granted: ${grants[id].join(", ")}`
+          : "nothing granted"
+        : ""
+      if (g.grants.textContent !== text) g.grants.textContent = text
+      g.grants.hidden = !installed
+      if (g.edit) g.edit.hidden = !installed
+      const methods = all[id] ?? {}
+      g.forget.hidden = Object.keys(methods).length === 0
       for (const [m, r] of g.rows)
         if (!(m in methods)) {
           r.el.remove()

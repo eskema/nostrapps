@@ -6,7 +6,7 @@ A napp is an app published as kind `35130`. It is a static site with launcher ca
 
 A napp is a folder with `metadata.json`, `index.html` and the rest of its files. `/dev` in the launcher runs a local folder (Chrome, Edge). `/dev <url>` runs one from a local server. Files are read on every request, so a reload picks up changes. Closing the window erases the napp's data. `/upload` publishes the folder.
 
-Keep scripts, styles and fonts in the folder. The user can turn off `network`, which blocks everything else. Read and publish Nostr events through the bridge.
+Read and publish Nostr events through the bridge.
 
 Outside the launcher nothing injects the kit. The nostrapps ui kit napp shows one line for the head: when `window.napp.ui` is missing it pulls the kit from Blossom by hash, every server in the line at once, and sets `window.napp.ready`, a promise to await before the first helper.
 
@@ -30,7 +30,7 @@ body {
 
 The bridge keeps `data-theme`, `--surface` and `--text` in sync with the launcher, so napps need no theme code.
 
-`window.nostr` is undefined when `identity` isn't granted, and `getPublicKey()` throws when nobody is logged in.
+`window.nostr` and `window.nostrdb` are undefined without `identity` (the read row). `signEvent` comes with `write`, and `nip04`/`nip44` carry `encrypt` and `decrypt` as granted. `getPublicKey()` throws when nobody is logged in.
 
 Each napp has its own origin, so `localStorage` is its own.
 
@@ -343,7 +343,7 @@ reloaded, which starts from the napp's first location with no history.
 
 ## Permissions
 
-Declare required domains in `requires`. The launcher asks for permission on first launch and stores the grant. Sensitive operations such as signing, clipboard access, and file saving prompt separately.
+Declare required domains in `requires`. The launcher asks for permission on first launch and stores the grant. A row can be set to ask on every call. Clipboard access and file saving always prompt.
 
 The `ui` domain injects `/napp-ui.css` and `/napp-ui.js`: the launcher's
 buttons, inputs, disclosures, checks, icons and `--surface`/`--text`
@@ -353,9 +353,8 @@ spacing, motion, dimming and hairlines, and the helpers that build them as
 override it; its classes (`btn btn-primary`, `ui-input`, `ui-details`, …) are
 documented in it for markup that doesn't go through the helpers. The
 nostrapps ui kit napp shows every element with its call and its HTML. Napps
-without `ui` are unaffected. `network` controls direct connections from the
-app's own origin; Nostr bridge calls do not require direct relay access. `dev`
-lets the napp install and replace local apps (`window.napp.dev`).
+without `ui` are unaffected. `dev` lets the napp install and replace local
+apps (`window.napp.dev`).
 
 ## Runtime
 

@@ -117,13 +117,8 @@
         }
 
         // Tear down any service worker the NAPP registered for itself, keeping
-        // only the launcher's own (served at /sw.js). A napp's SW isn't governed
-        // by the document CSP, so it could keep talking to the network after the
-        // user revokes `network` — this makes the grant toggle authoritative:
-        // flip network off, the launcher re-applies the policy, and the rogue SW
-        // is gone on reload. No manual unregistering. (Locked napps can't create
-        // one in the first place — LOCKED_CSP has worker-src 'none' — so this
-        // only matters for a napp that registered one while it was allowed.)
+        // only the launcher's own (served at /sw.js): one of its own would take
+        // over serving the napp's files, and with them what gets injected.
         async function unregisterForeignSWs() {
           if (!navigator.serviceWorker?.getRegistrations) return
           try {
@@ -246,8 +241,8 @@
                 await putFile(f.path, f.body, f.mime)
               }
               // The service worker reads /__policy__ from this store to decide
-              // the napp's CSP (network lockdown). Written here so it's in place
-              // before the napp's first document load.
+              // what it injects. Written here so it's in place before the
+              // napp's first document load.
               if (data.policy) {
                 await putFile("/__policy__", JSON.stringify(data.policy), "application/json")
               }
