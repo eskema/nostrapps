@@ -66,8 +66,11 @@ export function findHandlersForAction(
   // call, so the candidate list grows by duplicates each dispatch).
   let apps = [...(actionMap.get(action) || [])]
 
-  // special case
-  if (action.startsWith("view:")) apps.push(...(actionMap.get("view") || []))
+  // special case: an app declaring both "view" and this view:<kind> is one
+  // candidate, not two
+  if (action.startsWith("view:")) {
+    apps = [...new Set([...apps, ...(actionMap.get("view") || [])])]
+  }
 
   // Mode-gated dispatch: auxiliary calls only consider apps advertising
   // "auxiliary"; normal calls only consider apps advertising "normal" (absent
