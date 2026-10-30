@@ -586,9 +586,10 @@ export function broadcastTheme() {
 // ({type:"domain.action", id, ...} → {type:"...result", id, ...fields}) over
 // postMessage. Per the spec there is NO shell handshake — availability is
 // signalled by PRESENCE of a domain object on window.napplet, and the shell
-// injects only the domains it grants (see the SW's __nappletDomains injection
-// + bridge.js). So the host's job is just: service a granted-domain call with
-// its exact per-domain result shape, and silently ignore everything else.
+// injects only the domains it grants (see buildNappletDoc). So the host's job
+// is just: service a granted-domain call with its exact per-domain result
+// shape, and silently ignore everything else. Napps and nsites have no
+// window.napplet.
 //
 // Result shapes are the @napplet/nap contracts verbatim — each result carries
 // named top-level fields (pubkey / relays / profile / pubkeys / entries /
@@ -610,12 +611,11 @@ const NAPPLET_OFFERED = [
   "config"
 ]
 
-// The capability domains this napp is actually granted: declared (a napp's
-// ["requires", "<domain>"] tags, a napplet's R and O tags, or a metadata.json
-// `requires` array) ∩ what we implement ∩ what the user granted in the
-// permission screen. Empty for a plain napp that declared nothing — it never
-// enters the seam.
+// The capability domains this napplet is actually granted: declared (its R and
+// O tags, or a local one's `requires`) ∩ what we implement ∩ what the user
+// granted in the permission screen. Empty for napps and nsites.
 export function nappletDomainsFor(nappId: string): string[] {
+  if (classifyNappId(nappId) !== "napplet") return []
   const app = getInstalledApp(nappId)
   if (!app) return []
   const declared = new Set<string>(app.event ? declaredDomains(app.event) : [])
@@ -2240,12 +2240,6 @@ function mount(
     position,
     status,
     onMessage: (data, iframe) => {
-      // NIP-5D dialect (window.napplet) carries `type`; legacy carries
-      // `__nostrapps`. Same channel, two routers.
-      if (typeof (data as any).type === "string" && !data.__nostrapps) {
-        handleNapplet(data as any, iframe, origin, nappId, instanceId)
-        return
-      }
       switch (data.__nostrapps) {
         case "napp-ready": {
           resolveReady(data.instanceId!)
@@ -2852,11 +2846,6 @@ export function mountWithLoading(
     position,
     status,
     onMessage: (data, iframe) => {
-      // NIP-5D dialect — same routing as mount() above.
-      if (typeof (data as any).type === "string" && !data.__nostrapps) {
-        handleNapplet(data as any, iframe, origin, nappId, instanceId)
-        return
-      }
       switch (data.__nostrapps) {
         case "napp-ready": {
           resolveReady(data.instanceId!)

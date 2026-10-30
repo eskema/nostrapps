@@ -503,7 +503,7 @@ export function mount(
       if (plan.icon) tags.push(["icon", plan.icon])
       for (const a of plan.actions) tags.push(["action", a])
       // The authored requires list becomes the manifest's ["requires", "<domain>"]
-      // tags. `ui` and the NAP domains ride the same list.
+      // tags.
       for (const r of plan.requires) tags.push(["requires", r])
       // Presentation modes ride as one ["mode", "<mode>"] tag per mode; the
       // preferred auxiliary-window size as ["initial_size", w, h]. A wasm napp

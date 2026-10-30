@@ -85,8 +85,6 @@
 
   const actionHandlers = []
 
-  // The NIP-5D window.napplet surface lives in its own file (napplet-bridge.js),
-  // injected alongside this one; bridge.js owns only the napp surface below.
   // ── The napp's own history ──────────────────────────────────────────
   // The browser keeps one history for the whole tab: a real pushState in
   // here would be a step of the launcher's back button, and history.back()

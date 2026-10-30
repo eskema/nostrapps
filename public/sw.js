@@ -43,7 +43,6 @@ async function handleFetch(req, url) {
   if (path === "/boot.html") return passthrough(req, BOOT_CSP)
   if (path === "/sw.js") return passthrough(req)
   if (path === "/bridge.js") return passthrough(req)
-  if (path === "/napplet-bridge.js") return passthrough(req)
   // Signing companion lazy-imported by bridge.js (napp.utils.signWithKey /
   // generateKey) — generated from @nostr/tools/pure, served like bridge.js.
   if (path === "/nostr-crypto.js") return passthrough(req)
@@ -249,11 +248,10 @@ async function readDevPolicy() {
 }
 
 function injectBridge(html, { wrapperUi = false, domains = [], nsite = false } = {}) {
-  // NIP-5D presence model: the shell declares the granted capability domains as
-  // window.__nappletDomains BEFORE bridge.js runs; bridge.js then builds
-  // window.napplet with exactly those domain objects. `<` is escaped so a domain
-  // string can never break out of the inline <script>. An nsite gets bridge.js
-  // alone, told it's one: window.nostr and its history, nothing else.
+  // The grants go in as window.__nappletDomains BEFORE bridge.js runs, which
+  // builds window.nostr from them. `<` is escaped so a domain string can never
+  // break out of the inline <script>. An nsite is told it's one: window.nostr
+  // and its history, nothing else. Napps and nsites have no window.napplet.
   const domainList = Array.isArray(domains) ? domains : []
   const domainsScript =
     "<script>window.__nappletDomains=" +
@@ -261,13 +259,10 @@ function injectBridge(html, { wrapperUi = false, domains = [], nsite = false } =
     (nsite ? ";window.__nsite=true" : "") +
     "</script>"
   // Injected ahead of the napp's own tags, so the shared stylesheet lands BEFORE
-  // the napp's styles and the napp can still override it. __nappletDomains must
-  // precede napplet-bridge.js (which reads it). bridge.js owns window.nostr /
-  // window.napp; napplet-bridge.js owns window.napplet; napp-ui.js puts the
+  // the napp's styles and the napp can still override it. napp-ui.js puts the
   // kit's helpers on window.napp.ui, so it follows bridge.js.
   const headInject =
     domainsScript +
-    (nsite ? "" : '<script src="/napplet-bridge.js"></script>') +
     '<script src="/bridge.js"></script>' +
     (wrapperUi
       ? '<link rel="stylesheet" href="/napp-ui.css"><script src="/napp-ui.js"></script>'

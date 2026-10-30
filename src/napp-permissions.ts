@@ -295,8 +295,8 @@ function policySection(
   const unsupportedOptional = unsupportedRequires(optionals)
   // The effective type. With chooseType the user flips it live and the rows
   // re-render: napplet = exactly its declared NAP domains; nsite = the
-  // identity rows (window.nostr is all it gets); napp = those, link and what
-  // it declares.
+  // identity rows (window.nostr is all it gets); napp = those and link, no
+  // NAP domains (it has no window.napplet).
   let type = opts.type || "nsite"
   // dev is a row only when declared, and never for a napplet (no bridge for it).
   const declaredDev = opts.declaredDomains.includes("dev") ? ["dev"] : []
@@ -305,13 +305,7 @@ function policySection(
       ? declaredCaps
       : type === "nsite"
         ? IDENTITY_GROUP
-        : [
-            ...IDENTITY_GROUP,
-            ...CAP_ORDER.filter(
-              d => d === "link" || (d !== "identity" && declaredCaps.includes(d))
-            ),
-            ...declaredDev
-          ]
+        : [...IDENTITY_GROUP, "link", ...declaredDev]
 
   const el = document.createElement("div")
   el.className = "napp-perms-app"

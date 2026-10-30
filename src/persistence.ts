@@ -864,6 +864,9 @@ export const ALL_REQUIRES = [...NAP_DOMAINS, ...LAUNCHER_DOMAINS]
 // writes are relay, outbox and common.
 export const IDENTITY_ROWS = ["write", "encrypt", "decrypt"]
 
+// What a napp or an nsite can be granted. The other domains are napplets'.
+const NAPP_GRANTS = ["identity", ...IDENTITY_ROWS, "link", "dev", "ui"]
+
 // `ui` implies `theme`: the component kit is built on theme's color tokens, so a
 // napp that takes the kit must also get the colors — otherwise it renders
 // colorless. Applied whenever grants are normalized.
@@ -893,8 +896,11 @@ export const POLICY_VERSION = 3
 // granted.
 function normalize(nappId: string, domains: string[], ask: unknown): NappPolicy {
   domains = [...new Set(domains)]
-  if (!nappId.startsWith("napplet~") && !domains.includes("identity"))
-    domains = domains.filter(d => !IDENTITY_ROWS.includes(d))
+  if (!nappId.startsWith("napplet~")) {
+    // NAP domains are napplets' only: napps and nsites have no window.napplet.
+    domains = domains.filter(d => NAPP_GRANTS.includes(d))
+    if (!domains.includes("identity")) domains = domains.filter(d => !IDENTITY_ROWS.includes(d))
+  }
   const asked = Array.isArray(ask) ? ask.filter(d => domains.includes(d)) : []
   return asked.length ? { domains, ask: asked } : { domains }
 }
