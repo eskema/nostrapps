@@ -2751,6 +2751,7 @@ body.popover-open .napp-body iframe {
 /* The build stamp, a link button: the kit dims it until hover. */
 .settings-build {
   font-family: var(--font-mono);
+  font-size: var(--text-xs);
   font-weight: 400;
   margin-right: auto;
 }
