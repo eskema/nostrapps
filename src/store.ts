@@ -33,6 +33,7 @@ export function getStore(): RedEventStore {
     facade = new Proxy({} as RedEventStore, {
       get(_, prop) {
         if (prop === "saveEvent") return guardedSave
+        if (prop === "loadReplaceables") return loadReplaceables
         const v = (instance as any)[prop]
         return typeof v === "function" ? v.bind(instance) : v
       },
@@ -44,6 +45,18 @@ export function getStore(): RedEventStore {
     setReplaceableStore(facade)
   }
   return facade
+}
+
+// gadgets 0.21 asks for kind 0, 3 and 1xxxx with an empty d-tag ([0, pk, ""])
+// and redstore hashes it into a d-tag lookup, an index only 3xxxx events are
+// in: every stored profile and list missed, and went to relays again on every
+// load. Only addressable kinds have a d-tag.
+function loadReplaceables(specs: Parameters<RedEventStore["loadReplaceables"]>[0]) {
+  return instance.loadReplaceables(
+    specs.map(([kind, pubkey, d]): [number, string, string?] =>
+      isAddressableKind(kind) ? [kind, pubkey, d] : [kind, pubkey]
+    )
+  )
 }
 
 // ─── deletions ───────────────────────────────────────────────────
