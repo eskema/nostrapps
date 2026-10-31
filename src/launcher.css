@@ -2017,6 +2017,29 @@ body.popover-open .napp-body iframe {
   /* display: inline-block; */
 }
 
+/* "some files are missing, try a custom server", on top of the files: the
+   feed napp's status line, mono and dim, the server a dotted toggle like its
+   newest/oldest. */
+.apps-detail-check-line {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.8;
+  opacity: 0.75;
+}
+
+.apps-detail-check-line .btn-link {
+  display: inline;
+  font: inherit;
+  opacity: 1;
+  vertical-align: baseline;
+  text-decoration: underline dotted;
+}
+
+.apps-detail-check-line .btn-link:hover {
+  text-decoration-style: solid;
+}
+
 /* .apps-detail-author {
   display: inline-flex;
   align-items: center;

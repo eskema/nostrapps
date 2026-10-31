@@ -1005,25 +1005,27 @@ a.ui-author:hover > .ui-author-name {
        <div class="ui-add-error"></div>
      </div> */
 .ui-add {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-xs);
   margin-top: var(--space-s);
 }
 /* Collapsed state: the lone button keeps its natural width. */
 .ui-add > .btn {
-  align-self: flex-start;
+  justify-self: start;
 }
 .ui-add-form {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-s);
 }
 .ui-add-input {
-  flex: 1;
   min-width: 0;
   font-size: var(--text-s);
 }
 .ui-add-error {
+  justify-self: start;
+  border-top: 1px dashed var(--danger);
   color: var(--danger);
 }
 .ui-add-error:empty {

@@ -70,17 +70,19 @@ export async function fetchNsite(
   if (paths.length === 0) throw new Error("nsite manifest has no path tags")
 
   const servers = await blobServers(manifest, pubkey)
+  // heal only writes to the napp's own servers
+  const sources = [...servers, ...addedServers(manifest)]
 
   const files = []
   const healFiles = []
   for (let i = 0; i < paths.length; i++) {
     const { path, sha, mime } = paths[i]
     onProgress(`Fetching ${i + 1}/${paths.length}: ${path}`)
-    const blob = await fetchBlob(servers, sha)
+    const blob = await fetchBlob(sources, sha)
     if (!blob)
       throw new Error(
-        `Could not fetch ${path} (${sha}) from any of ${servers.length} server(s): ${
-          servers.join(", ") || "none configured"
+        `Could not fetch ${path} (${sha}) from any of ${sources.length} server(s): ${
+          sources.join(", ") || "none configured"
         }`
       )
     files.push({ path, body: blob, mime })
@@ -145,6 +147,35 @@ export async function blobServers(manifest: NostrEvent, pubkey: string): Promise
     seen.add(key)
     return true
   })
+}
+
+// Servers added on a napp's detail page for files its own servers lost:
+// fetched from, never uploaded to. This browser only, by address.
+const ADDED_SERVERS_KEY = "nostrapps:added-servers"
+
+function readAdded(): Record<string, string[]> {
+  try {
+    return JSON.parse(localStorage.getItem(ADDED_SERVERS_KEY) || "{}") || {}
+  } catch {
+    return {}
+  }
+}
+
+function addressOf(manifest: NostrEvent): string {
+  return `${manifest.kind}:${manifest.pubkey}:${getTag(manifest, "d") ?? ""}`
+}
+
+export function addedServers(manifest: NostrEvent): string[] {
+  const list = readAdded()[addressOf(manifest)]
+  return Array.isArray(list) ? list.filter(s => typeof s === "string") : []
+}
+
+export function addServer(manifest: NostrEvent, server: string) {
+  const all = readAdded()
+  const list = addedServers(manifest)
+  if (list.includes(server)) return
+  all[addressOf(manifest)] = [...list, server]
+  localStorage.setItem(ADDED_SERVERS_KEY, JSON.stringify(all))
 }
 
 // The manifest's files: ["path", path, sha, mime?] tags, paths made absolute.

@@ -28,6 +28,8 @@ import {
   NSITE_NAMED_KIND,
   NAPP_NAMED_KIND,
   WASM_NAMED_KIND,
+  addServer,
+  addedServers,
   blobServers,
   fetchPointed
 } from "../nsite/fetch.js"
@@ -2184,16 +2186,28 @@ async function renderFiles(
   list: HTMLElement,
   ctx?: SystemCtx
 ) {
-  // Where fetching looks: ours first, then the author's and the manifest's.
+  // Where fetching looks: ours first, then the author's and the manifest's,
+  // then the ones added here.
   const servers = (
     await blobServers(evt, evt.pubkey).catch(() => [...DEFAULT_BLOSSOM_SERVERS])
   ).map(normalizeServer)
+  const added = new Set(addedServers(evt).map(normalizeServer))
+  for (const s of added) if (!servers.includes(s)) servers.push(s)
   const host = (u: string) => {
     try {
       return new URL(u).host
     } catch {
       return u
     }
+  }
+  const link = (url: string, sha: string) => {
+    const a = document.createElement("a")
+    a.href = `${url}/${sha}`
+    a.target = "_blank"
+    a.rel = "noopener noreferrer"
+    a.textContent = host(url)
+    a.dataset.server = url
+    return a
   }
 
   // What each server said about each blob: has it, or answered it hasn't. A
@@ -2202,15 +2216,84 @@ async function renderFiles(
   const have = new Map<string, Set<string>>()
   const gone = new Map<string, Set<string>>()
   const asked = new Map<string, number>()
+  const lost = (sha: string) => asked.get(sha) === servers.length && !have.get(sha)!.size
   // A server that says it hasn't got a file shows red in the file's links; a
-  // file no server has handed over shows its path red.
+  // file no server has handed over shows its path red, and a line on top
+  // offers a custom server.
   const paint = (sha: string) => {
-    const lost = asked.get(sha) === servers.length && !have.get(sha)!.size
     for (const li of lisBySha.get(sha) || []) {
-      li.classList.toggle("apps-file-lost", lost)
+      li.classList.toggle("apps-file-lost", lost(sha))
       for (const a of li.querySelectorAll<HTMLAnchorElement>("a[data-server]"))
         a.classList.toggle("apps-file-gone", gone.get(sha)!.has(a.dataset.server!))
     }
+    if (lost(sha) && !checkOn.isConnected) list.before(checkOn)
+  }
+
+  // "some files are missing, try a custom server", the server a toggle for an
+  // input under the line. A server that has any of the lost files is kept for
+  // this napp: fetching asks it after the others.
+  const inp = input({
+    placeholder: "https://blossom.example.com",
+    class: "ui-add-input",
+    spellcheck: false
+  })
+  inp.setAttribute("autocomplete", "off")
+  inp.setAttribute("autocapitalize", "off")
+  const go = button({ label: "check", variant: "outline", type: "submit" })
+  const error = el("div", "ui-add-error")
+  const form = el("form", "ui-add-form", inp, go)
+  const add = el("div", "ui-add", form, error)
+  const toggle = button({
+    label: "a custom server",
+    variant: "link",
+    onClick: () => {
+      if (add.isConnected) add.remove()
+      else checkOn.append(add)
+      toggle.setAttribute("aria-expanded", String(add.isConnected))
+      if (add.isConnected) inp.focus()
+    }
+  })
+  const checkOn = el(
+    "div",
+    "apps-detail-check",
+    el("p", "apps-detail-check-line", "some files are missing, try ", toggle)
+  )
+  inp.addEventListener("input", () => (error.textContent = ""))
+  form.addEventListener("submit", async e => {
+    e.preventDefault()
+    if (go.disabled) return
+    go.disabled = true
+    try {
+      error.textContent = (await check(inp.value)) ?? ""
+    } finally {
+      go.disabled = false
+    }
+    if (!error.textContent) inp.value = ""
+  })
+  async function check(value: string): Promise<string | undefined> {
+    let server: string
+    try {
+      server = new URL(normalizeServer(value.trim())).origin
+    } catch {
+      return "this url is not valid"
+    }
+    if (servers.includes(server)) return "server already checked"
+    const shas = [...lisBySha.keys()]
+    const answers = await Promise.all(shas.map(sha => hasBytes(server, sha)))
+    if (answers.every(r => r === null)) return "server did not respond"
+    if (!shas.some((sha, i) => answers[i] && lost(sha)))
+      return "no missing files were found on this server"
+    addServer(evt, server)
+    added.add(server)
+    servers.push(server)
+    shas.forEach((sha, i) => {
+      if (answers[i]) have.get(sha)!.add(server)
+      asked.set(sha, asked.get(sha)! + 1)
+      for (const li of lisBySha.get(sha) || [])
+        li.querySelector(".apps-detail-files-links")?.append(link(server, sha))
+      paint(sha)
+    })
+    if (!shas.some(lost)) checkOn.remove()
   }
 
   for (const { path, sha } of files) {
@@ -2227,15 +2310,7 @@ async function renderFiles(
     linksBtn.addEventListener("click", () => {
       const span = document.createElement("span")
       span.className = "apps-detail-files-links"
-      for (const url of servers) {
-        const a = document.createElement("a")
-        a.href = `${url}/${sha}`
-        a.target = "_blank"
-        a.rel = "noopener noreferrer"
-        a.textContent = host(url)
-        a.dataset.server = url
-        span.appendChild(a)
-      }
+      for (const url of servers) span.appendChild(link(url, sha))
       linksBtn.replaceWith(span)
       paint(sha)
     })
@@ -2260,8 +2335,10 @@ async function renderFiles(
       for (const sha of shas) {
         const r = answering ? await hasBytes(server, sha) : null
         if (r) have.get(sha)!.add(server)
-        else if (r === false) gone.get(sha)!.add(server)
-        else answering = false
+        else if (r === false) {
+          // an added server isn't the napp's: not missing anything, not re-seeded
+          if (!added.has(server)) gone.get(sha)!.add(server)
+        } else answering = false
         asked.set(sha, asked.get(sha)! + 1)
         paint(sha)
       }

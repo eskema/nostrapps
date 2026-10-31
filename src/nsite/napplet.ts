@@ -5,7 +5,7 @@ import { pool } from "@nostr/gadgets/global"
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
 import { verifyEvent } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
-import { fetchBlob } from "./fetch.js"
+import { addedServers, fetchBlob } from "./fetch.js"
 import { healNapp } from "./heal.js"
 import { FALLBACK_RELAYS } from "../relay-health.js"
 
@@ -255,7 +255,8 @@ export async function loadNappletFromManifest(
   ].filter(Boolean) as string[]
 
   onProgress("Fetching napplet…")
-  const blob = await fetchBlob(servers, artifactHash) // verifies sha256(blob) === hash
+  // verifies sha256(blob) === hash; heal only writes to the napplet's own servers
+  const blob = await fetchBlob([...servers, ...addedServers(manifest)], artifactHash)
   if (!blob) throw new Error(`Could not fetch napplet (${artifactHash})`)
 
   if (opts.healRelays?.length) {
