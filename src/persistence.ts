@@ -955,20 +955,26 @@ export function getStoredPolicy(
 }
 
 // What a new install's screen starts from: every row on except `off`, and
-// asking on `ask`. Set in Settings.
+// asking on `ask`. Set in Settings, one set for napplets and one for nsites
+// and napps.
 export type InstallDefaults = { off: string[]; ask: string[] }
 const INSTALL_DEFAULTS_KEY = "nostrapps:install-defaults"
 
-export function getInstallDefaults(): InstallDefaults {
-  const raw = readJson(INSTALL_DEFAULTS_KEY, null)
+export function getInstallDefaults(napplet: boolean): InstallDefaults {
+  const raw = readJson(INSTALL_DEFAULTS_KEY, {})?.[napplet ? "napplet" : "napp"]
   const list = (v: unknown) =>
     Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : []
   if (!raw || typeof raw !== "object") return { off: ["decrypt"], ask: [] }
   return { off: list(raw.off), ask: list(raw.ask) }
 }
 
-export function setInstallDefaults(d: InstallDefaults) {
-  writeJson(INSTALL_DEFAULTS_KEY, d)
+export function setInstallDefaults(napplet: boolean, d: InstallDefaults) {
+  const all = readJson(INSTALL_DEFAULTS_KEY, {})
+  writeJson(INSTALL_DEFAULTS_KEY, {
+    napp: all.napp,
+    napplet: all.napplet,
+    [napplet ? "napplet" : "napp"]: d
+  })
 }
 
 export function hasPolicy(nappId: string): boolean {

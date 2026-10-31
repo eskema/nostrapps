@@ -613,6 +613,22 @@ a.ui-author:hover > .ui-author-name {
   color: var(--text);
 }
 
+/* A disclosure inside another, a level down: the summary in the text's own
+   size, no margin of its own (what holds it spaces it, and a gap there would
+   add to a margin), less room under it open.
+     <details class="ui-details"><summary>permissions</summary>
+       <details class="ui-details"><summary>defaults</summary>…</details>
+     </details> */
+.ui-details .ui-details {
+  margin: 0;
+}
+.ui-details .ui-details[open] {
+  padding-bottom: var(--space-m);
+}
+.ui-details .ui-details > summary {
+  font-size: var(--text-m);
+}
+
 /* ─── Fold ────────────────────────────────────────────────────────
    The small disclosure under content: a rule above, a dimmed summary in the
    text's own size with a +/– at its end, lit while open. For an example's

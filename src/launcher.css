@@ -2077,17 +2077,21 @@ body.popover-open .napp-body iframe {
   justify-content: end;
 }
 
-/* Settings' permissions (permissionsSection): a napp each, room between
-   them. A napp: its title, the icon in line before it, "edit" and "forget"
-   at the line's end, the Apps card's byline under; then what it's granted,
-   and a row per decision, the prompt's words, the decision and a ×. */
+/* Settings' permissions (permissionsSection): the defaults for new installs
+   folded, then a napp each, room between them and a rule above. A napp: its
+   icon, "<title> <type> from <author>", and at the line's end what it's
+   granted and "forget"; then a row per decision, the prompt's words, the
+   decision and a ×. The list is the size container for a narrow window. */
 .settings-permissions .perm-list {
+  container: perms / inline-size;
   gap: var(--space-l);
 }
 
 .perm-napp {
   display: grid;
   gap: var(--space-xs);
+  padding-top: var(--space-s);
+  border-top: 1px solid var(--rule);
 }
 
 .perm-napp-head {
@@ -2097,23 +2101,58 @@ body.popover-open .napp-body iframe {
   column-gap: var(--space-s);
 }
 
-.perm-napp-head > .napp-byline {
-  grid-column: 1 / -1;
-}
-
-.perm-napp-actions {
+/* The line up to "forget", opening the napp's permission screen: the kit's
+   link button in the line's own type, lit, the name underlined on hover. A
+   napp that's gone has none and stays dimmed. The grants take at most half
+   of it and wrap there, so a long list doesn't squeeze the name. */
+.perm-napp-head > .perm-napp-open {
   display: grid;
-  grid-auto-flow: column;
+  grid-template-columns: minmax(0, 1fr) fit-content(50%);
+  align-items: center;
   column-gap: var(--space-s);
+  min-width: 0;
+  font: inherit;
+  text-align: start;
 }
 
-.perm-napp-grants {
-  margin: 0;
+.perm-napp-head > .perm-napp-open:enabled {
+  opacity: 1;
+}
+
+.perm-napp-open:hover:enabled .perm-napp-title > strong {
+  text-decoration: underline;
 }
 
 .perm-napp-title > .ui-app-icon {
   vertical-align: middle;
   margin-right: var(--space-s);
+}
+
+/* "<type> from <author>" wraps as one. */
+.perm-napp-title > .napp-byline {
+  display: inline-block;
+}
+
+.perm-napp-grants {
+  text-align: end;
+}
+
+/* A narrow window: the grants on a line of their own under the name. */
+@container perms (width < 30rem) {
+  .perm-napp-head > .perm-napp-open {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-xxs);
+  }
+
+  .perm-napp-grants {
+    text-align: start;
+  }
+}
+
+/* .btn sets display, which would beat the UA [hidden] rule: "forget" with
+   nothing to forget. */
+.perm-napp-head > .btn[hidden] {
+  display: none;
 }
 
 /* Holds a nappNameEl now — "<title> from <author>" prose, not an id, so no

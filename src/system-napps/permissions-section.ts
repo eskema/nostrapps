@@ -1,15 +1,15 @@
-// Settings' permissions: what a new install's screen starts from, then by
-// napp, what its install screen granted (edited on that screen), then what the
-// prompts were told to remember, in the prompts' words ("SAVE files"), each to
-// forget. A napp reads as the prompt's head
-// does: its icon and title, the Apps card's byline under them. It is handed
-// the grants, the decisions and what a forget does, so the mock page
-// (mocks/permissions.html) can lay it out with made-up ones. render() puts a
-// new set in place, a row or a napp added, gone or changed, the rest left as
-// it is.
+// Settings' permissions: what a new install's screen starts from, folded,
+// nsites' and napps' apart from napplets', then by napp, what its install
+// screen granted, then what the prompts were told to remember, in the
+// prompts' words ("SAVE files"), each to forget. A napp is one line opening
+// its permission screen: its icon, "<title> <type> from <author>", and at the
+// end what it's granted. It is handed the grants, the decisions and what a forget
+// does, so the mock page (mocks/permissions.html) can lay it out with made-up
+// ones. render() puts a new set in place, a row or a napp added, gone or
+// changed, the rest left as it is.
 import { nappByline, type NappName } from "../napp-name.js"
 import { decisionLabel } from "../permissions.js"
-import { badge, button, details, el, empty, item, itemList } from "./ui.js"
+import { badge, button, details, el, empty, item, itemList, overline } from "./ui.js"
 
 export type Decisions = Record<string, Record<string, string>>
 // An installed napp's granted rows, as named on its screen, ui left out.
@@ -18,10 +18,10 @@ export type Grants = Record<string, string[]>
 export interface PermissionsSectionOpts {
   napp(nappId: string): Pick<NappName, "title" | "author" | "authorLabel" | "type">
   icon?(nappId: string): HTMLElement | undefined
-  // Opens the napp's permission screen.
-  edit?(nappId: string): void
   // The rows a new install starts from.
-  defaults?: HTMLElement
+  defaults?: { napps: HTMLElement; napplets: HTMLElement }
+  // An installed napp's permission screen.
+  open?(nappId: string): void
   forget(nappId: string, method?: string): void
   forgetAll(): void
 }
@@ -34,10 +34,10 @@ interface Row {
 
 interface Group {
   el: HTMLElement
+  open: HTMLButtonElement
   items: HTMLElement
   rows: Map<string, Row>
   grants: HTMLElement
-  edit?: HTMLElement
   forget: HTMLElement
 }
 
@@ -63,9 +63,9 @@ export function permissionsSection(opts: PermissionsSectionOpts) {
     list.prepend(
       el(
         "div",
-        "perm-napp",
-        el("div", "perm-napp-head", el("strong", "", "new installs")),
-        opts.defaults
+        "perm-defaults",
+        details({ summary: "nsites and napps defaults" }, opts.defaults.napps),
+        details({ summary: "napplets defaults" }, opts.defaults.napplets)
       )
     )
   section.appendChild(list)
@@ -75,45 +75,34 @@ export function permissionsSection(opts: PermissionsSectionOpts) {
     const napp = opts.napp(nappId)
     const icon = opts.icon?.(nappId)
     const title = el(
-      "div",
+      "span",
       "perm-napp-title",
       ...(icon ? [icon] : []),
-      el("strong", "", napp.title)
+      el("strong", "", napp.title),
+      " ",
+      nappByline(napp)
     )
-    const edit = opts.edit
-      ? button({
-          label: "edit",
-          variant: "link",
-          title: `Change what ${napp.title} is granted`,
-          onClick: () => opts.edit?.(nappId)
-        })
-      : undefined
     const forget = button({
       label: "forget",
       variant: "link",
       title: `Forget everything ${napp.title} was allowed or denied`,
       onClick: () => opts.forget(nappId)
     })
-    const grants = el("p", "perm-napp-grants")
+    const grants = overline("", "perm-napp-grants")
+    const open = button({
+      variant: "link",
+      class: "perm-napp-open",
+      title: `${napp.title}'s permissions`,
+      onClick: () => opts.open?.(nappId)
+    })
+    open.append(title, grants)
     const items = itemList()
     return {
-      el: el(
-        "div",
-        "perm-napp",
-        el(
-          "div",
-          "perm-napp-head",
-          title,
-          el("div", "perm-napp-actions", ...(edit ? [edit] : []), forget),
-          nappByline(napp)
-        ),
-        grants,
-        items
-      ),
+      el: el("div", "perm-napp", el("div", "perm-napp-head", open, forget), items),
+      open,
       items,
       rows: new Map(),
       grants,
-      edit,
       forget
     }
   }
@@ -151,17 +140,13 @@ export function permissionsSection(opts: PermissionsSectionOpts) {
         groups.set(id, g)
         list.append(g.el)
       }
-      // Only an installed napp has a screen to edit; one gone may still have
-      // decisions left to forget.
+      // Only an installed napp has grants; one gone may still have decisions
+      // left to forget.
       const installed = id in grants
-      const text = installed
-        ? grants[id].length
-          ? `granted: ${grants[id].join(", ")}`
-          : "nothing granted"
-        : ""
+      const text = installed ? (grants[id].length ? grants[id].join(", ") : "nothing granted") : ""
       if (g.grants.textContent !== text) g.grants.textContent = text
       g.grants.hidden = !installed
-      if (g.edit) g.edit.hidden = !installed
+      g.open.disabled = !installed
       const methods = all[id] ?? {}
       g.forget.hidden = Object.keys(methods).length === 0
       for (const [m, r] of g.rows)

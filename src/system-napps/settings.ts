@@ -91,8 +91,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   const permissions = permissionsSection({
     napp: nappName,
     icon: perms.nappIcon,
-    edit: nappId => void ctx.editPermissions(nappId).then(renderGrants),
-    defaults: installDefaultsRows(),
+    defaults: { napps: installDefaultsRows(false), napplets: installDefaultsRows(true) },
+    open: nappId => void ctx.editPermissions(nappId),
     forget: (nappId, method) => perms.forgetDecision(nappId, method),
     forgetAll: () => perms.forgetAllDecisions()
   })

@@ -369,7 +369,7 @@ function policySection(
   const body = document.createElement("div")
   let rows!: ReturnType<typeof grantRows>
   function renderBody() {
-    const defaults = getInstallDefaults()
+    const defaults = getInstallDefaults(type === "napplet")
     rows = grantRows(
       rowsFor(),
       d => (cur ? cur.domains.includes(d) : !defaults.off.includes(d)),
@@ -470,19 +470,19 @@ function grantRows(
   }
 }
 
-// Settings' defaults for new installs: every row an app can get, as the
-// install screen shows them, saved as they change.
-export function installDefaultsRows(): HTMLElement {
-  const d = getInstallDefaults()
-  const keys = [...IDENTITY_GROUP, ...CAP_ORDER.filter(k => k !== "identity"), "dev"]
+// Settings' defaults for new installs, napplets' or nsites' and napps': every
+// row one can get, as the install screen shows them, saved as they change.
+export function installDefaultsRows(napplet: boolean): HTMLElement {
+  const d = getInstallDefaults(napplet)
+  const keys = napplet ? CAP_ORDER : [...IDENTITY_GROUP, "link", "dev"]
   const rows = grantRows(
     keys,
     k => !d.off.includes(k),
     k => d.ask.includes(k),
-    undefined,
+    napplet ? "napplet" : undefined,
     () => {
       const { domains, ask } = rows.read()
-      setInstallDefaults({ off: keys.filter(k => !domains.includes(k)), ask })
+      setInstallDefaults(napplet, { off: keys.filter(k => !domains.includes(k)), ask })
     }
   )
   return rows.el

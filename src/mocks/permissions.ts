@@ -473,7 +473,6 @@ const settings = permissionsSection({
   napp: nappId =>
     NAPPS[nappId] ?? { title: nappId, type: null, author: null, authorLabel: null, known: false },
   icon: () => appIcon({ src: ICON, size: "s" }),
-  edit() {},
   forget(nappId, method) {
     if (method) delete decisions[nappId]?.[method]
     if (!method || !Object.keys(decisions[nappId] ?? {}).length) delete decisions[nappId]
