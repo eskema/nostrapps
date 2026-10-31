@@ -718,9 +718,12 @@ export interface AddControlOpts {
   label: string
   placeholder?: string
   class?: string
+  /** The submit button's label; "add" if not given. */
+  submit?: string
   /** Return an error message to show it inline; return nothing on success —
-   *  the input clears and stays open so several entries can be added in a row. */
-  onAdd: (value: string) => string | void
+   *  the input clears and stays open so several entries can be added in a row.
+   *  A promise is waited for, the submit button disabled meanwhile. */
+  onAdd: (value: string) => string | void | Promise<string | void>
 }
 
 // Collapsed: a single outline button. Clicked: an input + add button in its
@@ -737,10 +740,18 @@ export function addControl(opts: AddControlOpts): HTMLDivElement {
     inp.setAttribute("autocomplete", "off")
     inp.setAttribute("autocapitalize", "off") // an id, a url: as typed, on a phone too
     inp.addEventListener("input", () => (error.textContent = ""))
-    form.append(inp, button({ label: "add", variant: "outline", type: "submit" }))
-    form.addEventListener("submit", e => {
+    const go = button({ label: opts.submit ?? "add", variant: "outline", type: "submit" })
+    form.append(inp, go)
+    form.addEventListener("submit", async e => {
       e.preventDefault()
-      const err = opts.onAdd(inp.value)
+      if (go.disabled) return
+      go.disabled = true
+      let err: string | void
+      try {
+        err = await opts.onAdd(inp.value)
+      } finally {
+        go.disabled = false
+      }
       error.textContent = typeof err === "string" ? err : ""
       if (typeof err !== "string") inp.value = ""
       inp.focus()
