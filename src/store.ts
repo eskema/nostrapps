@@ -51,12 +51,35 @@ export function getStore(): RedEventStore {
 // and redstore hashes it into a d-tag lookup, an index only 3xxxx events are
 // in: every stored profile and list missed, and went to relays again on every
 // load. Only addressable kinds have a d-tag.
-function loadReplaceables(specs: Parameters<RedEventStore["loadReplaceables"]>[0]) {
-  return instance.loadReplaceables(
+// What comes back is checked: the index can point a key at another event
+// (seen: a kind 10002 lookup answered with the author's kind 10030, so the
+// relay list had no relays and every publish went to none). One that isn't
+// the kind, author and d-tag asked for counts as not stored, and the loader
+// asks relays, as it did before this read the store.
+type Replaceables = Awaited<ReturnType<RedEventStore["loadReplaceables"]>>
+async function loadReplaceables(
+  specs: Parameters<RedEventStore["loadReplaceables"]>[0]
+): Promise<Replaceables> {
+  const found = await instance.loadReplaceables(
     specs.map(([kind, pubkey, d]): [number, string, string?] =>
       isAddressableKind(kind) ? [kind, pubkey, d] : [kind, pubkey]
     )
   )
+  return found.map(([lastAttempt, stored], i) => {
+    const [kind, pubkey, d] = specs[i]
+    const fits = (e: NostrEvent | undefined) => {
+      if (!e) return false
+      const ok =
+        e.kind === kind &&
+        e.pubkey === pubkey &&
+        (!isAddressableKind(kind) || d === undefined || (e.tags.find(t => t[0] === "d")?.[1] ?? "") === d)
+      if (!ok) console.warn("[store] replaceable lookup gave another event", { kind, pubkey, d, got: e.kind, id: e.id })
+      return ok
+    }
+    return Array.isArray(stored)
+      ? [lastAttempt, stored.filter(fits)]
+      : [lastAttempt, fits(stored) ? stored : undefined]
+  }) as Replaceables
 }
 
 // ─── deletions ───────────────────────────────────────────────────
