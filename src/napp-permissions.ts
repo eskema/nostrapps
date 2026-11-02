@@ -1,7 +1,8 @@
 // The per-napp permission screen. Shown before an app first runs and re-openable
 // from an app card. It turns the app's `requires` declarations into the single
-// granted `domains` list — nothing is serviced or reachable until it's ticked —
-// and the rows that still ask each time (permissions.ts). A new install starts
+// granted `domains` list and the rows that ask before use. Napplet APIs are
+// always available; these settings authorize their use (permissions.ts).
+// A new install starts
 // from the defaults set in Settings.
 // The capability rows use the design-system item list (the relays-napp look).
 // A share link opens several apps at once; promptSharedSpace lists them on one
@@ -21,10 +22,11 @@ const CAP_INFO: Record<string, { title: string; desc: string }> = {
   identity: { title: "identity", desc: "knows who you are" },
   theme: { title: "theme", desc: "matches your colors" },
   storage: { title: "storage", desc: "keeps its own data" },
-  resource: { title: "resource", desc: "loads files via the launcher" },
-  relay: { title: "relay", desc: "reads and posts events" },
+  resource: { title: "resource", desc: "reads HTTPS, HTTP and Blossom resources" },
+  relay: { title: "relay", desc: "reads and posts relay events" },
   outbox: { title: "outbox", desc: "finds the right relays for you" },
   common: { title: "common", desc: "looks up profiles, follows, reacts and reports" },
+  intent: { title: "intent", desc: "opens other napplets and receives intents" },
   inc: { title: "inc", desc: "talks to other open napplets" },
   link: { title: "link", desc: "opens links in new tabs" },
   config: { title: "config", desc: "settings you edit in the launcher" },
@@ -52,6 +54,7 @@ const CAP_ORDER = [
   "outbox",
   "common",
   "inc",
+  "intent",
   "link",
   "config"
 ]
@@ -397,6 +400,7 @@ function policySection(
 // ask ticks its row, unticking a row unticks its ask. A napp's identity rows
 // sit under one heading; unticking read unticks them, ticking one ticks read.
 // For a napplet identity is the one NAP row; an nsite's read has no nostrdb.
+// Napplet rows control permission to use the APIs, which are always present.
 function grantRows(
   keys: string[],
   on: (d: string) => boolean,

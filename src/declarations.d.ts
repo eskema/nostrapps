@@ -31,3 +31,8 @@ interface ParentNode {
   ): HTMLElementTagNameMap[K] | null
   querySelector<E extends HTMLElement = HTMLElement>(selectors: string): E | null
 }
+
+declare module "virtual:napplet-bridge-source" {
+  const source: string
+  export default source
+}

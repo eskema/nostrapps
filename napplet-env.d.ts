@@ -44,7 +44,13 @@ type NappletRelay = {
     recipient: string,
     encryption?: "nip44" | "nip04"
   ): Promise<NostrEvent>
-  query(filters: unknown[]): Promise<{ event: NostrEvent }[]>
+  query(filters: unknown[] | object): Promise<{ event: NostrEvent }[]>
+  subscribe(
+    filters: unknown[] | object,
+    onEvent: (result: { event: NostrEvent }) => void,
+    onEose: () => void,
+    options?: { relay?: string; group?: string }
+  ): { close(): void }
   subscribe(id: string, filters: unknown[], handlers: object, relay?: string): { close(): void }
 }
 type NappletOutbox = {
@@ -64,7 +70,49 @@ type NappletCommon = {
   react(targetEventId: string, reaction: string, emoji?: string): Promise<unknown>
   report(target: object, reason: string, text: string): Promise<unknown>
 }
+type NappletIntentRequest = {
+  archetype: string
+  action: string
+  convention: string
+  payload?: unknown
+  handler?: string
+  handlerHint?: { address: string; relays?: string[] }
+  behavior?: { focus?: boolean; reuse?: boolean }
+}
+type NappletIntentOptions = Pick<
+  NappletIntentRequest,
+  "payload" | "handler" | "handlerHint" | "behavior"
+>
+type NappletIntentDelivery = Pick<
+  NappletIntentRequest,
+  "archetype" | "action" | "convention" | "payload"
+> & { sender: string }
+type NappletIntentResult =
+  | { ok: true; archetype: string; action: string; convention: string; handler: string }
+  | { ok: false; error: string }
+type NappletIntentAvailability = {
+  archetype: string
+  available: boolean
+  hasDefault: boolean
+  candidates: {
+    id: string
+    title?: string
+    actions: string[]
+    conventions: string[]
+    contracts: { convention: string; params: string[] }[]
+  }[]
+}
+type NappletIntent = {
+  invoke(uri: string, options?: NappletIntentOptions): Promise<NappletIntentResult>
+  invoke(request: NappletIntentRequest): Promise<NappletIntentResult>
+  open(uri: string, options?: NappletIntentOptions): Promise<NappletIntentResult>
+  available(archetype: string): Promise<NappletIntentAvailability>
+  handlers(): Promise<NappletIntentAvailability[]>
+  onDelivery(handler: (delivery: NappletIntentDelivery) => void): NappletSubscription
+  onChanged(handler: (availability: NappletIntentAvailability) => void): NappletSubscription
+}
 type Napplet = {
+  intent?: NappletIntent
   identity?: NappletIdentity
   theme?: NappletTheme
   storage?: NappletStorage

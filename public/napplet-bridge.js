@@ -8,8 +8,8 @@
 //    signing is mediated through the relay domain — so this file must never
 //    reference the napp surface.
 //
-// Availability is PRESENCE: the shell declares window.__nappletDomains before
-// this runs, and we build window.napplet with exactly those domain objects.
+// The shell supplies the implemented domain list in window.__nappletDomains.
+// Every napplet receives the full API; the host checks permissions on use.
 // Wire + result-field names match the @napplet/nap contracts, so an app built
 // against @napplet/shim runs unchanged.
 ;(function () {
@@ -19,6 +19,41 @@
   const identityHandlers = new Set()
   const relaySubs = new Map() // subId -> { onEvent, onEose, onClosed }
   const outboxSubs = new Map() // subId -> { event: Set, closed: Set }
+  const intentHandlers = new Set()
+  const intentChanges = new Set()
+  const intentQueue = []
+  function drainIntents() {
+    while (intentQueue.length) {
+      const index = intentHandlers.size
+        ? 0
+        : intentQueue.findIndex(d => incHandlers.get(d.convention)?.size)
+      if (index < 0) return
+      const [delivery] = intentQueue.splice(index, 1)
+      if (intentHandlers.size) {
+        for (const fn of [...intentHandlers]) {
+          try {
+            fn(delivery)
+          } catch {}
+        }
+      } else {
+        const payload = delivery.payload
+        const event = {
+          id: "",
+          pubkey: delivery.sender,
+          created_at: Math.floor(Date.now() / 1000),
+          kind: 0,
+          tags: [["t", delivery.convention]],
+          content: typeof payload === "string" ? payload : JSON.stringify(payload ?? {}),
+          sig: ""
+        }
+        for (const fn of [...incHandlers.get(delivery.convention)]) {
+          try {
+            fn(payload, event)
+          } catch {}
+        }
+      }
+    }
+  }
   const incHandlers = new Map() // topic -> Set<callback(payload, syntheticEvent)>
   const configSubscribers = new Set()
   const configSchemaErrorHandlers = new Set()
@@ -36,6 +71,22 @@
   }
 
   function handleNappletMessage(data) {
+    if (data.type === "intent.deliver") {
+      const d = data.delivery
+      if (d && typeof d.sender === "string" && typeof d.convention === "string") {
+        intentQueue.push(Object.freeze(d))
+        drainIntents()
+      }
+      return
+    }
+    if (data.type === "intent.changed") {
+      for (const fn of intentChanges) {
+        try {
+          fn(data.availability)
+        } catch {}
+      }
+      return
+    }
     if (data.type === "theme.changed") {
       for (const fn of themeHandlers) {
         try {
@@ -56,7 +107,7 @@
       const s = relaySubs.get(data.subId)
       if (s && s.onEvent)
         try {
-          s.onEvent(data.result && data.result.event)
+          s.onEvent(s.legacy ? data.result && data.result.event : data.result)
         } catch {}
       return
     }
@@ -168,6 +219,68 @@
   })
 
   const NAPPLET_DOMAIN_FACTORIES = {
+    intent: () => {
+      const normalize = (uri, options) => {
+        if (typeof uri === "string") return window.__normalizeIntentUri(uri, options)
+        if (
+          !uri ||
+          typeof uri !== "object" ||
+          Array.isArray(uri) ||
+          Object.keys(uri).some(
+            k =>
+              ![
+                "archetype",
+                "action",
+                "convention",
+                "payload",
+                "handler",
+                "handlerHint",
+                "behavior"
+              ].includes(k)
+          )
+        )
+          throw new TypeError("Invalid intent request")
+        const {
+          archetype,
+          action = "open",
+          convention = `napplet:${archetype}/${action}`,
+          ...rest
+        } = uri
+        const request = window.__normalizeIntentUri(convention, rest)
+        if (request.archetype !== archetype || request.action !== action)
+          throw new TypeError("Invalid intent convention")
+        return request
+      }
+      const invoke = (uri, options) =>
+        nappletCall("intent.invoke", { request: normalize(uri, options) }, d => d.result)
+      return {
+        invoke,
+        open: (uri, options, legacyOptions) => {
+          const request =
+            typeof uri === "string" && !uri.startsWith("napplet:")
+              ? normalize(`napplet:${uri}/open`, {
+                  ...legacyOptions,
+                  ...(options === undefined ? {} : { payload: options })
+                })
+              : normalize(uri, options)
+          if (request.action !== "open") throw new TypeError("intent.open requires a /open URI")
+          return nappletCall("intent.invoke", { request }, d => d.result)
+        },
+        available: archetype => nappletCall("intent.available", { archetype }, d => d.availability),
+        handlers: () => nappletCall("intent.handlers", null, d => d.handlers),
+        onDelivery: handler => {
+          if (typeof handler !== "function")
+            throw new TypeError("Expected an intent delivery handler")
+          intentHandlers.add(handler)
+          drainIntents()
+          return { close: () => intentHandlers.delete(handler) }
+        },
+        onChanged: handler => {
+          intentChanges.add(handler)
+          return { close: () => intentChanges.delete(handler) }
+        }
+      }
+    },
     identity: () => ({
       getPublicKey: () => nappletCall("identity.getPublicKey", null, d => d.pubkey),
       getRelays: () => nappletCall("identity.getRelays", null, d => d.relays),
@@ -233,9 +346,22 @@
       publishEncrypted: (event, recipient, encryption) =>
         nappletCall("relay.publishEncrypted", { event, recipient, encryption }, d => d.event),
       query: filters => nappletCall("relay.query", { filters }, d => d.events),
-      subscribe: (subId, filters, handlers, relay) => {
-        relaySubs.set(subId, handlers || {})
-        const msg = { type: "relay.subscribe", id: "n5d" + n5dSerial++, subId, filters }
+      subscribe: (filtersOrId, onEventOrFilters, onEoseOrHandlers, optionsOrRelay) => {
+        // Accept the SDK contract as well as the original host-specific form.
+        const legacy = typeof filtersOrId === "string"
+        const subId = legacy ? filtersOrId : "relay" + n5dSerial++
+        const filters = legacy ? onEventOrFilters : filtersOrId
+        const handlers = legacy
+          ? { ...(onEoseOrHandlers || {}), legacy: true }
+          : { onEvent: onEventOrFilters, onEose: onEoseOrHandlers }
+        const relay = legacy ? optionsOrRelay : optionsOrRelay?.relay
+        relaySubs.set(subId, handlers)
+        const msg = {
+          type: "relay.subscribe",
+          id: "n5d" + n5dSerial++,
+          subId,
+          filters: Array.isArray(filters) ? filters : [filters]
+        }
         if (relay) msg.relay = relay
         window.parent.postMessage(msg, "*")
         return {
@@ -333,6 +459,7 @@
         let set = incHandlers.get(topic)
         if (!set) incHandlers.set(topic, (set = new Set()))
         set.add(callback)
+        drainIntents()
         window.parent.postMessage({ type: "inc.subscribe", id: "n5d" + n5dSerial++, topic }, "*")
         return {
           close: () => {
@@ -348,9 +475,13 @@
     link: () => ({
       // Resolves { status: "opened" | "denied" }; malformed URLs reject.
       open: (url, options) =>
-        nappletCall("link.open", { url, ...(options ? { options } : {}) }, d => ({
-          status: d.status
-        }))
+        typeof url === "string" && url.startsWith("napplet:") && window.napplet.intent
+          ? window.napplet.intent
+              .invoke(url)
+              .then(result => ({ status: result.ok ? "opened" : "denied" }))
+          : nappletCall("link.open", { url, ...(options ? { options } : {}) }, d => ({
+              status: d.status
+            }))
     }),
     // Shell-owned settings (@napplet/shim parity, including the lazy .schema
     // getter — the manifest meta tag isn't parsed yet when this runs).
@@ -430,4 +561,19 @@
       window.napplet = napplet
     } catch {}
   }
+  // Intent deliveries are buffered above, including for late subscribers.
+  const ready = () => window.parent.postMessage({ type: "intent.ready" }, "*")
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", ready, { once: true })
+  else ready()
+  document.addEventListener("click", event => {
+    const anchor = event.composedPath().find(node => node instanceof HTMLAnchorElement)
+    const uri = anchor && anchor.getAttribute("href")
+    if (event.defaultPrevented || !uri || !uri.startsWith("napplet:") || !window.napplet?.intent)
+      return
+    event.preventDefault()
+    Promise.resolve()
+      .then(() => window.napplet.intent.invoke(uri))
+      .catch(() => {})
+  })
 })()

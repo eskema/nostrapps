@@ -1050,6 +1050,13 @@ body.popover-open .napp-body iframe {
   overflow: auto;
 }
 
+/* Give action and intent choices room for app names, authors and controls. */
+.app-dialog-handler .app-dialog-cards {
+  width: 40rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
 /* Both are surface cards — the gap between them shows the scrim. */
 .app-dialog-body,
 .app-dialog-queue {
@@ -1209,6 +1216,20 @@ body.popover-open .napp-body iframe {
 }
 
 .app-dialog-permission .app-dialog-actions > :nth-child(even) {
+  justify-self: end;
+}
+
+/* Session approval has its own row; keep deny and allow in their columns. */
+.app-dialog-napplet-permission .app-dialog-actions > :nth-child(3) {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+}
+
+.app-dialog-napplet-permission .app-dialog-actions > :nth-child(4) {
+  justify-self: start;
+}
+
+.app-dialog-napplet-permission .app-dialog-actions > :nth-child(5) {
   justify-self: end;
 }
 

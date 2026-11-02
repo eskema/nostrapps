@@ -47,11 +47,20 @@ import { NostrEvent } from "@nostr/tools"
 import { BlossomClient } from "@nostr/tools/nipb7"
 import { DEFAULT_BLOSSOM_SERVERS, normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
+import { isValidNamedNapplet } from "../nsite/napplet-manifest.js"
 import { hasBytes } from "../nsite/heal.js"
 
 // Addressable app kinds shown in Discover: nsites, napps, wasm napps, and
 // named napplets.
 const DISCOVER_KINDS = [NSITE_NAMED_KIND, NAPP_NAMED_KIND, WASM_NAMED_KIND, NAPPLET_NAMED_KIND]
+
+function isDiscoverableManifest(event: NostrEvent): boolean {
+  return (
+    DISCOVER_KINDS.includes(event.kind) &&
+    (event.kind !== NAPPLET_NAMED_KIND || isValidNamedNapplet(event))
+  )
+}
+
 import {
   badge,
   button,
@@ -141,7 +150,8 @@ export function mount(
   function setView(v: "list" | "grid") {
     view = v
     appsContent.classList.toggle("apps-grid", v === "grid")
-    for (const b of appsContent.querySelectorAll<HTMLButtonElement>(".apps-view")) paintViewToggle(b)
+    for (const b of appsContent.querySelectorAll<HTMLButtonElement>(".apps-view"))
+      paintViewToggle(b)
     emitParams()
   }
 
@@ -830,7 +840,11 @@ export function mount(
   }
 
   function renderInstalled() {
-    const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
+    const searchEl = input({
+      type: "search",
+      class: "apps-search",
+      placeholder: SEARCH_PLACEHOLDER
+    })
     _installedListEl = el("div", "apps-list")
     installedPane.replaceChildren(toolbar(searchEl))
     if (MOCK_CARD) installedPane.appendChild(mockTemporaryCard())
@@ -1199,6 +1213,7 @@ export function mount(
   // superseded version still buffered is dropped before its card is ever
   // built; one already rendered is replaced by flushPending.
   function addManifest(event: NostrEvent, urls: string[]) {
+    if (!isDiscoverableManifest(event)) return
     const addr = computeNappId(event)
     let seen = nappRelays.get(addr)
     if (!seen) nappRelays.set(addr, (seen = new Map()))
@@ -1231,7 +1246,7 @@ export function mount(
       .then(evt => {
         if (!evt || (p.id ? evt.id !== p.id : computeNappId(evt) !== p.addr)) {
           lookups.set(p.key, "missing")
-        } else if (!DISCOVER_KINDS.includes(evt.kind)) {
+        } else if (!isDiscoverableManifest(evt)) {
           lookups.set(p.key, "notapp")
         } else {
           lookups.set(p.key, evt)
@@ -1423,7 +1438,11 @@ export function mount(
   }
 
   function renderDiscover() {
-    const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
+    const searchEl = input({
+      type: "search",
+      class: "apps-search",
+      placeholder: SEARCH_PLACEHOLDER
+    })
     _listEl = el("div", "apps-list")
     _actionBarEl = el("div", "apps-actionbar")
     paintActionBar()
@@ -1684,7 +1703,7 @@ function renderCard(
         // not at all. Try opens a temp in the current space, as a pasted
         // address used to.
         if (action === "try") await ctx.tryApp!(raw)
-        else await ctx.install(raw)
+        else await ctx.install(raw, { manifest: evt })
       } else if (action === "keep") {
         // a temp's id: install keeps it
         await ctx.install(nappId)

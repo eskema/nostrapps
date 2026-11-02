@@ -1,3 +1,14 @@
+import {
+  configureIntents,
+  dispatchIntentAction,
+  isIntentAction,
+  observeIntentManifest,
+  invokeIntent,
+  intentForNappAction,
+  hasIntentHandlers
+} from "./intents/manager.js"
+import { deliverNappletIntent, matchesNappletRevision } from "./sandbox/host.js"
+import type { IntentRequest } from "./intents/catalog.js"
 import "@fontsource-variable/source-sans-3"
 import "@fontsource-variable/source-sans-3/wght-italic.css"
 import "@fontsource-variable/source-serif-4"
@@ -128,7 +139,7 @@ import { clearDecisions, onRowRevoked } from "./permissions.js"
 import { openPopover } from "./popover.js"
 import { setPointer, getPointer } from "./pointer.js"
 import { moveBefore } from "./dom.js"
-import { buildHandlerBody } from "./system-napps/handler.js"
+import { pickActionHandler } from "./action-handler-picker.js"
 import * as persist from "./persistence.js"
 import * as handlers from "./handlers.js"
 import type {
@@ -759,11 +770,14 @@ async function runNappAction(
   callerNappId: string,
   name: string,
   payload: unknown,
-  options?: { instance?: string; auxiliary?: boolean }
+  options?: { instance?: string; auxiliary?: boolean },
+  selected?: handlers.ActionTarget
 ) {
   if (typeof name !== "string" || !name) {
     throw new Error("napp.action: action name is required")
   }
+
+  if (isIntentAction(name)) return dispatchIntentAction(name, payload, callerNappId)
 
   const auxiliary = !!options?.auxiliary
   let auxWin: NappWindow | null = null
@@ -785,19 +799,42 @@ async function runNappAction(
     const [candidates, openCandidates] = handlers.findHandlersForAction(name, { auxiliary })
     // No app takes it (a system napp's fallback doesn't count): the napps that
     // do, out there, and the action waits for the one the user tries.
+    const compatibleIntent = !auxiliary ? intentForNappAction(name, payload) : undefined
+    const hasNapplets = !!compatibleIntent && hasIntentHandlers(compatibleIntent)
     const any = [...candidates, ...openCandidates.map(w => w.nappId)]
-    if (!auxiliary && !any.some(id => !handlers.systemIdOf(id))) {
+    if (!selected && !hasNapplets && !auxiliary && !any.some(id => !handlers.systemIdOf(id))) {
       return showHandlersInApps(callerNappId, name, payload)
     }
     try {
       // One way to go: the one app, or the one open window (an open system
       // napp, which isn't offered again as a new one).
-      const picked = candidates.length + openCandidates.length !== 1
-      const [nappId, existingInstanceId] = !picked
-        ? candidates.length
-          ? [candidates[0], undefined]
-          : [openCandidates[0].nappId, openCandidates[0].instanceId]
-        : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
+      const picked = !!selected || hasNapplets || candidates.length + openCandidates.length !== 1
+      const selection =
+        selected ??
+        (!picked
+          ? candidates.length
+            ? { nappId: candidates[0] }
+            : { nappId: openCandidates[0].nappId, instanceId: openCandidates[0].instanceId }
+          : await pickHandler(
+              callerNappId,
+              name,
+              payload,
+              candidates,
+              openCandidates,
+              compatibleIntent
+            ))
+      if ("intent" in selection) {
+        return invokeIntent(selection.intent, { sender: callerNappId, check() {} })
+      }
+      const { nappId, instanceId: existingInstanceId } = selection
+      // A selection is delivered directly, but still must be a current action handler.
+      const [currentCandidates, currentOpen] = handlers.findHandlersForAction(name, { auxiliary })
+      if (
+        existingInstanceId
+          ? !currentOpen.some(w => w.nappId === nappId && w.instanceId === existingInstanceId)
+          : !currentCandidates.includes(nappId)
+      )
+        throw new Error("The action handler is no longer available")
 
       // Revealed when a window opened, or the user picked one to see; an
       // auto-selected open window answers behind the caller.
@@ -841,6 +878,7 @@ async function runNappAction(
     } catch (err) {
       console.warn(err)
       setStatus(String(err))
+      if (selected) throw err
       return
     }
   }
@@ -973,8 +1011,9 @@ async function pickHandler(
   actionName: string,
   payload: unknown,
   candidates: string[],
-  openCandidates: NappWindowState[]
-): Promise<[nappId: string, instanceId: string | undefined]> {
+  openCandidates: NappWindowState[],
+  compatibleIntent?: IntentRequest
+): Promise<handlers.ActionTarget | { intent: IntentRequest }> {
   if (isViewAction(actionName) && typeof payload === "string") {
     const event = await resolveViewPayload(payload)
     if (event) payload = event
@@ -988,40 +1027,14 @@ async function pickHandler(
     setStatus(`No handler for action "${actionName}" from ${friendlyNameFor(callerNappId)}`)
   }
 
-  type Choice = [string, string | undefined] | null
-  const build = (resolve: (choice: Choice) => void) =>
-    buildHandlerBody({
-      actionName,
-      payload,
-      candidates,
-      openCandidates,
-      apps: {
-        list: () => persist.getInstalledApps(),
-        get: (nappId: string) => persist.getInstalledApp(nappId)
-      },
-      onSelect: (nappId, instanceId) => {
-        if (candidates.includes(nappId)) resolve([nappId, instanceId])
-      }
-    })
-  // A napp's action opens the picker where it was clicked. The launcher
-  // input's and a link's have no click to open at: a dialog.
-  const choice =
-    callerNappId === "launcher" || callerNappId === "link"
-      ? await openDialog<Choice>({
-          title: "Choose a napp to open this",
-          queue: { kind: "action", name: actionName },
-          build,
-          dismissValue: null // Esc / backdrop cancels
-        })
-      : await openPopover<Choice>({
-          ...getPointer(),
-          class: "handler-popover",
-          build,
-          dismissValue: null // click outside / Esc cancels
-        })
-
-  if (!choice) throw new Error("Action handler selection cancelled")
-  return choice
+  return pickActionHandler(
+    friendlyNameFor(callerNappId),
+    actionName,
+    payload,
+    candidates,
+    openCandidates,
+    compatibleIntent
+  )
 }
 
 function friendlyNameFor(nappId: string): string {
@@ -1074,7 +1087,7 @@ const systemCtx: SystemCtx = {
   // Use a thunk so the reference resolves to the function declared later.
   isInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
   wasInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
-  install: async (raw: string, opts?: { launch?: boolean }) => {
+  install: async (raw: string, opts?: { launch?: boolean; manifest?: NostrEvent }) => {
     const nappId = await install(raw, opts)
     void deliverPendingAction(nappId)
     return nappId
@@ -1770,41 +1783,44 @@ function buildRow(item: SuggestionItem, sig: string): Row {
 
   el.addEventListener("mousedown", async (e: MouseEvent) => {
     e.preventDefault()
-    const item = row.item // the row is kept; its item is the current one
-    const label = itemPreferredValue(item)
-    hideSuggestions()
-    try {
-      if (item.systemId) {
-        await invokeSystemNapp(item.systemId)
-      } else if (item.actionId) {
-        actionRegistry[item.actionId]?.run(systemCtx)
-      } else if (item.instanceId) {
-        // Window may live in another space — go there first, then focus it.
-        if (item.spaceId && item.spaceId !== currentSpaceId) {
-          await switchSpace(item.spaceId)
-          renderSpacesBar()
-        }
-        await launchSession(item.instanceId)
-      } else if (item.nappId) {
-        const win = await launch(stage, item.nappId, {
-          ...makeLaunchOpts(),
-          petname: item.petname && item.petname !== item.nappId ? item.petname : item.nappId
-        })
-        syncDOM(win)
-        win.focus()
-      } else if (item.link) {
-        await importShareLink(item.link)
-      } else if (item.raw) {
-        await install(item.raw) // opens where its screen said, if at all
-      }
-      setStatus(`Launched ${label}`)
-      input!.value = ""
-    } catch (err: any) {
-      setStatus(`Error: ${err.message}`)
-      console.error(err)
-    }
+    await launchSuggestion(row.item)
   })
   return row
+}
+
+async function launchSuggestion(item: SuggestionItem) {
+  const label = itemPreferredValue(item)
+  hideSuggestions()
+  try {
+    if (item.systemId) {
+      await invokeSystemNapp(item.systemId)
+    } else if (item.actionId) {
+      actionRegistry[item.actionId]?.run(systemCtx)
+    } else if (item.instanceId) {
+      // Window may live in another space — go there first, then focus it.
+      if (item.spaceId && item.spaceId !== currentSpaceId) {
+        await switchSpace(item.spaceId)
+        renderSpacesBar()
+      }
+      await launchSession(item.instanceId)
+    } else if (item.nappId) {
+      const win = await launch(stage, item.nappId, {
+        ...makeLaunchOpts(),
+        petname: item.petname && item.petname !== item.nappId ? item.petname : item.nappId
+      })
+      syncDOM(win)
+      win.focus()
+    } else if (item.link) {
+      await importShareLink(item.link)
+    } else if (item.raw) {
+      await install(item.raw) // opens where its screen said, if at all
+    }
+    setStatus(`Launched ${label}`)
+    input!.value = ""
+  } catch (err: any) {
+    setStatus(`Error: ${err.message}`)
+    console.error(err)
+  }
 }
 
 async function launchSession(instanceId: string) {
@@ -2777,7 +2793,10 @@ async function openInstalled(nappId: string, petname: string, spaceId: string) {
   win.focus()
 }
 
-async function install(raw: string, opts: { launch?: boolean } = {}): Promise<string> {
+async function install(
+  raw: string,
+  opts: { launch?: boolean; manifest?: NostrEvent } = {}
+): Promise<string> {
   // A temp app, not kept yet (the Apps card's keep): kept. Its card is up
   // from the moment its window is, before there is anything to keep.
   if (sharedTemps.has(raw)) return keepTempApp(raw)
@@ -2869,10 +2888,19 @@ async function installNapplet(
     relayHints: string[]
     kind: number
   },
-  { launch = true }: { launch?: boolean } = {}
+  { launch = true, manifest }: { launch?: boolean; manifest?: NostrEvent } = {}
 ): Promise<string> {
   setStatus("Resolving napplet…")
-  const resolved = await resolveNapplet(target, setStatus)
+  if (
+    manifest &&
+    (manifest.kind !== target.kind ||
+      manifest.pubkey !== target.pubkey ||
+      (target.kind === 35129 && manifest.tags.find(tag => tag[0] === "d")?.[1] !== target.dTag))
+  )
+    throw new Error("Discovered manifest does not match the requested napplet")
+  const resolved = manifest
+    ? await loadNappletFromManifest(manifest, setStatus, { healRelays: target.relayHints })
+    : await resolveNapplet(target, setStatus)
   const nappId = persist.computeNappId(resolved.manifest)
   persist.assertSameAuthor(nappId, resolved.manifest.pubkey)
 
@@ -3234,6 +3262,22 @@ async function launchFromInput(raw: string): Promise<boolean | void> {
     input.value = "" // taken: the space's tab and "loading…" show it's on its way
     await importShareLink(link)
     return true
+  }
+
+  // Plain search text launches the first matching row in displayed order.
+  if (!/^naddr1/i.test(raw) && !/[./:]/.test(raw)) {
+    syncSuggestions()
+    for (const section of SECTIONS) {
+      for (const el of suggSections[section].children) {
+        if ((el as HTMLElement).hidden) continue
+        const row = [...rows.values()].find(row => row.el === el)
+        if (row) {
+          await launchSuggestion(row.item)
+          return true
+        }
+      }
+    }
+    throw new Error(`No app matches "${raw}"`)
   }
 
   // An address (naddr, nsite host): the app if it's here, else its card.
@@ -4171,3 +4215,62 @@ async function checkReachable(
   }
   return out
 }
+
+configureIntents({
+  action: (name, payload, target) => runNappAction("intent", name, payload, undefined, target),
+  loadEvent: async code =>
+    (await resolveViewPayload(code)) as import("@nostr/tools/core").NostrEvent | null,
+  async deliver(event, request, delivery, context) {
+    context.check()
+    const nappId = persist.computeNappId(event)
+    persist.assertSameAuthor(nappId, event.pubkey)
+    const policy = await resolvePolicyForLaunch(nappId, {
+      title: event.tags.find(t => t[0] === "title")?.[1] || "Napplet",
+      type: "napplet",
+      author: event.pubkey,
+      declaredDomains: requiresFromEvent(event),
+      optionalDomains: optionalFromEvent(event)
+    })
+    context.check()
+    if (!policy?.domains.includes("intent")) return false
+    // Preflight the exact chosen revision before mounting or disclosing payload.
+    const resolved = await loadNappletFromManifest(event, setStatus, { signal: context.signal })
+    context.check()
+    let win = request.behavior?.reuse === false ? null : findOpenWindowByNappId(nappId)
+    // A snapshot/root/named manifest can share a legacy installed ID. Reuse
+    // only a window running this exact verified revision.
+    if (win && !matchesNappletRevision(win, event.id)) win = null
+    persist.storeInstalledEvent(event)
+    observeIntentManifest(event)
+    if (!win) {
+      win = launchNapplet(stage, nappId, resolved.html, {
+        ...makeLaunchOpts(),
+        petname: resolved.title || "Napplet"
+      })
+      syncDOM(win)
+    }
+    context.check()
+    const accepted = await deliverNappletIntent(
+      win,
+      delivery,
+      () => {
+        context.check()
+        if (
+          persist.getInstalledApp(nappId)?.event?.id !== event.id ||
+          !persist.getPolicy(nappId).domains.includes("intent")
+        )
+          throw new Error("The target changed or lost intent permission")
+      },
+      context.signal
+    )
+    if (accepted && request.behavior?.focus !== false) {
+      const spaceId = win.root.dataset.space
+      if (spaceId && spaceId !== currentSpaceId) await goToSpace(spaceId)
+      win.root.classList.remove("minimized")
+      win.notifyState()
+      revealInstance(win.getState().instanceId)
+    }
+    notifyAppsChanged()
+    return accepted
+  }
+})

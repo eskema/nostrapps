@@ -4,6 +4,8 @@ import { NappWindowState } from "./types.js"
 // napp.action() options: `instance` targets an existing window;
 // `auxiliary` restricts the dispatch to apps advertising the "auxiliary"
 // mode (their window is ephemeral — see runNappAction in main.ts).
+export type ActionTarget = { nappId: string; instanceId?: string }
+
 export type ActionOptions = { instance?: string; auxiliary?: boolean }
 
 // action name → nappIds that can handle it
@@ -140,4 +142,9 @@ export function snapshotActionMap(): Array<[string, string[]]> {
 export function subscribe(fn: () => void) {
   subs.add(fn)
   return () => subs.delete(fn)
+}
+
+export function hasUserActionHandler(name: string): boolean {
+  const [candidates, open] = findHandlersForAction(name)
+  return [...candidates, ...open.map(w => w.nappId)].some(id => !systemIdOf(id))
 }

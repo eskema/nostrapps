@@ -9,3 +9,7 @@ vite.config.ts.timestamp-*
 
 # the wasm harness runs whatever module is dropped next to it
 harness/app.wasm
+
+# Browser regression artifacts
+playwright-report/
+test-results/

@@ -2,13 +2,12 @@ import { openDialog, type DialogAction } from "./dialog.js"
 import { nappByline, nappName, nappNameEl, type NappName } from "./napp-name.js"
 import { getInstalledApp, getPolicy, setPolicy } from "./persistence.js"
 import { appIcon, code, el, overline } from "./system-napps/ui.js"
+import { getPubkey, subscribe as onAccountChanged } from "./account.js"
 
 const STORAGE_KEY = "nostrapps:permissions"
 
-// The install screen's rows these methods fall under. A granted row answers
-// at once, or asks each time when its ask box is ticked; an unticked row
-// refuses. Files and the clipboard have no row: they ask, and what the prompt
-// is told to remember is kept by method.
+// Install rows control domain access. Napplet operations have separate,
+// account-scoped decisions. Napps retain their row-level ask/allow behavior.
 const ROW_OF: Record<string, string> = {
   signEvent: "write",
   "napp.publish": "write",
@@ -23,7 +22,12 @@ const ROW_OF: Record<string, string> = {
   "common.report": "common",
   "common.follow": "common",
   "common.unfollow": "common",
-  "link.open": "link"
+  "link.open": "link",
+  "resource.https": "resource",
+  "resource.blossom": "resource",
+  "resource.http": "resource",
+  "relay.read": "relay",
+  "outbox.read": "outbox"
 }
 
 // The rows that have an ask box.
@@ -34,15 +38,27 @@ const asks = (nappId: string, row: string) => !!getPolicy(nappId).ask?.includes(
 
 // What answers a request without a prompt: its row, or a decision kept for a
 // method with none. Null: ask.
+const isNapplet = (id: string) => id.startsWith("napplet~")
+const account = () => getPubkey() || "signed-out"
+const decisionKey = (id: string) => (isNapplet(id) ? JSON.stringify([account(), id]) : id)
+const sessions = new Map<string, Record<string, string>>()
+
 function settled(nappId: string, method: string): boolean | null {
   const row = ROW_OF[method]
-  if (row) return holds(nappId, row) ? (asks(nappId, row) ? null : true) : false
+  if (row && !holds(nappId, row)) return false
+  if (isNapplet(nappId)) {
+    const cached = getDecision(nappId, method)
+    if (cached) return cached === "allow" || cached === "session"
+    if (row) return asks(nappId, row) ? null : true
+    return null
+  }
+  if (row) return asks(nappId, row) ? null : true
   const cached = getDecision(nappId, method)
   return cached ? cached === "allow" : null
 }
 
-// A prompt's "always", written back to the row: allow clears its ask, deny
-// unticks it.
+// A napp prompt's "always" updates the install row. Napplets remember
+// individual operations for the current account instead.
 function answerRow(nappId: string, row: string, allow: boolean) {
   const p = getPolicy(nappId)
   setPolicy(nappId, {
@@ -83,7 +99,8 @@ export function isGated(method: string) {
 
 function readAll() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}")
+    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}")
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {}
   } catch {
     return {}
   }
@@ -94,13 +111,19 @@ function writeAll(data: Record<string, any>) {
 }
 
 export function getDecision(nappId: string, method: string) {
-  return readAll()[nappId]?.[method] ?? null
+  const key = decisionKey(nappId)
+  if (sessions.get(key)?.[method] === "session") return "session"
+  const saved = readAll()[key]?.[method]
+  return saved === "allow" || saved === "deny" ? saved : null
 }
 
 export function setDecision(nappId: string, method: string, decision: string) {
+  if (decision !== "allow" && decision !== "deny") return
   const all = readAll()
-  all[nappId] ??= {}
-  all[nappId][method] = decision
+  const key = decisionKey(nappId)
+  if (!all[key] || typeof all[key] !== "object" || Array.isArray(all[key])) all[key] = {}
+  all[key][method] = decision
+  delete sessions.get(key)?.[method]
   writeAll(all)
   notify()
 }
@@ -108,38 +131,67 @@ export function setDecision(nappId: string, method: string, decision: string) {
 export function clearDecisions(nappId: string) {
   const all = readAll()
   delete all[nappId]
+  for (const key of Object.keys(all)) {
+    try {
+      if (JSON.parse(key)?.[1] === nappId) delete all[key]
+    } catch {}
+  }
+  for (const key of sessions.keys()) {
+    try {
+      if (JSON.parse(key)?.[1] === nappId) sessions.delete(key)
+    } catch {}
+  }
+  cancelApprovals(nappId)
   writeAll(all)
   notify()
 }
 
-// The decisions that still answer something: a method with a row has its
-// answer on the row, whatever an older prompt or a backup left here.
-export function listDecisions(): Record<string, Record<string, string>> {
+// Settings shows the current account's napplet decisions and session grants.
+// Napp decisions represented by install rows remain hidden here.
+export function listDecisions(includeSession = true): Record<string, Record<string, string>> {
   const out: Record<string, Record<string, string>> = {}
-  for (const [id, methods] of Object.entries(readAll() as Record<string, Record<string, string>>)) {
-    const kept = Object.entries(methods).filter(([m]) => !(m in ROW_OF))
-    if (kept.length) out[id] = Object.fromEntries(kept)
+  const all = { ...readAll() }
+  if (includeSession) for (const [key, methods] of sessions) all[key] = { ...all[key], ...methods }
+  for (const [key, methods] of Object.entries(all)) {
+    let id = key
+    if (key.startsWith("[")) {
+      try {
+        const [owner, app] = JSON.parse(key)
+        if (owner !== account() || typeof app !== "string" || !isNapplet(app)) continue
+        id = app
+      } catch {
+        continue
+      }
+    } else if (isNapplet(id)) continue // Old approvals were not account-scoped.
+    if (!methods || typeof methods !== "object" || Array.isArray(methods)) continue
+    const kept = Object.entries(methods).filter(
+      ([m, d]) =>
+        (isNapplet(id) || !(m in ROW_OF)) && ["allow", "deny", "session"].includes(String(d))
+    )
+    if (kept.length) out[id] = Object.fromEntries(kept) as Record<string, string>
   }
   return out
 }
 
-// Drop every napp's decisions at once (settings' "forget all"). One write, one
-// notify — not a forget per napp.
+// Forget approvals for the current account; other accounts keep their choices.
 export function forgetAllDecisions() {
-  if (Object.keys(readAll()).length === 0) return
-  writeAll({})
-  notify()
+  for (const id of Object.keys(listDecisions())) forgetDecision(id)
 }
 
 export function forgetDecision(nappId: string, method?: string) {
   const all = readAll()
-  if (!all[nappId]) return
+  const key = decisionKey(nappId)
   if (method) {
-    delete all[nappId][method]
-    if (Object.keys(all[nappId]).length === 0) delete all[nappId]
+    if (all[key]) delete all[key][method]
+    delete sessions.get(key)?.[method]
   } else {
-    delete all[nappId]
+    delete all[key]
+    sessions.delete(key)
   }
+  cancelApprovals(nappId)
+  window.dispatchEvent(
+    new CustomEvent("nostrapps:permission-revoked", { detail: { nappId, method } })
+  )
   writeAll(all)
   notify()
 }
@@ -177,6 +229,7 @@ const DENY_COOLDOWN_MS = 10_000
 const lines = new Map<string, Promise<void>>() // key → the line's tail
 const waiting = new Map<string, number>() // key → requests in the line, asking one included
 const deniedAt = new Map<string, number>()
+const approvalControllers = new Map<string, AbortController>()
 const generation = new Map<string, number>() // nappId → bumped when it goes away
 
 const lineKey = (nappId: string, method: string) => `${nappId}\u0000${method}`
@@ -197,13 +250,27 @@ export function coveredByGrant(nappId: string, method: string): boolean {
   return settled(nappId, method) === true
 }
 
-// The napp's last window closed: what it still has waiting is refused (a
-// dialog already on screen stays, its answer goes nowhere).
+// Closing the last window cancels both visible and queued approvals.
 export function cancelApprovals(nappId: string) {
   generation.set(nappId, (generation.get(nappId) ?? 0) + 1)
+  approvalControllers.get(nappId)?.abort()
+  approvalControllers.delete(nappId)
 }
 
-export async function requireApproval(nappId: string, method: string, detail?: ApprovalDetail) {
+export async function requireApproval(
+  nappId: string,
+  method: string,
+  detail?: ApprovalDetail,
+  options?: { signal?: AbortSignal }
+) {
+  if (options?.signal?.aborted) return false
+  const owner = account()
+  let controller = approvalControllers.get(nappId)
+  if (!controller) approvalControllers.set(nappId, (controller = new AbortController()))
+  const signal = options?.signal
+    ? AbortSignal.any([options.signal, controller.signal])
+    : controller.signal
+  const valid = () => !signal.aborted && owner === account()
   const answer = settled(nappId, method)
   if (answer !== null) return answer
   const key = lineKey(nappId, method)
@@ -220,27 +287,38 @@ export async function requireApproval(nappId: string, method: string, detail?: A
   try {
     await prev
     // What changed while waiting: the napp gone, an "always", a denial.
-    if ((generation.get(nappId) ?? 0) !== gen) return false
+    if (!valid() || (generation.get(nappId) ?? 0) !== gen) return false
     const now = settled(nappId, method)
     if (now !== null) return now
     if (coolingDown(key)) return false
 
     const decision = await openDialog<string>({
+      signal,
       title: "Permission request",
       queue: { kind: "permission", name: nappNameEl(nappId), type: method },
       body: permissionBody(nappName(nappId), method, detail, nappIcon(nappId)),
-      class: "app-dialog-permission",
-      actions: PERMISSION_ACTIONS,
+      class: isNapplet(nappId)
+        ? "app-dialog-permission app-dialog-napplet-permission"
+        : "app-dialog-permission",
+      actions: isNapplet(nappId) ? NAPPLET_PERMISSION_ACTIONS : PERMISSION_ACTIONS,
       dismissValue: "deny-once" // Esc / backdrop → deny
     })
+    // A dismissed or revoked request must never save a stale approval.
+    if (!valid() || (generation.get(nappId) ?? 0) !== gen) return false
+    if (ROW_OF[method] && !holds(nappId, ROW_OF[method])) return false
     const row = ROW_OF[method]
+    if (decision === "allow-session" && isNapplet(nappId)) {
+      const key = decisionKey(nappId)
+      sessions.set(key, { ...sessions.get(key), [method]: "session" })
+      notify()
+    }
     if (decision === "allow-always" || decision === "deny-always") {
       const allow = decision === "allow-always"
-      if (row) answerRow(nappId, row, allow)
+      if (row && !isNapplet(nappId)) answerRow(nappId, row, allow)
       else setDecision(nappId, method, allow ? "allow" : "deny")
     }
     if (decision === "deny-once") deniedAt.set(key, Date.now())
-    return decision === "allow-once" || decision === "allow-always"
+    return decision === "allow-once" || decision === "allow-always" || decision === "allow-session"
   } finally {
     release?.()
     const left = (waiting.get(key) ?? 1) - 1
@@ -260,6 +338,41 @@ export const PERMISSION_ACTIONS: DialogAction<string>[] = [
   { label: "Allow always", value: "allow-always", variant: "link" }
 ]
 
+const NAPPLET_PERMISSION_ACTIONS: DialogAction<string>[] = [
+  ...PERMISSION_ACTIONS.slice(0, 2),
+  { label: "Allow for this session", value: "allow-session", variant: "outline" },
+  ...PERMISSION_ACTIONS.slice(2)
+]
+
+let permissionAccount = account()
+onAccountChanged(() => {
+  const next = account()
+  if (next === permissionAccount) return
+  permissionAccount = next
+  for (const id of approvalControllers.keys()) cancelApprovals(id)
+  sessions.clear()
+  deniedAt.clear()
+  notify()
+})
+window.addEventListener("storage", event => {
+  if (
+    event.key === STORAGE_KEY ||
+    event.key === "nostrapps:policy" ||
+    event.key === "nostrapps:pubkey" ||
+    event.key === null
+  ) {
+    for (const id of approvalControllers.keys()) cancelApprovals(id)
+    sessions.clear()
+    notify()
+  }
+})
+window.addEventListener("nostrapps:policy-changed", event => {
+  const id = (event as CustomEvent<string>).detail
+  cancelApprovals(id)
+  sessions.delete(decisionKey(id))
+  notify()
+})
+
 // How Settings names a remembered decision: the prompt's verb, then what
 // tells apart the methods sharing it, and what the grant covers.
 const DECISION_WORDS: Record<string, string> = {
@@ -272,7 +385,12 @@ const DECISION_WORDS: Record<string, string> = {
   "napp.copyText": "to clipboard",
   "link.open": "links",
   "common.follow": "people",
-  "common.unfollow": "people"
+  "common.unfollow": "people",
+  "resource.https": "HTTPS resources",
+  "resource.http": "HTTP resources",
+  "resource.blossom": "Blossom resources",
+  "relay.read": "events from relays",
+  "outbox.read": "events from author relays"
 }
 
 export function decisionLabel(method: string): HTMLElement {
@@ -303,7 +421,12 @@ const VERBS: Record<string, string> = {
   "common.follow": "follow",
   "common.unfollow": "unfollow",
   "common.react": "react",
-  "common.report": "report"
+  "common.report": "report",
+  "resource.https": "read",
+  "resource.http": "read",
+  "resource.blossom": "read",
+  "relay.read": "read",
+  "outbox.read": "read"
 }
 
 // The napp's icon before its name: a plate holding the place, then the first
@@ -354,7 +477,7 @@ export function permissionBody(
   // far better basis for a decision than a method name. What the verb acts on
   // goes on its line, the sentence going on from it on the next; anything
   // else goes under it all.
-  let object: Node | string | undefined = verb ? undefined : code(method)
+  let object: Node | string | undefined = verb ? DECISION_WORDS[method] : code(method)
   let line: Node | undefined
   let rest: Node | undefined
   if (typeof detail === "string") line = el("p", "", detail)
@@ -371,5 +494,17 @@ export function permissionBody(
   const said = el("div", "permission-ask", ask, ...(line ? [line] : []))
   const wrap = el("div", "permission", el("div", "permission-head", named, from, said))
   if (rest) wrap.append(rest)
+  if (napp.type === "napplet") {
+    const pk = getPubkey()
+    wrap.append(
+      el(
+        "p",
+        "napp-perms-reqs",
+        pk
+          ? `For account ${pk.slice(0, 8)}…${pk.slice(-8)} on this device.`
+          : "For this signed-out session on this device."
+      )
+    )
+  }
   return wrap
 }
