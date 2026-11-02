@@ -1460,6 +1460,9 @@ a.ui-author:hover > .ui-author-name {
 .intent-settings .intent-chain { display: grid; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
 .intent-settings .intent-toolbar, .intent-settings .intent-handler-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .intent-settings .intent-handler-name { display: grid; gap: 4px; flex: 1; min-width: 120px; }
+.intent-settings .intent-handler-name > :last-child:not(strong) { font-size: .875em; opacity: var(--dim-m); }
+.intent-settings .intent-settings-footer { display: flex; justify-content: flex-end; padding-top: 12px; margin-top: 8px; border-top: 1px solid var(--line); }
+.intent-settings .intent-handler-row > .ui-app-icon { flex-shrink: 0; }
 .intent-settings .intent-toolbar > :is(select, input[type="search"]) { flex: 1; min-width: 120px; }
 .intent-settings label { display: inline-flex; align-items: center; gap: 4px; }
 .intent-settings :is(button, select, input[type="search"]) { min-height: 36px; }
@@ -1474,15 +1477,15 @@ a.ui-author:hover > .ui-author-name {
   text-align: left;
   white-space: normal;
 }
-.intent-handler-choice .ui-app-icon {
+:is(.intent-handler-choice, .intent-handler-row) .ui-app-icon {
   position: relative;
   display: grid;
   place-items: center;
   flex-shrink: 0;
 }
-.intent-handler-choice .ui-app-icon > .ui-icon { opacity: var(--dim-m); }
-.intent-handler-choice .ui-app-icon:has(> img.loaded) > .ui-icon { display: none; }
-.intent-handler-choice .ui-app-icon > img { position: absolute; inset: 0; }
+:is(.intent-handler-choice, .intent-handler-row) .ui-app-icon > .ui-icon { opacity: var(--dim-m); }
+:is(.intent-handler-choice, .intent-handler-row) .ui-app-icon:has(> img.loaded) > .ui-icon { display: none; }
+:is(.intent-handler-choice, .intent-handler-row) .ui-app-icon > img { position: absolute; inset: 0; }
 .intent-handler-copy {
   display: grid;
   gap: 4px;

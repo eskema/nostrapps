@@ -12,7 +12,7 @@ import {
 } from "../intents/manager.js"
 import { canReceiveIntent, manifestContracts, conventionIdentity } from "../intents/catalog.js"
 import { handlerEntries, type HandlerEdit } from "../intents/preferences.js"
-import { button, el, code, details } from "./ui.js"
+import { button, el, code, details, appIcon, icon, author } from "./ui.js"
 
 /** Native editor for kind 31129 defaults and convention-specific handler chains. */
 export function intentSettings() {
@@ -189,20 +189,29 @@ export function intentSettings() {
           chain.append(el("p", "", identity ? "Uses archetype defaults." : "No default handlers."))
         entries.forEach((entry, index) => {
           const event = catalog.get(entry.reference)
-          const name =
-            event?.tags.find(t => t[0] === "title")?.[1] ||
-            (event ? event.content : "Unavailable napplet")
+          const name = event?.tags.find(t => t[0] === "title")?.[1] || "Unavailable napplet"
+          const picture = appIcon({ size: "m", fade: true })
+          picture.append(icon("tile"))
+          picture.setAttribute("aria-hidden", "true")
+          if (event)
+            void import("../nsite/icon.js")
+              .then(m => m.nappletIconSrc(event))
+              .then(src => {
+                if (src) picture.img.src = src
+              })
+              .catch(() => {})
           const info = el(
             "div",
             "intent-handler-name",
             el("strong", "", name),
-            code(entry.reference)
+            ...(event ? [author(event.pubkey, { link: false })] : [])
           )
           if (event?.kind === 5129) info.append(el("span", "", "Pinned snapshot"))
           const row = el(
             "div",
             "intent-handler-row",
             el("span", "", `${index + 1}.`),
+            picture,
             info,
             el("span", "", entry.hidden ? "Private" : "Public"),
             button({
@@ -225,7 +234,8 @@ export function intentSettings() {
                 })
             }),
             button({
-              label: "Remove handler",
+              icon: "trash",
+              title: "Remove handler",
               disabled: busy || !!pref?.locked,
               onClick: () => void edit({ action: "remove", reference: entry.reference })
             })
@@ -248,7 +258,7 @@ export function intentSettings() {
               c => c.archetype === role && (!identity || c.convention === identity)
             )
           )
-            target.add(new Option(event.tags.find(t => t[0] === "title")?.[1] || ref, ref))
+            target.add(new Option(event.tags.find(t => t[0] === "title")?.[1] || "Napplet", ref))
         target.disabled = busy || !!pref?.locked
         const hidden = document.createElement("input")
         hidden.type = "checkbox"
@@ -265,26 +275,22 @@ export function intentSettings() {
         chain.append(
           el("div", "intent-toolbar", target, el("label", "", hidden, "Private"), submit)
         )
-        if (entries.length)
-          chain.append(
-            button({
-              label: identity ? "Reset override" : "Reset defaults",
-              disabled: busy || !!pref?.locked,
-              onClick: () => void edit({ action: "reset" })
-            })
-          )
         group.append(chain)
       }
       if (pref)
         group.append(
-          button({
-            label: "Clear archetype preferences",
-            disabled: busy || pref.locked,
-            onClick: () => {
-              if (window.confirm(`Clear defaults and all intent overrides for ${role}?`))
-                void run(() => editIntentPreference(role, { action: "clear" }))
-            }
-          })
+          el(
+            "div",
+            "intent-settings-footer",
+            button({
+              label: "Clear archetype preferences",
+              disabled: busy || pref.locked,
+              onClick: () => {
+                if (window.confirm(`Clear defaults and all intent overrides for ${role}?`))
+                  void run(() => editIntentPreference(role, { action: "clear" }))
+              }
+            })
+          )
         )
       content.append(group)
     }
