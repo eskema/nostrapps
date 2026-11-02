@@ -1,5 +1,5 @@
 import { configureIntents, dispatchIntentAction, isIntentAction, observeIntentManifest } from "./intents/manager.js"
-import { deliverNappletIntent } from "./sandbox/host.js"
+import { deliverNappletIntent, matchesNappletRevision } from "./sandbox/host.js"
 import { actionConventions, mappedActionPayload } from "./intents/action-mappings.js"
 import "@fontsource-variable/source-sans-3"
 import "@fontsource-variable/source-sans-3/wght-italic.css"
@@ -4217,7 +4217,7 @@ configureIntents({
     let win = request.behavior?.reuse === false ? null : findOpenWindowByNappId(nappId)
     // A snapshot/root/named manifest can share a legacy installed ID. Reuse
     // only a window running this exact verified revision.
-    if (persist.getInstalledApp(nappId)?.event?.id !== event.id) win = null
+    if (win && !matchesNappletRevision(win, event.id)) win = null
     persist.storeInstalledEvent(event)
     observeIntentManifest(event)
     if (!win) {
@@ -4229,7 +4229,13 @@ configureIntents({
       context.check()
       if (persist.getInstalledApp(nappId)?.event?.id !== event.id || !persist.getPolicy(nappId).domains.includes("intent")) throw new Error("The target changed or lost intent permission")
     }, context.signal)
-    if (accepted && request.behavior?.focus !== false) win.focus()
+    if (accepted && request.behavior?.focus !== false) {
+      const spaceId = win.root.dataset.space
+      if (spaceId && spaceId !== currentSpaceId) await goToSpace(spaceId)
+      win.root.classList.remove("minimized")
+      win.notifyState()
+      revealInstance(win.getState().instanceId)
+    }
     notifyAppsChanged()
     return accepted
   }

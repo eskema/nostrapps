@@ -2025,8 +2025,7 @@ function handleNapplet(
     try {
       if (!nappletGrantedDomainsFor(nappId).includes("intent")) throw new Error("Permission denied")
       const request = normalizeIntentUri((data as any).url, undefined)
-      const app = getInstalledApp(nappId)
-      const sender = app?.event ? manifestIdentity(app.event) : `nostrapps:local:${nappId}`
+      const sender = nappletIdentities.get(iframe) ?? `nostrapps:local:${nappId}`
       void invokeIntent(request, { sender, signal: context.signal, check() { context.check(); if (!nappletGrantedDomainsFor(nappId).includes("intent")) throw new Error("Permission denied") } })
         .then(result => post({ type: "link.open.result", id: data.id, status: result.ok ? "opened" : "denied" }))
     } catch (error) { post({ type: "link.open.result", id: data.id, error: error instanceof Error ? error.message : String(error) }) }
@@ -2036,8 +2035,7 @@ function handleNapplet(
   if (domain === "intent") {
     const payload = data as any
     if (data.type === "intent.invoke") {
-      const app = getInstalledApp(nappId)
-      const sender = app?.event ? manifestIdentity(app.event) : `nostrapps:local:${nappId}`
+      const sender = nappletIdentities.get(iframe) ?? `nostrapps:local:${nappId}`
       void invokeIntent(payload.request, { sender, signal: context.signal, check: () => context.check() })
         .then(result => post({ type: "intent.invoke.result", id: data.id, result }))
     } else if (data.type === "intent.handlers" || data.type === "intent.available") {
@@ -2419,6 +2417,11 @@ export async function reinstallFiles(
 // update). A srcdoc document is baked at launch, so a plain reload would just
 // re-run the old bytes; reassigning srcdoc reloads with the new ones.
 const nappletDocuments = new WeakMap<HTMLIFrameElement, string>()
+const nappletRevisions = new WeakMap<HTMLIFrameElement, string>()
+const nappletIdentities = new WeakMap<HTMLIFrameElement, string>()
+export function matchesNappletRevision(win: NappWindow, eventId: string) {
+  return !!win.iframe && nappletRevisions.get(win.iframe) === eventId
+}
 
 export function reloadNappletWindows(nappId: string, html: string): number {
   let count = 0
@@ -2428,6 +2431,10 @@ export function reloadNappletWindows(nappId: string, html: string): number {
       const instanceId = win.root.dataset.instanceId || ""
       resetInstanceRuntimeState(instanceId, "Window reloaded before action registered")
       nappletDocuments.set(win.iframe, html)
+      const revision = getInstalledApp(nappId)?.event?.id
+      if (revision) nappletRevisions.set(win.iframe, revision)
+      const manifest = getInstalledApp(nappId)?.event
+      if (manifest) nappletIdentities.set(win.iframe, manifestIdentity(manifest))
       win.iframe.srcdoc = doc
       replayStoredActions(instanceId)
       count++
@@ -3123,6 +3130,10 @@ export function launchNapplet(
   if (win.iframe) {
     win.iframe.referrerPolicy = "no-referrer"
     nappletDocuments.set(win.iframe, html)
+    const revision = getInstalledApp(nappId)?.event?.id
+    if (revision) nappletRevisions.set(win.iframe, revision)
+    const manifest = getInstalledApp(nappId)?.event
+    if (manifest) nappletIdentities.set(win.iframe, manifestIdentity(manifest))
   }
   adoptWindow(win)
   flagFreshInPack(stageEl, win, !!position)
