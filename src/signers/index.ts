@@ -1,6 +1,7 @@
 import { getType } from "../account.js"
 import { nip07Signer } from "./nip07.js"
 import { nip46Signer, restoreBunkerSigner, hasStoredBunker } from "./nip46.js"
+import { localSigner } from "./local.js"
 
 // Resolves to whichever signer is currently selected, based on persisted
 // account type. The returned object exposes the standard shape:
@@ -10,6 +11,7 @@ import { nip46Signer, restoreBunkerSigner, hasStoredBunker } from "./nip46.js"
 export function currentSigner() {
   const type = getType()
   if (type === "nip46") return nip46Signer
+  if (type === "local") return localSigner
   // Default and explicit 'nip07' both use the extension. If neither is set
   // (e.g. legacy state, never connected), fall through to nip07 — its
   // methods will throw "No NIP-07 extension detected" on first use.

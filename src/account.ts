@@ -1,5 +1,5 @@
 const PUBKEY_KEY = "nostrapps:pubkey"
-const TYPE_KEY = "nostrapps:signerType" // 'nip07' | 'nip46'
+const TYPE_KEY = "nostrapps:signerType" // 'nip07' | 'nip46' | 'local'
 const listeners = new Set<(pk: string | null) => void>()
 
 export function getPubkey() {

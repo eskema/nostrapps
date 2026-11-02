@@ -1,6 +1,6 @@
-// Getting a key into the launcher. Three ways in — extension, bunker, the
-// google shortcut — shared by the settings panel and by the prompt a napp
-// raises when it asks for an identity nobody has connected yet.
+// Getting a key into the launcher. Four ways in — extension, bunker, a pasted
+// key, the google shortcut — shared by the settings panel and by the prompt a
+// napp raises when it asks for an identity nobody has connected yet.
 //
 // Every signer path in the bridge goes through requireAccount(), so an app
 // that asks for the key on load gets a login screen instead of an empty
@@ -9,6 +9,7 @@ import { openDialog } from "./dialog.js"
 import { button, input } from "./system-napps/ui.js"
 import { getPubkey, setAccount } from "./account.js"
 import { connectBunkerInput } from "./signers/nip46.js"
+import { isEncryptedKey, loginLocalKey } from "./signers/local.js"
 import { googleLoginAndCreateBunker } from "./signers/google.js"
 import { nappNameEl } from "./napp-name.js"
 
@@ -21,7 +22,7 @@ export function setLoginStatusSink(fn: (msg: string) => void) {
   statusSink = fn
 }
 
-// ─── the three ways in ───────────────────────────────────────────
+// ─── the ways in ─────────────────────────────────────────────────
 // Each ends the same way: a pubkey and the signer type it came from, saved as
 // the account.
 
@@ -35,6 +36,14 @@ export async function loginWithExtension(): Promise<string> {
 export async function loginWithBunker(uri: string): Promise<string> {
   const pk = await connectBunkerInput(uri)
   setAccount(pk, "nip46")
+  return pk
+}
+
+// A hex key, nsec or ncryptsec. An ncryptsec needs its password right away
+// (that's where the pubkey comes from), and again on each new tab.
+export async function loginWithKey(raw: string, password?: string): Promise<string> {
+  const pk = loginLocalKey(raw, password)
+  setAccount(pk, "local")
   return pk
 }
 
@@ -54,7 +63,7 @@ export interface LoginControlsOpts {
   onDone?: (pubkey: string) => void
 }
 
-// The three login paths as one block, used by the settings panel and by the
+// The login paths as one block, used by the settings panel and by the
 // prompt. Errors land under the button that caused them rather than only in
 // the log — the prompt has no log to look at.
 export function loginControls(opts: LoginControlsOpts = {}): HTMLElement {
@@ -158,6 +167,82 @@ export function loginControls(opts: LoginControlsOpts = {}): HTMLElement {
     bunkerForm
   )
   wrap.appendChild(bunkerSection)
+
+  // key
+  const keySection = document.createElement("div")
+  keySection.className = "login-section"
+  const keyError = errorEl()
+  const keyForm = document.createElement("form")
+  keyForm.className = "login-bunker-form"
+  keyForm.hidden = true
+  const keyInput = input({
+    type: "password",
+    placeholder: "nsec1…, ncryptsec1… or hex",
+    autocomplete: "off",
+    spellcheck: false
+  })
+  // Shown only once what's pasted is an ncryptsec.
+  const keyPassword = input({
+    type: "password",
+    placeholder: "password",
+    autocomplete: "current-password"
+  })
+  keyPassword.hidden = true
+  keyInput.addEventListener("input", () => {
+    keyPassword.hidden = !isEncryptedKey(keyInput.value)
+  })
+  const keySubmit = button({ label: "log in", type: "submit" })
+  const keyCancel = button({
+    label: "cancel",
+    onClick: () => {
+      keyForm.hidden = true
+      keyError.hidden = true
+      keyInput.value = ""
+      keyPassword.value = ""
+      keyPassword.hidden = true
+    }
+  })
+  const keyActions = document.createElement("div")
+  keyActions.className = "login-bunker-actions"
+  keyActions.append(keySubmit, keyCancel)
+  keyForm.append(keyInput, keyPassword, keyActions, keyError)
+  keyForm.addEventListener("submit", async e => {
+    e.preventDefault()
+    keyError.hidden = true
+    const raw = keyInput.value.trim()
+    if (!raw) return
+    if (isEncryptedKey(raw) && !keyPassword.value) {
+      keyPassword.hidden = false
+      keyPassword.focus()
+      return
+    }
+    keySubmit.disabled = true
+    keySubmit.textContent = "logging in…"
+    // scrypt blocks the thread; let the label paint first.
+    await new Promise(r => setTimeout(r, 20))
+    try {
+      done(await loginWithKey(raw, keyPassword.value))
+      keyInput.value = ""
+      keyPassword.value = ""
+    } catch (err: any) {
+      status(`Error: ${err.message}`)
+      fail(keyError, err)
+    } finally {
+      keySubmit.disabled = false
+      keySubmit.textContent = "log in"
+    }
+  })
+  keySection.append(
+    button({
+      label: "log in with key",
+      onClick: () => {
+        keyForm.hidden = !keyForm.hidden
+        if (!keyForm.hidden) keyInput.focus()
+      }
+    }),
+    keyForm
+  )
+  wrap.appendChild(keySection)
 
   // google
   const googleSection = document.createElement("div")

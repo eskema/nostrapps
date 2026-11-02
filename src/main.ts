@@ -121,6 +121,7 @@ import {
 } from "./nsite/icon.js"
 import { reconnectIfNeeded } from "./signers/index.js"
 import { disconnectBunkerSigner } from "./signers/nip46.js"
+import { forgetLocalKey } from "./signers/local.js"
 import { resetRefusal, setLoginStatusSink } from "./login.js"
 import * as account from "./account.js"
 import { clearDecisions, onRowRevoked } from "./permissions.js"
@@ -473,6 +474,7 @@ async function disconnect(): Promise<void> {
       await disconnectBunkerSigner()
     } catch {}
   }
+  if (account.getType() === "local") forgetLocalKey()
   account.clearPubkey()
   // Logging out is a fresh start: a napp that was told "later" earlier gets to
   // ask again.

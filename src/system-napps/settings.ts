@@ -38,7 +38,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   )
   container.replaceChildren(panel)
 
-  // The three ways in, from login.ts — the same block the prompt a napp raises
+  // The ways in, from login.ts — the same block the prompt a napp raises
   // is built from. Rebuilt on logout so a stale form doesn't sit there.
   function fillLoginOptions() {
     disconnectedEl.replaceChildren(loginControls())
@@ -58,7 +58,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
         })
       )
       const type = ctx.account.getType?.()
-      accountTypeEl.textContent = type === "nip46" ? "bunker" : "extension"
+      accountTypeEl.textContent =
+        type === "nip46" ? "bunker" : type === "local" ? "key" : "extension"
     } else {
       connectedEl.hidden = true
       disconnectedEl.hidden = false
