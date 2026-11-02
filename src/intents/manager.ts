@@ -62,6 +62,8 @@ let serial = 0
 let generation = 0
 let loading: Promise<void> | undefined
 let preferencesSynced = false
+let localLoading: Promise<void> | undefined
+let cachedPreferences = false
 let owner: string | null = getPubkey()
 const candidateId = (reference: string) => {
   if (!ids.has(reference)) ids.set(reference, `intent-handler:${++serial}`)
@@ -129,10 +131,60 @@ function reset() {
   loading = undefined
   preferences.clear()
   preferencesSynced = false
+  localLoading = undefined
+  cachedPreferences = false
   ids.clear()
   emit()
 }
 onAccountChanged(reset)
+// Persist signed events only; decrypted private handler tags stay in memory.
+const preferenceCacheKey = (pk: string) => `nostrapps:intent-preferences:v1:${pk}`
+function acceptPreference(event: NostrEvent, pk: string): boolean {
+  if (event?.kind !== HANDLER_PREFERENCES_KIND || event.pubkey !== pk || !verifyEventFresh(event))
+    return false
+  const role = event.tags.find(t => t[0] === "d")?.[1]
+  if (
+    event.tags.filter(t => t[0] === "d").length !== 1 ||
+    !role ||
+    !conventionIdentity(`napplet:${role}/open`)
+  )
+    return false
+  if (newer(event, preferences.get(role)?.event))
+    preferences.set(role, { event, privateTags: [], locked: !!event.content })
+  return true
+}
+function savePreferenceSnapshot(pk: string) {
+  try {
+    localStorage.setItem(
+      preferenceCacheKey(pk),
+      JSON.stringify([...preferences.values()].map(p => p.event))
+    )
+  } catch {} // The verified event store remains a second local cache.
+}
+async function loadLocalPreferences() {
+  if (owner !== getPubkey()) reset()
+  if (localLoading) return localLoading
+  const pk = getPubkey(),
+    version = generation
+  localLoading = (async () => {
+    if (!pk) return
+    try {
+      const snapshot: unknown = JSON.parse(localStorage.getItem(preferenceCacheKey(pk)) || "null")
+      if (Array.isArray(snapshot)) {
+        // An empty snapshot records a completed sync with no saved preferences.
+        cachedPreferences = snapshot.every(event => acceptPreference(event, pk))
+      }
+    } catch {}
+    const events = await safeQueryEvents({
+      kinds: [HANDLER_PREFERENCES_KIND],
+      authors: [pk]
+    }).catch(() => [])
+    if (version !== generation || pk !== getPubkey()) return
+    for (const event of events) acceptPreference(event, pk)
+    emit()
+  })()
+  return localLoading
+}
 export async function refreshIntentPreferences() {
   if (owner !== getPubkey()) reset()
   if (loading) return loading
@@ -140,6 +192,8 @@ export async function refreshIntentPreferences() {
     version = generation
   loading = (async () => {
     if (!pk) return
+    await loadLocalPreferences()
+    if (generation !== version || pk !== getPubkey()) return
     let complete = false
     const events = await query(
       { kinds: [HANDLER_PREFERENCES_KIND], authors: [pk] },
@@ -150,20 +204,10 @@ export async function refreshIntentPreferences() {
     )
     if (generation !== version || pk !== getPubkey()) return
     preferencesSynced = complete
-    for (const event of events) {
-      const role = event.tags.find(t => t[0] === "d")?.[1]
-      if (
-        event.kind !== HANDLER_PREFERENCES_KIND ||
-        event.tags.filter(t => t[0] === "d").length !== 1 ||
-        !role ||
-        !conventionIdentity(`napplet:${role}/open`) ||
-        event.pubkey !== pk ||
-        !verifyEventFresh(event) ||
-        !newer(event, preferences.get(role)?.event)
-      )
-        continue
-      // Hidden tags are unlocked only when their role is invoked or edited.
-      preferences.set(role, { event, privateTags: [], locked: !!event.content })
+    for (const event of events) acceptPreference(event, pk)
+    if (complete) {
+      cachedPreferences = true
+      savePreferenceSnapshot(pk)
     }
     emit()
     // Keep verified relay preferences available after reload or while offline.
@@ -206,6 +250,16 @@ export async function discoverIntents(convention?: string) {
     ...(identity ? { "#z": [identity.archetype], "#i": [identity.convention] } : {}),
     limit: 500
   })
+  for (const event of events) {
+    observeIntentManifest(event)
+    if (matchesHandler(event, manifestIdentity(event)))
+      void getStore()
+        .saveEvent(event)
+        .catch(() => {})
+  }
+}
+async function loadLocalCatalog() {
+  const events = await safeQueryEvents({ kinds: [5129, 15129, 35129] }).catch(() => [])
   for (const event of events) observeIntentManifest(event)
 }
 async function loadReference(reference: string, hints?: string[]) {
@@ -219,6 +273,23 @@ async function loadReference(reference: string, hints?: string[]) {
           authors: [pointer.pubkey],
           ...(pointer.kind === 35129 ? { "#d": [pointer.identifier] } : {})
         }
+  const known = catalog.get(reference)
+  const cached = await safeQueryEvents(filter).catch(() => [])
+  let local = known && matchesHandler(known, reference) ? known : undefined
+  for (const event of cached)
+    if (matchesHandler(event, reference) && newer(event, local)) local = event
+  if (local) {
+    // A verified cached handler is usable immediately. Refresh its revision
+    // independently; delivery rechecks catalog revisions before disclosure.
+    void query(filter, hints)
+      .then(events => {
+        for (const event of events)
+          if (catalog.has(reference) && matchesHandler(event, reference))
+            observeIntentManifest(event)
+      })
+      .catch(() => {})
+    return local
+  }
   const events = await query(filter, hints)
   let best: NostrEvent | undefined
   for (const event of events)
@@ -318,6 +389,7 @@ export async function editIntentPreference(role: string, edit: HandlerEdit) {
   if (!results.some(r => r.status === "fulfilled"))
     throw new Error("No relay accepted the preferences")
   preferences.set(role, { event: signed, privateTags: hidden, locked: false })
+  savePreferenceSnapshot(pk)
   await getStore()
     .saveEvent(signed)
     .catch(() => {})
@@ -414,45 +486,65 @@ async function choose(
   context: IntentContext,
   message = ""
 ): Promise<Choice | null> {
-  return openDialog<Choice | null>({
-    title: "Open with",
-    class: "app-dialog-handler",
-    signal: context.signal,
-    dismissValue: null,
-    build(resolve) {
-      const readable = (value: string) => value.replace(/[-_]+/g, " ")
-      const action = readable(request.action)
-      const body = el(
-        "div",
-        "intent-chooser",
-        el("p", "", `Choose an app to ${action} ${readable(request.archetype)}.`)
-      )
-      if (message) body.append(el("p", "", message))
-      const remember = check({ label: "Remember this choice" })
-      const hidden = check({ label: "Keep handler preference private" })
-      hidden.hidden = true
-      remember.querySelector("input")?.addEventListener("change", () => {
-        hidden.hidden = !getPubkey() || !rememberValue()
-      })
-      const rememberValue = () => !!remember.querySelector("input")?.checked
-      const hiddenValue = () => !!hidden.querySelector("input")?.checked
-      const napplets = buildIntentHandlerChoices(request, handler => {
-        const reference = [...catalog.keys()].find(ref => candidateId(ref) === handler)!
-        resolve({ reference, remember: rememberValue(), hidden: hiddenValue() })
-      })
-      body.append(el("section", "intent-handler-section", el("h4", "", "Napplets"), napplets))
-      const mapped = mappedNappAction(request.convention, request.payload)
-      const napps =
-        mapped &&
-        buildNappHandlerChoices(mapped.name, mapped.payload, target =>
-          resolve({ napp: true, target, remember: rememberValue() })
+  let unsubscribe = () => {}
+  try {
+    return await openDialog<Choice | null>({
+      title: "Open with",
+      class: "app-dialog-handler",
+      signal: context.signal,
+      dismissValue: null,
+      build(resolve) {
+        const readable = (value: string) => value.replace(/[-_]+/g, " ")
+        const action = readable(request.action)
+        const body = el(
+          "div",
+          "intent-chooser",
+          el("p", "", `Choose an app to ${action} ${readable(request.archetype)}.`)
         )
-      if (napps) body.append(el("section", "intent-handler-section", el("h4", "", "Napps"), napps))
-      body.append(remember, hidden)
-      return body
-    },
-    actions: [{ label: "Cancel", value: null }]
-  })
+        if (message) body.append(el("p", "", message))
+        const remember = check({ label: "Remember this choice" })
+        const hidden = check({ label: "Keep handler preference private" })
+        hidden.hidden = true
+        remember.querySelector("input")?.addEventListener("change", () => {
+          hidden.hidden = !getPubkey() || !rememberValue()
+        })
+        const rememberValue = () => !!remember.querySelector("input")?.checked
+        const hiddenValue = () => !!hidden.querySelector("input")?.checked
+        const napplets = el("div")
+        let revision = ""
+        const render = () => {
+          const next = [...catalog.values()]
+            .filter(event => supports(event, request.convention))
+            .map(event => event.id)
+            .join(":")
+          if (revision === next && napplets.childNodes.length) return
+          revision = next
+          napplets.replaceChildren(
+            buildIntentHandlerChoices(request, handler => {
+              const reference = [...catalog.keys()].find(ref => candidateId(ref) === handler)!
+              resolve({ reference, remember: rememberValue(), hidden: hiddenValue() })
+            })
+          )
+        }
+        render()
+        unsubscribe = subscribeIntents(render)
+        body.append(el("section", "intent-handler-section", el("h4", "", "Napplets"), napplets))
+        const mapped = mappedNappAction(request.convention, request.payload)
+        const napps =
+          mapped &&
+          buildNappHandlerChoices(mapped.name, mapped.payload, target =>
+            resolve({ napp: true, target, remember: rememberValue() })
+          )
+        if (napps)
+          body.append(el("section", "intent-handler-section", el("h4", "", "Napps"), napps))
+        body.append(remember, hidden)
+        return body
+      },
+      actions: [{ label: "Cancel", value: null }]
+    })
+  } finally {
+    unsubscribe()
+  }
 }
 export async function invokeIntent(value: unknown, source: IntentContext): Promise<IntentResult> {
   const controller = new AbortController(),
@@ -525,6 +617,8 @@ async function resolveIntent(
       if (pk !== getPubkey() || version !== generation) throw new Error("Your account changed")
     }
     installed()
+    if (!request.handler) await loadLocalCatalog()
+    checkCurrent()
     // Discovery is independent of account preferences; start both together.
     // Catch here as an explicit handler/default may never need discovery.
     const discovery = request.handler
@@ -540,7 +634,13 @@ async function resolveIntent(
           .then(() => {})
           .catch(() => {})
     if (!request.handler) {
-      await refreshIntentPreferences()
+      await loadLocalPreferences()
+      checkCurrent()
+      const sync = refreshIntentPreferences()
+      // A first-ever account sync still discovers remote defaults. Returning
+      // accounts can use verified local preferences without waiting for EOSE.
+      if (!cachedPreferences && !preferences.has(request.archetype)) await sync
+      else void sync.catch(() => {})
       checkCurrent()
       // Signers may need their own confirmation dialog.
       if (preferences.get(request.archetype)?.locked) ready()
@@ -601,7 +701,9 @@ async function resolveIntent(
         choice = { napp: true, target: saved, remember: false }
     }
     if (!target && !choice) {
-      await discovery
+      const mapped = mappedNappAction(request.convention, request.payload)
+      if (!hasIntentHandlers(request) && !(mapped && hasUserActionHandler(mapped.name)))
+        await discovery
       checkCurrent()
     }
     // With no installed choice in either protocol, retain the existing Apps discovery flow.
@@ -778,21 +880,14 @@ export function intentCatalog() {
 
 onStoreSaved(event => {
   if ([5129, 15129, 35129].includes(event.kind)) observeIntentManifest(event)
-  else if (
-    event.kind === HANDLER_PREFERENCES_KIND &&
-    event.pubkey === getPubkey() &&
-    verifyEventFresh(event)
-  ) {
+  else {
+    const pk = getPubkey()
     const role = event.tags.find(t => t[0] === "d")?.[1]
-    if (
-      !role ||
-      event.tags.filter(t => t[0] === "d").length !== 1 ||
-      !conventionIdentity(`napplet:${role}/open`) ||
-      !newer(event, preferences.get(role)?.event)
-    )
-      return
-    preferences.set(role, { event, privateTags: [], locked: !!event.content })
-    emit()
+    const previous = role ? preferences.get(role) : undefined
+    if (pk && acceptPreference(event, pk) && role && preferences.get(role) !== previous) {
+      if (cachedPreferences) savePreferenceSnapshot(pk)
+      emit()
+    }
   }
 })
 

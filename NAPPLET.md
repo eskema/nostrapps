@@ -159,3 +159,8 @@ source window. Closing/reloading the source, changing accounts, or revoking its
 permission cancels pending work. Targets are signature/hash verified before
 execution and remain opaque sandboxed iframes without a signer. Deliveries are
 one-shot and are never stored in window history, restore state, or share links.
+Preferences are cached per account as verified signed events and used before
+relay discovery finishes on subsequent starts. Decrypted private tags remain in
+memory. Relay synchronization continues in the background; editing preferences
+still requires a completed sync. The first sync for an uncached account can
+require network access before choosing a handler.

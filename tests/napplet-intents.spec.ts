@@ -21,10 +21,10 @@ const manifest = finalizeEvent(
 )
 const sourceId = "napplet~local~intent-source"
 const sourceHtml = `<p id="result">ready</p><a id="link" href="napplet:note/open?id=from-link">Open note</a><script>window.invoke=async(options)=>{try{const r=await napplet.intent.invoke('napplet:note/open',options);document.querySelector('#result').textContent=JSON.stringify(r);return r}catch(e){document.querySelector('#result').textContent=e.message}}</script>`
-async function setup(page: Page, granted = true) {
+async function setup(page: Page, granted = true, targetInstalled = true) {
   await page.goto("/harness/napplet.html")
   await page.evaluate(
-    async ({ manifest, targetHtml, sourceHtml, sourceId, granted }) => {
+    async ({ manifest, targetHtml, sourceHtml, sourceId, granted, targetInstalled }) => {
       const host = await import("/src/sandbox/host.ts")
       const manager = await import("/src/intents/manager.ts")
       const persistence = await import("/src/persistence.ts")
@@ -36,7 +36,7 @@ async function setup(page: Page, granted = true) {
         queueMicrotask(() => params.oneose?.())
         return { close() {} }
       }
-      persistence.storeInstalledEvent(manifest)
+      if (targetInstalled) persistence.storeInstalledEvent(manifest)
       const targetId = persistence.computeNappId(manifest)
       persistence.setPolicy(targetId, { domains: ["intent"] })
       persistence.storeInstalledLocalApp({
@@ -65,7 +65,7 @@ async function setup(page: Page, granted = true) {
       })
       Object.assign(window, { host, manager, persistence, account, source, targetId })
     },
-    { manifest, targetHtml, sourceHtml, sourceId, granted }
+    { manifest, targetHtml, sourceHtml, sourceId, granted, targetInstalled }
   )
   await expect(page.frameLocator("iframe").locator("#result")).toHaveText("ready")
 }
@@ -246,6 +246,12 @@ test("public and private handler preferences publish, fall back in order, and ke
   ])
   expect(published[1].content).not.toContain(reference)
   expect(published[1].content.length).toBeGreaterThan(0)
+  const snapshot = await page.evaluate(
+    pk => localStorage.getItem(`nostrapps:intent-preferences:v1:${pk}`),
+    pk
+  )
+  expect(snapshot).not.toContain(reference)
+  expect(JSON.parse(snapshot!)[0].content).toBe(published[1].content)
   // Reload private preferences from their signed, encrypted event and invoke.
   await page.evaluate(async () => {
     const w = window as any
@@ -552,7 +558,7 @@ test("intent picker shows clickable app rows with icons and authors without tech
 test("slow discovery gives immediate feedback and can be cancelled without a later picker", async ({
   page
 }) => {
-  await setup(page)
+  await setup(page, true, false)
   await page.evaluate(() => {
     ;(window as any).relayPool.subscribeMap = (_requests: unknown, params: any) => {
       const timer = setTimeout(() => params.oneose?.(), 1500)
@@ -700,4 +706,192 @@ test("intent manager can initialize before the sandbox host", async ({ page }) =
     return typeof host.launchNapplet
   })
   expect(result).toBe("function")
+})
+
+for (const preferred of [true, false]) {
+  test(`cold start uses cached ${preferred ? "default" : "empty preferences"} before slow relays finish`, async ({
+    page
+  }) => {
+    await setup(page)
+    const preference = finalizeEvent(
+      {
+        kind: 31129,
+        created_at: 10,
+        content: "",
+        tags: [
+          ["d", "note"],
+          ...(preferred ? [["a", `35129:${manifest.pubkey}:intent-reader`]] : [])
+        ]
+      },
+      generateSecretKey()
+    )
+    await page.evaluate(async preference => {
+      const w = window as any
+      w.account.setAccount(preference.pubkey, "nip07")
+      w.relayPool.subscribeMap = (requests: any[], params: any) => {
+        queueMicrotask(() => {
+          if (requests[0].filter.kinds?.includes(31129)) params.onevent?.(preference)
+          params.oneose?.()
+        })
+        return { close() {} }
+      }
+      await w.manager.refreshIntentPreferences()
+    }, preference)
+    // A fresh module and worker must read persisted state, not the in-memory map.
+    await page.reload()
+    await page.evaluate(async () => {
+      const w = window as any
+      w.manager = await import("/src/intents/manager.ts")
+      w.deliveries = 0
+      w.relayPool.subscribeMap = (requests: any[], params: any) => {
+        if (requests[0].filter.kinds?.includes(31129)) w.finishSync = params.oneose
+        return { close() {} }
+      }
+      w.manager.configureIntents({
+        loadEvent: async () => null,
+        action: async () => {
+          throw new Error("Unexpected NAPP handoff")
+        },
+        deliver: async () => {
+          w.deliveries++
+          return true
+        }
+      })
+      w.started = performance.now()
+      void w.manager
+        .invokeIntent(
+          {
+            archetype: "note",
+            action: "open",
+            convention: "napplet:note/open",
+            payload: { id: "cold" }
+          },
+          { sender: "cold-start", check() {} }
+        )
+        .then((result: unknown) => {
+          w.elapsed = performance.now() - w.started
+          w.result = result
+        })
+    })
+    if (preferred) {
+      await expect
+        .poll(() => page.evaluate(() => (window as any).result?.ok), { timeout: 900 })
+        .toBe(true)
+      expect(await page.evaluate(() => (window as any).elapsed)).toBeLessThan(900)
+      expect(await page.evaluate(() => (window as any).deliveries)).toBe(1)
+    } else {
+      await expect(page.getByRole("button", { name: "Intent Reader", exact: true })).toBeVisible({
+        timeout: 900
+      })
+      await page.getByRole("button", { name: "Cancel", exact: true }).click()
+    }
+    // A cached read never counts as a completed relay sync for editing.
+    await expect.poll(() => page.evaluate(() => typeof (window as any).finishSync)).toBe("function")
+    await page.evaluate(() => (window as any).finishSync())
+  })
+}
+
+for (const invalid of ["tampered", "other-account"]) {
+  test(`a ${invalid} preference snapshot cannot select a cold-start handler`, async ({ page }) => {
+    await setup(page)
+    const preference = finalizeEvent(
+      {
+        kind: 31129,
+        created_at: 10,
+        content: "",
+        tags: [
+          ["d", "note"],
+          ["a", `35129:${manifest.pubkey}:intent-reader`]
+        ]
+      },
+      generateSecretKey()
+    )
+    await page.evaluate(
+      ({ preference, invalid }) => {
+        const w = window as any
+        const account = invalid === "other-account" ? "a".repeat(64) : preference.pubkey
+        w.account.setAccount(account, "nip07")
+        localStorage.setItem(
+          `nostrapps:intent-preferences:v1:${account}`,
+          JSON.stringify([invalid === "tampered" ? { ...preference, created_at: 100 } : preference])
+        )
+        w.relayPool.subscribeMap = (requests: any[], params: any) => {
+          if (requests[0].filter.kinds?.includes(31129)) w.finishSync = params.oneose
+          else queueMicrotask(() => params.oneose?.())
+          return { close() {} }
+        }
+        w.deliveries = 0
+        w.manager.configureIntents({
+          loadEvent: async () => null,
+          action: async () => undefined,
+          deliver: async () => {
+            w.deliveries++
+            return true
+          }
+        })
+        void w.manager
+          .invokeIntent(
+            {
+              archetype: "note",
+              action: "open",
+              convention: "napplet:note/open",
+              payload: { id: "invalid-cache" }
+            },
+            { sender: "cache-test", check() {} }
+          )
+          .then((result: unknown) => (w.result = result))
+      },
+      { preference, invalid }
+    )
+    await expect.poll(() => page.evaluate(() => typeof (window as any).finishSync)).toBe("function")
+    expect(await page.evaluate(() => (window as any).deliveries)).toBe(0)
+    await expect(page.getByText("Finding apps for your request…")).toBeVisible()
+    await page.evaluate(() => (window as any).finishSync())
+    await page.getByRole("button", { name: "Intent Reader", exact: true }).click()
+    await expect.poll(() => page.evaluate(() => (window as any).result?.ok)).toBe(true)
+  })
+}
+
+test("cached choices appear immediately and remote discovery updates the open chooser", async ({
+  page
+}) => {
+  await setup(page)
+  const remote = finalizeEvent(
+    {
+      kind: 35129,
+      created_at: 1,
+      content: "Remote reader",
+      tags: [
+        ["d", "remote"],
+        ["title", "Remote Reader"],
+        ["x", "1".repeat(64)],
+        ["R", "intent"],
+        ["z", "note"],
+        ["i", "napplet:note/open"]
+      ]
+    },
+    generateSecretKey()
+  )
+  await page.evaluate(remote => {
+    const w = window as any
+    w.relayPool.subscribeMap = (_requests: any[], params: any) => {
+      w.finishDiscovery = () => {
+        params.onevent?.(remote)
+        params.oneose?.()
+      }
+      return { close() {} }
+    }
+  }, remote)
+  await invoke(page)
+  await expect(page.getByRole("button", { name: "Intent Reader", exact: true })).toBeVisible({
+    timeout: 900
+  })
+  await page.getByRole("checkbox", { name: "Remember this choice", exact: true }).check()
+  await page.evaluate(() => (window as any).finishDiscovery())
+  await expect(page.getByRole("button", { name: "Remote Reader", exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("checkbox", { name: "Remember this choice", exact: true })
+  ).toBeChecked()
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByRole("dialog")).toBeHidden()
 })
