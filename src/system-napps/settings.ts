@@ -1,3 +1,4 @@
+import { intentSettings } from "./intent-settings.js"
 export const id = "settings"
 export const title = "Settings"
 export const slash = "/settings"
@@ -59,6 +60,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     ),
     buildRow
   )
+  const intents = intentSettings()
+  panel.append(intents.section)
   container.replaceChildren(panel)
 
   // The ways in, from login.ts — the same block the prompt a napp raises
@@ -273,6 +276,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
       unsubHandlers()
       unsubRelays()
       backup.unmount()
+      intents.unmount()
     }
   }
 }

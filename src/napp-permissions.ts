@@ -26,6 +26,7 @@ const CAP_INFO: Record<string, { title: string; desc: string }> = {
   relay: { title: "relay", desc: "reads and posts relay events" },
   outbox: { title: "outbox", desc: "finds the right relays for you" },
   common: { title: "common", desc: "looks up profiles, follows, reacts and reports" },
+  intent: { title: "intent", desc: "opens other napplets and receives intents" },
   inc: { title: "inc", desc: "talks to other open napplets" },
   link: { title: "link", desc: "opens links in new tabs" },
   config: { title: "config", desc: "settings you edit in the launcher" },
@@ -53,6 +54,7 @@ const CAP_ORDER = [
   "outbox",
   "common",
   "inc",
+  "intent",
   "link",
   "config"
 ]

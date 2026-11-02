@@ -346,7 +346,7 @@ export interface SystemCtx {
   isInstalled(nappId: string): boolean
   wasInstalled(nappId: string): boolean
   // `launch: false` installs a napplet without opening its window.
-  install(raw: string, opts?: { launch?: boolean }): Promise<string>
+  install(raw: string, opts?: { launch?: boolean; manifest?: NostrEvent }): Promise<string>
   // Opens an address as a temp app, without installing it (or the app, when
   // it's here already).
   tryApp?(raw: string): Promise<void>

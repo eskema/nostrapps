@@ -251,8 +251,27 @@ function upgradeInsecureRequests(): Plugin {
   }
 }
 
+// The bridge is also served as a public script. Load its source explicitly
+// for srcdoc injection; Vite does not support raw imports from public/.
+function nappletBridgeSource(): Plugin {
+  const id = "virtual:napplet-bridge-source"
+  const resolvedId = "\0" + id
+  const path = here("public/napplet-bridge.js")
+  return {
+    name: "napplet-bridge-source",
+    resolveId(source) {
+      if (source === id) return resolvedId
+    },
+    load(source) {
+      if (source !== resolvedId) return
+      this.addWatchFile(path)
+      return `export default ${JSON.stringify(readFileSync(path, "utf8"))}`
+    }
+  }
+}
+
 export default defineConfig({
-  plugins: [nappUi(), fontSlots(), buildStamp(), upgradeInsecureRequests()],
+  plugins: [nappUi(), fontSlots(), buildStamp(), upgradeInsecureRequests(), nappletBridgeSource()],
   server: {
     port: 5173,
     strictPort: true,

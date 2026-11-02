@@ -100,7 +100,7 @@ test("permission edits retain all APIs and deny revoked usage", async ({ page })
     "<p id='result'></p><script>document.querySelector('#result').textContent=Object.keys(napplet).sort().join(',')</script>"
   )
   await expect(page.frameLocator("iframe").locator("#result")).toHaveText(
-    "common,config,identity,inc,link,outbox,relay,resource,storage,theme"
+    "common,config,identity,inc,intent,link,outbox,relay,resource,storage,theme"
   )
   await page.evaluate(async id => {
     const w = window as any
@@ -108,7 +108,7 @@ test("permission edits retain all APIs and deny revoked usage", async ({ page })
     await w.host.applyNappPolicy("", id)
   }, id)
   await expect(page.frameLocator("iframe").locator("#result")).toHaveText(
-    "common,config,identity,inc,link,outbox,relay,resource,storage,theme"
+    "common,config,identity,inc,intent,link,outbox,relay,resource,storage,theme"
   )
   expect(await page.locator("iframe").getAttribute("sandbox")).toBe("allow-scripts")
   expect(
@@ -257,7 +257,7 @@ test("napplets without declarations or grants receive all APIs but cannot use pr
     []
   )
   await expect(page.frameLocator("iframe").locator("#apis")).toHaveText(
-    "common,config,identity,inc,link,outbox,relay,resource,storage,theme"
+    "common,config,identity,inc,intent,link,outbox,relay,resource,storage,theme"
   )
   await expect(page.frameLocator("iframe").locator("#result")).toHaveText("Permission denied")
 })

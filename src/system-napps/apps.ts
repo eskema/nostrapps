@@ -150,7 +150,8 @@ export function mount(
   function setView(v: "list" | "grid") {
     view = v
     appsContent.classList.toggle("apps-grid", v === "grid")
-    for (const b of appsContent.querySelectorAll<HTMLButtonElement>(".apps-view")) paintViewToggle(b)
+    for (const b of appsContent.querySelectorAll<HTMLButtonElement>(".apps-view"))
+      paintViewToggle(b)
     emitParams()
   }
 
@@ -839,7 +840,11 @@ export function mount(
   }
 
   function renderInstalled() {
-    const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
+    const searchEl = input({
+      type: "search",
+      class: "apps-search",
+      placeholder: SEARCH_PLACEHOLDER
+    })
     _installedListEl = el("div", "apps-list")
     installedPane.replaceChildren(toolbar(searchEl))
     if (MOCK_CARD) installedPane.appendChild(mockTemporaryCard())
@@ -1433,7 +1438,11 @@ export function mount(
   }
 
   function renderDiscover() {
-    const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
+    const searchEl = input({
+      type: "search",
+      class: "apps-search",
+      placeholder: SEARCH_PLACEHOLDER
+    })
     _listEl = el("div", "apps-list")
     _actionBarEl = el("div", "apps-actionbar")
     paintActionBar()
@@ -1694,7 +1703,7 @@ function renderCard(
         // not at all. Try opens a temp in the current space, as a pasted
         // address used to.
         if (action === "try") await ctx.tryApp!(raw)
-        else await ctx.install(raw)
+        else await ctx.install(raw, { manifest: evt })
       } else if (action === "keep") {
         // a temp's id: install keeps it
         await ctx.install(nappId)

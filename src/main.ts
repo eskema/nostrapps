@@ -1,3 +1,6 @@
+import { configureIntents, dispatchIntentAction, isIntentAction, observeIntentManifest } from "./intents/manager.js"
+import { deliverNappletIntent } from "./sandbox/host.js"
+import { actionConventions, mappedActionPayload } from "./intents/action-mappings.js"
 import "@fontsource-variable/source-sans-3"
 import "@fontsource-variable/source-sans-3/wght-italic.css"
 import "@fontsource-variable/source-serif-4"
@@ -759,11 +762,14 @@ async function runNappAction(
   callerNappId: string,
   name: string,
   payload: unknown,
-  options?: { instance?: string; auxiliary?: boolean }
+  options?: { instance?: string; auxiliary?: boolean },
+  bypassIntents = false
 ) {
   if (typeof name !== "string" || !name) {
     throw new Error("napp.action: action name is required")
   }
+
+  if (isIntentAction(name)) return dispatchIntentAction(name, payload)
 
   const auxiliary = !!options?.auxiliary
   let auxWin: NappWindow | null = null
@@ -779,6 +785,13 @@ async function runNappAction(
     }
     const kind = (payload as { kind?: unknown } | null)?.kind
     if (typeof kind === "number") name = `view:${kind}`
+  }
+  if (!bypassIntents && !instanceId && !auxiliary && Object.hasOwn(actionConventions, name)) {
+    // Only fixed, validated compatibility contracts enter canonical delivery.
+    // Invalid legacy payloads retain the existing NAPP action behavior.
+    try { mappedActionPayload(name, payload) }
+    catch { return runNappAction(callerNappId, name, payload, options, true) }
+    return dispatchIntentAction(name, payload)
   }
   if (!instanceId) {
     // no instance specified, will open a new window, often prompting the user first
@@ -1074,7 +1087,7 @@ const systemCtx: SystemCtx = {
   // Use a thunk so the reference resolves to the function declared later.
   isInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
   wasInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
-  install: async (raw: string, opts?: { launch?: boolean }) => {
+  install: async (raw: string, opts?: { launch?: boolean; manifest?: NostrEvent }) => {
     const nappId = await install(raw, opts)
     void deliverPendingAction(nappId)
     return nappId
@@ -2777,7 +2790,10 @@ async function openInstalled(nappId: string, petname: string, spaceId: string) {
   win.focus()
 }
 
-async function install(raw: string, opts: { launch?: boolean } = {}): Promise<string> {
+async function install(
+  raw: string,
+  opts: { launch?: boolean; manifest?: NostrEvent } = {}
+): Promise<string> {
   // A temp app, not kept yet (the Apps card's keep): kept. Its card is up
   // from the moment its window is, before there is anything to keep.
   if (sharedTemps.has(raw)) return keepTempApp(raw)
@@ -2869,10 +2885,19 @@ async function installNapplet(
     relayHints: string[]
     kind: number
   },
-  { launch = true }: { launch?: boolean } = {}
+  { launch = true, manifest }: { launch?: boolean; manifest?: NostrEvent } = {}
 ): Promise<string> {
   setStatus("Resolving napplet…")
-  const resolved = await resolveNapplet(target, setStatus)
+  if (
+    manifest &&
+    (manifest.kind !== target.kind ||
+      manifest.pubkey !== target.pubkey ||
+      (target.kind === 35129 && manifest.tags.find(tag => tag[0] === "d")?.[1] !== target.dTag))
+  )
+    throw new Error("Discovered manifest does not match the requested napplet")
+  const resolved = manifest
+    ? await loadNappletFromManifest(manifest, setStatus, { healRelays: target.relayHints })
+    : await resolveNapplet(target, setStatus)
   const nappId = persist.computeNappId(resolved.manifest)
   persist.assertSameAuthor(nappId, resolved.manifest.pubkey)
 
@@ -4171,3 +4196,41 @@ async function checkReachable(
   }
   return out
 }
+
+configureIntents({
+  action: (name, payload) => runNappAction("intent", name, payload, undefined, true),
+  loadEvent: async code => (await resolveViewPayload(code)) as import("@nostr/tools/core").NostrEvent | null,
+  async deliver(event, request, delivery, context) {
+    context.check()
+    const nappId = persist.computeNappId(event)
+    persist.assertSameAuthor(nappId, event.pubkey)
+    const policy = await resolvePolicyForLaunch(nappId, {
+      title: event.tags.find(t => t[0] === "title")?.[1] || "Napplet",
+      type: "napplet", author: event.pubkey,
+      declaredDomains: requiresFromEvent(event), optionalDomains: optionalFromEvent(event)
+    })
+    context.check()
+    if (!policy?.domains.includes("intent")) return false
+    // Preflight the exact chosen revision before mounting or disclosing payload.
+    const resolved = await loadNappletFromManifest(event, setStatus, { signal: context.signal })
+    context.check()
+    let win = request.behavior?.reuse === false ? null : findOpenWindowByNappId(nappId)
+    // A snapshot/root/named manifest can share a legacy installed ID. Reuse
+    // only a window running this exact verified revision.
+    if (persist.getInstalledApp(nappId)?.event?.id !== event.id) win = null
+    persist.storeInstalledEvent(event)
+    observeIntentManifest(event)
+    if (!win) {
+      win = launchNapplet(stage, nappId, resolved.html, { ...makeLaunchOpts(), petname: resolved.title || "Napplet" })
+      syncDOM(win)
+    }
+    context.check()
+    const accepted = await deliverNappletIntent(win, delivery, () => {
+      context.check()
+      if (persist.getInstalledApp(nappId)?.event?.id !== event.id || !persist.getPolicy(nappId).domains.includes("intent")) throw new Error("The target changed or lost intent permission")
+    }, context.signal)
+    if (accepted && request.behavior?.focus !== false) win.focus()
+    notifyAppsChanged()
+    return accepted
+  }
+})

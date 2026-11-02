@@ -1,3 +1,6 @@
+import { normalizeIntentUri, createIntentUriNormalizer } from "../intents/uri.js"
+import { invokeIntent, readIntentAvailability, intentAvailability, subscribeIntents } from "../intents/manager.js"
+import { manifestIdentity, type IntentDelivery } from "../intents/catalog.js"
 import type {
   SystemLaunchOpts,
   LaunchOpts,
@@ -36,7 +39,7 @@ import { WASM_LOCAL_METHODS } from "./wasm-local.js"
 import { httpFetch, httpFetchImage } from "./wasm-http.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
-import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
+import nappletBridgeSource from "virtual:napplet-bridge-source"
 import { readBoundedBlob } from "../nsite/download.js"
 import { fetchBlob } from "../nsite/fetch.js"
 import {
@@ -407,6 +410,8 @@ function resetInstanceRuntimeState(
   instanceId: string,
   reason = "Window reloaded before action registered"
 ) {
+  const frame = openWindows.get(instanceId)?.iframe
+  if (frame) intentReady.delete(frame)
   clearInstanceRuntimeState(instanceId, reason)
   trackReady(instanceId)
 }
@@ -608,6 +613,7 @@ const NAPPLET_OFFERED = [
   "outbox",
   "common",
   "inc",
+  "intent",
   "link",
   "config"
 ]
@@ -1966,6 +1972,10 @@ function handleNapplet(
   nappId: string,
   instanceId: string
 ) {
+  if (data.type === "intent.ready") {
+    intentReady.add(iframe)
+    return
+  }
   const domain = data.type.split(".")[0]
   if (!nappletDomainsFor(nappId).includes(domain)) return
   let entry = nappletLifetimes.get(instanceId)
@@ -1998,7 +2008,9 @@ function handleNapplet(
   try {
     context.check()
   } catch {
-    if (data.type === "relay.subscribe" || data.type === "outbox.subscribe")
+    if (data.type === "intent.invoke")
+      post({ type: "intent.invoke.result", id: data.id, result: { ok: false, error: "Permission denied" } })
+    else if (data.type === "relay.subscribe" || data.type === "outbox.subscribe")
       post({ type: `${domain}.closed`, subId: data.subId, reason: "Permission denied" })
     else
       post({
@@ -2006,6 +2018,36 @@ function handleNapplet(
         id: data.id,
         error: "Permission denied"
       })
+    return
+  }
+
+  if (data.type === "link.open" && typeof (data as any).url === "string" && (data as any).url.startsWith("napplet:")) {
+    try {
+      if (!nappletGrantedDomainsFor(nappId).includes("intent")) throw new Error("Permission denied")
+      const request = normalizeIntentUri((data as any).url, undefined)
+      const app = getInstalledApp(nappId)
+      const sender = app?.event ? manifestIdentity(app.event) : `nostrapps:local:${nappId}`
+      void invokeIntent(request, { sender, signal: context.signal, check() { context.check(); if (!nappletGrantedDomainsFor(nappId).includes("intent")) throw new Error("Permission denied") } })
+        .then(result => post({ type: "link.open.result", id: data.id, status: result.ok ? "opened" : "denied" }))
+    } catch (error) { post({ type: "link.open.result", id: data.id, error: error instanceof Error ? error.message : String(error) }) }
+    return
+  }
+
+  if (domain === "intent") {
+    const payload = data as any
+    if (data.type === "intent.invoke") {
+      const app = getInstalledApp(nappId)
+      const sender = app?.event ? manifestIdentity(app.event) : `nostrapps:local:${nappId}`
+      void invokeIntent(payload.request, { sender, signal: context.signal, check: () => context.check() })
+        .then(result => post({ type: "intent.invoke.result", id: data.id, result }))
+    } else if (data.type === "intent.handlers" || data.type === "intent.available") {
+      void readIntentAvailability().then(handlers => {
+        context.check()
+        if (data.type === "intent.handlers") post({ type: "intent.handlers.result", id: data.id, handlers })
+        else if (typeof payload.archetype !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(payload.archetype)) post({ type: "intent.available.result", id: data.id, error: "Invalid archetype" })
+        else post({ type: "intent.available.result", id: data.id, availability: handlers.find(h => h.archetype === payload.archetype) ?? { archetype: payload.archetype, available: false, candidates: [], hasDefault: false } })
+      }).catch(error => post({ type: `${data.type}.result`, id: data.id, error: error.message }))
+    }
     return
   }
 
@@ -3024,7 +3066,7 @@ function buildNappletDoc(html: string, domains: string[]): string {
   const inject =
     `<meta http-equiv="Content-Security-Policy" content="${NAPPLET_CSP}">` +
     `<script>window.__nappletDomains=${JSON.stringify(domains).replace(/</g, "\\u003c")}</script>` +
-    `<script>${nappletBridgeSource}</script>`
+    `<script>window.__normalizeIntentUri=(${createIntentUriNormalizer.toString()})();${nappletBridgeSource}</script>`
   return `<!doctype html><head>${inject}</head>${html}`
 }
 
@@ -6069,3 +6111,35 @@ async function publishEventToRelays(
 
   return { relays: relaysMap, published, failed }
 }
+
+// Readiness belongs to the currently loaded document and is never persisted.
+const intentReady = new WeakSet<HTMLIFrameElement>()
+export async function deliverNappletIntent(win: NappWindow, delivery: IntentDelivery, check: () => void, signal?: AbortSignal): Promise<boolean> {
+  const frame = win.iframe
+  if (!frame) return false
+  const source = frame.contentWindow
+  const deadline = Date.now() + 15000
+  while (!intentReady.has(frame)) {
+    check()
+    signal?.throwIfAborted()
+    if (!frame.isConnected || frame.contentWindow !== source || Date.now() >= deadline) return false
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  check()
+  const id = win.getState().nappId
+  if (!frame.isConnected || !nappletGrantedDomainsFor(id).includes("intent")) return false
+  source?.postMessage({ type: "intent.deliver", delivery: structuredClone(delivery) }, "*")
+  return true
+}
+let lastIntentRoles = new Set<string>()
+subscribeIntents(() => {
+  const handlers = intentAvailability()
+  const roles = new Set(handlers.map(h => h.archetype))
+  for (const archetype of lastIntentRoles) if (!roles.has(archetype)) handlers.push({ archetype, available: false, candidates: [], hasDefault: false })
+  lastIntentRoles = roles
+  for (const win of openWindows.values()) {
+    const frame = win.iframe
+    if (!frame || !intentReady.has(frame) || !nappletGrantedDomainsFor(win.getState().nappId).includes("intent")) continue
+    for (const availability of handlers) frame.contentWindow?.postMessage({ type: "intent.changed", availability }, "*")
+  }
+})

@@ -1431,3 +1431,27 @@ a.ui-author:hover > .ui-author-name {
 )[hidden] {
   display: none;
 }
+
+/* Intent choices and preference chains stay usable in narrow app windows. */
+.intent-chooser, .intent-settings {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.intent-chooser > div, .intent-settings > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.intent-chooser code, .intent-settings code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 12px;
+}
+.intent-settings input, .intent-settings select {
+  min-width: 0;
+  max-width: 100%;
+}
+.intent-chooser button { min-height: 44px; }

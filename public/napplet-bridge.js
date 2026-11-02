@@ -19,6 +19,16 @@
   const identityHandlers = new Set()
   const relaySubs = new Map() // subId -> { onEvent, onEose, onClosed }
   const outboxSubs = new Map() // subId -> { event: Set, closed: Set }
+  const intentHandlers = new Set()
+  const intentChanges = new Set()
+  const intentQueue = []
+  function drainIntents() {
+    if (!intentHandlers.size) return
+    while (intentQueue.length) {
+      const delivery = intentQueue.shift()
+      for (const fn of [...intentHandlers]) { try { fn(delivery) } catch {} }
+    }
+  }
   const incHandlers = new Map() // topic -> Set<callback(payload, syntheticEvent)>
   const configSubscribers = new Set()
   const configSchemaErrorHandlers = new Set()
@@ -36,6 +46,18 @@
   }
 
   function handleNappletMessage(data) {
+    if (data.type === "intent.deliver") {
+      const d = data.delivery
+      if (d && typeof d.sender === "string" && typeof d.convention === "string") {
+        intentQueue.push(Object.freeze(d))
+        drainIntents()
+      }
+      return
+    }
+    if (data.type === "intent.changed") {
+      for (const fn of intentChanges) { try { fn(data.availability) } catch {} }
+      return
+    }
     if (data.type === "theme.changed") {
       for (const fn of themeHandlers) {
         try {
@@ -168,6 +190,39 @@
   })
 
   const NAPPLET_DOMAIN_FACTORIES = {
+    intent: () => {
+      const normalize = (uri, options) => {
+        if (typeof uri === "string") return window.__normalizeIntentUri(uri, options)
+        if (!uri || typeof uri !== "object" || Array.isArray(uri) || Object.keys(uri).some(k => !["archetype", "action", "convention", "payload", "handler", "handlerHint", "behavior"].includes(k))) throw new TypeError("Invalid intent request")
+        const { archetype, action = "open", convention = `napplet:${archetype}/${action}`, ...rest } = uri
+        const request = window.__normalizeIntentUri(convention, rest)
+        if (request.archetype !== archetype || request.action !== action) throw new TypeError("Invalid intent convention")
+        return request
+      }
+      const invoke = (uri, options) => nappletCall("intent.invoke", { request: normalize(uri, options) }, d => d.result)
+      return {
+        invoke,
+        open: (uri, options, legacyOptions) => {
+          const request = typeof uri === "string" && !uri.startsWith("napplet:")
+            ? normalize(`napplet:${uri}/open`, { ...legacyOptions, ...(options === undefined ? {} : { payload: options }) })
+            : normalize(uri, options)
+          if (request.action !== "open") throw new TypeError("intent.open requires a /open URI")
+          return nappletCall("intent.invoke", { request }, d => d.result)
+        },
+        available: archetype => nappletCall("intent.available", { archetype }, d => d.availability),
+        handlers: () => nappletCall("intent.handlers", null, d => d.handlers),
+        onDelivery: handler => {
+          if (typeof handler !== "function") throw new TypeError("Expected an intent delivery handler")
+          intentHandlers.add(handler)
+          drainIntents()
+          return { close: () => intentHandlers.delete(handler) }
+        },
+        onChanged: handler => {
+          intentChanges.add(handler)
+          return { close: () => intentChanges.delete(handler) }
+        }
+      }
+    },
     identity: () => ({
       getPublicKey: () => nappletCall("identity.getPublicKey", null, d => d.pubkey),
       getRelays: () => nappletCall("identity.getRelays", null, d => d.relays),
@@ -347,8 +402,9 @@
     }),
     link: () => ({
       // Resolves { status: "opened" | "denied" }; malformed URLs reject.
-      open: (url, options) =>
-        nappletCall("link.open", { url, ...(options ? { options } : {}) }, d => ({
+      open: (url, options) => typeof url === "string" && url.startsWith("napplet:") && window.napplet.intent
+        ? window.napplet.intent.invoke(url).then(result => ({ status: result.ok ? "opened" : "denied" }))
+        : nappletCall("link.open", { url, ...(options ? { options } : {}) }, d => ({
           status: d.status
         }))
     }),
@@ -430,4 +486,15 @@
       window.napplet = napplet
     } catch {}
   }
+  // Intent deliveries are buffered above, including for late subscribers.
+  const ready = () => window.parent.postMessage({ type: "intent.ready" }, "*")
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ready, { once: true })
+  else ready()
+  document.addEventListener("click", event => {
+    const anchor = event.composedPath().find(node => node instanceof HTMLAnchorElement)
+    const uri = anchor && anchor.getAttribute("href")
+    if (event.defaultPrevented || !uri || !uri.startsWith("napplet:") || !window.napplet?.intent) return
+    event.preventDefault()
+    Promise.resolve().then(() => window.napplet.intent.invoke(uri)).catch(() => {})
+  })
 })()

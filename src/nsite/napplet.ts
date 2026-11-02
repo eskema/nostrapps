@@ -6,7 +6,8 @@ import { pool } from "@nostr/gadgets/global"
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
 import { verifyEventFresh } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
-import { addedServers, fetchBlob } from "./fetch.js"
+import { addedServers, fetchBlob, NAPP_RELAYS } from "./fetch.js"
+import { optionalLookup, queryManifestEvents } from "./relay-query.js"
 import { healNapp } from "./heal.js"
 import { FALLBACK_RELAYS } from "../relay-health.js"
 
@@ -207,18 +208,28 @@ export async function resolveNapplet(
   const { pubkey, kind, dTag, relayHints, id } = target
   onProgress("Querying relays for napplet…")
 
-  let relays = relayHints.length ? relayHints : FALLBACK_RELAYS
-  if (!relayHints.length && pubkey) {
-    try {
-      const w = (await loadRelayList(pubkey)).items.filter(r => r.write).map(r => r.url)
-      if (w.length) relays = w
-    } catch {}
-  }
-
+  // Ask known sources immediately. Hints supplement rather than replace them.
+  const relays = [...new Set([...relayHints, ...NAPP_RELAYS, ...FALLBACK_RELAYS])]
   const filter: any = id
     ? { ids: [id] }
-    : { kinds: [kind], authors: [pubkey], ...(dTag ? { "#d": [dTag] } : {}) }
-  const events = await pool.querySync(relays, filter, { maxWait: 6000 })
+    : { kinds: [kind], authors: [pubkey], ...(kind === NAPPLET_NAMED_KIND ? { "#d": [dTag] } : {}) }
+  const primary = queryManifestEvents(pool, relays, filter)
+  const author =
+    !relayHints.length && pubkey
+      ? (async () => {
+          const list = await optionalLookup(loadRelayList(pubkey))
+          const extra =
+            list?.items
+              .filter(r => r.write)
+              .map(r => r.url)
+              .filter(url => !relays.includes(url)) ?? []
+          if (!extra.length) return []
+          relays.push(...extra)
+          return queryManifestEvents(pool, extra, filter)
+        })()
+      : Promise.resolve([])
+  const events = (await Promise.all([primary, author])).flat()
+
   const manifest = latest(
     events.filter(
       event =>
@@ -263,9 +274,10 @@ export async function loadNappletFromManifest(
 
   const pubkey = manifest.pubkey
   const manifestServers = manifest.tags.filter(t => t[0] === "server" && t[1]).map(t => t[1])
+  onProgress(cached ? "Loading verified cached napplet…" : "Finding napplet download servers…")
   const userServers =
     pubkey && (!cached || opts.healRelays?.length)
-      ? ((await loadBlossomServers(pubkey).catch(() => ({ items: [] }))).items ?? [])
+      ? ((await optionalLookup(loadBlossomServers(pubkey)))?.items ?? [])
       : []
   const servers = [
     "relay.nostrapps.com",
