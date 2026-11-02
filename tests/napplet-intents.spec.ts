@@ -451,3 +451,245 @@ test("sender identity remains bound to the running document when its installed r
     original.id
   )
 })
+
+test("settings edits synced default and private intent override chains", async ({ page }) => {
+  await setup(page)
+  await page.evaluate(async () => {
+    const w = window as any
+    const { loginLocalKey } = await import("/src/signers/local.ts")
+    w.account.setAccount(loginLocalKey("1".repeat(64)), "local")
+    w.published = []
+    w.relayPool.publish = (_relays: string[], event: any) => {
+      w.published.push(event)
+      return [Promise.resolve("accepted")]
+    }
+    w.relayPool.subscribeMap = (requests: any[], params: any) => {
+      queueMicrotask(() => {
+        if (requests[0].filter.kinds?.includes(31129))
+          w.published.forEach((event: any) => params.onevent?.(event))
+        params.oneose?.()
+      })
+      return { close() {} }
+    }
+    const reference = [...w.manager.intentCatalog().keys()][0]
+    await w.manager.editIntentPreference("note", { action: "add", reference })
+    await w.manager.editIntentPreference("note", {
+      action: "add", reference, identity: "napplet:note/open", hidden: true
+    })
+    // Reload the saved state so private handlers begin locked, as on a fresh session.
+    const pk = w.account.getPubkey()
+    w.account.setAccount(null, null)
+    w.account.setAccount(pk, "local")
+    const { intentSettings } = await import("/src/system-napps/intent-settings.ts")
+    w.settings = intentSettings()
+    document.body.append(w.settings.section)
+    w.settings.section.open = true
+  })
+  await expect(page.getByRole("button", { name: "Refresh handlers" })).toBeEnabled()
+  await page.locator(".intent-archetype > summary").filter({ hasText: /^note$/ }).click()
+  const defaults = page.getByRole("region", { name: "note default handlers", exact: true })
+  await expect(defaults.getByText("Intent Reader", { exact: true })).toBeVisible()
+  await expect(defaults.getByRole("button", { name: "Prefer", exact: true })).toBeDisabled()
+  await expect(page.getByRole("combobox", { name: "Add preference", exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Unlock private preferences", exact: true }).click()
+  const override = page.getByRole("region", {
+    name: "note napplet:note/open handlers",
+    exact: true
+  })
+  await expect(override.getByRole("button", { name: "Make public", exact: true })).toBeEnabled()
+  const events = await page.evaluate(() => (window as any).published)
+  expect(events).toHaveLength(2)
+  expect(events[1].kind).toBe(31129)
+  expect(events[1].tags).toEqual([
+    ["d", "note"],
+    ["a", `35129:${manifest.pubkey}:intent-reader`]
+  ])
+  expect(events[1].content.length).toBeGreaterThan(0)
+  await override.getByRole("button", { name: "Reset override" }).click()
+  await expect(override).toHaveCount(0)
+  await expect(defaults).toBeVisible()
+  await page.getByRole("searchbox", { name: "Filter intents" }).fill("missing")
+  await expect(page.getByText("No matching intents.")).toBeVisible()
+  await page.getByRole("searchbox", { name: "Filter intents" }).fill("")
+  await defaults.getByRole("button", { name: "Remove handler", exact: true }).click()
+  await expect(page.locator(".intent-archetype")).toHaveCount(0)
+  await expect(page.getByText("No saved intent handlers.", { exact: true })).toBeVisible()
+  await page.evaluate(() => (window as any).account.setAccount(null, null))
+  await expect(page.getByText("Connect an account to sync handler preferences.")).toBeVisible()
+  await expect(page.getByText("Intent Reader", { exact: true })).toHaveCount(0)
+})
+
+test("intent picker shows clickable app rows with icons and authors without technical data", async ({
+  page
+}) => {
+  await setup(page)
+  await invoke(page)
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByText("Choose an app to open note.")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Intent Reader", exact: true })).toBeVisible()
+  const row = dialog.getByRole("button", { name: "Intent Reader", exact: true })
+  await expect(row.locator(".ui-app-icon")).toBeVisible()
+  await expect(row.locator(".intent-handler-title")).toHaveText("Intent Reader")
+  await expect(row.locator(".intent-handler-author .ui-author")).toBeVisible()
+  await expect(dialog.locator("code, details")).toHaveCount(0)
+  await expect(dialog).not.toContainText(`35129:${manifest.pubkey}:intent-reader`)
+  await expect(dialog.getByText("Keep handler preference private", { exact: true })).toBeHidden()
+  const titleBox = await row.locator(".intent-handler-title").boundingBox()
+  const authorBox = await row.locator(".intent-handler-author").boundingBox()
+  const iconBox = await row.locator(".ui-app-icon").boundingBox()
+  expect(authorBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height)
+  expect(iconBox!.x + iconBox!.width).toBeLessThanOrEqual(titleBox!.x)
+  await row.locator(".intent-handler-author").click()
+  await expect(page.locator("iframe")).toHaveCount(2)
+})
+
+test("slow discovery gives immediate feedback and can be cancelled without a later picker", async ({
+  page
+}) => {
+  await setup(page)
+  await page.evaluate(() => {
+    ;(window as any).relayPool.subscribeMap = (_requests: unknown, params: any) => {
+      const timer = setTimeout(() => params.oneose?.(), 1500)
+      return {
+        close() {
+          clearTimeout(timer)
+        }
+      }
+    }
+  })
+  await invoke(page)
+  await expect(page.getByText("Finding apps for your request…")).toBeVisible({ timeout: 700 })
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByRole("dialog")).toBeHidden()
+  await expect(page.frames()[1]!.locator("#result")).toContainText('"ok":false')
+  await expect(page.getByRole("dialog")).toBeHidden()
+  await expect(page.locator("iframe")).toHaveCount(1)
+})
+
+test("loads the logged-in user's newest verified preferences from write relays and caches them", async ({
+  page
+}) => {
+  await setup(page)
+  const secret = generateSecretKey()
+  const sign = (created_at: number, tags: string[][]) =>
+    finalizeEvent({ kind: 31129, created_at, tags, content: "" }, secret)
+  const older = sign(10, [
+    ["d", "note"],
+    ["e", "1".repeat(64)]
+  ])
+  const newest = sign(20, [
+    ["d", "note"],
+    ["e", "2".repeat(64)]
+  ])
+  const other = finalizeEvent(
+    { kind: 31129, created_at: 30, tags: [["d", "note"]], content: "" },
+    generateSecretKey()
+  )
+  const malformed = sign(40, [
+    ["d", "note"],
+    ["d", "article"]
+  ])
+  const forged = { ...newest, created_at: 50 }
+  const relayList = finalizeEvent(
+    {
+      kind: 10002,
+      created_at: 1,
+      content: "",
+      tags: [
+        ["r", "wss://read.example", "read"],
+        ["r", "wss://write.example", "write"]
+      ]
+    },
+    secret
+  )
+  const result = await page.evaluate(
+    async ({ secret, relayList, batch }) => {
+      const w = window as any
+      const { loginLocalKey } = await import("/src/signers/local.ts")
+      const { getStore, safeQueryEvents } = await import("/src/store.ts")
+      await getStore().saveEvent(relayList)
+      w.account.setAccount(loginLocalKey(secret), "local")
+      const requestsSeen: any[] = []
+      w.relayPool.subscribeMap = (requests: any[], params: any) => {
+        requestsSeen.push(...requests)
+        queueMicrotask(() => {
+          if (requests.some(r => r.url === "wss://write.example/"))
+            batch.forEach((e: any) => params.onevent?.(e))
+          params.oneose?.()
+        })
+        return { close() {} }
+      }
+      await w.manager.refreshIntentPreferences()
+      const loaded = w.manager.intentPreferences().get("note")?.event.id
+      const cached = await safeQueryEvents({ kinds: [31129], authors: [relayList.pubkey] })
+      return { loaded, cached: cached.map(e => e.id), requestsSeen }
+    },
+    {
+      secret: Buffer.from(secret).toString("hex"),
+      relayList,
+      batch: [newest, older, other, malformed, forged]
+    }
+  )
+  expect(result.loaded).toBe(newest.id)
+  expect(result.cached).toContain(newest.id)
+  const requests = result.requestsSeen.filter(r => r.filter.kinds?.includes(31129))
+  expect(requests.map(r => r.url)).toContain("wss://write.example/")
+  expect(
+    requests.every(r => JSON.stringify(r.filter.authors) === JSON.stringify([newest.pubkey]))
+  ).toBe(true)
+})
+
+test("late preference responses from a previous account cannot populate the current account", async ({
+  page
+}) => {
+  await setup(page)
+  const preference = finalizeEvent(
+    {
+      kind: 31129,
+      created_at: 1,
+      tags: [
+        ["d", "note"],
+        ["e", "1".repeat(64)]
+      ],
+      content: ""
+    },
+    generateSecretKey()
+  )
+  await page.evaluate(async preference => {
+    const w = window as any
+    w.account.setAccount(preference.pubkey, "nip07")
+    w.relayPool.subscribeMap = (requests: any[], params: any) => {
+      if (requests[0].filter.kinds?.includes(31129)) {
+        w.finishPreferences = () => {
+          params.onevent?.(preference)
+          params.oneose?.()
+        }
+      } else queueMicrotask(() => params.oneose?.())
+      return { close() {} }
+    }
+    w.pendingPreferences = w.manager.refreshIntentPreferences()
+  }, preference)
+  await expect
+    .poll(() => page.evaluate(() => typeof (window as any).finishPreferences))
+    .toBe("function")
+  const loaded = await page.evaluate(async () => {
+    const w = window as any
+    w.account.setAccount("a".repeat(64), "nip07")
+    w.finishPreferences()
+    await w.pendingPreferences
+    return [...w.manager.intentPreferences().keys()]
+  })
+  expect(loaded).toEqual([])
+})
+
+test("intent manager can initialize before the sandbox host", async ({ page }) => {
+  await page.goto("/harness/napplet.html")
+  const result = await page.evaluate(async () => {
+    const manager = await import("/src/intents/manager.ts")
+    const stop = manager.subscribeIntents(() => {})
+    stop()
+    const host = await import("/src/sandbox/host.ts")
+    return typeof host.launchNapplet
+  })
+  expect(result).toBe("function")
+})

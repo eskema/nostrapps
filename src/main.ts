@@ -2,10 +2,13 @@ import {
   configureIntents,
   dispatchIntentAction,
   isIntentAction,
-  observeIntentManifest
+  observeIntentManifest,
+  invokeIntent,
+  intentForNappAction,
+  hasIntentHandlers
 } from "./intents/manager.js"
 import { deliverNappletIntent, matchesNappletRevision } from "./sandbox/host.js"
-import { actionConventions, mappedActionPayload } from "./intents/action-mappings.js"
+import type { IntentRequest } from "./intents/catalog.js"
 import "@fontsource-variable/source-sans-3"
 import "@fontsource-variable/source-sans-3/wght-italic.css"
 import "@fontsource-variable/source-serif-4"
@@ -136,7 +139,7 @@ import { clearDecisions, onRowRevoked } from "./permissions.js"
 import { openPopover } from "./popover.js"
 import { setPointer, getPointer } from "./pointer.js"
 import { moveBefore } from "./dom.js"
-import { buildHandlerBody } from "./system-napps/handler.js"
+import { pickActionHandler } from "./action-handler-picker.js"
 import * as persist from "./persistence.js"
 import * as handlers from "./handlers.js"
 import type {
@@ -768,13 +771,13 @@ async function runNappAction(
   name: string,
   payload: unknown,
   options?: { instance?: string; auxiliary?: boolean },
-  bypassIntents = false
+  selected?: handlers.ActionTarget
 ) {
   if (typeof name !== "string" || !name) {
     throw new Error("napp.action: action name is required")
   }
 
-  if (isIntentAction(name)) return dispatchIntentAction(name, payload)
+  if (isIntentAction(name)) return dispatchIntentAction(name, payload, callerNappId)
 
   const auxiliary = !!options?.auxiliary
   let auxWin: NappWindow | null = null
@@ -791,34 +794,47 @@ async function runNappAction(
     const kind = (payload as { kind?: unknown } | null)?.kind
     if (typeof kind === "number") name = `view:${kind}`
   }
-  if (!bypassIntents && !instanceId && !auxiliary && Object.hasOwn(actionConventions, name)) {
-    // Only fixed, validated compatibility contracts enter canonical delivery.
-    // Invalid legacy payloads retain the existing NAPP action behavior.
-    try {
-      mappedActionPayload(name, payload)
-    } catch {
-      return runNappAction(callerNappId, name, payload, options, true)
-    }
-    return dispatchIntentAction(name, payload)
-  }
   if (!instanceId) {
     // no instance specified, will open a new window, often prompting the user first
     const [candidates, openCandidates] = handlers.findHandlersForAction(name, { auxiliary })
     // No app takes it (a system napp's fallback doesn't count): the napps that
     // do, out there, and the action waits for the one the user tries.
+    const compatibleIntent = !auxiliary ? intentForNappAction(name, payload) : undefined
+    const hasNapplets = !!compatibleIntent && hasIntentHandlers(compatibleIntent)
     const any = [...candidates, ...openCandidates.map(w => w.nappId)]
-    if (!auxiliary && !any.some(id => !handlers.systemIdOf(id))) {
+    if (!selected && !hasNapplets && !auxiliary && !any.some(id => !handlers.systemIdOf(id))) {
       return showHandlersInApps(callerNappId, name, payload)
     }
     try {
       // One way to go: the one app, or the one open window (an open system
       // napp, which isn't offered again as a new one).
-      const picked = candidates.length + openCandidates.length !== 1
-      const [nappId, existingInstanceId] = !picked
-        ? candidates.length
-          ? [candidates[0], undefined]
-          : [openCandidates[0].nappId, openCandidates[0].instanceId]
-        : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
+      const picked = !!selected || hasNapplets || candidates.length + openCandidates.length !== 1
+      const selection =
+        selected ??
+        (!picked
+          ? candidates.length
+            ? { nappId: candidates[0] }
+            : { nappId: openCandidates[0].nappId, instanceId: openCandidates[0].instanceId }
+          : await pickHandler(
+              callerNappId,
+              name,
+              payload,
+              candidates,
+              openCandidates,
+              compatibleIntent
+            ))
+      if ("intent" in selection) {
+        return invokeIntent(selection.intent, { sender: callerNappId, check() {} })
+      }
+      const { nappId, instanceId: existingInstanceId } = selection
+      // A selection is delivered directly, but still must be a current action handler.
+      const [currentCandidates, currentOpen] = handlers.findHandlersForAction(name, { auxiliary })
+      if (
+        existingInstanceId
+          ? !currentOpen.some(w => w.nappId === nappId && w.instanceId === existingInstanceId)
+          : !currentCandidates.includes(nappId)
+      )
+        throw new Error("The action handler is no longer available")
 
       // Revealed when a window opened, or the user picked one to see; an
       // auto-selected open window answers behind the caller.
@@ -862,6 +878,7 @@ async function runNappAction(
     } catch (err) {
       console.warn(err)
       setStatus(String(err))
+      if (selected) throw err
       return
     }
   }
@@ -994,8 +1011,9 @@ async function pickHandler(
   actionName: string,
   payload: unknown,
   candidates: string[],
-  openCandidates: NappWindowState[]
-): Promise<[nappId: string, instanceId: string | undefined]> {
+  openCandidates: NappWindowState[],
+  compatibleIntent?: IntentRequest
+): Promise<handlers.ActionTarget | { intent: IntentRequest }> {
   if (isViewAction(actionName) && typeof payload === "string") {
     const event = await resolveViewPayload(payload)
     if (event) payload = event
@@ -1009,40 +1027,14 @@ async function pickHandler(
     setStatus(`No handler for action "${actionName}" from ${friendlyNameFor(callerNappId)}`)
   }
 
-  type Choice = [string, string | undefined] | null
-  const build = (resolve: (choice: Choice) => void) =>
-    buildHandlerBody({
-      actionName,
-      payload,
-      candidates,
-      openCandidates,
-      apps: {
-        list: () => persist.getInstalledApps(),
-        get: (nappId: string) => persist.getInstalledApp(nappId)
-      },
-      onSelect: (nappId, instanceId) => {
-        if (candidates.includes(nappId)) resolve([nappId, instanceId])
-      }
-    })
-  // A napp's action opens the picker where it was clicked. The launcher
-  // input's and a link's have no click to open at: a dialog.
-  const choice =
-    callerNappId === "launcher" || callerNappId === "link"
-      ? await openDialog<Choice>({
-          title: "Choose a napp to open this",
-          queue: { kind: "action", name: actionName },
-          build,
-          dismissValue: null // Esc / backdrop cancels
-        })
-      : await openPopover<Choice>({
-          ...getPointer(),
-          class: "handler-popover",
-          build,
-          dismissValue: null // click outside / Esc cancels
-        })
-
-  if (!choice) throw new Error("Action handler selection cancelled")
-  return choice
+  return pickActionHandler(
+    friendlyNameFor(callerNappId),
+    actionName,
+    payload,
+    candidates,
+    openCandidates,
+    compatibleIntent
+  )
 }
 
 function friendlyNameFor(nappId: string): string {
@@ -4225,7 +4217,7 @@ async function checkReachable(
 }
 
 configureIntents({
-  action: (name, payload) => runNappAction("intent", name, payload, undefined, true),
+  action: (name, payload, target) => runNappAction("intent", name, payload, undefined, target),
   loadEvent: async code =>
     (await resolveViewPayload(code)) as import("@nostr/tools/core").NostrEvent | null,
   async deliver(event, request, delivery, context) {

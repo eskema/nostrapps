@@ -10,7 +10,9 @@ import { queryManifestEvents, optionalLookup } from "../nsite/relay-query.js"
 import { FALLBACK_RELAYS } from "../relay-health.js"
 import { verifyEventFresh } from "../verify.js"
 import { openDialog } from "../dialog.js"
-import { button, check, el, code } from "../system-napps/ui.js"
+import { check, el } from "../system-napps/ui.js"
+import { handlerChoice, buildNappHandlerChoices } from "../system-napps/handler.js"
+import { hasUserActionHandler, findHandlersForAction, type ActionTarget } from "../handlers.js"
 import { normalizeIntentUri } from "./uri.js"
 import {
   actionConventions,
@@ -45,7 +47,7 @@ type Hooks = {
     delivery: IntentDelivery,
     context: IntentContext
   ): Promise<boolean>
-  action(name: string, payload: unknown): Promise<unknown>
+  action(name: string, payload: unknown, target?: ActionTarget): Promise<unknown>
   loadEvent(code: string): Promise<NostrEvent | null>
 }
 let hooks: Hooks | undefined
@@ -85,12 +87,12 @@ function installed() {
   for (const app of getInstalledApps())
     if (app.event && [5129, 15129, 35129].includes(app.event.kind)) observeIntentManifest(app.event)
 }
-async function relays(write = false) {
+async function relays(write: boolean | "preferences" = false) {
   const pk = getPubkey()
   if (pk)
     try {
       const list = (await optionalLookup(loadRelayList(pk)))?.items
-        .filter(r => (write ? r.write : r.read))
+        .filter(r => (write === "preferences" ? r.write || r.read : write ? r.write : r.read))
         .map(r => r.url)
       if (list?.length) return list
     } catch {}
@@ -141,12 +143,12 @@ export async function refreshIntentPreferences() {
     let complete = false
     const events = await query(
       { kinds: [HANDLER_PREFERENCES_KIND], authors: [pk] },
-      undefined,
+      await relays("preferences"),
       value => {
         complete = value
       }
     )
-    if (generation !== version) return
+    if (generation !== version || pk !== getPubkey()) return
     preferencesSynced = complete
     for (const event of events) {
       const role = event.tags.find(t => t[0] === "d")?.[1]
@@ -164,6 +166,14 @@ export async function refreshIntentPreferences() {
       preferences.set(role, { event, privateTags: [], locked: !!event.content })
     }
     emit()
+    // Keep verified relay preferences available after reload or while offline.
+    await Promise.all(
+      [...preferences.values()].map(({ event }) =>
+        getStore()
+          .saveEvent(event)
+          .catch(() => {})
+      )
+    )
   })().finally(() => {
     if (generation === version) loading = undefined
   })
@@ -315,7 +325,8 @@ export async function editIntentPreference(role: string, edit: HandlerEdit) {
 }
 
 type Choice =
-  { reference: string; remember: boolean; hidden: boolean } | { napp: true; remember: boolean }
+  | { reference: string; remember: boolean; hidden: boolean }
+  | { napp: true; remember: boolean; target?: ActionTarget }
 function routeKey() {
   return `nostrapps:intent-routes:${getPubkey() || "guest"}`
 }
@@ -326,7 +337,17 @@ export function intentRoutes(): Record<string, "napp" | "napplet"> {
     return {}
   }
 }
+function rememberedNappTargets(): Record<string, ActionTarget> {
+  try {
+    return JSON.parse(localStorage.getItem(`${routeKey()}:targets`) || "{}")
+  } catch {
+    return {}
+  }
+}
 export function forgetIntentRoute(convention: string) {
+  const targets = rememberedNappTargets()
+  delete targets[convention]
+  localStorage.setItem(`${routeKey()}:targets`, JSON.stringify(targets))
   const routes = intentRoutes()
   delete routes[convention]
   localStorage.setItem(routeKey(), JSON.stringify(routes))
@@ -336,6 +357,46 @@ function rememberRoute(convention: string, route: "napp" | "napplet") {
   localStorage.setItem(routeKey(), JSON.stringify({ ...intentRoutes(), [convention]: route }))
   emit()
 }
+// Compatibility is an optional alternative to an action, never its routing policy.
+export function intentForNappAction(name: string, payload: unknown): IntentRequest | undefined {
+  if (!Object.hasOwn(actionConventions, name)) return
+  try {
+    return {
+      ...normalizeIntentUri(actionConventions[name]!, undefined),
+      payload: mappedActionPayload(name, payload)
+    }
+  } catch {
+    return
+  }
+}
+export function hasIntentHandlers(request: IntentRequest): boolean {
+  installed()
+  return [...catalog.values()].some(event => supports(event, request.convention))
+}
+export function buildIntentHandlerChoices(
+  request: IntentRequest,
+  select: (handler: string) => void
+): HTMLElement {
+  installed()
+  const body = el("div", "intent-handler-options")
+  for (const [reference, event] of catalog) {
+    if (!supports(event, request.convention)) continue
+    const title = event.tags.find(t => t[0] === "title")?.[1] || "Napplet"
+    body.append(
+      handlerChoice({
+        title,
+        pubkey: event.pubkey,
+        iconSources: () =>
+          import("../nsite/icon.js")
+            .then(m => m.nappletIconSrc(event))
+            .then(src => (src ? [src] : [])),
+        onSelect: () => select(candidateId(reference))
+      })
+    )
+  }
+  if (!body.children.length) body.append(el("p", "", "No compatible napplets found."))
+  return body
+}
 async function choose(
   request: IntentRequest,
   context: IntentContext,
@@ -343,41 +404,39 @@ async function choose(
 ): Promise<Choice | null> {
   return openDialog<Choice | null>({
     title: "Open with",
+    class: "app-dialog-handler",
     signal: context.signal,
     dismissValue: null,
     build(resolve) {
-      const body = el("div", "intent-chooser", code(request.convention))
+      const readable = (value: string) => value.replace(/[-_]+/g, " ")
+      const action = readable(request.action)
+      const body = el(
+        "div",
+        "intent-chooser",
+        el("p", "", `Choose an app to ${action} ${readable(request.archetype)}.`)
+      )
       if (message) body.append(el("p", "", message))
       const remember = check({ label: "Remember this choice" })
       const hidden = check({ label: "Keep handler preference private" })
-      hidden.hidden = !getPubkey()
-      body.append(remember, hidden)
+      hidden.hidden = true
+      remember.querySelector("input")?.addEventListener("change", () => {
+        hidden.hidden = !getPubkey() || !rememberValue()
+      })
       const rememberValue = () => !!remember.querySelector("input")?.checked
       const hiddenValue = () => !!hidden.querySelector("input")?.checked
-      for (const [reference, event] of catalog)
-        if (supports(event, request.convention)) {
-          const title = event.tags.find(t => t[0] === "title")?.[1] || "Napplet"
-          const row = el(
-            "div",
-            "",
-            button({
-              label: title,
-              onClick: () =>
-                resolve({ reference, remember: rememberValue(), hidden: hiddenValue() })
-            }),
-            code(reference)
-          )
-          body.append(row)
-        }
-      if (mappedNappAction(request.convention, request.payload))
-        body.append(
-          button({
-            label: "Open in another app",
-            onClick: () => resolve({ napp: true, remember: rememberValue() })
-          })
+      const napplets = buildIntentHandlerChoices(request, handler => {
+        const reference = [...catalog.keys()].find(ref => candidateId(ref) === handler)!
+        resolve({ reference, remember: rememberValue(), hidden: hiddenValue() })
+      })
+      body.append(el("section", "intent-handler-section", el("h4", "", "Napplets"), napplets))
+      const mapped = mappedNappAction(request.convention, request.payload)
+      const napps =
+        mapped &&
+        buildNappHandlerChoices(mapped.name, mapped.payload, target =>
+          resolve({ napp: true, target, remember: rememberValue() })
         )
-      if (![...catalog.values()].some(e => supports(e, request.convention)))
-        body.append(el("p", "", "No compatible napplets found."))
+      if (napps) body.append(el("section", "intent-handler-section", el("h4", "", "Napps"), napps))
+      body.append(remember, hidden)
       return body
     },
     actions: [{ label: "Cancel", value: null }]
@@ -401,13 +460,31 @@ export async function invokeIntent(value: unknown, source: IntentContext): Promi
       if (pk !== getPubkey()) throw new Error("Your account changed")
     }
   }
+  const progressController = new AbortController()
+  const progress = openDialog({
+    title: "Open with",
+    class: "app-dialog-handler",
+    body: "Finding apps for your request…",
+    signal: AbortSignal.any([signal, progressController.signal]),
+    dismissValue: null,
+    actions: [{ label: "Cancel", value: null }]
+  }).then(() => {
+    if (!progressController.signal.aborted) controller.abort()
+  })
+  const ready = () => progressController.abort()
   try {
-    return await resolveIntent(value, context)
+    return await resolveIntent(value, context, ready)
   } finally {
+    ready()
+    await progress
     stop()
   }
 }
-async function resolveIntent(value: unknown, context: IntentContext): Promise<IntentResult> {
+async function resolveIntent(
+  value: unknown,
+  context: IntentContext,
+  ready: () => void
+): Promise<IntentResult> {
   try {
     const input = validateRequest(structuredClone(value))
     // Validate every option again at the authenticated host boundary.
@@ -427,10 +504,28 @@ async function resolveIntent(value: unknown, context: IntentContext): Promise<In
       if (pk !== getPubkey() || version !== generation) throw new Error("Your account changed")
     }
     installed()
-    await refreshIntentPreferences()
-    checkCurrent()
-    await unlockIntentPreference(request.archetype, context)
-    checkCurrent()
+    // Discovery is independent of account preferences; start both together.
+    // Catch here as an explicit handler/default may never need discovery.
+    const discovery = request.handler
+      ? Promise.resolve()
+      : Promise.all([
+          discoverIntents(request.convention),
+          request.handlerHint
+            ? loadReference(request.handlerHint.address, request.handlerHint.relays).then(event => {
+                if (event && supports(event, request.convention)) observeIntentManifest(event)
+              })
+            : Promise.resolve()
+        ])
+          .then(() => {})
+          .catch(() => {})
+    if (!request.handler) {
+      await refreshIntentPreferences()
+      checkCurrent()
+      // Signers may need their own confirmation dialog.
+      if (preferences.get(request.archetype)?.locked) ready()
+      await unlockIntentPreference(request.archetype, context)
+      checkCurrent()
+    }
     if (!hooks) throw new Error("Intent launcher is unavailable")
     let target: NostrEvent | undefined
     let choice: Choice | null = null
@@ -441,13 +536,8 @@ async function resolveIntent(value: unknown, context: IntentContext): Promise<In
     } else {
       const preference = preferences.get(request.archetype)
       const route = intentRoutes()[request.convention]
-      if (route === "napp" && mappedNappAction(request.convention, request.payload))
-        choice = { napp: true, remember: false }
-      if (
-        !choice &&
-        preference &&
-        (route === "napplet" || !mappedNappAction(request.convention, request.payload))
-      ) {
+      // Intent defaults belong to the napplet protocol, even when a NAPP mapping exists.
+      if (preference) {
         for (const ref of preferenceReferences(preference, request.convention)) {
           const tag = [...preference.privateTags, ...preference.event.tags].find(
             t => (t[0] === "a" || t[0] === "e") && t[1] === ref
@@ -456,6 +546,7 @@ async function resolveIntent(value: unknown, context: IntentContext): Promise<In
           checkCurrent()
           if (!event || !supports(event, request.convention)) continue
           try {
+            ready()
             if (
               await hooks.deliver(event, request, deliveryFor(request, context.sender), {
                 ...context,
@@ -478,25 +569,31 @@ async function resolveIntent(value: unknown, context: IntentContext): Promise<In
           }
         }
       }
+      const mapped = mappedNappAction(request.convention, request.payload)
+      const saved = rememberedNappTargets()[request.convention]
+      if (
+        route === "napp" &&
+        saved &&
+        mapped &&
+        findHandlersForAction(mapped.name)[0].includes(saved.nappId)
+      )
+        choice = { napp: true, target: saved, remember: false }
     }
     if (!target && !choice) {
-      await discoverIntents(request.convention)
+      await discovery
       checkCurrent()
-      if (request.handlerHint) {
-        const event = await loadReference(request.handlerHint.address, request.handlerHint.relays)
-        checkCurrent()
-        if (event && supports(event, request.convention)) observeIntentManifest(event)
-      }
     }
-    // Preserve the launcher's ordinary action flow when discovery finds no
-    // napplet for a compatible NAPP action.
+    // With no installed choice in either protocol, retain the existing Apps discovery flow.
+    const mappedFallback = mappedNappAction(request.convention, request.payload)
     if (
       !target &&
       !choice &&
-      ![...catalog.values()].some(event => supports(event, request.convention)) &&
-      mappedNappAction(request.convention, request.payload)
+      !hasIntentHandlers(request) &&
+      mappedFallback &&
+      !hasUserActionHandler(mappedFallback.name)
     )
       choice = { napp: true, remember: false }
+    ready()
     let message = ""
     while (true) {
       checkCurrent()
@@ -511,11 +608,20 @@ async function resolveIntent(value: unknown, context: IntentContext): Promise<In
         )
         checkCurrent()
         if (!mapped) throw new Error("This payload cannot be opened as a NAPP action")
-        const result = await hooks.action(mapped.name, mapped.payload)
+        const result = await hooks.action(mapped.name, mapped.payload, choice.target)
         checkCurrent()
         if (result && typeof result === "object" && "ok" in result && result.ok === false)
           throw new Error("The app could not open this action")
-        if (choice.remember) rememberRoute(request.convention, "napp")
+        if (choice.remember && choice.target) {
+          localStorage.setItem(
+            `${routeKey()}:targets`,
+            JSON.stringify({
+              ...rememberedNappTargets(),
+              [request.convention]: { nappId: choice.target.nappId }
+            })
+          )
+          rememberRoute(request.convention, "napp")
+        }
         return success(request, `napp:${mapped.name}`)
       }
       const selected = choice && "reference" in choice ? choice : undefined
@@ -615,13 +721,7 @@ export async function dispatchIntentAction(
         envelope.uri,
         Object.hasOwn(envelope, "payload") ? { payload: envelope.payload } : undefined
       )
-    } else
-      request = {
-        ...normalizeIntentUri(actionConventions[name] ?? name, undefined),
-        payload: Object.hasOwn(actionConventions, name)
-          ? mappedActionPayload(name, payload)
-          : payload
-      }
+    } else request = { ...normalizeIntentUri(name, undefined), payload }
     const controller = new AbortController(),
       pk = getPubkey()
     const stop = onAccountChanged(() => controller.abort())

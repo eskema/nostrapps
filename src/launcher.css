@@ -1050,6 +1050,13 @@ body.popover-open .napp-body iframe {
   overflow: auto;
 }
 
+/* Give action and intent choices room for app names, authors and controls. */
+.app-dialog-handler .app-dialog-cards {
+  width: 40rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
 /* Both are surface cards — the gap between them shows the scrim. */
 .app-dialog-body,
 .app-dialog-queue {

@@ -61,7 +61,6 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     buildRow
   )
   const intents = intentSettings()
-  panel.append(intents.section)
   container.replaceChildren(panel)
 
   // The ways in, from login.ts — the same block the prompt a napp raises
@@ -141,9 +140,10 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   const backup = backupSection(ctx)
 
   // Sections live directly on the root panel (user · permissions · actions ·
-  // relays · backups), inserted before the build/reset footer.
+  // intent handlers · relays · backups), inserted before the build/reset footer.
   panel.insertBefore(permissions.el, buildRow)
   panel.insertBefore(actionsDetails, buildRow)
+  panel.insertBefore(intents.section, buildRow)
   panel.insertBefore(relaysDetails, buildRow)
   panel.insertBefore(backup.el, buildRow)
 

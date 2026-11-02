@@ -1,9 +1,12 @@
 import type { InstalledApp, NappWindowState } from "../types.js"
+import * as persist from "../persistence.js"
+import * as handlers from "../handlers.js"
 import { nappNameText } from "../napp-name.js"
 import { formatPayload } from "../utils.js"
-import { button, code, codeBlock, empty } from "./ui.js"
+import { button, code, codeBlock, empty, appIcon, icon, author, el as node } from "./ui.js"
 
 export interface HandlerBodyOpts {
+  showRequest?: boolean
   actionName: string
   payload: unknown
   candidates: string[]
@@ -29,7 +32,7 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
   lbl.textContent = "action:"
   actionLine.append(lbl, code(o.actionName || "(none)"))
   request.append(actionLine, codeBlock(formatPayload(o.payload), "handler-payload"))
-  root.appendChild(request)
+  if (o.showRequest !== false) root.appendChild(request)
 
   const appLabel = (app: InstalledApp | undefined, nappId: string) =>
     app?.petname || app?.title || nappNameText(nappId)
@@ -47,7 +50,7 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
       const n = (counts.get(win.nappId) || 0) + 1
       counts.set(win.nappId, n)
       list.appendChild(
-        handlerItem(appLabel(app, win.nappId), n, () => o.onSelect(win.nappId, win.instanceId))
+        handlerItem(appLabel(app, win.nappId), app, n, () => o.onSelect(win.nappId, win.instanceId))
       )
     }
     openEl.appendChild(list)
@@ -66,7 +69,7 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
     list.className = "handler-list"
     for (const nappId of o.candidates) {
       const app = byId.get(nappId)
-      list.appendChild(handlerItem(appLabel(app, nappId), null, () => o.onSelect(nappId)))
+      list.appendChild(handlerItem(appLabel(app, nappId), app, null, () => o.onSelect(nappId)))
     }
     candidatesEl.appendChild(list)
   }
@@ -84,13 +87,22 @@ function el(tag: string, className: string, text: string): HTMLElement {
 
 // A picker row, built on the design-system button. `num` (the per-app window
 // number) is shown only for already-open instances.
-function handlerItem(text: string, num: number | null, onClick: () => void): HTMLLIElement {
+function handlerItem(
+  text: string,
+  app: InstalledApp | undefined,
+  num: number | null,
+  onClick: () => void
+): HTMLLIElement {
   const item = document.createElement("li")
-  const btn = button({ variant: "outline", class: "handler-item", onClick })
-  const title = document.createElement("span")
-  title.className = "handler-pet"
-  title.textContent = text
-  btn.appendChild(title)
+  const btn = handlerChoice({
+    title: text,
+    pubkey: app?.event?.pubkey,
+    iconSources: app
+      ? () => import("../nsite/icon.js").then(m => m.installedIconSources(app))
+      : undefined,
+    onSelect: onClick
+  })
+  btn.classList.add("handler-item")
   if (num != null) {
     const badge = document.createElement("span")
     badge.className = "handler-num"
@@ -99,4 +111,60 @@ function handlerItem(text: string, num: number | null, onClick: () => void): HTM
   }
   item.appendChild(btn)
   return item
+}
+
+// Both action and intent pickers use the same accessible, full-width app row.
+export function handlerChoice(opts: {
+  title: string
+  pubkey?: string
+  iconSources?: () => Promise<string[]>
+  onSelect(): void
+}): HTMLButtonElement {
+  const picture = appIcon({ size: "m", fade: true })
+  picture.append(icon("tile"))
+  picture.setAttribute("aria-hidden", "true")
+  if (opts.iconSources)
+    void opts
+      .iconSources()
+      .then(sources => {
+        if (!sources.length) return
+        let next = 0
+        picture.img.addEventListener("error", () => {
+          if (++next < sources.length) picture.img.src = sources[next]
+        })
+        picture.img.src = sources[0]
+      })
+      .catch(() => {})
+  const row = button({ class: "intent-handler-choice", onClick: opts.onSelect })
+  row.setAttribute("aria-label", opts.title)
+  row.append(
+    picture,
+    node(
+      "span",
+      "intent-handler-copy",
+      node("span", "intent-handler-title", opts.title),
+      ...(opts.pubkey
+        ? [node("span", "intent-handler-author", author(opts.pubkey, { link: false }))]
+        : [])
+    )
+  )
+  return row
+}
+
+export function buildNappHandlerChoices(
+  name: string,
+  payload: unknown,
+  select: (target: handlers.ActionTarget) => void
+): HTMLElement | undefined {
+  const [candidates, openCandidates] = handlers.findHandlersForAction(name)
+  if (!handlers.hasUserActionHandler(name)) return
+  return buildHandlerBody({
+    showRequest: false,
+    actionName: name,
+    payload,
+    candidates,
+    openCandidates,
+    apps: { list: persist.getInstalledApps, get: persist.getInstalledApp },
+    onSelect: (nappId, instanceId) => select({ nappId, instanceId })
+  })
 }

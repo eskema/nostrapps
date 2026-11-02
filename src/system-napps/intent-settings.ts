@@ -1,4 +1,4 @@
-import { getPubkey } from "../account.js"
+import { getPubkey, subscribe as subscribeAccount } from "../account.js"
 import {
   intentCatalog,
   intentPreferences,
@@ -14,168 +14,295 @@ import { canReceiveIntent, manifestContracts, conventionIdentity } from "../inte
 import { handlerEntries, type HandlerEdit } from "../intents/preferences.js"
 import { button, el, code, details } from "./ui.js"
 
+/** Native editor for kind 31129 defaults and convention-specific handler chains. */
 export function intentSettings() {
   const content = el("div", "intent-settings")
   const section = details({ summary: "intent handlers", sticky: true }, content)
   let active = true,
     busy = false,
-    message = ""
-  let role = "",
-    identity = ""
+    message = "",
+    query = "",
+    selected = ""
+  let account = getPubkey()
+  const expanded = new Set<string>()
   const run = async (work: () => Promise<unknown>) => {
+    if (busy || !active) return
+    const startedFor = getPubkey()
     busy = true
     message = ""
     render()
     try {
       await work()
     } catch (e) {
-      message = e instanceof Error ? e.message : String(e)
+      if (startedFor === getPubkey()) message = e instanceof Error ? e.message : String(e)
     } finally {
       busy = false
-      if (active) render()
+      if (active) {
+        render()
+        if (startedFor !== getPubkey() && section.open) void refresh()
+      }
     }
   }
+  const refresh = () => run(() => Promise.all([refreshIntentPreferences(), discoverIntents()]))
   function render() {
+    if (account !== getPubkey()) {
+      account = getPubkey()
+      expanded.clear()
+      selected = ""
+      query = ""
+      message = ""
+    }
     const catalog = intentCatalog(),
       preferences = intentPreferences()
-    const roles = [
-      ...new Set([
-        ...preferences.keys(),
-        ...[...catalog.values()].flatMap(e => manifestContracts(e).map(c => c.archetype))
-      ])
-    ].sort()
-    role ||= roles[0] ?? ""
-    content.replaceChildren(
-      button({
-        label: busy ? "Loading…" : "Refresh handlers",
-        disabled: busy,
-        onClick: () => void run(() => Promise.all([refreshIntentPreferences(), discoverIntents()]))
-      })
-    )
-    if (message) content.append(el("p", "", message))
-    for (const [convention, route] of Object.entries(intentRoutes()))
-      content.append(
-        el(
-          "div",
-          "",
-          code(convention),
-          ` · ${route}`,
-          button({ label: "Forget route", onClick: () => forgetIntentRoute(convention) })
+    const identities = new Map<string, string[]>()
+    for (const [role, pref] of preferences) {
+      const contracts = new Set<string>()
+      for (const tag of [...pref.event.tags, ...pref.privateTags])
+        if (
+          tag[0] === "i" &&
+          conventionIdentity(tag[1] ?? "")?.archetype === role &&
+          handlerEntries(pref, tag[1]).length
         )
+          contracts.add(tag[1]!)
+      identities.set(role, [...contracts].sort())
+    }
+    const roles = [...preferences.keys()]
+      .filter(role => {
+        const pref = preferences.get(role)!
+        return pref.locked || handlerEntries(pref).length || identities.get(role)?.length
+      })
+      .sort()
+    if (selected && !roles.includes(selected)) selected = ""
+    const matches = (value: string) =>
+      query
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .every(t => value.toLowerCase().includes(t))
+    content.replaceChildren()
+    const search = document.createElement("input")
+    search.type = "search"
+    search.placeholder = "Filter intents…"
+    search.value = query
+    search.setAttribute("aria-label", "Filter intents")
+    search.addEventListener("input", () => {
+      const start = search.selectionStart
+      query = search.value
+      render()
+      const next = content.querySelector<HTMLInputElement>('input[type="search"]')!
+      next.focus()
+      if (start !== null) next.setSelectionRange(start, start)
+    })
+    const filter = document.createElement("select")
+    filter.setAttribute("aria-label", "Archetype")
+    filter.add(new Option("All archetypes", ""))
+    roles.forEach(r => filter.add(new Option(r, r)))
+    filter.value = selected
+    filter.onchange = () => {
+      selected = filter.value
+      render()
+    }
+    content.append(
+      el(
+        "div",
+        "intent-toolbar",
+        search,
+        filter,
+        button({
+          label: busy ? "Loading…" : "Refresh handlers",
+          disabled: busy,
+          onClick: () => void refresh()
+        })
       )
-    if (!getPubkey()) {
+    )
+    content.append(
+      el(
+        "p",
+        "",
+        "Preferred napplets sync with your account. Intent overrides run before archetype defaults; private handlers run before public handlers within each chain."
+      )
+    )
+    if (message) {
+      const error = el("p", "", message)
+      error.setAttribute("role", "alert")
+      content.append(error)
+    }
+    const routes = Object.entries(intentRoutes())
+    if (routes.length) {
+      const routesSection = el(
+        "section",
+        "intent-routes",
+        el("h3", "", "Remembered choices · this device")
+      )
+      for (const [convention, route] of routes)
+        routesSection.append(
+          el(
+            "div",
+            "intent-handler-row",
+            code(convention),
+            route === "napp" ? "Open in another app" : "Use preferred napplets",
+            button({ label: "Forget route", onClick: () => forgetIntentRoute(convention) })
+          )
+        )
+      content.append(routesSection)
+    }
+    if (!account) {
       content.append(el("p", "", "Connect an account to sync handler preferences."))
       return
     }
-    const roleInput = document.createElement("input")
-    roleInput.placeholder = "Archetype"
-    roleInput.setAttribute("aria-label", "Intent archetype")
-    roleInput.value = role
-    roleInput.addEventListener("change", () => {
-      role = roleInput.value.trim()
-      identity = ""
-      render()
-    })
-    const rolesList = document.createElement("select")
-    rolesList.setAttribute("aria-label", "Saved archetypes")
-    for (const r of roles) rolesList.add(new Option(r, r, false, r === role))
-    rolesList.addEventListener("change", () => {
-      role = rolesList.value
-      identity = ""
-      render()
-    })
-    content.append(roleInput, rolesList)
-    if (!conventionIdentity(`napplet:${role}/open`)) return
-    const contracts = [
-      ...new Set(
-        [...catalog.values()].flatMap(e =>
-          manifestContracts(e)
-            .filter(c => c.archetype === role)
-            .map(c => c.convention)
-        )
+    let shown = 0
+    for (const role of roles) {
+      if (selected && selected !== role) continue
+      const pref = preferences.get(role)
+      const chains = ["", ...(identities.get(role) ?? [])].filter(
+        identity =>
+          handlerEntries(pref, identity || undefined).length &&
+          matches(`${role} ${identity || "default"}`)
       )
-    ]
-    const pref = preferences.get(role)
-    for (const tag of [...(pref?.event.tags ?? []), ...(pref?.privateTags ?? [])])
-      if (tag[0] === "i" && !contracts.includes(tag[1])) contracts.push(tag[1])
-    const scope = document.createElement("select")
-    scope.setAttribute("aria-label", "Handler chain")
-    scope.add(new Option("All intents for this archetype", "", false, !identity))
-    for (const c of contracts) scope.add(new Option(c, c, false, c === identity))
-    scope.addEventListener("change", () => {
-      identity = scope.value
-      render()
-    })
-    content.append(scope)
-    const edit = (change: HandlerEdit) =>
-      run(() => editIntentPreference(role, { identity: identity || undefined, ...change }))
-    if (pref?.locked) {
-      content.append(
-        button({
-          label: "Unlock private preferences",
-          disabled: busy,
-          onClick: () => void run(() => unlockIntentPreference(role))
-        })
-      )
-      return
-    }
-    for (const entry of handlerEntries(pref, identity || undefined)) {
-      const row = el("div", "", code(entry.reference), entry.hidden ? " · private" : " · public")
-      row.append(
-        button({
-          label: "Prefer",
-          disabled: busy,
-          onClick: () =>
-            void edit({ action: "prefer", reference: entry.reference, hidden: entry.hidden })
-        }),
-        button({
-          label: entry.hidden ? "Make public" : "Make private",
-          disabled: busy,
-          onClick: () =>
-            void edit({ action: "visibility", reference: entry.reference, hidden: !entry.hidden })
-        }),
-        button({
-          label: "Remove handler",
-          disabled: busy,
-          onClick: () => void edit({ action: "remove", reference: entry.reference })
-        })
-      )
-      content.append(row)
-    }
-    const target = document.createElement("select")
-    target.setAttribute("aria-label", "Add intent handler")
-    for (const [ref, event] of catalog)
-      if (
-        canReceiveIntent(event) &&
-        manifestContracts(event).some(
-          c => c.archetype === role && (!identity || c.convention === identity)
-        )
-      )
-        target.add(new Option(event.tags.find(t => t[0] === "title")?.[1] || ref, ref))
-    content.append(
-      target,
-      button({
-        label: "Add handler",
-        disabled: busy || !target.options.length,
-        onClick: () => void edit({ action: "add", reference: target.value })
-      }),
-      button({
-        label: "Reset chain",
-        disabled: busy,
-        onClick: () => void edit({ action: "reset" })
-      }),
-      button({
-        label: "Clear archetype preferences",
-        disabled: busy,
-        onClick: () => void edit({ action: "clear" })
+      if (!chains.length && (!pref?.locked || !matches(role))) continue
+      shown++
+      const group = details({
+        summary: role,
+        open: expanded.has(role) || !!query || !!selected
       })
-    )
+      group.classList.add("intent-archetype")
+      group.addEventListener("toggle", () => {
+        if (group.open) expanded.add(role)
+        else expanded.delete(role)
+      })
+      if (pref?.locked)
+        group.append(
+          el("p", "", "Private preferences are locked. Unlock to inspect or edit this archetype."),
+          button({
+            label: "Unlock private preferences",
+            disabled: busy,
+            onClick: () => void run(() => unlockIntentPreference(role))
+          })
+        )
+      for (const identity of chains) {
+        const edit = (change: HandlerEdit) =>
+          run(() => editIntentPreference(role, { identity: identity || undefined, ...change }))
+        const chain = el("section", "intent-chain", el("h4", "", identity || "Defaults"))
+        chain.setAttribute("aria-label", `${role} ${identity || "default"} handlers`)
+        const entries = handlerEntries(pref, identity || undefined)
+        if (!entries.length)
+          chain.append(el("p", "", identity ? "Uses archetype defaults." : "No default handlers."))
+        entries.forEach((entry, index) => {
+          const event = catalog.get(entry.reference)
+          const name =
+            event?.tags.find(t => t[0] === "title")?.[1] ||
+            (event ? event.content : "Unavailable napplet")
+          const info = el(
+            "div",
+            "intent-handler-name",
+            el("strong", "", name),
+            code(entry.reference)
+          )
+          if (event?.kind === 5129) info.append(el("span", "", "Pinned snapshot"))
+          const row = el(
+            "div",
+            "intent-handler-row",
+            el("span", "", `${index + 1}.`),
+            info,
+            el("span", "", entry.hidden ? "Private" : "Public"),
+            button({
+              label: "Prefer",
+              disabled:
+                busy ||
+                !!pref?.locked ||
+                !entries.slice(0, index).some(e => e.hidden === entry.hidden),
+              onClick: () =>
+                void edit({ action: "prefer", reference: entry.reference, hidden: entry.hidden })
+            }),
+            button({
+              label: entry.hidden ? "Make public" : "Make private",
+              disabled: busy || !!pref?.locked,
+              onClick: () =>
+                void edit({
+                  action: "visibility",
+                  reference: entry.reference,
+                  hidden: !entry.hidden
+                })
+            }),
+            button({
+              label: "Remove handler",
+              disabled: busy || !!pref?.locked,
+              onClick: () => void edit({ action: "remove", reference: entry.reference })
+            })
+          )
+          chain.append(row)
+        })
+        const target = document.createElement("select")
+        target.setAttribute("aria-label", `Add ${role} ${identity || "default"} handler`)
+        target.add(
+          new Option(
+            entries.length ? "Add fallback…" : identity ? "Add override…" : "Add handler…",
+            ""
+          )
+        )
+        for (const [ref, event] of catalog)
+          if (
+            canReceiveIntent(event) &&
+            !entries.some(e => e.reference === ref) &&
+            manifestContracts(event).some(
+              c => c.archetype === role && (!identity || c.convention === identity)
+            )
+          )
+            target.add(new Option(event.tags.find(t => t[0] === "title")?.[1] || ref, ref))
+        target.disabled = busy || !!pref?.locked
+        const hidden = document.createElement("input")
+        hidden.type = "checkbox"
+        hidden.disabled = busy || !!pref?.locked
+        const submit = button({
+          label: "Add handler",
+          disabled: true,
+          onClick: () =>
+            void edit({ action: "add", reference: target.value, hidden: hidden.checked })
+        })
+        target.onchange = () => {
+          submit.disabled = busy || !!pref?.locked || !target.value
+        }
+        chain.append(
+          el("div", "intent-toolbar", target, el("label", "", hidden, "Private"), submit)
+        )
+        if (entries.length)
+          chain.append(
+            button({
+              label: identity ? "Reset override" : "Reset defaults",
+              disabled: busy || !!pref?.locked,
+              onClick: () => void edit({ action: "reset" })
+            })
+          )
+        group.append(chain)
+      }
+      if (pref)
+        group.append(
+          button({
+            label: "Clear archetype preferences",
+            disabled: busy || pref.locked,
+            onClick: () => {
+              if (window.confirm(`Clear defaults and all intent overrides for ${role}?`))
+                void run(() => editIntentPreference(role, { action: "clear" }))
+            }
+          })
+        )
+      content.append(group)
+    }
+    if (!shown)
+      content.append(
+        el("p", "", query || selected ? "No matching intents." : "No saved intent handlers.")
+      )
   }
+  const stopAccount = subscribeAccount(() => {
+    if (!active) return
+    render()
+    if (section.open && !busy) void refresh()
+  })
   const stop = subscribeIntents(() => {
     if (active && !busy) render()
   })
   section.addEventListener("toggle", () => {
-    if (section.open) void run(() => Promise.all([refreshIntentPreferences(), discoverIntents()]))
+    if (section.open) void refresh()
   })
   render()
   return {
@@ -183,6 +310,7 @@ export function intentSettings() {
     unmount() {
       active = false
       stop()
+      stopAccount()
     }
   }
 }
