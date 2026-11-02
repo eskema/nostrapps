@@ -1,3 +1,5 @@
+import { fetchBlob } from "./download.js"
+export { fetchBlob } from "./download.js"
 import { pool } from "@nostr/gadgets/global"
 import { guessMime } from "./mime.js"
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
@@ -5,8 +7,6 @@ import { onRelayAuth } from "../relay-auth.js"
 import { Filter } from "@nostr/tools/filter"
 import { normalizeURL } from "@nostr/tools/utils"
 import { NostrEvent } from "@nostr/tools/pure"
-import { sha256 } from "@noble/hashes/sha2.js"
-import { bytesToHex } from "@noble/hashes/utils.js"
 import { NsiteResult } from "../types.js"
 import { healNapp } from "./heal.js"
 
@@ -233,34 +233,4 @@ function latest(events: NostrEvent[]): NostrEvent | null {
 function getTag(evt: { tags: string[][] }, name: string): string | undefined {
   const t = evt.tags.find(x => x[0] === name)
   return t?.[1]
-}
-
-export async function fetchBlob(servers: string[], sha: string): Promise<Blob | null> {
-  // Try each server at most once. A throwing server (timeout / network / CORS)
-  // is skipped like any other failure — never retried in place, so an
-  // unreachable server can't spin this loop forever and stall the install.
-  for (let server of servers) {
-    try {
-      server = server.endsWith("/") ? server.slice(0, -1) : server
-      server = server.startsWith("http") ? server : `https://${server}`
-      const res = await fetch(`${server}/${sha}`, { signal: AbortSignal.timeout(10000) })
-      if (!res.ok) {
-        console.debug("[fetchBlob] miss", { server, sha, status: res.status })
-        continue
-      }
-      const blob = await res.blob()
-      const buf = await blob.arrayBuffer()
-      if (bytesToHex(sha256(new Uint8Array(buf))) !== sha) {
-        console.debug("[fetchBlob] hash mismatch", { server, sha })
-        continue
-      }
-      return blob
-    } catch (err) {
-      // network error / timeout / abort — move on to the next server
-      console.debug("[fetchBlob] error", { server, sha, err: String(err) })
-      continue
-    }
-  }
-  console.warn("[fetchBlob] all servers failed", { sha, servers })
-  return null
 }

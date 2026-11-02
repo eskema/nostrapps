@@ -199,7 +199,13 @@ export function createNappWindow({
       return b
     }
     const navCmd = (dir: "back" | "forward" | "reload") => {
-      if (dir === "reload") onReload?.()
+      if (dir === "reload") {
+        onReload?.()
+        if (sourceRouting && iframeRef.current) {
+          iframeRef.current.srcdoc = iframeRef.current.srcdoc
+          return
+        }
+      }
       iframeRef.current?.contentWindow?.postMessage({ __nostrapps: "napp-nav", dir }, origin || "*")
     }
     if (wasm) {
@@ -478,6 +484,10 @@ export function createNappWindow({
   // onReload alone, and the wasm window's own reload is the launcher's job.
   function reload() {
     onReload?.()
+    if (sourceRouting && iframeRef.current) {
+      iframeRef.current.srcdoc = iframeRef.current.srcdoc
+      return
+    }
     iframeRef.current?.contentWindow?.postMessage(
       { __nostrapps: "napp-nav", dir: "reload" },
       origin || "*"

@@ -20,6 +20,7 @@ export interface DialogAction<T> {
 
 export interface DialogOptions<T> {
   title?: string
+  signal?: AbortSignal
   // Body content: a prebuilt node/string, OR a builder that receives `resolve`
   // so interactive content (e.g. a picker list) can settle the dialog itself.
   body?: Node | string
@@ -93,10 +94,22 @@ let showing = false
 let current: { opts: DialogOptions<any>; finish: (value: any) => void } | null = null
 
 export function openDialog<T = string>(opts: DialogOptions<T>): Promise<T> {
+  if (opts.signal?.aborted) return Promise.resolve(opts.dismissValue)
   return new Promise<T>(resolve => {
-    queue.push({ opts, resolve })
-    if (showing)
-      renderQueueBar() // the open dialog lists the new request
+    const abort = () => {
+      if (current?.opts === opts) current.finish(opts.dismissValue)
+      else dropQueued(item)
+    }
+    const item: Pending<T> = {
+      opts,
+      resolve: value => {
+        opts.signal?.removeEventListener("abort", abort)
+        resolve(value)
+      }
+    }
+    opts.signal?.addEventListener("abort", abort, { once: true })
+    queue.push(item)
+    if (showing) renderQueueBar()
     else pump()
   })
 }

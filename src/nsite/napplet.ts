@@ -1,9 +1,10 @@
 // NIP-5D napplet resolution + verification. A napplet is a SINGLE self-contained
 // /index.html, published as its own event kind (distinct from an nsite), fetched
 // from Blossom by the manifest's x tag and verified before it ever runs.
+import { cacheArtifact, cachedArtifact, NAPPLET_MAX_BYTES } from "./artifact-cache.js"
 import { pool } from "@nostr/gadgets/global"
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
-import { verifyEvent } from "../verify.js"
+import { verifyEventFresh } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
 import { addedServers, fetchBlob } from "./fetch.js"
 import { healNapp } from "./heal.js"
@@ -217,7 +218,19 @@ export async function resolveNapplet(
   const filter: any = id
     ? { ids: [id] }
     : { kinds: [kind], authors: [pubkey], ...(dTag ? { "#d": [dTag] } : {}) }
-  const manifest = latest(await pool.querySync(relays, filter, { maxWait: 6000 }))
+  const events = await pool.querySync(relays, filter, { maxWait: 6000 })
+  const manifest = latest(
+    events.filter(
+      event =>
+        isNappletKind(event.kind) &&
+        verifyEventFresh(event) &&
+        (id
+          ? event.id === id
+          : event.kind === kind &&
+            event.pubkey === pubkey &&
+            (kind !== NAPPLET_NAMED_KIND || event.tags.find(t => t[0] === "d")?.[1] === dTag))
+    )
+  )
   if (!manifest) throw new Error("napplet manifest not found")
   return loadNappletFromManifest(manifest, onProgress, { healRelays: relays })
 }
@@ -231,9 +244,11 @@ export async function loadNappletFromManifest(
   onProgress: (m: string) => void = () => {},
   // healRelays marks a fresh resolve (install/update): heal fires there, never
   // on the RESTORE re-verify, which runs on every launch.
-  opts: { healRelays?: string[] } = {}
+  opts: { healRelays?: string[]; signal?: AbortSignal } = {}
 ): Promise<ResolvedNapplet> {
-  if (!verifyEvent(manifest)) throw new Error("napplet manifest signature is invalid")
+  opts.signal?.throwIfAborted()
+  if (!isNappletKind(manifest.kind)) throw new Error("not a napplet manifest")
+  if (!verifyEventFresh(manifest)) throw new Error("napplet manifest signature is invalid")
 
   // Turned away here rather than asking every server for a blob that isn't one.
   if (isOldNappletFormat(manifest)) {
@@ -244,10 +259,14 @@ export async function loadNappletFromManifest(
     throw new Error("napplet manifest needs exactly one x tag")
   }
   const artifactHash = xTags[0][1]
+  const cached = await cachedArtifact(artifactHash, opts.signal)
 
   const pubkey = manifest.pubkey
   const manifestServers = manifest.tags.filter(t => t[0] === "server" && t[1]).map(t => t[1])
-  const userServers = pubkey ? ((await loadBlossomServers(pubkey)).items ?? []) : []
+  const userServers =
+    pubkey && (!cached || opts.healRelays?.length)
+      ? ((await loadBlossomServers(pubkey).catch(() => ({ items: [] }))).items ?? [])
+      : []
   const servers = [
     "relay.nostrapps.com",
     ...new Set(userServers),
@@ -256,8 +275,17 @@ export async function loadNappletFromManifest(
 
   onProgress("Fetching napplet…")
   // verifies sha256(blob) === hash; heal only writes to the napplet's own servers
-  const blob = await fetchBlob([...servers, ...addedServers(manifest)], artifactHash)
+  const blob =
+    cached ??
+    (await fetchBlob([...servers, ...addedServers(manifest)], artifactHash, {
+      signal: opts.signal,
+      maxBytes: NAPPLET_MAX_BYTES,
+      concurrency: 4
+    }))
   if (!blob) throw new Error(`Could not fetch napplet (${artifactHash})`)
+
+  opts.signal?.throwIfAborted()
+  cacheArtifact(artifactHash, blob)
 
   if (opts.healRelays?.length) {
     healNapp({

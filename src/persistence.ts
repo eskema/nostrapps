@@ -939,6 +939,7 @@ export function setPolicy(nappId: string, policy: NappPolicy, v = POLICY_VERSION
   const all = readPolicies()
   all[nappId] = { ...normalize(nappId, expandGrants(policy.domains), policy.ask), v }
   writeJson(POLICY_KEY, all)
+  window.dispatchEvent(new CustomEvent("nostrapps:policy-changed", { detail: nappId }))
 }
 
 // The record written into the napp's /__policy__ for its service worker: the
@@ -964,7 +965,8 @@ export function getInstallDefaults(napplet: boolean): InstallDefaults {
   const raw = readJson(INSTALL_DEFAULTS_KEY, {})?.[napplet ? "napplet" : "napp"]
   const list = (v: unknown) =>
     Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : []
-  if (!raw || typeof raw !== "object") return { off: ["decrypt"], ask: [] }
+  if (!raw || typeof raw !== "object")
+    return napplet ? { off: [], ask: [] } : { off: ["decrypt"], ask: [] }
   return { off: list(raw.off), ask: list(raw.ask) }
 }
 
@@ -986,6 +988,7 @@ export function clearPolicy(nappId: string) {
   if (!(nappId in all)) return
   delete all[nappId]
   writeJson(POLICY_KEY, all)
+  window.dispatchEvent(new CustomEvent("nostrapps:policy-changed", { detail: nappId }))
 }
 
 // ─── NIP-5D napplet storage (NAP-STORAGE) ───────────────────────

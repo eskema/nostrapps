@@ -1212,6 +1212,20 @@ body.popover-open .napp-body iframe {
   justify-self: end;
 }
 
+/* Session approval has its own row; keep deny and allow in their columns. */
+.app-dialog-napplet-permission .app-dialog-actions > :nth-child(3) {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+}
+
+.app-dialog-napplet-permission .app-dialog-actions > :nth-child(4) {
+  justify-self: start;
+}
+
+.app-dialog-napplet-permission .app-dialog-actions > :nth-child(5) {
+  justify-self: end;
+}
+
 /* ─── Napp permission screen (install / edit) ─────────────────────────── */
 .napp-perms {
   display: grid;

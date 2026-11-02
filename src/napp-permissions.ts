@@ -1,7 +1,8 @@
 // The per-napp permission screen. Shown before an app first runs and re-openable
 // from an app card. It turns the app's `requires` declarations into the single
 // granted `domains` list — nothing is serviced or reachable until it's ticked —
-// and the rows that still ask each time (permissions.ts). A new install starts
+// and napp rows that still ask each time. Napplet operations ask separately
+// per account (permissions.ts). A new install starts
 // from the defaults set in Settings.
 // The capability rows use the design-system item list (the relays-napp look).
 // A share link opens several apps at once; promptSharedSpace lists them on one
@@ -21,8 +22,8 @@ const CAP_INFO: Record<string, { title: string; desc: string }> = {
   identity: { title: "identity", desc: "knows who you are" },
   theme: { title: "theme", desc: "matches your colors" },
   storage: { title: "storage", desc: "keeps its own data" },
-  resource: { title: "resource", desc: "loads files via the launcher" },
-  relay: { title: "relay", desc: "reads and posts events" },
+  resource: { title: "resource", desc: "asks before reading HTTPS, HTTP or Blossom resources" },
+  relay: { title: "relay", desc: "asks to read relay events; posts with separate approval" },
   outbox: { title: "outbox", desc: "finds the right relays for you" },
   common: { title: "common", desc: "looks up profiles, follows, reacts and reports" },
   inc: { title: "inc", desc: "talks to other open napplets" },
@@ -397,6 +398,7 @@ function policySection(
 // ask ticks its row, unticking a row unticks its ask. A napp's identity rows
 // sit under one heading; unticking read unticks them, ticking one ticks read.
 // For a napplet identity is the one NAP row; an nsite's read has no nostrdb.
+// Napplet rows control availability; runtime operation approvals are separate.
 function grantRows(
   keys: string[],
   on: (d: string) => boolean,
@@ -441,7 +443,7 @@ function grantRows(
     const line = document.createElement("div")
     line.className = "napp-perms-line" + (sub ? " napp-perms-sub" : "")
     line.appendChild(permRow(box, info.title, info.desc))
-    if (ASKABLE.has(d)) {
+    if (!napplet && ASKABLE.has(d)) {
       const ask = check({
         label: "ask",
         class: "napp-perms-ask",

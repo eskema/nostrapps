@@ -76,7 +76,7 @@ export function backupTags(theme: string, parts: BackupParts): string[][] {
     tags.push(auth)
   }
 
-  const decisions = listDecisions() as Record<string, Record<string, string>>
+  const decisions = listDecisions(false) as Record<string, Record<string, string>>
   const addrs = new Map<string, string>()
   for (const app of persist.getInstalledApps()) {
     const addr = addrFor(app)

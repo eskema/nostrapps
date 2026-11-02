@@ -42,7 +42,9 @@ interface Group {
 }
 
 const decisionBadge = (decision: string) =>
-  badge(decision, { tone: decision === "allow" ? "good" : "danger" })
+  badge(decision === "session" ? "this session" : decision, {
+    tone: decision === "allow" || decision === "session" ? "good" : "danger"
+  })
 
 export function permissionsSection(opts: PermissionsSectionOpts) {
   const section = details({ summary: "permissions", sticky: true, class: "settings-permissions" })
