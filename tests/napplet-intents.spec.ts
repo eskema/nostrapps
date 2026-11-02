@@ -888,11 +888,208 @@ test("cached choices appear immediately and remote discovery updates the open ch
     timeout: 900
   })
   await page.getByRole("checkbox", { name: "Remember this choice", exact: true }).check()
+  // Existing rows must survive discovery updates so clicks and focus are not lost.
+  await page
+    .getByRole("button", { name: "Intent Reader", exact: true })
+    .evaluate(node => ((window as any).cachedRow = node))
   await page.evaluate(() => (window as any).finishDiscovery())
   await expect(page.getByRole("button", { name: "Remote Reader", exact: true })).toBeVisible()
+  expect(
+    await page.evaluate(() => {
+      const row = (window as any).cachedRow as HTMLElement
+      return row.isConnected && row.textContent?.includes("Intent Reader")
+    })
+  ).toBe(true)
   await expect(
     page.getByRole("checkbox", { name: "Remember this choice", exact: true })
   ).toBeChecked()
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await expect(page.getByRole("dialog")).toBeHidden()
+})
+
+// A handler manifest and preference signed by keys the test controls.
+function handlerRevision(secret: Uint8Array, d: string, created_at: number, title: string) {
+  return finalizeEvent(
+    {
+      kind: 35129,
+      created_at,
+      content: title,
+      tags: [
+        ["d", d],
+        ["title", title],
+        ["x", "3".repeat(64)],
+        ["R", "intent"],
+        ["z", "note"],
+        ["i", "napplet:note/open"]
+      ]
+    },
+    secret
+  )
+}
+function notePreference(secret: Uint8Array, created_at: number, handler: { pubkey: string }, d: string) {
+  return finalizeEvent(
+    {
+      kind: 31129,
+      created_at,
+      content: "",
+      tags: [
+        ["d", "note"],
+        ["a", `35129:${handler.pubkey}:${d}`]
+      ]
+    },
+    secret
+  )
+}
+// Deliveries pause on the first attempt until the test calls w.release().
+async function stubPausingDelivery(page: Page) {
+  await page.evaluate(() => {
+    const w = window as any
+    w.delivered = []
+    w.attempts = 0
+    w.manager.configureIntents({
+      loadEvent: async () => null,
+      action: async () => {
+        throw new Error("Unexpected NAPP handoff")
+      },
+      async deliver(event: any, _request: any, _delivery: any, context: any) {
+        if (w.attempts++ === 0)
+          await new Promise(resolve => {
+            w.release = resolve
+          })
+        context.check()
+        w.delivered.push(event.id)
+        return true
+      }
+    })
+  })
+}
+function invokeNote(page: Page) {
+  return page.evaluate(() => {
+    const w = window as any
+    void w.manager
+      .invokeIntent(
+        { archetype: "note", action: "open", convention: "napplet:note/open", payload: { id: "x" } },
+        { sender: "stale-route", check() {} }
+      )
+      .then((result: unknown) => (w.result = result))
+  })
+}
+
+test("a default handler updated during delivery is retried with its newer revision", async ({
+  page
+}) => {
+  await setup(page)
+  const author = generateSecretKey()
+  const v1 = handlerRevision(author, "updatable", 1, "Updatable")
+  const v2 = handlerRevision(author, "updatable", 2, "Updatable")
+  const preference = notePreference(generateSecretKey(), 10, v1, "updatable")
+  await page.evaluate(
+    async ({ v1, preference }) => {
+      const w = window as any
+      w.account.setAccount(preference.pubkey, "nip07")
+      w.relayPool.subscribeMap = (requests: any[], params: any) => {
+        queueMicrotask(() => {
+          if (requests[0].filter.kinds?.includes(31129)) params.onevent?.(preference)
+          params.oneose?.()
+        })
+        return { close() {} }
+      }
+      await w.manager.refreshIntentPreferences()
+      w.manager.observeIntentManifest(v1)
+    },
+    { v1, preference }
+  )
+  await stubPausingDelivery(page)
+  await invokeNote(page)
+  await expect.poll(() => page.evaluate(() => typeof (window as any).release)).toBe("function")
+  const outcome = await page.evaluate(async v2 => {
+    const w = window as any
+    w.manager.observeIntentManifest(v2)
+    w.release()
+    while (!w.result) await new Promise(r => setTimeout(r, 10))
+    return { result: w.result, delivered: w.delivered }
+  }, v2)
+  expect(outcome.result.ok).toBe(true)
+  expect(outcome.delivered).toEqual([v2.id])
+  await expect(page.getByRole("button", { name: "Updatable", exact: true })).toHaveCount(0)
+})
+
+test("a default replaced by the relay sync during delivery routes to the new default", async ({
+  page
+}) => {
+  await setup(page)
+  const user = generateSecretKey()
+  const a = handlerRevision(generateSecretKey(), "handler-a", 1, "Handler A")
+  const b = handlerRevision(generateSecretKey(), "handler-b", 1, "Handler B")
+  const cached = notePreference(user, 10, a, "handler-a")
+  const synced = notePreference(user, 20, b, "handler-b")
+  await page.evaluate(
+    ({ a, b, cached, synced }) => {
+      const w = window as any
+      localStorage.setItem(`nostrapps:intent-preferences:v1:${cached.pubkey}`, JSON.stringify([cached]))
+      w.relayPool.subscribeMap = (requests: any[], params: any) => {
+        if (requests[0].filter.kinds?.includes(31129))
+          w.finishSync = () => {
+            params.onevent?.(synced)
+            params.oneose?.()
+          }
+        else queueMicrotask(() => params.oneose?.())
+        return { close() {} }
+      }
+      w.manager.observeIntentManifest(a)
+      w.manager.observeIntentManifest(b)
+      w.account.setAccount(cached.pubkey, "nip07")
+    },
+    { a, b, cached, synced }
+  )
+  await stubPausingDelivery(page)
+  await invokeNote(page)
+  await expect.poll(() => page.evaluate(() => typeof (window as any).release)).toBe("function")
+  await expect.poll(() => page.evaluate(() => typeof (window as any).finishSync)).toBe("function")
+  await page.evaluate(() => (window as any).finishSync())
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).manager.intentPreferences().get("note")?.event.id)
+    )
+    .toBe(synced.id)
+  await page.evaluate(() => (window as any).release())
+  await expect.poll(() => page.evaluate(() => (window as any).result?.ok)).toBe(true)
+  expect(await page.evaluate(() => (window as any).delivered)).toEqual([b.id])
+})
+
+test("a snapshot with one invalid entry still uses its valid cached default", async ({ page }) => {
+  await setup(page)
+  const user = generateSecretKey()
+  const valid = notePreference(user, 10, manifest, "intent-reader")
+  const tampered = { ...notePreference(user, 5, manifest, "intent-reader"), created_at: 100 }
+  await page.evaluate(
+    ({ valid, tampered }) => {
+      const w = window as any
+      localStorage.setItem(
+        `nostrapps:intent-preferences:v1:${valid.pubkey}`,
+        JSON.stringify([tampered, valid])
+      )
+      w.relayPool.subscribeMap = (requests: any[], params: any) => {
+        if (requests[0].filter.kinds?.includes(31129)) w.finishSync = params.oneose
+        else queueMicrotask(() => params.oneose?.())
+        return { close() {} }
+      }
+      w.account.setAccount(valid.pubkey, "nip07")
+      w.deliveries = 0
+      w.manager.configureIntents({
+        loadEvent: async () => null,
+        action: async () => undefined,
+        deliver: async () => {
+          w.deliveries++
+          return true
+        }
+      })
+    },
+    { valid, tampered }
+  )
+  await invokeNote(page)
+  await expect.poll(() => page.evaluate(() => (window as any).result?.ok)).toBe(true)
+  expect(await page.evaluate(() => (window as any).deliveries)).toBe(1)
+  await expect.poll(() => page.evaluate(() => typeof (window as any).finishSync)).toBe("function")
+  await page.evaluate(() => (window as any).finishSync())
 })

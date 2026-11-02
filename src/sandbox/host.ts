@@ -1974,6 +1974,8 @@ function handleNapplet(
 ) {
   if (data.type === "intent.ready") {
     intentReady.add(iframe)
+    // A new document starts with no availability; resend everything to it.
+    sentIntentAvailability.delete(iframe)
     return
   }
   const domain = data.type.split(".")[0]
@@ -6143,14 +6145,33 @@ export async function deliverNappletIntent(win: NappWindow, delivery: IntentDeli
   return true
 }
 let lastIntentRoles = new Set<string>()
-subscribeIntents(() => {
+// Per frame, the last availability posted for each role, so unchanged roles are not resent.
+const sentIntentAvailability = new WeakMap<HTMLIFrameElement, Map<string, string>>()
+function broadcastIntentAvailability() {
   const handlers = intentAvailability()
   const roles = new Set(handlers.map(h => h.archetype))
   for (const archetype of lastIntentRoles) if (!roles.has(archetype)) handlers.push({ archetype, available: false, candidates: [], hasDefault: false })
   lastIntentRoles = roles
+  const serialized = handlers.map(availability => [availability, JSON.stringify(availability)] as const)
   for (const win of openWindows.values()) {
     const frame = win.iframe
     if (!frame || !intentReady.has(frame) || !nappletGrantedDomainsFor(win.getState().nappId).includes("intent")) continue
-    for (const availability of handlers) frame.contentWindow?.postMessage({ type: "intent.changed", availability }, "*")
+    let sent = sentIntentAvailability.get(frame)
+    if (!sent) sentIntentAvailability.set(frame, (sent = new Map()))
+    for (const [availability, json] of serialized) {
+      if (sent.get(availability.archetype) === json) continue
+      sent.set(availability.archetype, json)
+      frame.contentWindow?.postMessage({ type: "intent.changed", availability }, "*")
+    }
   }
+}
+// Discovery can add hundreds of manifests in one burst; scan and post once per batch.
+let intentBroadcastScheduled = false
+subscribeIntents(() => {
+  if (intentBroadcastScheduled) return
+  intentBroadcastScheduled = true
+  queueMicrotask(() => {
+    intentBroadcastScheduled = false
+    broadcastIntentAvailability()
+  })
 })

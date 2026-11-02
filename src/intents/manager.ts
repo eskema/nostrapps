@@ -79,9 +79,11 @@ export function subscribeIntents(fn: () => void) {
   }
 }
 export function observeIntentManifest(event: NostrEvent) {
-  if (!verifyEventFresh(event)) return
   const key = manifestIdentity(event)
-  if (!matchesHandler(event, key) || !newer(event, catalog.get(key))) return
+  const known = catalog.get(key)
+  // Catalog entries are already verified; skip re-verifying them or older revisions.
+  if (known?.id === event.id || !newer(event, known)) return
+  if (!verifyEventFresh(event) || !matchesHandler(event, key)) return
   catalog.set(key, event)
   emit()
 }
@@ -172,7 +174,10 @@ async function loadLocalPreferences() {
       const snapshot: unknown = JSON.parse(localStorage.getItem(preferenceCacheKey(pk)) || "null")
       if (Array.isArray(snapshot)) {
         // An empty snapshot records a completed sync with no saved preferences.
-        cachedPreferences = snapshot.every(event => acceptPreference(event, pk))
+        // Accept every valid entry, but only a fully valid snapshot counts as complete.
+        let allValid = true
+        for (const event of snapshot) if (!acceptPreference(event, pk)) allValid = false
+        cachedPreferences = allValid
       }
     } catch {}
     const events = await safeQueryEvents({
@@ -258,10 +263,20 @@ export async function discoverIntents(convention?: string) {
         .catch(() => {})
   }
 }
-async function loadLocalCatalog() {
-  const events = await safeQueryEvents({ kinds: [5129, 15129, 35129] }).catch(() => [])
-  for (const event of events) observeIntentManifest(event)
+// Later store saves reach the catalog through onStoreSaved, so load once per session.
+let localCatalog: Promise<void> | undefined
+function loadLocalCatalog() {
+  localCatalog ??= safeQueryEvents({ kinds: [5129, 15129, 35129] }).then(
+    events => {
+      for (const event of events) observeIntentManifest(event)
+    },
+    () => {
+      localCatalog = undefined
+    }
+  )
+  return localCatalog
 }
+const refreshing = new Map<string, Promise<void>>()
 async function loadReference(reference: string, hints?: string[]) {
   const pointer = handlerPointer(reference, hints)
   if (!pointer) return
@@ -281,13 +296,20 @@ async function loadReference(reference: string, hints?: string[]) {
   if (local) {
     // A verified cached handler is usable immediately. Refresh its revision
     // independently; delivery rechecks catalog revisions before disclosure.
-    void query(filter, hints)
-      .then(events => {
-        for (const event of events)
-          if (catalog.has(reference) && matchesHandler(event, reference))
-            observeIntentManifest(event)
-      })
-      .catch(() => {})
+    // Event ids are immutable, and references outside the catalog (such as
+    // private ones) would discard the result, so only refresh catalog addresses.
+    if (!("id" in pointer) && catalog.has(reference) && !refreshing.has(reference))
+      refreshing.set(
+        reference,
+        query(filter, hints)
+          .then(events => {
+            for (const event of events)
+              if (catalog.has(reference) && matchesHandler(event, reference))
+                observeIntentManifest(event)
+          })
+          .catch(() => {})
+          .finally(() => refreshing.delete(reference))
+      )
     return local
   }
   const events = await query(filter, hints)
@@ -457,36 +479,64 @@ export function hasIntentHandlers(request: IntentRequest): boolean {
   installed()
   return [...catalog.values()].some(event => supports(event, request.convention))
 }
-export function buildIntentHandlerChoices(
+// A live list of compatible handlers. Rows are added, removed or swapped
+// individually so the row under the cursor or focus is never rebuilt.
+export function mountIntentHandlerChoices(
   request: IntentRequest,
   select: (handler: string) => void
-): HTMLElement {
-  installed()
+): { element: HTMLElement; dispose(): void } {
   const body = el("div", "intent-handler-options")
-  for (const [reference, event] of catalog) {
-    if (!supports(event, request.convention)) continue
-    const title = event.tags.find(t => t[0] === "title")?.[1] || "Napplet"
-    body.append(
-      handlerChoice({
-        title,
-        pubkey: event.pubkey,
-        iconSources: () =>
-          import("../nsite/icon.js")
-            .then(m => m.nappletIconSrc(event))
-            .then(src => (src ? [src] : [])),
-        onSelect: () => select(candidateId(reference))
-      })
-    )
+  const empty = el("p", "", "No compatible napplets found.")
+  const rows = new Map<string, { id: string; node: HTMLElement }>()
+  const row = (reference: string, event: NostrEvent) =>
+    handlerChoice({
+      title: event.tags.find(t => t[0] === "title")?.[1] || "Napplet",
+      pubkey: event.pubkey,
+      iconSources: () =>
+        import("../nsite/icon.js")
+          .then(m => m.nappletIconSrc(event))
+          .then(src => (src ? [src] : [])),
+      onSelect: () => select(candidateId(reference))
+    })
+  const sync = () => {
+    installed()
+    const seen = new Set<string>()
+    for (const [reference, event] of catalog) {
+      if (!supports(event, request.convention)) continue
+      seen.add(reference)
+      const existing = rows.get(reference)
+      if (existing?.id === event.id) continue
+      const node = row(reference, event)
+      if (existing) existing.node.replaceWith(node)
+      else body.append(node)
+      rows.set(reference, { id: event.id, node })
+    }
+    for (const [reference, { node }] of rows)
+      if (!seen.has(reference)) {
+        node.remove()
+        rows.delete(reference)
+      }
+    if (rows.size) empty.remove()
+    else if (!empty.isConnected) body.append(empty)
   }
-  if (!body.children.length) body.append(el("p", "", "No compatible napplets found."))
-  return body
+  let scheduled = false
+  const unsubscribe = subscribeIntents(() => {
+    if (scheduled) return
+    scheduled = true
+    queueMicrotask(() => {
+      scheduled = false
+      sync()
+    })
+  })
+  sync()
+  return { element: body, dispose: unsubscribe }
 }
 async function choose(
   request: IntentRequest,
   context: IntentContext,
   message = ""
 ): Promise<Choice | null> {
-  let unsubscribe = () => {}
+  let dispose = () => {}
   try {
     return await openDialog<Choice | null>({
       title: "Open with",
@@ -510,24 +560,12 @@ async function choose(
         })
         const rememberValue = () => !!remember.querySelector("input")?.checked
         const hiddenValue = () => !!hidden.querySelector("input")?.checked
-        const napplets = el("div")
-        let revision = ""
-        const render = () => {
-          const next = [...catalog.values()]
-            .filter(event => supports(event, request.convention))
-            .map(event => event.id)
-            .join(":")
-          if (revision === next && napplets.childNodes.length) return
-          revision = next
-          napplets.replaceChildren(
-            buildIntentHandlerChoices(request, handler => {
-              const reference = [...catalog.keys()].find(ref => candidateId(ref) === handler)!
-              resolve({ reference, remember: rememberValue(), hidden: hiddenValue() })
-            })
-          )
-        }
-        render()
-        unsubscribe = subscribeIntents(render)
+        const choices = mountIntentHandlerChoices(request, handler => {
+          const reference = [...catalog.keys()].find(ref => candidateId(ref) === handler)!
+          resolve({ reference, remember: rememberValue(), hidden: hiddenValue() })
+        })
+        dispose = choices.dispose
+        const napplets = el("div", "", choices.element)
         body.append(el("section", "intent-handler-section", el("h4", "", "Napplets"), napplets))
         const mapped = mappedNappAction(request.convention, request.payload)
         const napps =
@@ -543,7 +581,7 @@ async function choose(
       actions: [{ label: "Cancel", value: null }]
     })
   } finally {
-    unsubscribe()
+    dispose()
   }
 }
 export async function invokeIntent(value: unknown, source: IntentContext): Promise<IntentResult> {
@@ -593,6 +631,9 @@ export async function invokeIntent(value: unknown, source: IntentContext): Promi
     stop()
   }
 }
+// Thrown by delivery checks when the chosen route was superseded before disclosure.
+class StaleRouteError extends Error {}
+const MAX_ROUTE_PASSES = 3
 async function resolveIntent(
   value: unknown,
   context: IntentContext,
@@ -617,8 +658,6 @@ async function resolveIntent(
       if (pk !== getPubkey() || version !== generation) throw new Error("Your account changed")
     }
     installed()
-    if (!request.handler) await loadLocalCatalog()
-    checkCurrent()
     // Discovery is independent of account preferences; start both together.
     // Catch here as an explicit handler/default may never need discovery.
     const discovery = request.handler
@@ -634,6 +673,8 @@ async function resolveIntent(
           .then(() => {})
           .catch(() => {})
     if (!request.handler) {
+      await loadLocalCatalog()
+      checkCurrent()
       await loadLocalPreferences()
       checkCurrent()
       const sync = refreshIntentPreferences()
@@ -655,16 +696,27 @@ async function resolveIntent(
       if (!target || !supports(target, request.convention))
         throw new Error("Unknown or incompatible handler")
     } else {
-      const preference = preferences.get(request.archetype)
       const route = intentRoutes()[request.convention]
       // Intent defaults belong to the napplet protocol, even when a NAPP mapping exists.
-      if (preference) {
+      // Cached preferences and manifests are used before relays answer. If either
+      // changes before the payload is posted, restart with the current state
+      // rather than falling back to the chooser. A change that lands after the
+      // payload was posted cannot be undone; that is the cost of a fast cold start.
+      preferenceWalk: for (let pass = 0; pass < MAX_ROUTE_PASSES; pass++) {
+        const preference = preferences.get(request.archetype)
+        if (!preference) break
+        if (preference.locked) {
+          ready()
+          await unlockIntentPreference(request.archetype, context)
+          checkCurrent()
+        }
         for (const ref of preferenceReferences(preference, request.convention)) {
           const tag = [...preference.privateTags, ...preference.event.tags].find(
             t => (t[0] === "a" || t[0] === "e") && t[1] === ref
           )
           const event = await loadReference(ref, tag?.[2] ? [tag[2]] : undefined)
           checkCurrent()
+          if (preferences.get(request.archetype) !== preference) continue preferenceWalk
           if (!event || !supports(event, request.convention)) continue
           try {
             ready()
@@ -677,18 +729,20 @@ async function resolveIntent(
                     preferences.get(request.archetype)?.event.id !== preference.event.id ||
                     !preferenceReferences(preference, request.convention).includes(ref)
                   )
-                    throw new Error("Handler preferences changed")
+                    throw new StaleRouteError("Handler preferences changed")
                   const current = catalog.get(ref)
                   if (current && newer(current, event))
-                    throw new Error("The handler manifest changed")
+                    throw new StaleRouteError("The handler manifest changed")
                 }
               })
             )
               return success(request, candidateId(ref))
-          } catch {
+          } catch (error) {
             checkCurrent()
+            if (error instanceof StaleRouteError) continue preferenceWalk
           }
         }
+        break
       }
       const mapped = mappedNappAction(request.convention, request.payload)
       const saved = rememberedNappTargets()[request.convention]
@@ -761,17 +815,36 @@ async function resolveIntent(
         throw new Error("The handler is no longer compatible")
       const ref = manifestIdentity(target)
       try {
-        if (
-          !(await hooks.deliver(target, request, deliveryFor(request, context.sender), {
-            ...context,
-            check() {
-              checkCurrent()
-              if (catalog.get(ref)?.id !== target?.id)
-                throw new Error("The handler manifest changed")
-            }
-          }))
-        )
-          throw new Error("The target could not start")
+        // The user picked a handler, not a revision: follow compatible updates.
+        for (let pass = 0; ; pass++) {
+          const attempt: NostrEvent = target
+          try {
+            if (
+              !(await hooks.deliver(attempt, request, deliveryFor(request, context.sender), {
+                ...context,
+                check() {
+                  checkCurrent()
+                  if (catalog.get(ref)?.id !== attempt.id)
+                    throw new StaleRouteError("The handler manifest changed")
+                }
+              }))
+            )
+              throw new Error("The target could not start")
+            break
+          } catch (error) {
+            checkCurrent()
+            const latest = catalog.get(ref)
+            if (
+              !(error instanceof StaleRouteError) ||
+              pass + 1 >= MAX_ROUTE_PASSES ||
+              !latest ||
+              latest.id === attempt.id ||
+              !supports(latest, request.convention)
+            )
+              throw error
+            target = latest
+          }
+        }
         checkCurrent()
         if (selected?.remember) {
           try {
@@ -880,7 +953,7 @@ export function intentCatalog() {
 
 onStoreSaved(event => {
   if ([5129, 15129, 35129].includes(event.kind)) observeIntentManifest(event)
-  else {
+  else if (event.kind === HANDLER_PREFERENCES_KIND) {
     const pk = getPubkey()
     const role = event.tags.find(t => t[0] === "d")?.[1]
     const previous = role ? preferences.get(role) : undefined

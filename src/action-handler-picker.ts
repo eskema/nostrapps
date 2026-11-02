@@ -1,6 +1,6 @@
 import { openDialog } from "./dialog.js"
 import { buildHandlerBody } from "./system-napps/handler.js"
-import { buildIntentHandlerChoices, discoverIntents, subscribeIntents } from "./intents/manager.js"
+import { discoverIntents, mountIntentHandlerChoices } from "./intents/manager.js"
 import type { IntentRequest } from "./intents/catalog.js"
 import type { NappWindowState } from "./types.js"
 import type { ActionTarget } from "./handlers.js"
@@ -42,16 +42,11 @@ export async function pickActionHandler(
     }
     root.append(section("Napps", napps))
     if (compatibleIntent) {
-      const alternatives = document.createElement("div")
-      const render = () =>
-        alternatives.replaceChildren(
-          buildIntentHandlerChoices(compatibleIntent, handler =>
-            resolve({ intent: { ...compatibleIntent, handler } })
-          )
-        )
-      render()
-      root.append(section("Napplets", alternatives))
-      unsubscribe = subscribeIntents(render)
+      const choices = mountIntentHandlerChoices(compatibleIntent, handler =>
+        resolve({ intent: { ...compatibleIntent, handler } })
+      )
+      root.append(section("Napplets", choices.element))
+      unsubscribe = choices.dispose
       // Show installed handlers immediately and fill in remote alternatives as they arrive.
       void discoverIntents(compatibleIntent.convention).catch(() => {})
     }
