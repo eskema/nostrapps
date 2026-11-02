@@ -8,8 +8,8 @@
 //    signing is mediated through the relay domain — so this file must never
 //    reference the napp surface.
 //
-// Availability is PRESENCE: the shell declares window.__nappletDomains before
-// this runs, and we build window.napplet with exactly those domain objects.
+// The shell supplies the implemented domain list in window.__nappletDomains.
+// Every napplet receives the full API; the host checks permissions on use.
 // Wire + result-field names match the @napplet/nap contracts, so an app built
 // against @napplet/shim runs unchanged.
 ;(function () {

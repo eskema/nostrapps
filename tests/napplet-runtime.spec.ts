@@ -18,7 +18,7 @@ async function launch(
       const permissions = await import("/src/permissions.ts")
       account.setAccount(alice, "local")
       persistence.storeInstalledLocalApp({ nappId: id, title: "Counter", requires: domains, html })
-      persistence.setPolicy(id, { domains, ask: ["relay"] })
+      persistence.setPolicy(id, { domains, ask: ["resource", "relay"] })
       const win = host.launchNapplet(document.querySelector("#stage")!, id, html, {
         instanceId: "runtime-test"
       })
@@ -94,20 +94,22 @@ test("closing a window cancels its pending approval even when another instance r
   expect(await page.evaluate(() => (window as any).permissions.listDecisions())).toEqual({})
 })
 
-test("permission edits rebuild srcdoc with the new available domains", async ({ page }) => {
+test("permission edits retain all APIs and deny revoked usage", async ({ page }) => {
   await launch(
     page,
     "<p id='result'></p><script>document.querySelector('#result').textContent=Object.keys(napplet).sort().join(',')</script>"
   )
   await expect(page.frameLocator("iframe").locator("#result")).toHaveText(
-    "relay,resource,storage,theme"
+    "common,config,identity,inc,link,outbox,relay,resource,storage,theme"
   )
   await page.evaluate(async id => {
     const w = window as any
     w.persistence.setPolicy(id, { domains: ["theme"] })
     await w.host.applyNappPolicy("", id)
   }, id)
-  await expect(page.frameLocator("iframe").locator("#result")).toHaveText("theme")
+  await expect(page.frameLocator("iframe").locator("#result")).toHaveText(
+    "common,config,identity,inc,link,outbox,relay,resource,storage,theme"
+  )
   expect(await page.locator("iframe").getAttribute("sandbox")).toBe("allow-scripts")
   expect(
     await page
@@ -227,4 +229,35 @@ test("revocation closes a one-shot relay query already in progress", async ({ pa
   await page.evaluate(id => (window as any).permissions.forgetDecision(id, "relay.read"), id)
   await expect.poll(() => page.evaluate(() => (window as any).queryClosed)).toBe(1)
   await expect(page.frameLocator("iframe").locator("#result")).not.toHaveText("pending")
+})
+
+test("a checked resource permission fetches without a second approval", async ({ page }) => {
+  await page.route("https://resource.example/**", route => route.fulfill({ body: "granted" }))
+  await launch(page, resourceHtml.replace("}; fetchResource();", "};"))
+  await page.evaluate(
+    id => (window as any).persistence.setPolicy(id, { domains: ["resource"] }),
+    id
+  )
+  await page.frames()[1]!.evaluate(() => {
+    void (window as any).fetchResource()
+  })
+  await expect(page.frameLocator("iframe").locator("#result")).toHaveText("granted")
+  await expect(page.getByRole("dialog")).not.toBeVisible()
+})
+
+test("napplets without declarations or grants receive all APIs but cannot use protected operations", async ({
+  page
+}) => {
+  await launch(
+    page,
+    `<p id="apis"></p><p id="result">pending</p><script>
+    document.querySelector('#apis').textContent=Object.keys(napplet).sort().join(',');
+    napplet.storage.getItem('secret').then(()=>document.querySelector('#result').textContent='allowed',e=>document.querySelector('#result').textContent=e.message);
+  </script>`,
+    []
+  )
+  await expect(page.frameLocator("iframe").locator("#apis")).toHaveText(
+    "common,config,identity,inc,link,outbox,relay,resource,storage,theme"
+  )
+  await expect(page.frameLocator("iframe").locator("#result")).toHaveText("Permission denied")
 })

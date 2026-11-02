@@ -36,29 +36,31 @@ const pubkey = await window.napplet.identity.getPublicKey()
 const value = await window.napplet.storage.getItem("counter")
 ```
 
-Domains are granted individually from the declared `R` and `O` domains. Available domains include `identity`, `theme`, `storage`, `resource`, `relay`, `outbox`, `common`, `inc`, `link`, and `config`.
+Every napplet receives all implemented APIs, regardless of its `R` and `O` declarations or permissions. Implemented domains include `identity`, `theme`, `storage`, `resource`, `relay`, `outbox`, `common`, `inc`, `link`, and `config`.
 
 TypeScript declarations: [`napplet-env.d.ts`](./napplet-env.d.ts).
 
 ## Permissions
 
-The install screen controls which declared domains are available. Enabling a
-napplet domain does not approve every operation in it. HTTPS, HTTP, and Blossom
-resource reads, relay reads, outbox reads, publishing, social writes, and opening
-links have separate approvals.
+The install screen grants permission to use the requested APIs; it does not
+control API availability. A checked permission authorizes use without an
+additional prompt. Selecting “ask” requires approval before use, with separate
+remembered decisions for HTTPS, HTTP, and Blossom resource reads, relay reads,
+outbox reads, publishing, social writes, and opening links. An unchecked
+permission denies calls; its API remains present and returns an error.
 
 Each approval can allow one operation, allow that operation for the launcher
 session, or remember an allow/deny decision on this device. Napplet decisions
-are scoped to the connected account and app identity, so an approval for one
-account never authorizes another account. Session approvals end when the page
+are scoped to the connected account and app identity. These saved decisions
+are separate from the app's install-screen grants. Session approvals end when the page
 reloads or the account changes; they are excluded from backups. Updates to the
 same installed app retain remembered decisions. Older global napplet decisions
-are not reused: those operations ask again after upgrading.
+are not reused.
 
 Settings → permissions lists the current account's remembered and session
 approvals. Forgetting an approval cancels the app's pending operations and live
-relay subscriptions; its next operation asks again. Removing a domain takes
-effect immediately and rebuilds open napplet windows with the updated bridge.
+relay subscriptions; operations configured to ask request approval again.
+Revoking a permission takes effect immediately; all APIs remain present.
 Closing or reloading a window cancels its pending requests and prompts, including
 when another window of the same app remains open. Account changes invalidate
 pending approvals and prevent an event signed for the previous account from

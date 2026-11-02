@@ -10,7 +10,20 @@ import { loginControls } from "../login.js"
 import { nappName, nappNameEl } from "../napp-name.js"
 import { installDefaultsRows } from "../napp-permissions.js"
 import { getPolicy } from "../persistence.js"
-import { author, badge, busy, button, check, code, details, el, empty, item, itemList } from "./ui.js"
+import { declaredDomains } from "../nsite/napplet.js"
+import {
+  author,
+  badge,
+  busy,
+  button,
+  check,
+  code,
+  details,
+  el,
+  empty,
+  item,
+  itemList
+} from "./ui.js"
 import { backupSection } from "./backup-section.js"
 import { permissionsSection, type Grants } from "./permissions-section.js"
 
@@ -22,10 +35,20 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     class: "settings-disconnect-btn",
     onClick: () => ctx.disconnect()
   })
-  const connectedEl = el("div", "settings-account-connected", pubkeyEl, accountTypeEl, disconnectBtn)
+  const connectedEl = el(
+    "div",
+    "settings-account-connected",
+    pubkeyEl,
+    accountTypeEl,
+    disconnectBtn
+  )
   connectedEl.hidden = true
   const disconnectedEl = el("div", "settings-account-disconnected")
-  const resetBtn = button({ label: "erase all data", variant: "danger", class: "settings-reset-btn" })
+  const resetBtn = button({
+    label: "erase all data",
+    variant: "danger",
+    class: "settings-reset-btn"
+  })
   const buildRow = el("div", "settings-build-row", buildLine(), resetBtn)
   const panel = el(
     "div",
@@ -197,18 +220,24 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     }
   }
 
-  // Every installed napp, with what its install screen granted, by the rows'
-  // names there: a napp's identity grant is its read row.
+  // Apps with permissions to manage. A napplet with no requests or grants
+  // stays out; saved decisions can still give it an entry in render().
   function grants(): Grants {
     const out: Grants = {}
     for (const app of ctx.apps.list()) {
       const p = getPolicy(app.nappId)
       const napplet = app.nappId.startsWith("napplet~")
+      if (
+        napplet &&
+        p.domains.length === 0 &&
+        !app.requires?.length &&
+        !(app.event && declaredDomains(app.event).length)
+      )
+        continue
       out[app.nappId] = p.domains
         .filter(d => d !== "ui")
         .map(
-          d =>
-            (d === "identity" && !napplet ? "read" : d) + (p.ask?.includes(d) ? " (ask)" : "")
+          d => (d === "identity" && !napplet ? "read" : d) + (p.ask?.includes(d) ? " (ask)" : "")
         )
     }
     return out

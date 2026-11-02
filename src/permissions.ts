@@ -31,7 +31,7 @@ const ROW_OF: Record<string, string> = {
 }
 
 // The rows that have an ask box.
-export const ASKABLE = new Set(Object.values(ROW_OF).filter(row => row !== "resource"))
+export const ASKABLE = new Set(Object.values(ROW_OF))
 
 const holds = (nappId: string, row: string) => getPolicy(nappId).domains.includes(row)
 const asks = (nappId: string, row: string) => !!getPolicy(nappId).ask?.includes(row)
@@ -49,7 +49,7 @@ function settled(nappId: string, method: string): boolean | null {
   if (isNapplet(nappId)) {
     const cached = getDecision(nappId, method)
     if (cached) return cached === "allow" || cached === "session"
-    // Domain availability never grants account-sensitive operations by itself.
+    if (row) return asks(nappId, row) ? null : true
     return null
   }
   if (row) return asks(nappId, row) ? null : true

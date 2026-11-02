@@ -39,7 +39,6 @@ import { httpFetch, httpFetchImage } from "./wasm-http.js"
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
 import { readBoundedBlob } from "../nsite/download.js"
 import { fetchBlob } from "../nsite/fetch.js"
-import { declaredDomains } from "../nsite/napplet.js"
 import {
   fetchEmojisWithSets,
   fetchFavoriteFollowSetsWithSets,
@@ -588,11 +587,9 @@ export function broadcastTheme() {
 // Additive, and entirely separate from our napp surface (window.napp /
 // window.nostr): a napplet speaks the NIP-5D wire dialect
 // ({type:"domain.action", id, ...} → {type:"...result", id, ...fields}) over
-// postMessage. Per the spec there is NO shell handshake — availability is
-// signalled by PRESENCE of a domain object on window.napplet, and the shell
-// injects only the domains it grants (see buildNappletDoc). So the host's job
-// is just: service a granted-domain call with its exact per-domain result
-// shape, and silently ignore everything else. Napps and nsites have no
+// postMessage. Every napplet receives all implemented APIs. Permissions are
+// checked when calls arrive, independently of manifest declarations. Denied
+// calls receive an error; APIs remain present. Napps and nsites have no
 // window.napplet.
 //
 // Result shapes are the @napplet/nap contracts verbatim — each result carries
@@ -615,18 +612,13 @@ const NAPPLET_OFFERED = [
   "config"
 ]
 
-// The capability domains this napplet is actually granted: declared (its R and
-// O tags, or a local one's `requires`) ∩ what we implement ∩ what the user
-// granted in the permission screen. Empty for napps and nsites.
+// Every napplet gets the complete implemented API. Permissions govern use.
 export function nappletDomainsFor(nappId: string): string[] {
-  if (classifyNappId(nappId) !== "napplet") return []
-  const app = getInstalledApp(nappId)
-  if (!app) return []
-  const declared = new Set<string>(app.event ? declaredDomains(app.event) : [])
-  for (const d of app.requires ?? []) declared.add(d)
-  if (declared.size === 0) return []
-  const granted = new Set(getPolicy(nappId).domains)
-  return NAPPLET_OFFERED.filter(d => declared.has(d) && granted.has(d))
+  return classifyNappId(nappId) === "napplet" ? [...NAPPLET_OFFERED] : []
+}
+
+function nappletGrantedDomainsFor(nappId: string): string[] {
+  return nappletDomainsFor(nappId).filter(domain => getPolicy(nappId).domains.includes(domain))
 }
 
 function nappletTheme() {
@@ -641,7 +633,7 @@ function broadcastNappletThemeChanged() {
   const theme = nappletTheme()
   for (const [, win] of openWindows) {
     const nappId = win.root?.dataset.nappId
-    if (!nappId || !nappletDomainsFor(nappId).includes("theme")) continue
+    if (!nappId || !nappletGrantedDomainsFor(nappId).includes("theme")) continue
     if (!win.iframe?.contentWindow) continue
     try {
       win.iframe.contentWindow.postMessage(
@@ -660,7 +652,7 @@ const iframeTargetOrigin = (iframe: HTMLIFrameElement) =>
 onAccountChanged(pk => {
   for (const [, win] of openWindows) {
     const nappId = win.root?.dataset.nappId
-    if (!nappId || !nappletDomainsFor(nappId).includes("identity")) continue
+    if (!nappId || !nappletGrantedDomainsFor(nappId).includes("identity")) continue
     if (!win.iframe?.contentWindow) continue
     try {
       win.iframe.contentWindow.postMessage(
@@ -1878,7 +1870,7 @@ export function pushNappletConfig(nappId: string) {
       configSubs.delete(iframe)
       continue
     }
-    if (id !== nappId || !nappletDomainsFor(nappId).includes("config")) continue
+    if (id !== nappId || !nappletGrantedDomainsFor(nappId).includes("config")) continue
     iframe.contentWindow?.postMessage({ type: "config.values", values }, iframeTargetOrigin(iframe))
   }
 }
@@ -1911,7 +1903,7 @@ function incEmit(sender: HTMLIFrameElement, senderNappId: string, data: any) {
       continue
     }
     if (iframe === sender || !sub.topics.has(topic)) continue
-    if (!nappletDomainsFor(sub.nappId).includes("inc")) continue
+    if (!nappletGrantedDomainsFor(sub.nappId).includes("inc")) continue
     iframe.contentWindow?.postMessage(
       {
         type: "inc.event",
@@ -1965,11 +1957,8 @@ async function approveNappletRead(nappId: string, method: string, context: Nappl
   context.check()
 }
 
-// Service one inbound napplet message. No handshake, no session: availability
-// is presence (the shell injected only granted domains), so here we re-check
-// the grant as defense-in-depth and answer with the exact result shape. An
-// ungranted or unknown domain is SILENTLY IGNORED — per NIP-5D, unrecognized
-// messages get no reply, which also prevents capability probing.
+// Route by the source window. API presence is independent of permission;
+// denied calls receive a result so callers can handle the refusal.
 function handleNapplet(
   data: { type: string; id?: string; subId?: string },
   iframe: HTMLIFrameElement,
@@ -1983,12 +1972,14 @@ function handleNapplet(
   if (!entry) {
     entry = {
       nappId,
-      lifetime: createNappletLifetime(getPubkey, d => nappletDomainsFor(nappId).includes(d))
+      lifetime: createNappletLifetime(getPubkey, d => nappletGrantedDomainsFor(nappId).includes(d))
     }
     nappletLifetimes.set(instanceId, entry)
   }
   if (entry.lifetime.signal.aborted)
-    entry.lifetime = createNappletLifetime(getPubkey, d => nappletDomainsFor(nappId).includes(d))
+    entry.lifetime = createNappletLifetime(getPubkey, d =>
+      nappletGrantedDomainsFor(nappId).includes(d)
+    )
   const lifetime = entry.lifetime
   const endpoint = entry
   const context = lifetime.context(domain)
@@ -2002,6 +1993,20 @@ function handleNapplet(
       nappletLifetimes.get(instanceId) === endpoint
     )
       source?.postMessage(msg, origin)
+  }
+
+  try {
+    context.check()
+  } catch {
+    if (data.type === "relay.subscribe" || data.type === "outbox.subscribe")
+      post({ type: `${domain}.closed`, subId: data.subId, reason: "Permission denied" })
+    else
+      post({
+        type: data.type.startsWith("resource.") ? `${data.type}.error` : `${data.type}.result`,
+        id: data.id,
+        error: "Permission denied"
+      })
+    return
   }
 
   // Streaming ops have no single .result — they push by subId.
@@ -3024,7 +3029,7 @@ function buildNappletDoc(html: string, domains: string[]): string {
 }
 
 // Load a resolved+verified napplet into a window. nappId must already be a
-// stored InstalledApp (so nappletDomainsFor sees its requires) with a policy.
+// stored InstalledApp with a policy.
 export function launchNapplet(
   stageEl: HTMLElement,
   nappId: string,

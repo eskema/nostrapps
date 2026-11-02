@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
       account.setAccount(alice, "local")
       persistence.setPolicy(id, {
         domains: ["resource", "relay", "outbox", "common", "link"],
-        ask: ["relay", "outbox", "common", "link"]
+        ask: ["resource", "relay", "outbox", "common", "link"]
       })
     },
     { id, alice }
@@ -46,7 +46,7 @@ test("remembered approvals are account-scoped and do not grant other operations"
     own: true,
     encrypted: false,
     reads: false,
-    asks: ["relay", "outbox", "common", "link"]
+    asks: ["resource", "relay", "outbox", "common", "link"]
   })
   await page.evaluate(bob => (window as any).account.setAccount(bob, "local"), bob)
   expect(
@@ -170,11 +170,11 @@ test("legacy global napplet approvals are not reused for a new account", async (
   ).toBe(false)
 })
 
-test("a domain grant alone does not approve publishing for any account", async ({ page }) => {
+test("a checked permission allows publishing without another prompt", async ({ page }) => {
   await page.evaluate(id => (window as any).persistence.setPolicy(id, { domains: ["relay"] }), id)
   expect(
     await page.evaluate(id => (window as any).permissions.coveredByGrant(id, "relay.publish"), id)
-  ).toBe(false)
+  ).toBe(true)
 })
 
 test("forget all keeps another account's remembered decisions", async ({ page }) => {
