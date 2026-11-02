@@ -356,7 +356,12 @@
           : { onEvent: onEventOrFilters, onEose: onEoseOrHandlers }
         const relay = legacy ? optionsOrRelay : optionsOrRelay?.relay
         relaySubs.set(subId, handlers)
-        const msg = { type: "relay.subscribe", id: "n5d" + n5dSerial++, subId, filters: Array.isArray(filters) ? filters : [filters] }
+        const msg = {
+          type: "relay.subscribe",
+          id: "n5d" + n5dSerial++,
+          subId,
+          filters: Array.isArray(filters) ? filters : [filters]
+        }
         if (relay) msg.relay = relay
         window.parent.postMessage(msg, "*")
         return {

@@ -1,4 +1,9 @@
-import { configureIntents, dispatchIntentAction, isIntentAction, observeIntentManifest } from "./intents/manager.js"
+import {
+  configureIntents,
+  dispatchIntentAction,
+  isIntentAction,
+  observeIntentManifest
+} from "./intents/manager.js"
 import { deliverNappletIntent, matchesNappletRevision } from "./sandbox/host.js"
 import { actionConventions, mappedActionPayload } from "./intents/action-mappings.js"
 import "@fontsource-variable/source-sans-3"
@@ -789,8 +794,11 @@ async function runNappAction(
   if (!bypassIntents && !instanceId && !auxiliary && Object.hasOwn(actionConventions, name)) {
     // Only fixed, validated compatibility contracts enter canonical delivery.
     // Invalid legacy payloads retain the existing NAPP action behavior.
-    try { mappedActionPayload(name, payload) }
-    catch { return runNappAction(callerNappId, name, payload, options, true) }
+    try {
+      mappedActionPayload(name, payload)
+    } catch {
+      return runNappAction(callerNappId, name, payload, options, true)
+    }
     return dispatchIntentAction(name, payload)
   }
   if (!instanceId) {
@@ -1783,41 +1791,44 @@ function buildRow(item: SuggestionItem, sig: string): Row {
 
   el.addEventListener("mousedown", async (e: MouseEvent) => {
     e.preventDefault()
-    const item = row.item // the row is kept; its item is the current one
-    const label = itemPreferredValue(item)
-    hideSuggestions()
-    try {
-      if (item.systemId) {
-        await invokeSystemNapp(item.systemId)
-      } else if (item.actionId) {
-        actionRegistry[item.actionId]?.run(systemCtx)
-      } else if (item.instanceId) {
-        // Window may live in another space — go there first, then focus it.
-        if (item.spaceId && item.spaceId !== currentSpaceId) {
-          await switchSpace(item.spaceId)
-          renderSpacesBar()
-        }
-        await launchSession(item.instanceId)
-      } else if (item.nappId) {
-        const win = await launch(stage, item.nappId, {
-          ...makeLaunchOpts(),
-          petname: item.petname && item.petname !== item.nappId ? item.petname : item.nappId
-        })
-        syncDOM(win)
-        win.focus()
-      } else if (item.link) {
-        await importShareLink(item.link)
-      } else if (item.raw) {
-        await install(item.raw) // opens where its screen said, if at all
-      }
-      setStatus(`Launched ${label}`)
-      input!.value = ""
-    } catch (err: any) {
-      setStatus(`Error: ${err.message}`)
-      console.error(err)
-    }
+    await launchSuggestion(row.item)
   })
   return row
+}
+
+async function launchSuggestion(item: SuggestionItem) {
+  const label = itemPreferredValue(item)
+  hideSuggestions()
+  try {
+    if (item.systemId) {
+      await invokeSystemNapp(item.systemId)
+    } else if (item.actionId) {
+      actionRegistry[item.actionId]?.run(systemCtx)
+    } else if (item.instanceId) {
+      // Window may live in another space — go there first, then focus it.
+      if (item.spaceId && item.spaceId !== currentSpaceId) {
+        await switchSpace(item.spaceId)
+        renderSpacesBar()
+      }
+      await launchSession(item.instanceId)
+    } else if (item.nappId) {
+      const win = await launch(stage, item.nappId, {
+        ...makeLaunchOpts(),
+        petname: item.petname && item.petname !== item.nappId ? item.petname : item.nappId
+      })
+      syncDOM(win)
+      win.focus()
+    } else if (item.link) {
+      await importShareLink(item.link)
+    } else if (item.raw) {
+      await install(item.raw) // opens where its screen said, if at all
+    }
+    setStatus(`Launched ${label}`)
+    input!.value = ""
+  } catch (err: any) {
+    setStatus(`Error: ${err.message}`)
+    console.error(err)
+  }
 }
 
 async function launchSession(instanceId: string) {
@@ -3261,6 +3272,22 @@ async function launchFromInput(raw: string): Promise<boolean | void> {
     return true
   }
 
+  // Plain search text launches the first matching row in displayed order.
+  if (!/^naddr1/i.test(raw) && !/[.\s/:]/.test(raw)) {
+    syncSuggestions()
+    for (const section of SECTIONS) {
+      for (const el of suggSections[section].children) {
+        if ((el as HTMLElement).hidden) continue
+        const row = [...rows.values()].find(row => row.el === el)
+        if (row) {
+          await launchSuggestion(row.item)
+          return true
+        }
+      }
+    }
+    throw new Error(`No app matches "${raw}"`)
+  }
+
   // An address (naddr, nsite host): the app if it's here, else its card.
   return launchAddress(raw)
 }
@@ -4199,15 +4226,18 @@ async function checkReachable(
 
 configureIntents({
   action: (name, payload) => runNappAction("intent", name, payload, undefined, true),
-  loadEvent: async code => (await resolveViewPayload(code)) as import("@nostr/tools/core").NostrEvent | null,
+  loadEvent: async code =>
+    (await resolveViewPayload(code)) as import("@nostr/tools/core").NostrEvent | null,
   async deliver(event, request, delivery, context) {
     context.check()
     const nappId = persist.computeNappId(event)
     persist.assertSameAuthor(nappId, event.pubkey)
     const policy = await resolvePolicyForLaunch(nappId, {
       title: event.tags.find(t => t[0] === "title")?.[1] || "Napplet",
-      type: "napplet", author: event.pubkey,
-      declaredDomains: requiresFromEvent(event), optionalDomains: optionalFromEvent(event)
+      type: "napplet",
+      author: event.pubkey,
+      declaredDomains: requiresFromEvent(event),
+      optionalDomains: optionalFromEvent(event)
     })
     context.check()
     if (!policy?.domains.includes("intent")) return false
@@ -4221,14 +4251,26 @@ configureIntents({
     persist.storeInstalledEvent(event)
     observeIntentManifest(event)
     if (!win) {
-      win = launchNapplet(stage, nappId, resolved.html, { ...makeLaunchOpts(), petname: resolved.title || "Napplet" })
+      win = launchNapplet(stage, nappId, resolved.html, {
+        ...makeLaunchOpts(),
+        petname: resolved.title || "Napplet"
+      })
       syncDOM(win)
     }
     context.check()
-    const accepted = await deliverNappletIntent(win, delivery, () => {
-      context.check()
-      if (persist.getInstalledApp(nappId)?.event?.id !== event.id || !persist.getPolicy(nappId).domains.includes("intent")) throw new Error("The target changed or lost intent permission")
-    }, context.signal)
+    const accepted = await deliverNappletIntent(
+      win,
+      delivery,
+      () => {
+        context.check()
+        if (
+          persist.getInstalledApp(nappId)?.event?.id !== event.id ||
+          !persist.getPolicy(nappId).domains.includes("intent")
+        )
+          throw new Error("The target changed or lost intent permission")
+      },
+      context.signal
+    )
     if (accepted && request.behavior?.focus !== false) {
       const spaceId = win.root.dataset.space
       if (spaceId && spaceId !== currentSpaceId) await goToSpace(spaceId)
