@@ -78,31 +78,31 @@ export function loginControls(opts: LoginControlsOpts = {}): HTMLElement {
     el.hidden = false
   }
 
-  // extension. Always offered, never gated on window.nostr being there when
-  // this is built: extensions inject on their own schedule, so a snapshot
-  // taken at build time drops the row for anyone whose extension was a beat
-  // late. loginWithExtension checks at click time, which is the only moment
-  // the answer is worth anything.
-  const extError = errorEl()
-  const extSection = document.createElement("div")
-  extSection.className = "login-section"
-  extSection.append(
-    button({
-      label: "connect with extension",
-      onClick: async () => {
-        extError.hidden = true
-        try {
-          status("Requesting pubkey from extension…")
-          done(await loginWithExtension())
-        } catch (err: any) {
-          status(`Error: ${err.message}`)
-          fail(extError, err)
+  // extension. Only offered when a NIP-07 provider is actually there — a
+  // button that can only fail is worse than no button. A late-injecting
+  // extension is picked up the next time the controls are built.
+  if (window.nostr) {
+    const extError = errorEl()
+    const extSection = document.createElement("div")
+    extSection.className = "login-section"
+    extSection.append(
+      button({
+        label: "connect with extension",
+        onClick: async () => {
+          extError.hidden = true
+          try {
+            status("Requesting pubkey from extension…")
+            done(await loginWithExtension())
+          } catch (err: any) {
+            status(`Error: ${err.message}`)
+            fail(extError, err)
+          }
         }
-      }
-    }),
-    extError
-  )
-  wrap.appendChild(extSection)
+      }),
+      extError
+    )
+    wrap.appendChild(extSection)
+  }
 
   // bunker
   const bunkerSection = document.createElement("div")
