@@ -9,7 +9,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit",
-    "test": "playwright test"
+    "test": "bun run test:unit && bun run test:browser",
+    "test:unit": "bun test tests/*.test.ts",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@fiatjaf/promenade-trusted-dealer": "npm:@jsr/fiatjaf__promenade-trusted-dealer@^0.4.3",
