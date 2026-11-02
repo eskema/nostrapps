@@ -3265,7 +3265,7 @@ async function launchFromInput(raw: string): Promise<boolean | void> {
   }
 
   // Plain search text launches the first matching row in displayed order.
-  if (!/^naddr1/i.test(raw) && !/[.\s/:]/.test(raw)) {
+  if (!/^naddr1/i.test(raw) && !/[./:]/.test(raw)) {
     syncSuggestions()
     for (const section of SECTIONS) {
       for (const el of suggSections[section].children) {

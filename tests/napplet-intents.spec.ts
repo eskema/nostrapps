@@ -474,7 +474,10 @@ test("settings edits synced default and private intent override chains", async (
     const reference = [...w.manager.intentCatalog().keys()][0]
     await w.manager.editIntentPreference("note", { action: "add", reference })
     await w.manager.editIntentPreference("note", {
-      action: "add", reference, identity: "napplet:note/open", hidden: true
+      action: "add",
+      reference,
+      identity: "napplet:note/open",
+      hidden: true
     })
     // Reload the saved state so private handlers begin locked, as on a fresh session.
     const pk = w.account.getPubkey()
@@ -486,7 +489,10 @@ test("settings edits synced default and private intent override chains", async (
     w.settings.section.open = true
   })
   await expect(page.getByRole("button", { name: "Refresh handlers" })).toBeEnabled()
-  await page.locator(".intent-archetype > summary").filter({ hasText: /^note$/ }).click()
+  await page
+    .locator(".intent-archetype > summary")
+    .filter({ hasText: /^note$/ })
+    .click()
   const defaults = page.getByRole("region", { name: "note default handlers", exact: true })
   await expect(defaults.getByText("Intent Reader", { exact: true })).toBeVisible()
   await expect(defaults.getByRole("button", { name: "Prefer", exact: true })).toBeDisabled()
@@ -561,7 +567,9 @@ test("slow discovery gives immediate feedback and can be cancelled without a lat
   await expect(page.getByText("Finding apps for your request…")).toBeVisible({ timeout: 700 })
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await expect(page.getByRole("dialog")).toBeHidden()
-  await expect(page.frames()[1]!.locator("#result")).toContainText('"ok":false')
+  await expect(page.frames()[1]!.locator("#result")).toContainText('"ok":false', { timeout: 700 })
+  // Let the delayed response finish and ensure cancellation cannot reopen a picker.
+  await page.waitForTimeout(1600)
   await expect(page.getByRole("dialog")).toBeHidden()
   await expect(page.locator("iframe")).toHaveCount(1)
 })

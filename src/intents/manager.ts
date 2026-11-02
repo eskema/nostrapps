@@ -330,19 +330,31 @@ type Choice =
 function routeKey() {
   return `nostrapps:intent-routes:${getPubkey() || "guest"}`
 }
-export function intentRoutes(): Record<string, "napp" | "napplet"> {
+function readRoutes(suffix = ""): Record<string, unknown> {
   try {
-    return JSON.parse(localStorage.getItem(routeKey()) || "{}")
+    const value = JSON.parse(localStorage.getItem(`${routeKey()}${suffix}`) || "{}")
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {}
   } catch {
     return {}
   }
 }
+export function intentRoutes(): Record<string, "napp" | "napplet"> {
+  return Object.fromEntries(
+    Object.entries(readRoutes()).filter(
+      ([convention, route]) =>
+        conventionIdentity(convention) && (route === "napp" || route === "napplet")
+    )
+  ) as Record<string, "napp" | "napplet">
+}
 function rememberedNappTargets(): Record<string, ActionTarget> {
-  try {
-    return JSON.parse(localStorage.getItem(`${routeKey()}:targets`) || "{}")
-  } catch {
-    return {}
-  }
+  return Object.fromEntries(
+    Object.entries(readRoutes(":targets")).flatMap(([convention, value]) => {
+      if (!conventionIdentity(convention) || !value || typeof value !== "object") return []
+      const { nappId } = value as Partial<ActionTarget>
+      // Window IDs expire; remembered choices always open the app afresh.
+      return typeof nappId === "string" && nappId ? [[convention, { nappId }]] : []
+    })
+  )
 }
 export function forgetIntentRoute(convention: string) {
   const targets = rememberedNappTargets()
@@ -472,9 +484,18 @@ export async function invokeIntent(value: unknown, source: IntentContext): Promi
     if (!progressController.signal.aborted) controller.abort()
   })
   const ready = () => progressController.abort()
+  let aborted: (() => void) | undefined
+  const cancelled = new Promise<IntentResult>(resolve => {
+    aborted = () => resolve({ ok: false, error: "Intent selection was cancelled" })
+    if (signal.aborted) aborted()
+    else signal.addEventListener("abort", aborted, { once: true })
+  })
   try {
-    return await resolveIntent(value, context, ready)
+    // Shared preference sync and discovery can finish in the background. Their
+    // context checks prevent delivery after cancellation; callers need not wait.
+    return await Promise.race([resolveIntent(value, context, ready), cancelled])
   } finally {
+    if (aborted) signal.removeEventListener("abort", aborted)
     ready()
     await progress
     stop()
@@ -613,14 +634,18 @@ async function resolveIntent(
         if (result && typeof result === "object" && "ok" in result && result.ok === false)
           throw new Error("The app could not open this action")
         if (choice.remember && choice.target) {
-          localStorage.setItem(
-            `${routeKey()}:targets`,
-            JSON.stringify({
-              ...rememberedNappTargets(),
-              [request.convention]: { nappId: choice.target.nappId }
-            })
-          )
-          rememberRoute(request.convention, "napp")
+          try {
+            localStorage.setItem(
+              `${routeKey()}:targets`,
+              JSON.stringify({
+                ...rememberedNappTargets(),
+                [request.convention]: { nappId: choice.target.nappId }
+              })
+            )
+            rememberRoute(request.convention, "napp")
+          } catch (error) {
+            reportPreferenceSaveFailure(error)
+          }
         }
         return success(request, `napp:${mapped.name}`)
       }
@@ -659,12 +684,7 @@ async function resolveIntent(
             rememberRoute(request.convention, "napplet")
           } catch (error) {
             // Delivery already succeeded. Never retry it because saving failed.
-            void openDialog({
-              title: "Opened; preference could not be saved",
-              body: error instanceof Error ? error.message : String(error),
-              dismissValue: null,
-              actions: [{ label: "OK", value: null }]
-            })
+            reportPreferenceSaveFailure(error)
           }
         }
         return success(request, candidateId(ref))
@@ -679,6 +699,15 @@ async function resolveIntent(
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+function reportPreferenceSaveFailure(error: unknown) {
+  // A storage or relay failure must not turn completed delivery into failure.
+  void openDialog({
+    title: "Opened; preference could not be saved",
+    body: error instanceof Error ? error.message : String(error),
+    dismissValue: null,
+    actions: [{ label: "OK", value: null }]
+  })
 }
 function deliveryFor(request: IntentRequest, sender: string): IntentDelivery {
   return {

@@ -304,3 +304,75 @@ test("an explicitly targeted NAPP action retains its legacy payload and result w
   expect(await page.evaluate(() => (window as any).actions)).toEqual([{ name: "profile", payload }])
   await expect(page.getByRole("dialog")).toBeHidden()
 })
+
+test("malformed remembered routes cannot break intent selection", async ({ page }) => {
+  await setup(page)
+  await page.evaluate(pubkey => {
+    const w = window as any
+    localStorage.setItem("nostrapps:intent-routes:guest", "null")
+    localStorage.setItem("nostrapps:intent-routes:guest:targets", '[{"nappId":"stale"}]')
+    void w.manager
+      .invokeIntent(
+        {
+          archetype: "profile",
+          action: "open",
+          convention: "napplet:profile/open",
+          payload: { pubkey }
+        },
+        { sender: "test-napplet", check() {} }
+      )
+      .then((result: any) => (w.result = result))
+  }, napplet.pubkey)
+  await page.getByRole("button", { name: "Profile Napplet", exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).result?.ok)).toBe(true)
+  expect(await page.evaluate(() => (window as any).deliveries.length)).toBe(1)
+})
+
+test("a remembered NAPP choice remains successful when saving the route fails", async ({
+  page
+}) => {
+  await setup(page)
+  await page.evaluate(pubkey => {
+    const w = window as any
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith("nostrapps:intent-routes:"))
+        throw new DOMException("Storage is full", "QuotaExceededError")
+      return setItem.call(this, key, value)
+    }
+    void w.manager
+      .invokeIntent(
+        {
+          archetype: "profile",
+          action: "open",
+          convention: "napplet:profile/open",
+          payload: { pubkey }
+        },
+        { sender: "test-napplet", check() {} }
+      )
+      .then((result: any) => (w.result = result))
+  }, napplet.pubkey)
+  await page.getByRole("checkbox", { name: "Remember this choice", exact: true }).check()
+  await page.getByRole("button", { name: "Profile Napp", exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).result?.ok)).toBe(true)
+  await expect(
+    page.getByText("Opened; preference could not be saved", { exact: true })
+  ).toBeVisible()
+  expect(await page.evaluate(() => (window as any).actions.length)).toBe(1)
+  await page.getByRole("button", { name: "OK", exact: true }).click()
+  await expect(page.getByRole("dialog")).toBeHidden()
+})
+
+test("submitting a multiword launcher search opens the matching app", async ({ page }) => {
+  await setup(page, true)
+  const input = page.locator("#nsite-input")
+  await input.fill("Profile Na")
+  await expect(page.locator("#suggestions")).toContainText("Profile Napp")
+  // Submit the form directly: an active suggestion's key handler would bypass
+  // the search submission path being exercised here.
+  await input.evaluate(el => (el.closest("form") as HTMLFormElement).requestSubmit())
+  await expect(input).toHaveValue("")
+  await expect(
+    page.locator(".napp-window").filter({ hasText: "Profile Napp" }).first()
+  ).toBeVisible()
+})
