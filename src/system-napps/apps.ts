@@ -47,11 +47,20 @@ import { NostrEvent } from "@nostr/tools"
 import { BlossomClient } from "@nostr/tools/nipb7"
 import { DEFAULT_BLOSSOM_SERVERS, normalizeServer, publishOutcomes } from "../utils.js"
 import { onRelayAuth } from "../relay-auth.js"
+import { isValidNamedNapplet } from "../nsite/napplet-manifest.js"
 import { hasBytes } from "../nsite/heal.js"
 
 // Addressable app kinds shown in Discover: nsites, napps, wasm napps, and
 // named napplets.
 const DISCOVER_KINDS = [NSITE_NAMED_KIND, NAPP_NAMED_KIND, WASM_NAMED_KIND, NAPPLET_NAMED_KIND]
+
+function isDiscoverableManifest(event: NostrEvent): boolean {
+  return (
+    DISCOVER_KINDS.includes(event.kind) &&
+    (event.kind !== NAPPLET_NAMED_KIND || isValidNamedNapplet(event))
+  )
+}
+
 import {
   badge,
   button,
@@ -1199,6 +1208,7 @@ export function mount(
   // superseded version still buffered is dropped before its card is ever
   // built; one already rendered is replaced by flushPending.
   function addManifest(event: NostrEvent, urls: string[]) {
+    if (!isDiscoverableManifest(event)) return
     const addr = computeNappId(event)
     let seen = nappRelays.get(addr)
     if (!seen) nappRelays.set(addr, (seen = new Map()))
@@ -1231,7 +1241,7 @@ export function mount(
       .then(evt => {
         if (!evt || (p.id ? evt.id !== p.id : computeNappId(evt) !== p.addr)) {
           lookups.set(p.key, "missing")
-        } else if (!DISCOVER_KINDS.includes(evt.kind)) {
+        } else if (!isDiscoverableManifest(evt)) {
           lookups.set(p.key, "notapp")
         } else {
           lookups.set(p.key, evt)
