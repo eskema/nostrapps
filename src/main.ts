@@ -1,3 +1,4 @@
+import "./top-only"
 import "@fontsource-variable/source-sans-3"
 import "@fontsource-variable/source-sans-3/wght-italic.css"
 import "@fontsource-variable/source-serif-4"
