@@ -11,7 +11,7 @@
         "@fontsource-variable/source-serif-4": "^5.2.9",
         "@noble/hashes": "^2.2.0",
         "@nostr/gadgets": "npm:@jsr/nostr__gadgets@^0.21.1",
-        "@nostr/tools": "npm:@jsr/nostr__tools@^2.25.2",
+        "@nostr/tools": "npm:@jsr/nostr__tools@^2.25.5",
         "flexsearch": "^0.8.212",
         "nostr-wasm": "0.1.0",
         "nostr-web-components": "^0.2.2",
@@ -99,7 +99,7 @@
 
     "@nostr/gadgets": ["@jsr/nostr__gadgets@0.21.1", "https://npm.jsr.io/~/11/@jsr/nostr__gadgets/0.21.1.tgz", { "dependencies": { "@jsr/fiatjaf__lru-cache": "^0.0.1", "@jsr/henrygd__semaphore": "^0.0.2", "@jsr/nostr__tools": "^2.23.12", "@noble/hashes": "2.0.1", "idb-keyval": "^6.2.1" } }, "sha512-uHpaVnR26WEWn8lc8nX2+8eQS32/lyzmLRgw2jtImPyhONdBXBNqewOD0KHw4mGsbdMvohyKBTvjYxZHQ4gD/w=="],
 
-    "@nostr/tools": ["@jsr/nostr__tools@2.25.2", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.25.2.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-Yhe1ppPZWWd52mSqdYDd+Zq9gm4e+B7CMQ62gGXPpkBvfCXXCiTUWlctEEVzam6TGZaeHXcgiYj+zzKW02bAig=="],
+    "@nostr/tools": ["@jsr/nostr__tools@2.25.5", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.25.5.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-hg9kzmUJW8ah+le1QoIaTCPg6JEZTCViB36g1dxxxurC9P/DfspPWo4M2kKKY237fiu0AxdOd1TOK4lJDyhMXw=="],
 
     "@rollup/rollup-android-arm-eabi": ["@rollup/rollup-android-arm-eabi@4.60.2", "", { "os": "android", "cpu": "arm" }, "sha512-dnlp69efPPg6Uaw2dVqzWRfAWRnYVb1XJ8CyyhIbZeaq4CA5/mLeZ1IEt9QqQxmbdvagjLIm2ZL8BxXv5lH4Yw=="],
 
@@ -211,7 +211,7 @@
 
     "@noble/curves/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
 
-    "@nostr/gadgets/@jsr/nostr__tools": ["@jsr/nostr__tools@2.25.2", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.25.2.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-Yhe1ppPZWWd52mSqdYDd+Zq9gm4e+B7CMQ62gGXPpkBvfCXXCiTUWlctEEVzam6TGZaeHXcgiYj+zzKW02bAig=="],
+    "@nostr/gadgets/@jsr/nostr__tools": ["@jsr/nostr__tools@2.25.5", "https://npm.jsr.io/~/11/@jsr/nostr__tools/2.25.5.tgz", { "dependencies": { "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@scure/base": "2.0.0", "@scure/bip32": "2.0.1", "@scure/bip39": "2.0.1", "nostr-wasm": "0.1.0" } }, "sha512-hg9kzmUJW8ah+le1QoIaTCPg6JEZTCViB36g1dxxxurC9P/DfspPWo4M2kKKY237fiu0AxdOd1TOK4lJDyhMXw=="],
 
     "@nostr/gadgets/@noble/hashes": ["@noble/hashes@2.0.1", "", {}, "sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw=="],
 
