@@ -152,7 +152,10 @@
     opacity var(--duration-quick) var(--ease);
 }
 
-.btn:disabled {
+/* aria-disabled looks the same but still takes clicks, for a control that
+   checks again when clicked. */
+.btn:disabled,
+.btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
@@ -163,7 +166,7 @@
   border-color: var(--text);
 }
 
-.btn-primary:hover:not(:disabled) {
+.btn-primary:hover:not(:disabled, [aria-disabled="true"]) {
   opacity: 0.85;
 }
 
@@ -171,7 +174,7 @@
   border-color: color-mix(in srgb, currentColor 25%, transparent);
 }
 
-.btn-outline:hover:not(:disabled) {
+.btn-outline:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--text);
   color: var(--surface);
   border-color: var(--text);
@@ -182,7 +185,7 @@
   border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
-.btn-danger:hover:not(:disabled) {
+.btn-danger:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--danger);
   color: white;
   border-color: var(--danger);
@@ -195,11 +198,11 @@
   font-weight: 600;
 }
 
-.btn-warning:hover:not(:disabled) {
+.btn-warning:hover:not(:disabled, [aria-disabled="true"]) {
   opacity: 0.9;
 }
 
-.btn-ghost:hover:not(:disabled) {
+.btn-ghost:hover:not(:disabled, [aria-disabled="true"]) {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
@@ -212,7 +215,7 @@
   opacity: var(--dim-m);
 }
 
-.btn-link:hover:not(:disabled) {
+.btn-link:hover:not(:disabled, [aria-disabled="true"]) {
   opacity: 1;
   background: transparent;
 }

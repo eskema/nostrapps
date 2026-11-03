@@ -56,6 +56,39 @@ export async function loginWithGoogle(onProgress?: (msg: string) => void): Promi
   return pk
 }
 
+// ─── the extension's arrival ─────────────────────────────────────
+// NIP-07 has no "ready" event and extensions inject on their own schedule.
+// The button is dimmed until window.nostr shows up: looked for every 250ms
+// for the first 10s of the page, and again on each click of the dimmed
+// button, for an extension switched on later.
+
+const EXT_LABEL = "connect with extension"
+const LOOK_UNTIL = 10_000
+const dimmedExt = new Set<HTMLButtonElement>()
+let looking = 0
+
+function dimExtButton(b: HTMLButtonElement) {
+  b.setAttribute("aria-disabled", "true")
+  b.textContent = "no extension found"
+  dimmedExt.add(b)
+  if (looking || performance.now() > LOOK_UNTIL) return
+  looking = window.setInterval(() => {
+    if (window.nostr) lightExtButtons()
+    if (window.nostr || performance.now() > LOOK_UNTIL) {
+      window.clearInterval(looking)
+      looking = 0
+    }
+  }, 250)
+}
+
+function lightExtButtons() {
+  for (const b of dimmedExt) {
+    b.removeAttribute("aria-disabled")
+    b.textContent = EXT_LABEL
+  }
+  dimmedExt.clear()
+}
+
 // ─── the controls ────────────────────────────────────────────────
 
 export interface LoginControlsOpts {
@@ -87,31 +120,28 @@ export function loginControls(opts: LoginControlsOpts = {}): HTMLElement {
     el.hidden = false
   }
 
-  // extension. Only offered when a NIP-07 provider is actually there — a
-  // button that can only fail is worse than no button. A late-injecting
-  // extension is picked up the next time the controls are built.
-  if (window.nostr) {
-    const extError = errorEl()
-    const extSection = document.createElement("div")
-    extSection.className = "login-section"
-    extSection.append(
-      button({
-        label: "connect with extension",
-        onClick: async () => {
-          extError.hidden = true
-          try {
-            status("Requesting pubkey from extension…")
-            done(await loginWithExtension())
-          } catch (err: any) {
-            status(`Error: ${err.message}`)
-            fail(extError, err)
-          }
-        }
-      }),
-      extError
-    )
-    wrap.appendChild(extSection)
-  }
+  // extension. A click without one does nothing.
+  const extError = errorEl()
+  const extSection = document.createElement("div")
+  extSection.className = "login-section"
+  const extButton = button({
+    label: EXT_LABEL,
+    onClick: async () => {
+      if (!window.nostr) return
+      lightExtButtons()
+      extError.hidden = true
+      try {
+        status("Requesting pubkey from extension…")
+        done(await loginWithExtension())
+      } catch (err: any) {
+        status(`Error: ${err.message}`)
+        fail(extError, err)
+      }
+    }
+  })
+  if (!window.nostr) dimExtButton(extButton)
+  extSection.append(extButton, extError)
+  wrap.appendChild(extSection)
 
   // bunker
   const bunkerSection = document.createElement("div")
