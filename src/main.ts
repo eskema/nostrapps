@@ -157,6 +157,7 @@ import { loadFollowsList } from "@nostr/gadgets/lists"
 import type { NostrEvent } from "@nostr/tools/pure"
 import { naddrEncode, npubEncode } from "@nostr/tools/nip19"
 import * as relayAuth from "./relay-auth.js"
+import { configureRelayAuth } from "./relay-auth-pool.js"
 import { buildUserIndex, loadNostrUserIndexed } from "./user-search.js"
 import { verifyEvent } from "./verify.js"
 import { destroyStore } from "./store.js"
@@ -186,18 +187,7 @@ pool.allowConnectingToRelay = (url, operation) => {
   if (!host || host === "undefined" || host === "null") return false
   return relayAllowed ? relayAllowed(url, operation) : true
 }
-pool.automaticallyAuth = () => {
-  // Nothing while logged out: the challenge sits unanswered, and the pool asks
-  // here again on every use of the relay, so the first use after login arms it.
-  // currentSigner() is never null (it falls through to the extension), so the
-  // account is the check. Otherwise a signer is handed back even when auto-auth
-  // is off: returning non-null is what routes challenges to us at all, and the
-  // wrapper then decides per challenge — auto mode signs everything; otherwise
-  // a stored per-relay decision is honored or a confirmation toast is shown and
-  // remembered.
-  if (!account.getPubkey()) return null
-  return relayAuth.relayAuthSigner()
-}
+configureRelayAuth(pool, relayAuth.onRelayAuth)
 
 const stage = document.getElementById("stage")!
 const form = document.getElementById("launch-form")!

@@ -136,7 +136,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     relaysSummary.textContent =
       `relays (${decisions.length})` + (ctx.relayAuth.getAuto() ? " · auto" : "")
 
-    // The global switch: answer every relay auth challenge without asking.
+    // The global switch: approve required relay authentication without asking.
     // Off (the default) → per-relay confirmation toasts, remembered here below.
     relaysEl.appendChild(
       check({
