@@ -36,6 +36,7 @@ import { httpFetch, httpFetchImage } from "./wasm-http.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
+import { readBoundedBlob } from "../nsite/download.js"
 import { fetchBlob } from "../nsite/fetch.js"
 import { declaredDomains } from "../nsite/napplet.js"
 import {
@@ -1053,6 +1054,9 @@ async function publishNappletOutbox(
   }
 }
 
+// Napplets have media-src 'none', so audio and video arrive through here.
+const RESOURCE_MAX_BYTES = 128 * 1024 * 1024
+
 // Fetch a URL's bytes on the host. Returns a resource.bytes result (Blob +
 // content-type) or a typed resource.bytes.error.
 async function fetchNappletResource(url: unknown): Promise<Record<string, unknown>> {
@@ -1075,7 +1079,7 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
       const pk = getPubkey()
       const userServers = pk ? ((await loadBlossomServers(pk)).items ?? []) : []
       const servers = ["relay.nostrapps.com", ...new Set(userServers)].filter(Boolean) as string[]
-      const blob = await fetchBlob(servers, sha)
+      const blob = await fetchBlob(servers, sha, { maxBytes: RESOURCE_MAX_BYTES })
       if (!blob) {
         return {
           type: "resource.bytes.error",
@@ -1105,11 +1109,13 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
         message: `scheme ${u.protocol} not allowed`
       }
     }
-    const res = await fetch(url)
+    // No cookies or referrer: the napplet chose the URL, not the user.
+    const res = await fetch(url, { credentials: "omit", referrerPolicy: "no-referrer" })
     if (!res.ok) {
+      await res.body?.cancel().catch(() => {})
       return { type: "resource.bytes.error", error: "http-error", message: `HTTP ${res.status}` }
     }
-    const blob = await res.blob()
+    const blob = await readBoundedBlob(res, RESOURCE_MAX_BYTES)
     return {
       type: "resource.bytes.result",
       blob,
