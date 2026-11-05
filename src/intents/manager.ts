@@ -91,40 +91,83 @@ function installed() {
   for (const app of getInstalledApps())
     if (app.event && [5129, 15129, 35129].includes(app.event.kind)) observeIntentManifest(app.event)
 }
-async function relays(write: boolean | "preferences" = false) {
+async function relays(write = false) {
   const pk = getPubkey()
   if (pk)
     try {
       const list = (await optionalLookup(loadRelayList(pk)))?.items
-        .filter(r => (write === "preferences" ? r.write || r.read : write ? r.write : r.read))
+        .filter(r => (write ? r.write : r.read))
         .map(r => r.url)
       if (list?.length) return list
     } catch {}
   return FALLBACK_RELAYS
 }
-async function query(
-  filter: Filter,
-  hints?: string[],
-  reportComplete?: (complete: boolean) => void
-) {
-  let complete = false
-  const cached = await safeQueryEvents(filter).catch(() => [])
-  const remote = await queryManifestEvents(
-    {
-      subscribeMap(requests, params) {
-        return pool.subscribeMap(requests, {
-          ...params,
-          oneose() {
-            complete = true
-            params.oneose?.()
+// The relays of the user's own NIP-65 list, or null when it can't be found in
+// time. Fallback relays don't hold the user's preferences, so they never count:
+// a slow lookup leaves the sync incomplete (and saving refused), never empty.
+async function ownPreferenceRelays(pk: string): Promise<string[] | null> {
+  try {
+    const list = (await optionalLookup(loadRelayList(pk)))?.items
+      .filter(r => r.write || r.read)
+      .map(r => r.url)
+    return list?.length ? list : null
+  } catch {
+    return null
+  }
+}
+// Query each relay on its own so that only a real EOSE counts as an answer.
+// The pool reports EOSE for a relay that closed or failed to connect too, but
+// then calls onclose right away, in the same turn; a timeout is ours.
+async function queryAnswered(urls: string[], filter: Filter, timeoutMs = 6000) {
+  const events: NostrEvent[] = []
+  let answered = 0
+  await Promise.all(
+    urls.map(
+      url =>
+        new Promise<void>(resolve => {
+          let settled = false,
+            closed = false
+          const finish = (eose: boolean) => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            if (eose) answered++
+            void Promise.resolve(sub?.close()).catch(() => {})
+            resolve()
+          }
+          const timer = setTimeout(() => finish(false), timeoutMs)
+          let sub: { close(): unknown } | undefined
+          try {
+            sub = pool.subscribeMap([{ url, filter }], {
+              label: "intent-preferences",
+              // Longer than our own timer, so the pool never passes off a
+              // timeout as an EOSE.
+              maxWait: timeoutMs * 2,
+              onevent: event => {
+                if (!settled) events.push(event)
+              },
+              oneose: () => queueMicrotask(() => finish(!closed)),
+              onclose: () => {
+                closed = true
+                finish(false)
+              }
+            })
+            if (settled) void Promise.resolve(sub.close()).catch(() => {})
+          } catch {
+            finish(false)
           }
         })
-      }
-    },
+    )
+  )
+  return { events, answered }
+}
+async function query(filter: Filter, hints?: string[]) {
+  const cached = await safeQueryEvents(filter).catch(() => [])
+  const remote = await queryManifestEvents(
+    pool,
     hints?.length ? hints : await relays(),
     filter
   ).catch(() => [])
-  reportComplete?.(complete)
   return [...cached, ...remote]
 }
 function reset() {
@@ -199,14 +242,15 @@ export async function refreshIntentPreferences() {
     if (!pk) return
     await loadLocalPreferences()
     if (generation !== version || pk !== getPubkey()) return
-    let complete = false
-    const events = await query(
-      { kinds: [HANDLER_PREFERENCES_KIND], authors: [pk] },
-      await relays("preferences"),
-      value => {
-        complete = value
-      }
-    )
+    const filter = { kinds: [HANDLER_PREFERENCES_KIND], authors: [pk] }
+    const own = await ownPreferenceRelays(pk)
+    if (generation !== version || pk !== getPubkey()) return
+    // Complete only when one of the user's own relays actually answered;
+    // otherwise an empty result must not stand in for "no preferences".
+    const { events, answered } = own
+      ? await queryAnswered(own, filter)
+      : { events: await query(filter, FALLBACK_RELAYS), answered: 0 }
+    const complete = answered > 0
     if (generation !== version || pk !== getPubkey()) return
     preferencesSynced = complete
     for (const event of events) acceptPreference(event, pk)
@@ -228,13 +272,41 @@ export async function refreshIntentPreferences() {
   })
   return loading
 }
+const UNLOCK_TIMEOUT_MS = 60_000
+// A preference that can't be unlocked (a signer that refuses, can't decrypt
+// or never answers) must not block its archetype: route with its public tags.
+async function tryUnlock(role: string, context: IntentContext, checkCurrent: () => void) {
+  try {
+    await unlockIntentPreference(role, context)
+  } catch (error) {
+    checkCurrent()
+    console.warn(`[intents] could not unlock ${role} preferences`, error)
+  }
+}
 export async function unlockIntentPreference(role: string, context?: IntentContext) {
   const preference = preferences.get(role)
   if (!preference?.locked) return
   const pk = getPubkey(),
     version = generation
   if (!pk) throw new Error("Connect an account to unlock handler preferences")
-  const plaintext = await currentSigner().nip44.decrypt(pk, preference.event.content)
+  // The decrypt takes no signal of its own: bound it, so a signer that never
+  // answers can't hold the request (or settings) pending forever.
+  const limit = AbortSignal.timeout(UNLOCK_TIMEOUT_MS)
+  const signal = context?.signal ? AbortSignal.any([context.signal, limit]) : limit
+  const plaintext = await new Promise<string>((resolve, reject) => {
+    const abort = () =>
+      reject(
+        limit.aborted
+          ? new Error("The signer did not decrypt the handler preferences")
+          : signal.reason
+      )
+    if (signal.aborted) return abort()
+    signal.addEventListener("abort", abort, { once: true })
+    currentSigner()
+      .nip44.decrypt(pk, preference.event.content)
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort))
+  })
   context?.check()
   if (version !== generation || pk !== getPubkey() || preferences.get(role) !== preference)
     throw new Error("Your account or preferences changed")
@@ -366,7 +438,10 @@ export async function editIntentPreference(role: string, edit: HandlerEdit) {
   await refreshIntentPreferences()
   if (!preferencesSynced)
     throw new Error("Handler preferences could not be synced. Refresh before saving.")
-  await unlockIntentPreference(role)
+  // Clearing replaces the whole event, so a preference whose private part
+  // can't be decrypted can still be cleared (its private entries are dropped).
+  if (!(edit.action === "clear" && preferences.get(role)?.locked))
+    await unlockIntentPreference(role)
   const previous = preferences.get(role)
   const checkAccount = () => {
     if (pk !== getPubkey() || version !== generation || preferences.get(role) !== previous)
@@ -474,6 +549,14 @@ export function intentForNappAction(name: string, payload: unknown): IntentReque
   } catch {
     return
   }
+}
+export function hasInstalledIntentHandlers(request: IntentRequest): boolean {
+  return getInstalledApps().some(
+    app =>
+      !!app.event &&
+      [5129, 15129, 35129].includes(app.event.kind) &&
+      supports(app.event, request.convention)
+  )
 }
 export function hasIntentHandlers(request: IntentRequest): boolean {
   installed()
@@ -664,8 +747,10 @@ async function resolveIntent(
       ? Promise.resolve()
       : Promise.all([
           discoverIntents(request.convention),
+          // Napplet-supplied relay hints are ignored: they would let a napplet
+          // choose which relays the launcher connects to.
           request.handlerHint
-            ? loadReference(request.handlerHint.address, request.handlerHint.relays).then(event => {
+            ? loadReference(request.handlerHint.address).then(event => {
                 if (event && supports(event, request.convention)) observeIntentManifest(event)
               })
             : Promise.resolve()
@@ -685,7 +770,7 @@ async function resolveIntent(
       checkCurrent()
       // Signers may need their own confirmation dialog.
       if (preferences.get(request.archetype)?.locked) ready()
-      await unlockIntentPreference(request.archetype, context)
+      await tryUnlock(request.archetype, context, checkCurrent)
       checkCurrent()
     }
     if (!hooks) throw new Error("Intent launcher is unavailable")
@@ -707,7 +792,7 @@ async function resolveIntent(
         if (!preference) break
         if (preference.locked) {
           ready()
-          await unlockIntentPreference(request.archetype, context)
+          await tryUnlock(request.archetype, context, checkCurrent)
           checkCurrent()
         }
         for (const ref of preferenceReferences(preference, request.convention)) {

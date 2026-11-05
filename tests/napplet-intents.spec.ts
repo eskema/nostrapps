@@ -69,6 +69,20 @@ async function setup(page: Page, granted = true, targetInstalled = true) {
   )
   await expect(page.frameLocator("iframe").locator("#result")).toHaveText("ready")
 }
+// Preferences only count as synced once the user's own relays answer, so an
+// account that saves them needs a NIP-65 list. The relay mocks answer any URL.
+function relayListFor(secret: Uint8Array) {
+  return finalizeEvent(
+    { kind: 10002, created_at: 1, content: "", tags: [["r", "wss://prefs.example"]] },
+    secret
+  )
+}
+async function saveRelayList(page: Page, secret: Uint8Array) {
+  await page.evaluate(async relayList => {
+    const { getStore } = await import("/src/store.ts")
+    await getStore().saveEvent(relayList)
+  }, relayListFor(secret))
+}
 async function invoke(page: Page, options = { payload: { id: "note-1" } }) {
   await page
     .frames()
@@ -201,6 +215,7 @@ test("public and private handler preferences publish, fall back in order, and ke
     generateSecretKey()
   )
   const reference = `35129:${privateManifest.pubkey}:private-reader`
+  await saveRelayList(page, secret)
   await page.evaluate(
     async ({ secret, pk, privateManifest }) => {
       const w = window as any
@@ -460,6 +475,7 @@ test("sender identity remains bound to the running document when its installed r
 
 test("settings edits synced default and private intent override chains", async ({ page }) => {
   await setup(page)
+  await saveRelayList(page, new Uint8Array(32).fill(0x11))
   await page.evaluate(async () => {
     const w = window as any
     const { loginLocalKey } = await import("/src/signers/local.ts")
@@ -926,7 +942,12 @@ function handlerRevision(secret: Uint8Array, d: string, created_at: number, titl
     secret
   )
 }
-function notePreference(secret: Uint8Array, created_at: number, handler: { pubkey: string }, d: string) {
+function notePreference(
+  secret: Uint8Array,
+  created_at: number,
+  handler: { pubkey: string },
+  d: string
+) {
   return finalizeEvent(
     {
       kind: 31129,
@@ -968,7 +989,12 @@ function invokeNote(page: Page) {
     const w = window as any
     void w.manager
       .invokeIntent(
-        { archetype: "note", action: "open", convention: "napplet:note/open", payload: { id: "x" } },
+        {
+          archetype: "note",
+          action: "open",
+          convention: "napplet:note/open",
+          payload: { id: "x" }
+        },
         { sender: "stale-route", check() {} }
       )
       .then((result: unknown) => (w.result = result))
@@ -1026,7 +1052,10 @@ test("a default replaced by the relay sync during delivery routes to the new def
   await page.evaluate(
     ({ a, b, cached, synced }) => {
       const w = window as any
-      localStorage.setItem(`nostrapps:intent-preferences:v1:${cached.pubkey}`, JSON.stringify([cached]))
+      localStorage.setItem(
+        `nostrapps:intent-preferences:v1:${cached.pubkey}`,
+        JSON.stringify([cached])
+      )
       w.relayPool.subscribeMap = (requests: any[], params: any) => {
         if (requests[0].filter.kinds?.includes(31129))
           w.finishSync = () => {

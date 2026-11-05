@@ -46,11 +46,12 @@ export async function fetchBlob(
       let server = candidates[next++]!
       try {
         server = server.startsWith("http") ? server : `https://${server}`
+        // BUD-01 lets servers redirect to another URL for the same hash; the
+        // hash is verified below, so following redirects is safe.
         const res = await fetch(`${server}/${sha}`, {
           signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
           credentials: "omit",
-          referrerPolicy: "no-referrer",
-          redirect: "error"
+          referrerPolicy: "no-referrer"
         })
         if (!res.ok) {
           await res.body?.cancel()

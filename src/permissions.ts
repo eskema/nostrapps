@@ -1,7 +1,7 @@
 import { openDialog, type DialogAction } from "./dialog.js"
 import { nappByline, nappName, nappNameEl, type NappName } from "./napp-name.js"
 import { getInstalledApp, getPolicy, setPolicy } from "./persistence.js"
-import { appIcon, code, el, overline } from "./system-napps/ui.js"
+import { appIcon, author, code, el, overline } from "./system-napps/ui.js"
 import { getPubkey, subscribe as onAccountChanged } from "./account.js"
 
 const STORAGE_KEY = "nostrapps:permissions"
@@ -500,9 +500,9 @@ export function permissionBody(
       el(
         "p",
         "napp-perms-reqs",
-        pk
-          ? `For account ${pk.slice(0, 8)}…${pk.slice(-8)} on this device.`
-          : "For this signed-out session on this device."
+        ...(pk
+          ? ["For ", author(pk, { link: false }), " on this device."]
+          : ["For this signed-out session on this device."])
       )
     )
   }

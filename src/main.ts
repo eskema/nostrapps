@@ -2,13 +2,12 @@ import {
   configureIntents,
   dispatchIntentAction,
   isIntentAction,
-  observeIntentManifest,
   invokeIntent,
   intentForNappAction,
-  hasIntentHandlers
+  hasInstalledIntentHandlers
 } from "./intents/manager.js"
 import { deliverNappletIntent, matchesNappletRevision } from "./sandbox/host.js"
-import type { IntentRequest } from "./intents/catalog.js"
+import { canReceiveIntent, manifestContracts, type IntentRequest } from "./intents/catalog.js"
 import "@fontsource-variable/source-sans-3"
 import "@fontsource-variable/source-sans-3/wght-italic.css"
 import "@fontsource-variable/source-serif-4"
@@ -770,7 +769,9 @@ async function runNappAction(
   callerNappId: string,
   name: string,
   payload: unknown,
-  options?: { instance?: string; auxiliary?: boolean },
+  // intent: a NAP-INTENT delivery, which never lands in window history or
+  // share links, and fails rather than resolving empty when nothing took it.
+  options?: { instance?: string; auxiliary?: boolean; intent?: boolean },
   selected?: handlers.ActionTarget
 ) {
   if (typeof name !== "string" || !name) {
@@ -800,10 +801,12 @@ async function runNappAction(
     // No app takes it (a system napp's fallback doesn't count): the napps that
     // do, out there, and the action waits for the one the user tries.
     const compatibleIntent = !auxiliary ? intentForNappAction(name, payload) : undefined
-    const hasNapplets = !!compatibleIntent && hasIntentHandlers(compatibleIntent)
+    // Only installed napplets change how an action routes; ones merely
+    // discovered on relays are offered once the picker opens for other reasons.
+    const hasNapplets = !!compatibleIntent && hasInstalledIntentHandlers(compatibleIntent)
     const any = [...candidates, ...openCandidates.map(w => w.nappId)]
     if (!selected && !hasNapplets && !auxiliary && !any.some(id => !handlers.systemIdOf(id))) {
-      return showHandlersInApps(callerNappId, name, payload)
+      return showHandlersInApps(callerNappId, name, payload, !!options?.intent)
     }
     try {
       // One way to go: the one app, or the one open window (an open system
@@ -886,7 +889,7 @@ async function runNappAction(
   try {
     // actually call the instance (auxiliary windows are ephemeral and system
     // napps restore without a replay — nothing to record for either)
-    if (!auxWin && !instanceId.startsWith("system:")) {
+    if (!auxWin && !options?.intent && !instanceId.startsWith("system:")) {
       persist.appendLoadedAction(instanceId, name, payload)
     }
     const result = await callIframe(instanceId, name, payload)
@@ -953,14 +956,15 @@ let pendingAction: {
   caller: string
   name: string
   payload: unknown
+  intent: boolean
   resolve(result: unknown): void
   reject(err: unknown): void
 } | null = null
 
-async function showHandlersInApps(caller: string, name: string, payload: unknown) {
+async function showHandlersInApps(caller: string, name: string, payload: unknown, intent = false) {
   dropPendingAction()
   const answer = new Promise<unknown>((resolve, reject) => {
-    pendingAction = { caller, name, payload, resolve, reject }
+    pendingAction = { caller, name, payload, intent, resolve, reject }
   })
   try {
     const apps = await invokeSystemNapp("apps")
@@ -979,7 +983,10 @@ async function showHandlersInApps(caller: string, name: string, payload: unknown
 function dropPendingAction() {
   const p = pendingAction
   pendingAction = null
-  p?.resolve(undefined)
+  // An intent must report that nothing received it; a napp gets a cancelled
+  // picker's answer.
+  if (p?.intent) p.reject(new Error("Intent selection was cancelled"))
+  else p?.resolve(undefined)
 }
 
 // The held action, to an app just tried or installed that takes it: its
@@ -994,12 +1001,10 @@ async function deliverPendingAction(nappId: string) {
     .at(-1)
   try {
     p.resolve(
-      await runNappAction(
-        p.caller,
-        p.name,
-        p.payload,
-        win ? { instance: win.instanceId } : undefined
-      )
+      await runNappAction(p.caller, p.name, p.payload, {
+        ...(win ? { instance: win.instanceId } : {}),
+        intent: p.intent
+      })
     )
   } catch (err) {
     p.reject(err)
@@ -1028,7 +1033,7 @@ async function pickHandler(
   }
 
   return pickActionHandler(
-    friendlyNameFor(callerNappId),
+    !["launcher", "link", "intent"].includes(callerNappId),
     actionName,
     payload,
     candidates,
@@ -1038,7 +1043,7 @@ async function pickHandler(
 }
 
 function friendlyNameFor(nappId: string): string {
-  return petnameForNappId(nappId, persist.readOpen()) || nappId
+  return petnameForNappId(nappId, persist.readOpen()) || nappNameText(nappId)
 }
 
 // ─── system napp ctx ────────────────────────────────────────────
@@ -1788,7 +1793,8 @@ function buildRow(item: SuggestionItem, sig: string): Row {
   return row
 }
 
-async function launchSuggestion(item: SuggestionItem) {
+// rethrow: the caller reports the failure (and keeps what was typed).
+async function launchSuggestion(item: SuggestionItem, { rethrow = false } = {}) {
   const label = itemPreferredValue(item)
   hideSuggestions()
   try {
@@ -1818,6 +1824,7 @@ async function launchSuggestion(item: SuggestionItem) {
     setStatus(`Launched ${label}`)
     input!.value = ""
   } catch (err: any) {
+    if (rethrow) throw err
     setStatus(`Error: ${err.message}`)
     console.error(err)
   }
@@ -3272,7 +3279,7 @@ async function launchFromInput(raw: string): Promise<boolean | void> {
         if ((el as HTMLElement).hidden) continue
         const row = [...rows.values()].find(row => row.el === el)
         if (row) {
-          await launchSuggestion(row.item)
+          await launchSuggestion(row.item, { rethrow: true })
           return true
         }
       }
@@ -4217,13 +4224,39 @@ async function checkReachable(
 }
 
 configureIntents({
-  action: (name, payload, target) => runNappAction("intent", name, payload, undefined, target),
+  action: (name, payload, target) =>
+    runNappAction("intent", name, payload, { intent: true }, target),
   loadEvent: async code =>
     (await resolveViewPayload(code)) as import("@nostr/tools/core").NostrEvent | null,
-  async deliver(event, request, delivery, context) {
+  async deliver(chosen, request, delivery, context) {
     context.check()
-    const nappId = persist.computeNappId(event)
-    persist.assertSameAuthor(nappId, event.pubkey)
+    const nappId = persist.computeNappId(chosen)
+    persist.assertSameAuthor(nappId, chosen.pubkey)
+    // Deliveries never install or update a napplet on their own. A napplet that
+    // isn't installed goes through the install flow and its prompt; an
+    // installed one receives the payload in the revision the user installed.
+    if (!persist.getInstalledApp(nappId)?.event) {
+      await installNapplet(
+        {
+          pubkey: chosen.pubkey,
+          dTag: chosen.tags.find(t => t[0] === "d")?.[1] ?? "",
+          relayHints: [],
+          kind: chosen.kind
+        },
+        { launch: false, manifest: chosen }
+      )
+      context.check()
+    }
+    const event = persist.getInstalledApp(nappId)?.event
+    // A pinned snapshot names one exact revision; another one won't do.
+    if (chosen.kind === 5129 && event?.id !== chosen.id)
+      throw new Error("The pinned napplet snapshot is not the installed revision")
+    if (
+      !event ||
+      !canReceiveIntent(event) ||
+      !manifestContracts(event).some(c => c.convention === request.convention)
+    )
+      return false
     const policy = await resolvePolicyForLaunch(nappId, {
       title: event.tags.find(t => t[0] === "title")?.[1] || "Napplet",
       type: "napplet",
@@ -4240,8 +4273,6 @@ configureIntents({
     // A snapshot/root/named manifest can share a legacy installed ID. Reuse
     // only a window running this exact verified revision.
     if (win && !matchesNappletRevision(win, event.id)) win = null
-    persist.storeInstalledEvent(event)
-    observeIntentManifest(event)
     if (!win) {
       win = launchNapplet(stage, nappId, resolved.html, {
         ...makeLaunchOpts(),

@@ -1,6 +1,15 @@
 import { normalizeIntentUri, createIntentUriNormalizer } from "../intents/uri.js"
-import { invokeIntent, readIntentAvailability, intentAvailability, subscribeIntents } from "../intents/manager.js"
-import { manifestIdentity, type IntentDelivery } from "../intents/catalog.js"
+import {
+  invokeIntent,
+  readIntentAvailability,
+  intentAvailability,
+  subscribeIntents
+} from "../intents/manager.js"
+import {
+  HANDLER_PREFERENCES_KIND,
+  manifestIdentity,
+  type IntentDelivery
+} from "../intents/catalog.js"
 import type {
   SystemLaunchOpts,
   LaunchOpts,
@@ -1056,6 +1065,11 @@ async function publishNappletOutbox(
   if (!template || typeof template !== "object") {
     return { type: resultType, ok: false, error: "invalid event template" }
   }
+  try {
+    assertSandboxMaySign(template.kind)
+  } catch (err: any) {
+    return { type: resultType, ok: false, error: err.message }
+  }
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
 
@@ -1105,6 +1119,10 @@ async function publishNappletOutbox(
   }
 }
 
+// Napplets have `media-src 'none'`, so audio and video must come through
+// resource.bytes; keep the cap large enough for ordinary media files.
+const RESOURCE_MAX_BYTES = 128 * 1024 * 1024
+
 // Fetch a URL's bytes on the host. Returns a resource.bytes result (Blob +
 // content-type) or a typed resource.bytes.error.
 async function fetchNappletResource(
@@ -1135,7 +1153,7 @@ async function fetchNappletResource(
       context.check()
       const blob = await fetchBlob(servers, sha, {
         signal: context.signal,
-        maxBytes: 8 * 1024 * 1024
+        maxBytes: RESOURCE_MAX_BYTES
       })
       if (!blob) {
         return {
@@ -1177,13 +1195,12 @@ async function fetchNappletResource(
     const res = await fetch(url, {
       signal: AbortSignal.any([context.signal, AbortSignal.timeout(15000)]),
       credentials: "omit",
-      referrerPolicy: "no-referrer",
-      redirect: "error"
+      referrerPolicy: "no-referrer"
     })
     if (!res.ok) {
       return { type: "resource.bytes.error", error: "http-error", message: `HTTP ${res.status}` }
     }
-    const blob = await readBoundedBlob(res, 8 * 1024 * 1024)
+    const blob = await readBoundedBlob(res, RESOURCE_MAX_BYTES)
     context.check()
     return {
       type: "resource.bytes.result",
@@ -1222,6 +1239,11 @@ async function publishNappletEvent(
   const resultType = enc ? "relay.publishEncrypted.result" : "relay.publish.result"
   if (!template || typeof template !== "object") {
     return { type: resultType, ok: false, error: "invalid event template" }
+  }
+  try {
+    assertSandboxMaySign(template.kind)
+  } catch (err: any) {
+    return { type: resultType, ok: false, error: err.message }
   }
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
@@ -1669,18 +1691,40 @@ async function nappletWriteRelays(pk: string | null): Promise<string[]> {
 // Each subscription is an AbortController keyed by window + subId; the
 // napplet owns its lifecycle via subId, and it ends with the window (closed
 // or reloaded, see clearInstanceRuntimeState) or the napp (uninstalled).
-const nappletSubs = new Map<
-  string,
-  { controller: AbortController; nappId: string; instanceId: string }
->()
+type NappletSub = {
+  controller: AbortController
+  nappId: string
+  instanceId: string
+  subId: string
+  wire: "relay" | "outbox"
+  post: (msg: object) => void
+}
+const nappletSubs = new Map<string, NappletSub>()
 const nappletSubKey = (instanceId: string, subId: string) => `${instanceId}\u0000${subId}`
 
-function openNappletSub(nappId: string, instanceId: string, subId: string): AbortController {
+function openNappletSub(
+  nappId: string,
+  instanceId: string,
+  subId: string,
+  wire: NappletSub["wire"],
+  post: NappletSub["post"]
+): AbortController {
   const key = nappletSubKey(instanceId, subId)
   nappletSubs.get(key)?.controller.abort() // replace an existing sub with the same id
   const controller = new AbortController()
-  nappletSubs.set(key, { controller, nappId, instanceId })
+  nappletSubs.set(key, { controller, nappId, instanceId, subId, wire, post })
   return controller
+}
+
+// End the matching subscriptions. With a reason the napplet is told, as
+// <wire>.closed, so it never just stops getting events.
+function endNappletSubs(match: (sub: NappletSub) => boolean, reason?: string) {
+  for (const [key, sub] of nappletSubs) {
+    if (!match(sub)) continue
+    sub.controller.abort()
+    nappletSubs.delete(key)
+    if (reason) sub.post({ type: `${sub.wire}.closed`, subId: sub.subId, reason })
+  }
 }
 
 async function nappletRelaySubscribe(
@@ -1693,7 +1737,7 @@ async function nappletRelaySubscribe(
   const subId = String(data?.subId ?? "")
   if (!subId) return
   const key = nappletSubKey(instanceId, subId)
-  const controller = openNappletSub(nappId, instanceId, subId)
+  const controller = openNappletSub(nappId, instanceId, subId, "relay", post)
   const current = () => nappletSubs.get(key)?.controller === controller
   const send = (msg: object) => {
     if (current()) post(msg)
@@ -1777,7 +1821,7 @@ async function nappletOutboxSubscribe(
   const subId = String(data?.subId ?? "")
   if (!subId) return
   const key = nappletSubKey(instanceId, subId)
-  const controller = openNappletSub(nappId, instanceId, subId)
+  const controller = openNappletSub(nappId, instanceId, subId, "outbox", post)
   const current = () => nappletSubs.get(key)?.controller === controller
   const send = (msg: object) => {
     if (current()) post(msg)
@@ -1844,23 +1888,15 @@ function nappletRelayClose(instanceId: string, subId: unknown, post: (msg: objec
   post({ type: "relay.closed", subId: String(subId ?? "") })
 }
 
-// Abort every live subscription of one window (closed or reloaded).
+// Abort every live subscription of one window (closed or reloaded): its
+// document is gone, so there is no one to tell.
 function closeInstanceSubs(instanceId: string) {
-  for (const [key, sub] of nappletSubs) {
-    if (sub.instanceId !== instanceId) continue
-    sub.controller.abort()
-    nappletSubs.delete(key)
-  }
+  endNappletSubs(sub => sub.instanceId === instanceId)
 }
 
 // Abort every live subscription of a napp (called on uninstall/reset).
 export function closeNappletSubs(nappId: string) {
   abortNappletWork(nappId)
-  for (const [key, sub] of nappletSubs) {
-    if (sub.nappId !== nappId) continue
-    sub.controller.abort()
-    nappletSubs.delete(key)
-  }
   for (const [iframe, sub] of incSubs) if (sub.nappId === nappId) incSubs.delete(iframe)
   for (const [iframe, id] of configSubs) if (id === nappId) configSubs.delete(iframe)
 }
@@ -1926,30 +1962,82 @@ const nappletLifetimes = new Map<
   string,
   { nappId: string; lifetime: ReturnType<typeof createNappletLifetime> }
 >()
-function abortNappletWork(nappId?: string) {
-  for (const [id, entry] of nappletLifetimes) {
-    if (nappId && entry.nappId !== nappId) continue
-    entry.lifetime.abort()
-    closeInstanceSubs(id)
-  }
+// All in-flight work of a napp's windows (or every napplet's) ends, and its
+// subscriptions are told why.
+function abortNappletWork(nappId?: string, reason = "Access ended") {
+  for (const entry of nappletLifetimes.values())
+    if (!nappId || entry.nappId === nappId) entry.lifetime.abort()
+  endNappletSubs(sub => !nappId || sub.nappId === nappId, reason)
+}
+// The approval each subscription wire stands on.
+const SUB_METHOD: Record<NappletSub["wire"], string> = {
+  relay: "relay.read",
+  outbox: "outbox.read"
+}
+// One decision forgotten: only the subscriptions that relied on it end; other
+// work checks its approval again when it next needs it.
+function revokeNappletMethod(nappId: string, method?: string) {
+  if (!method) return abortNappletWork(nappId, "Permission revoked")
+  endNappletSubs(
+    sub => sub.nappId === nappId && SUB_METHOD[sub.wire] === method,
+    "Permission revoked"
+  )
+}
+// A policy changed: subscriptions in a domain no longer granted end. In-flight
+// calls fail their own domain check.
+function enforceNappletPolicy(nappId?: string) {
+  endNappletSubs(
+    sub =>
+      (!nappId || sub.nappId === nappId) &&
+      !nappletGrantedDomainsFor(sub.nappId).includes(sub.wire),
+    "Access revoked"
+  )
 }
 let nappletAccount = getPubkey()
 onAccountChanged(pk => {
-  if (nappletAccount && pk !== nappletAccount) abortNappletWork()
+  if (nappletAccount && pk !== nappletAccount) abortNappletWork(undefined, "Account changed")
   nappletAccount = pk
 })
-window.addEventListener("nostrapps:permission-revoked", event =>
-  abortNappletWork((event as CustomEvent).detail.nappId)
-)
+window.addEventListener("nostrapps:permission-revoked", event => {
+  const { nappId, method } = (event as CustomEvent<{ nappId: string; method?: string }>).detail
+  revokeNappletMethod(nappId, method)
+})
 window.addEventListener("nostrapps:policy-changed", event =>
-  abortNappletWork((event as CustomEvent<string>).detail)
+  enforceNappletPolicy((event as CustomEvent<string>).detail)
 )
+// Remembered approvals another tab dropped or changed, as [nappId, method].
+function droppedDecisions(oldValue: string | null, newValue: string | null) {
+  const parse = (value: string | null): Record<string, Record<string, string>> => {
+    try {
+      const parsed = JSON.parse(value || "{}")
+      return parsed && typeof parsed === "object" ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+  const before = parse(oldValue),
+    after = parse(newValue)
+  const dropped: [string, string][] = []
+  for (const [key, methods] of Object.entries(before)) {
+    let nappId = key
+    if (key.startsWith("["))
+      try {
+        nappId = String(JSON.parse(key)[1])
+      } catch {
+        continue
+      }
+    for (const method of Object.keys(methods ?? {}))
+      if (after[key]?.[method] !== methods[method]) dropped.push([nappId, method])
+  }
+  return dropped
+}
 window.addEventListener("storage", event => {
-  if (
-    event.key === null ||
-    ["nostrapps:permissions", "nostrapps:policy", "nostrapps:pubkey"].includes(event.key!)
-  )
-    abortNappletWork()
+  if (event.key === null || event.key === "nostrapps:pubkey")
+    abortNappletWork(undefined, "Account changed")
+  else if (event.key === "nostrapps:policy") enforceNappletPolicy()
+  else if (event.key === "nostrapps:permissions")
+    for (const [nappId, method] of droppedDecisions(event.oldValue, event.newValue))
+      revokeNappletMethod(nappId, method)
 })
 
 async function approveNappletRead(nappId: string, method: string, context: NappletCallContext) {
@@ -2011,7 +2099,11 @@ function handleNapplet(
     context.check()
   } catch {
     if (data.type === "intent.invoke")
-      post({ type: "intent.invoke.result", id: data.id, result: { ok: false, error: "Permission denied" } })
+      post({
+        type: "intent.invoke.result",
+        id: data.id,
+        result: { ok: false, error: "Permission denied" }
+      })
     else if (data.type === "relay.subscribe" || data.type === "outbox.subscribe")
       post({ type: `${domain}.closed`, subId: data.subId, reason: "Permission denied" })
     else
@@ -2023,14 +2115,33 @@ function handleNapplet(
     return
   }
 
-  if (data.type === "link.open" && typeof (data as any).url === "string" && (data as any).url.startsWith("napplet:")) {
+  if (
+    data.type === "link.open" &&
+    typeof (data as any).url === "string" &&
+    (data as any).url.startsWith("napplet:")
+  ) {
     try {
       if (!nappletGrantedDomainsFor(nappId).includes("intent")) throw new Error("Permission denied")
       const request = normalizeIntentUri((data as any).url, undefined)
       const sender = nappletIdentities.get(iframe) ?? `nostrapps:local:${nappId}`
-      void invokeIntent(request, { sender, signal: context.signal, check() { context.check(); if (!nappletGrantedDomainsFor(nappId).includes("intent")) throw new Error("Permission denied") } })
-        .then(result => post({ type: "link.open.result", id: data.id, status: result.ok ? "opened" : "denied" }))
-    } catch (error) { post({ type: "link.open.result", id: data.id, error: error instanceof Error ? error.message : String(error) }) }
+      void invokeIntent(request, {
+        sender,
+        signal: context.signal,
+        check() {
+          context.check()
+          if (!nappletGrantedDomainsFor(nappId).includes("intent"))
+            throw new Error("Permission denied")
+        }
+      }).then(result =>
+        post({ type: "link.open.result", id: data.id, status: result.ok ? "opened" : "denied" })
+      )
+    } catch (error) {
+      post({
+        type: "link.open.result",
+        id: data.id,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
     return
   }
 
@@ -2038,15 +2149,35 @@ function handleNapplet(
     const payload = data as any
     if (data.type === "intent.invoke") {
       const sender = nappletIdentities.get(iframe) ?? `nostrapps:local:${nappId}`
-      void invokeIntent(payload.request, { sender, signal: context.signal, check: () => context.check() })
-        .then(result => post({ type: "intent.invoke.result", id: data.id, result }))
+      void invokeIntent(payload.request, {
+        sender,
+        signal: context.signal,
+        check: () => context.check()
+      }).then(result => post({ type: "intent.invoke.result", id: data.id, result }))
     } else if (data.type === "intent.handlers" || data.type === "intent.available") {
-      void readIntentAvailability().then(handlers => {
-        context.check()
-        if (data.type === "intent.handlers") post({ type: "intent.handlers.result", id: data.id, handlers })
-        else if (typeof payload.archetype !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(payload.archetype)) post({ type: "intent.available.result", id: data.id, error: "Invalid archetype" })
-        else post({ type: "intent.available.result", id: data.id, availability: handlers.find(h => h.archetype === payload.archetype) ?? { archetype: payload.archetype, available: false, candidates: [], hasDefault: false } })
-      }).catch(error => post({ type: `${data.type}.result`, id: data.id, error: error.message }))
+      void readIntentAvailability()
+        .then(handlers => {
+          context.check()
+          if (data.type === "intent.handlers")
+            post({ type: "intent.handlers.result", id: data.id, handlers })
+          else if (
+            typeof payload.archetype !== "string" ||
+            !/^[a-z0-9][a-z0-9-]*$/.test(payload.archetype)
+          )
+            post({ type: "intent.available.result", id: data.id, error: "Invalid archetype" })
+          else
+            post({
+              type: "intent.available.result",
+              id: data.id,
+              availability: handlers.find(h => h.archetype === payload.archetype) ?? {
+                archetype: payload.archetype,
+                available: false,
+                candidates: [],
+                hasDefault: false
+              }
+            })
+        })
+        .catch(error => post({ type: `${data.type}.result`, id: data.id, error: error.message }))
     }
     return
   }
@@ -4726,6 +4857,15 @@ const rowFor = (method: string) =>
   ROW_FOR[method] ??
   (method.startsWith("nostrdb.") ? "identity" : method.startsWith("napp.dev.") ? "dev" : null)
 
+// Kinds only the launcher may sign. Handler preferences decide which app
+// receives other apps' intent payloads, so a sandboxed app signing one could
+// make itself the default handler.
+const LAUNCHER_ONLY_KINDS = new Set([HANDLER_PREFERENCES_KIND])
+function assertSandboxMaySign(kind: unknown) {
+  if (LAUNCHER_ONLY_KINDS.has(Number(kind)))
+    throw new Error(`kind ${Number(kind)} can only be signed by the launcher`)
+}
+
 // One rpc behind its gates: the granted row, an account, the user's approval.
 // Shared by bridge.js's rpcs and a wasm napp's napp_call.
 async function runRpc(
@@ -4739,6 +4879,7 @@ async function runRpc(
   if (!SIGNER_METHODS.has(method) && isNsite(nappId)) {
     throw new Error(`not available to nsites: ${method}`)
   }
+  if (method === "signEvent") assertSandboxMaySign(params?.kind)
   const row = rowFor(method)
   if (row && !getPolicy(nappId).domains.includes(row)) {
     throw new Error(`${row} access not granted: ${method}`)
@@ -6127,7 +6268,12 @@ async function publishEventToRelays(
 
 // Readiness belongs to the currently loaded document and is never persisted.
 const intentReady = new WeakSet<HTMLIFrameElement>()
-export async function deliverNappletIntent(win: NappWindow, delivery: IntentDelivery, check: () => void, signal?: AbortSignal): Promise<boolean> {
+export async function deliverNappletIntent(
+  win: NappWindow,
+  delivery: IntentDelivery,
+  check: () => void,
+  signal?: AbortSignal
+): Promise<boolean> {
   const frame = win.iframe
   if (!frame) return false
   const source = frame.contentWindow
@@ -6150,12 +6296,21 @@ const sentIntentAvailability = new WeakMap<HTMLIFrameElement, Map<string, string
 function broadcastIntentAvailability() {
   const handlers = intentAvailability()
   const roles = new Set(handlers.map(h => h.archetype))
-  for (const archetype of lastIntentRoles) if (!roles.has(archetype)) handlers.push({ archetype, available: false, candidates: [], hasDefault: false })
+  for (const archetype of lastIntentRoles)
+    if (!roles.has(archetype))
+      handlers.push({ archetype, available: false, candidates: [], hasDefault: false })
   lastIntentRoles = roles
-  const serialized = handlers.map(availability => [availability, JSON.stringify(availability)] as const)
+  const serialized = handlers.map(
+    availability => [availability, JSON.stringify(availability)] as const
+  )
   for (const win of openWindows.values()) {
     const frame = win.iframe
-    if (!frame || !intentReady.has(frame) || !nappletGrantedDomainsFor(win.getState().nappId).includes("intent")) continue
+    if (
+      !frame ||
+      !intentReady.has(frame) ||
+      !nappletGrantedDomainsFor(win.getState().nappId).includes("intent")
+    )
+      continue
     let sent = sentIntentAvailability.get(frame)
     if (!sent) sentIntentAvailability.set(frame, (sent = new Map()))
     for (const [availability, json] of serialized) {

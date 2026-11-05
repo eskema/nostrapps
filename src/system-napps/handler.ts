@@ -15,14 +15,8 @@ export interface HandlerBodyOpts {
   onSelect: (nappId: string, instanceId?: string) => void
 }
 
-// Builds the action-handler picker body shown inside a launcher shell (the
-// cursor popover via openPopover, or openDialog). Selecting an already-open
-// instance or a candidate calls onSelect; cancel / dismiss is up to the shell.
-export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
-  const root = document.createElement("div")
-  root.className = "handler-panel"
-
-  // ── request: "action: <name>" on one line, then the payload ──
+// The request being opened: "action: <name>" on one line, then the payload.
+export function buildHandlerRequest(actionName: string, payload: unknown): HTMLElement {
   const request = document.createElement("div")
   request.className = "handler-request"
   const actionLine = document.createElement("div")
@@ -30,9 +24,19 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
   const lbl = document.createElement("span")
   lbl.className = "handler-request-label"
   lbl.textContent = "action:"
-  actionLine.append(lbl, code(o.actionName || "(none)"))
-  request.append(actionLine, codeBlock(formatPayload(o.payload), "handler-payload"))
-  if (o.showRequest !== false) root.appendChild(request)
+  actionLine.append(lbl, code(actionName || "(none)"))
+  request.append(actionLine, codeBlock(formatPayload(payload), "handler-payload"))
+  return request
+}
+
+// Builds the action-handler picker body shown inside a launcher shell (the
+// cursor popover via openPopover, or openDialog). Selecting an already-open
+// instance or a candidate calls onSelect; cancel / dismiss is up to the shell.
+export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
+  const root = document.createElement("div")
+  root.className = "handler-panel"
+
+  if (o.showRequest !== false) root.appendChild(buildHandlerRequest(o.actionName, o.payload))
 
   const appLabel = (app: InstalledApp | undefined, nappId: string) =>
     app?.petname || app?.title || nappNameText(nappId)

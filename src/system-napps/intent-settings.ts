@@ -44,14 +44,54 @@ export function intentSettings() {
     }
   }
   const refresh = () => run(() => Promise.all([refreshIntentPreferences(), discoverIntents()]))
+  // Add-row choices in progress, by archetype and chain, so a re-render (a
+  // catalog update arriving mid-edit) doesn't reset them.
+  const drafts = new Map<string, { reference: string; hidden: boolean }>()
+  // The toolbar is built once: re-renders replace only the body below it, so
+  // typing in the filter never loses focus.
+  const search = document.createElement("input")
+  search.type = "search"
+  search.placeholder = "Filter intents…"
+  search.setAttribute("aria-label", "Filter intents")
+  search.addEventListener("input", () => {
+    query = search.value
+    render()
+  })
+  const filter = document.createElement("select")
+  filter.setAttribute("aria-label", "Archetype")
+  filter.onchange = () => {
+    selected = filter.value
+    render()
+  }
+  const refreshButton = button({ label: "Refresh handlers", onClick: () => void refresh() })
+  const body = el("div", "intent-settings-body")
+  content.append(
+    el("div", "intent-toolbar", search, filter, refreshButton),
+    el(
+      "p",
+      "",
+      "Preferred napplets sync with your account. Intent overrides run before archetype defaults; private handlers run before public handlers within each chain."
+    ),
+    body
+  )
   function render() {
     if (account !== getPubkey()) {
       account = getPubkey()
       expanded.clear()
+      drafts.clear()
       selected = ""
       query = ""
+      search.value = ""
       message = ""
     }
+    // Put focus back on the same control after the body is rebuilt.
+    const focused = body.contains(document.activeElement)
+      ? document.activeElement?.getAttribute("aria-label")
+      : null
+    renderBody()
+    if (focused) body.querySelector<HTMLElement>(`[aria-label="${CSS.escape(focused)}"]`)?.focus()
+  }
+  function renderBody() {
     const catalog = intentCatalog(),
       preferences = intentPreferences()
     const identities = new Map<string, string[]>()
@@ -79,53 +119,16 @@ export function intentSettings() {
         .toLowerCase()
         .split(/\s+/)
         .every(t => value.toLowerCase().includes(t))
-    content.replaceChildren()
-    const search = document.createElement("input")
-    search.type = "search"
-    search.placeholder = "Filter intents…"
-    search.value = query
-    search.setAttribute("aria-label", "Filter intents")
-    search.addEventListener("input", () => {
-      const start = search.selectionStart
-      query = search.value
-      render()
-      const next = content.querySelector<HTMLInputElement>('input[type="search"]')!
-      next.focus()
-      if (start !== null) next.setSelectionRange(start, start)
-    })
-    const filter = document.createElement("select")
-    filter.setAttribute("aria-label", "Archetype")
-    filter.add(new Option("All archetypes", ""))
+    filter.replaceChildren(new Option("All archetypes", ""))
     roles.forEach(r => filter.add(new Option(r, r)))
     filter.value = selected
-    filter.onchange = () => {
-      selected = filter.value
-      render()
-    }
-    content.append(
-      el(
-        "div",
-        "intent-toolbar",
-        search,
-        filter,
-        button({
-          label: busy ? "Loading…" : "Refresh handlers",
-          disabled: busy,
-          onClick: () => void refresh()
-        })
-      )
-    )
-    content.append(
-      el(
-        "p",
-        "",
-        "Preferred napplets sync with your account. Intent overrides run before archetype defaults; private handlers run before public handlers within each chain."
-      )
-    )
+    refreshButton.textContent = busy ? "Loading…" : "Refresh handlers"
+    refreshButton.disabled = busy
+    body.replaceChildren()
     if (message) {
       const error = el("p", "", message)
       error.setAttribute("role", "alert")
-      content.append(error)
+      body.append(error)
     }
     const routes = Object.entries(intentRoutes())
     if (routes.length) {
@@ -144,10 +147,10 @@ export function intentSettings() {
             button({ label: "Forget route", onClick: () => forgetIntentRoute(convention) })
           )
         )
-      content.append(routesSection)
+      body.append(routesSection)
     }
     if (!account) {
-      content.append(el("p", "", "Connect an account to sync handler preferences."))
+      body.append(el("p", "", "Connect an account to sync handler preferences."))
       return
     }
     let shown = 0
@@ -263,15 +266,28 @@ export function intentSettings() {
         const hidden = document.createElement("input")
         hidden.type = "checkbox"
         hidden.disabled = busy || !!pref?.locked
+        hidden.setAttribute("aria-label", `Private ${role} ${identity || "default"} handler`)
+        const draftKey = `${role}\u0000${identity}`
+        const draft = drafts.get(draftKey)
+        if (draft && [...target.options].some(o => o.value === draft.reference))
+          target.value = draft.reference
+        hidden.checked = !!draft?.hidden
         const submit = button({
           label: "Add handler",
-          disabled: true,
-          onClick: () =>
+          disabled: busy || !!pref?.locked || !target.value,
+          onClick: () => {
+            drafts.delete(draftKey)
             void edit({ action: "add", reference: target.value, hidden: hidden.checked })
+          }
         })
-        target.onchange = () => {
+        const keep = () => {
+          if (target.value || hidden.checked)
+            drafts.set(draftKey, { reference: target.value, hidden: hidden.checked })
+          else drafts.delete(draftKey)
           submit.disabled = busy || !!pref?.locked || !target.value
         }
+        target.onchange = keep
+        hidden.onchange = keep
         chain.append(
           el("div", "intent-toolbar", target, el("label", "", hidden, "Private"), submit)
         )
@@ -284,18 +300,23 @@ export function intentSettings() {
             "intent-settings-footer",
             button({
               label: "Clear archetype preferences",
-              disabled: busy || pref.locked,
+              disabled: busy,
               onClick: () => {
-                if (window.confirm(`Clear defaults and all intent overrides for ${role}?`))
+                if (
+                  window.confirm(
+                    `Clear defaults and all intent overrides for ${role}?` +
+                      (pref.locked ? "\n\nLocked private entries will be discarded." : "")
+                  )
+                )
                   void run(() => editIntentPreference(role, { action: "clear" }))
               }
             })
           )
         )
-      content.append(group)
+      body.append(group)
     }
     if (!shown)
-      content.append(
+      body.append(
         el("p", "", query || selected ? "No matching intents." : "No saved intent handlers.")
       )
   }
