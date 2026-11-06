@@ -354,6 +354,8 @@ export interface SystemCtx {
   // caller gets undefined, as from a cancelled picker).
   dropPendingAction?(): void
   uninstall(nappId: string): Promise<void>
+  // Re-opens the handler picker for a remembered route and keeps its choice.
+  changeRoute(caller: string, action: string): Promise<void>
   editPermissions(nappId: string): Promise<void>
   update(target: {
     pubkey: string

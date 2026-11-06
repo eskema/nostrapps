@@ -6,6 +6,10 @@ import { NappWindowState } from "./types.js"
 // mode (their window is ephemeral — see runNappAction in main.ts).
 export type ActionOptions = { instance?: string; auxiliary?: boolean }
 
+// An open window that can take an action, with the space it is in: a window
+// in another space is offered too, and reached by switching there.
+export type OpenCandidate = { window: NappWindowState; spaceId: string; spaceName: string }
+
 // action name → nappIds that can handle it
 const actionMap = new Map<string, string[]>()
 
@@ -60,7 +64,7 @@ export function removeApp(nappId: string) {
 export function findHandlersForAction(
   action: string,
   options?: ActionOptions
-): [string[], NappWindowState[]] {
+): [string[], OpenCandidate[]] {
   // Copy — actionMap.get returns the stored array by reference, and the view:
   // push below would otherwise mutate it (appending "view" handlers on every
   // call, so the candidate list grows by duplicates each dispatch).
@@ -88,12 +92,19 @@ export function findHandlersForAction(
 
   // An auxiliary dispatch always opens a fresh ephemeral window that closes
   // itself on response — never route it into an already-open window.
-  const openCandidates = options?.auxiliary
-    ? []
-    : persist.readOpen().filter(w => apps.includes(w.nappId))
+  // Every space's windows count: the current space's first.
+  const openCandidates = options?.auxiliary ? [] : openWindowsOf(apps)
   // A system napp is one window: when it's open, the action goes there.
-  const open = new Set(openCandidates.map(w => w.nappId))
+  const open = new Set(openCandidates.map(c => c.window.nappId))
   return [apps.filter(id => !(systemIdOf(id) && open.has(id))), openCandidates]
+}
+
+// The open windows of these napps across all spaces, the current space's
+// first, then the others in the spaces' order.
+export function openWindowsOf(nappIds: string[]): OpenCandidate[] {
+  const cur = persist.getCurrentSpaceId()
+  const all = persist.allOpenWindows().filter(w => nappIds.includes(w.window.nappId))
+  return [...all.filter(w => w.spaceId === cur), ...all.filter(w => w.spaceId !== cur)]
 }
 
 // The system napp behind a window's nappId (`__<id>__`), or null.

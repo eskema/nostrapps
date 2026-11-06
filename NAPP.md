@@ -318,6 +318,9 @@ apps handling that kind are offered it alongside those handling `view` (which
 still receive it named `view`).
 Pass `{ instance: "..." }` as the third argument to target one running window, or
 `{ auxiliary: true }` to use auxiliary handlers.
+With several handlers the launcher asks the user, who can have the choice
+remembered for the calling napp; settings holds those choices and a default
+per action.
 
 The app can also receive action state through `popstate`:
 

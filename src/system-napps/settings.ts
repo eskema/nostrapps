@@ -5,12 +5,14 @@ export const slash = "/settings"
 import type { SystemCtx } from "../types.js"
 import * as perms from "../permissions.js"
 import * as handlers from "../handlers.js"
+import * as routes from "../action-routes.js"
 import { dispatchAction } from "../handlers.js"
 import { loginControls } from "../login.js"
-import { nappName, nappNameEl } from "../napp-name.js"
+import { nappName } from "../napp-name.js"
 import { installDefaultsRows } from "../napp-permissions.js"
-import { getPolicy } from "../persistence.js"
+import { allOpenWindows, getCurrentSpaceId, getPolicy } from "../persistence.js"
 import { author, badge, busy, button, check, code, details, el, empty, item, itemList } from "./ui.js"
+import { actionsSection } from "./actions-section.js"
 import { backupSection } from "./backup-section.js"
 import { permissionsSection, type Grants } from "./permissions-section.js"
 
@@ -98,11 +100,15 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     forgetAll: () => perms.forgetAllDecisions()
   })
 
-  const actionsDetails = details({ summary: "actions", sticky: true, class: "settings-actions" })
-  const actionsSummary = actionsDetails.querySelector("summary") as HTMLElement
-  const handlersEl = document.createElement("div")
-  handlersEl.className = "perm-list"
-  actionsDetails.appendChild(handlersEl)
+  const actions = actionsSection({
+    apps: { get: nappId => ctx.apps.get(nappId) },
+    windows: () => allOpenWindows(),
+    currentSpaceId: getCurrentSpaceId,
+    setDefault: (action, nappId) => routes.setDefault(action, nappId),
+    change: (caller, action) => void ctx.changeRoute(caller, action),
+    forget: (caller, action) => routes.forgetRoute(caller, action),
+    forgetAll: () => routes.forgetAllRoutes()
+  })
 
   // ─── relays (auth policy) section ───────────────────────────────
 
@@ -117,7 +123,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   // Sections live directly on the root panel (user · permissions · actions ·
   // relays · backups), inserted before the build/reset footer.
   panel.insertBefore(permissions.el, buildRow)
-  panel.insertBefore(actionsDetails, buildRow)
+  panel.insertBefore(actions.el, buildRow)
   panel.insertBefore(relaysDetails, buildRow)
   panel.insertBefore(backup.el, buildRow)
 
@@ -174,27 +180,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
     relaysEl.appendChild(list)
   }
 
-  function renderHandlerPrefs() {
-    handlersEl.replaceChildren()
-    const snapshot = handlers.snapshotActionMap()
-    actionsSummary.textContent = `actions (${snapshot.length})`
-    if (snapshot.length === 0) {
-      handlersEl.appendChild(empty("No actions registered in memory yet."))
-      return
-    }
-    for (const [action, nappIds] of snapshot) {
-      const row = document.createElement("div")
-      row.className = "perm-row"
-      const name = code(action, "perm-method")
-      const targets = document.createElement("span")
-      targets.className = "perm-napp-id"
-      for (const id of nappIds) {
-        if (targets.childNodes.length) targets.append(", ")
-        targets.appendChild(nappNameEl(id))
-      }
-      row.append(name, targets)
-      handlersEl.appendChild(row)
-    }
+  function renderActions() {
+    actions.render(handlers.snapshotActionMap(), routes.listDefaults(), routes.listRoutes())
   }
 
   // Every installed napp, with what its install screen granted, by the rows'
@@ -220,7 +207,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
 
   function renderPerms() {
     renderGrants()
-    renderHandlerPrefs()
+    renderActions()
   }
 
   // Opening a section is a click, so the window may take the room for it.
@@ -231,7 +218,8 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
   const unsubPerms = perms.subscribe(renderPerms)
   // An install, a removal, or grants edited from an Apps card.
   const unsubApps = ctx.apps.subscribe(renderGrants)
-  const unsubHandlers = handlers.subscribe(renderHandlerPrefs)
+  const unsubHandlers = handlers.subscribe(renderActions)
+  const unsubRoutes = routes.subscribe(renderActions)
 
   renderRelays()
   const unsubRelays = ctx.relayAuth.subscribe(renderRelays)
@@ -242,6 +230,7 @@ export function mount(container: HTMLElement, ctx: SystemCtx, opts: { fit?(): vo
       unsubPerms()
       unsubApps()
       unsubHandlers()
+      unsubRoutes()
       unsubRelays()
       backup.unmount()
     }

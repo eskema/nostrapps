@@ -54,17 +54,7 @@ import {
   setLocalInstaller,
   findOpenWindowByNappId
 } from "./sandbox/host.js"
-import {
-  appIcon,
-  author as authorEl,
-  authors as kitAuthors,
-  badge,
-  button,
-  chip,
-  empty,
-  icon,
-  tab
-} from "./system-napps/ui.js"
+import { authors as kitAuthors, button, chip, empty, icon, tab } from "./system-napps/ui.js"
 import { nappNameText } from "./napp-name.js"
 import { openDialog } from "./dialog.js"
 import {
@@ -83,7 +73,7 @@ import {
   type ShareLink
 } from "./share-link.js"
 import { resolveInput } from "./nsite/resolve.js"
-import { formatPayload, isInstanceSerial } from "./utils.js"
+import { formatPayload } from "./utils.js"
 import {
   fetchManifest,
   fetchNsite,
@@ -130,8 +120,10 @@ import { openPopover } from "./popover.js"
 import { setPointer, getPointer } from "./pointer.js"
 import { moveBefore } from "./dom.js"
 import { buildHandlerBody } from "./system-napps/handler.js"
+import { suggestionRow } from "./suggestion-row.js"
 import * as persist from "./persistence.js"
 import * as handlers from "./handlers.js"
+import * as routes from "./action-routes.js"
 import type {
   SuggestionItem,
   NsiteResult,
@@ -657,6 +649,8 @@ async function uninstall(nappId: string) {
   // cleanup and (when the last open instance dies) the global wipe path.
   try {
     destroyByNappId(nappId)
+    routes.forgetRoutesTo(nappId)
+    routes.forgetDefaultsTo(nappId)
 
     // Close any remaining (closed) sessions in persistence so they don't
     // linger as orphan entries.
@@ -786,22 +780,57 @@ async function runNappAction(
     const [candidates, openCandidates] = handlers.findHandlersForAction(name, { auxiliary })
     // No app takes it (a system napp's fallback doesn't count): the napps that
     // do, out there, and the action waits for the one the user tries.
-    const any = [...candidates, ...openCandidates.map(w => w.nappId)]
+    const any = [...candidates, ...openCandidates.map(c => c.window.nappId)]
     if (!auxiliary && !any.some(id => !handlers.systemIdOf(id))) {
       return showHandlersInApps(callerNappId, name, payload)
     }
     try {
-      // One way to go: the one app, or the one open window (an open system
-      // napp, which isn't offered again as a new one).
-      const picked = candidates.length + openCandidates.length !== 1
-      const [nappId, existingInstanceId] = !picked
-        ? candidates.length
-          ? [candidates[0], undefined]
-          : [openCandidates[0].nappId, openCandidates[0].instanceId]
-        : await pickHandler(callerNappId, name, payload, candidates, openCandidates)
+      // Where it goes, in order: the caller's remembered route, the action's
+      // default, the one way there is (the one app, or the one open window:
+      // an open system napp, which isn't offered again as a new one), the
+      // picker.
+      const fits = (id: string) =>
+        candidates.includes(id) || openCandidates.some(c => c.window.nappId === id)
+      const route = routes.getRoute(callerNappId, name)
+      const dflt = routes.getDefault(name)
+      let nappId: string
+      let existingInstanceId: string | undefined
+      let picked = false
+      let remember = false
+      let via = ""
+      if (route && !!route.auxiliary === auxiliary && fits(route.nappId)) {
+        nappId = route.nappId
+        // The chosen window while it's open; gone, the new one takes its place.
+        if (route.instanceId && openCandidates.some(c => c.window.instanceId === route.instanceId))
+          existingInstanceId = route.instanceId
+        remember = !!route.instanceId && !existingInstanceId
+        via = "remembered"
+      } else if (dflt && fits(dflt)) {
+        nappId = dflt
+        // The default's window in this space when it has one, else a new one.
+        existingInstanceId = openCandidates.find(
+          c => c.window.nappId === dflt && c.spaceId === currentSpaceId
+        )?.window.instanceId
+        via = "default"
+      } else {
+        picked = candidates.length + openCandidates.length !== 1
+        if (!picked) {
+          nappId = candidates[0] ?? openCandidates[0].window.nappId
+          existingInstanceId = candidates[0] ? undefined : openCandidates[0].window.instanceId
+        } else {
+          ;[nappId, existingInstanceId, remember] = await pickHandler({
+            callerNappId,
+            actionName: name,
+            payload,
+            candidates,
+            openCandidates,
+            remember: true
+          })
+        }
+      }
 
-      // Revealed when a window opened, or the user picked one to see; an
-      // auto-selected open window answers behind the caller.
+      // Revealed when a window opened, or the user picked (or remembered)
+      // one to see; an auto-selected open window answers behind the caller.
       let reveal = true
       // the user may have picked an existing window.
       // if not, open a new window here and get its id
@@ -811,7 +840,13 @@ async function runNappAction(
         instanceId = launchSystemNapp(sysId).getState().instanceId
       } else if (existingInstanceId) {
         // Raised like a new window would be, or it answers behind the caller.
-        reveal = picked
+        reveal = picked || !!via
+        // A window in another space: go there first, then focus it.
+        const space = openCandidates.find(c => c.window.instanceId === existingInstanceId)?.spaceId
+        if (space && space !== currentSpaceId) {
+          await switchSpace(space)
+          renderSpacesBar()
+        }
         focusInstance(existingInstanceId)
         instanceId = existingInstanceId
       } else if (auxiliary) {
@@ -836,8 +871,18 @@ async function runNappAction(
       // What opened, or what the user asked to see: out from under a
       // maximized window (the caller, usually).
       if (reveal) revealInstance(instanceId)
+      // Kept: the picker's choice, a window chosen (this one) or a new one
+      // each time; or the window that took a remembered one's place.
+      if (remember) {
+        const keepWindow = via === "remembered" || !!existingInstanceId
+        routes.setRoute(callerNappId, name, {
+          nappId,
+          ...(keepWindow ? { instanceId } : {}),
+          ...(auxiliary ? { auxiliary: true } : {})
+        })
+      }
       setStatus(
-        `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}\n${formatPayload(payload)}`
+        `Action "${name}" ${friendlyNameFor(callerNappId)} → ${friendlyNameFor(nappId)}${via ? ` (${via})` : ""}\n${formatPayload(payload)}`
       )
     } catch (err) {
       console.warn(err)
@@ -969,13 +1014,18 @@ async function deliverPendingAction(nappId: string) {
   }
 }
 
-async function pickHandler(
-  callerNappId: string,
-  actionName: string,
-  payload: unknown,
-  candidates: string[],
-  openCandidates: NappWindowState[]
-): Promise<[nappId: string, instanceId: string | undefined]> {
+// The picker: an action in flight (its payload shown, "remember" offered), or
+// a route changed from settings (no payload, the choice is the route).
+async function pickHandler(o: {
+  callerNappId: string
+  actionName: string
+  payload?: unknown
+  candidates: string[]
+  openCandidates: handlers.OpenCandidate[]
+  remember: boolean
+}): Promise<[nappId: string, instanceId: string | undefined, remember: boolean]> {
+  const { callerNappId, actionName, candidates, openCandidates } = o
+  let payload = o.payload
   if (isViewAction(actionName) && typeof payload === "string") {
     const event = await resolveViewPayload(payload)
     if (event) payload = event
@@ -989,19 +1039,23 @@ async function pickHandler(
     setStatus(`No handler for action "${actionName}" from ${friendlyNameFor(callerNappId)}`)
   }
 
-  type Choice = [string, string | undefined] | null
+  type Choice = [string, string | undefined, boolean] | null
   const build = (resolve: (choice: Choice) => void) =>
     buildHandlerBody({
       actionName,
       payload,
       candidates,
       openCandidates,
+      currentSpaceId,
+      remember: o.remember,
       apps: {
         list: () => persist.getInstalledApps(),
-        get: (nappId: string) => persist.getInstalledApp(nappId)
+        get: (nappId: string) => persist.getInstalledApp(nappId),
+        describe: describeApp
       },
-      onSelect: (nappId, instanceId) => {
-        if (candidates.includes(nappId)) resolve([nappId, instanceId])
+      onSelect: (nappId, instanceId, remember) => {
+        if (candidates.includes(nappId) || openCandidates.some(c => c.window.nappId === nappId))
+          resolve([nappId, instanceId, remember])
       }
     })
   // A napp's action opens the picker where it was clicked. The launcher
@@ -1023,6 +1077,31 @@ async function pickHandler(
 
   if (!choice) throw new Error("Action handler selection cancelled")
   return choice
+}
+
+// A remembered route changed from settings: the same picker, for the route's
+// kind of call, its choice written in place of the route. Nothing is sent.
+async function changeRoute(caller: string, action: string) {
+  const auxiliary = !!routes.getRoute(caller, action)?.auxiliary
+  const [candidates, openCandidates] = handlers.findHandlersForAction(action, { auxiliary })
+  if (!candidates.length && !openCandidates.length) {
+    setStatus(`No app here handles "${action}"`)
+    return
+  }
+  const choice = await pickHandler({
+    callerNappId: "settings",
+    actionName: action,
+    candidates,
+    openCandidates,
+    remember: false
+  }).catch(() => null)
+  if (!choice) return
+  const [nappId, instanceId] = choice
+  routes.setRoute(caller, action, {
+    nappId,
+    ...(instanceId ? { instanceId } : {}),
+    ...(auxiliary ? { auxiliary: true } : {})
+  })
 }
 
 function friendlyNameFor(nappId: string): string {
@@ -1086,6 +1165,7 @@ const systemCtx: SystemCtx = {
     void deliverPendingAction(nappIdFor(resolveInput(raw)))
   },
   uninstall: (nappId: string) => uninstall(nappId),
+  changeRoute,
   editPermissions: (nappId: string) => editPermissions(nappId),
   update: (target: { pubkey: string; dTag: string; relayHints: string[] }) => updateNapp(target)
 }
@@ -1663,86 +1743,11 @@ function applyFilter() {
 }
 
 function buildRow(item: SuggestionItem, sig: string): Row {
-  const el = document.createElement("div")
-  el.className = "suggestion"
+  const el = suggestionRow(item)
   const row: Row = { item, el, sig, base: itemSearchText(item), search: "" }
   const author = item.author ? authorFor(item.author, true) : null
   row.search = author ? `${row.base} ${author.search}` : row.base
 
-  const main = document.createElement("span")
-  main.className = "sugg-main"
-  let title: HTMLElement | null = null // the icon slots in right after it
-  // What trails the row: "<type> from <author>" for an installed app, the space
-  // it lives in for an open window.
-  let trail: HTMLElement | null = null
-
-  if (item.systemId || item.actionId) {
-    const cmd = document.createElement("span")
-    cmd.className = "sugg-slash"
-    cmd.textContent = item.slash || null
-    main.appendChild(cmd)
-  } else if (item.link) {
-    // A recent row: the name, and how long ago.
-    title = document.createElement("span")
-    title.className = "sugg-pet"
-    title.textContent = item.petname || null
-    main.appendChild(title)
-    trail = document.createElement("span")
-    trail.className = "sugg-when"
-    trail.textContent = item.when || null
-  } else if (item.raw) {
-    const raw = document.createElement("span")
-    raw.className = "sugg-raw"
-    raw.textContent = item.raw || null
-    main.appendChild(raw)
-  } else {
-    // Like the Apps card: title (and icon). An installed app trails with
-    // "<type> from <author>"; an open window shows its instance id here and
-    // trails with its space instead. No installed record: the bare id stands in.
-    if (item.petname) {
-      title = document.createElement("span")
-      title.className = "sugg-pet"
-      title.textContent = item.petname
-      main.appendChild(title)
-    } else {
-      const napp = document.createElement("span")
-      napp.className = "sugg-napp"
-      napp.textContent = item.nappId || null
-      main.appendChild(napp)
-    }
-    if (item.source === "napp" && (item.author || item.authorLabel)) {
-      trail = document.createElement("span")
-      trail.className = "sugg-author"
-      if (item.author) {
-        // The kit's author, not a link: the row is what's clicked.
-        trail.append(`${item.appType} from `, authorEl(item.author, { link: false }))
-      } else {
-        trail.textContent = `${item.appType} · ${item.authorLabel}`
-      }
-    }
-    if (item.instanceId && isInstanceSerial(item.instanceId)) {
-      const id = document.createElement("span")
-      id.className = "sugg-id"
-      id.textContent = item.instanceId
-      main.appendChild(id)
-    }
-    // Global view: every open window is tagged with the space it lives in. The
-    // current space's windows are de-emphasized (you're already in it).
-    if (item.source === "open" && item.spaceName) {
-      trail = document.createElement("span")
-      trail.className = item.spaceCurrent ? "sugg-space sugg-space-current" : "sugg-space"
-      trail.append(icon("window"), document.createTextNode(item.spaceName))
-    }
-  }
-
-  el.appendChild(main)
-  if (trail) el.appendChild(trail)
-  // Slash rows carry their affordance label at the right edge, recent rows what
-  // they were (a link, a space); app rows trail with their author line or space
-  // instead.
-  if (item.source === "system" || item.source === "action" || item.source === "recent") {
-    el.appendChild(badge(item.kind || item.source, { class: "source" }))
-  }
   if (item.link) {
     // Forget: on mousedown like the row (a click would land after the input's
     // blur has hidden the list), stopped there so the row doesn't open it.
@@ -1758,16 +1763,6 @@ function buildRow(item: SuggestionItem, sig: string): Row {
     })
     el.appendChild(forget)
   }
-  // The app's icon, next to its title: the probed src, already settled when the
-  // list was warmed ahead of time, so it lands before the paint. No src means
-  // no icon — there's no placeholder.
-  item.icon?.then(src => {
-    if (!src || !el.isConnected) return
-    const img = appIcon({ src, size: "s", class: "sugg-icon" })
-    img.img.addEventListener("error", () => img.remove())
-    if (title) title.after(img)
-    else main.prepend(img)
-  })
 
   el.addEventListener("mousedown", async (e: MouseEvent) => {
     e.preventDefault()

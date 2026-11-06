@@ -2759,44 +2759,48 @@ body.popover-open .napp-body iframe {
   overflow: auto;
 }
 
-.handler-candidates h3 {
-  margin: 0 0 var(--space-s);
-  font-size: var(--text-m);
-}
-
-.handler-list {
+/* The launcher's rows (suggestion-row.ts), open windows then a divider and
+   the apps, out to the panel's edges so a row's hover fills the width. */
+.handler-rows {
   display: grid;
-  gap: var(--space-xs);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  margin: 0 calc(-1 * var(--space-s));
 }
 
-/* Picker rows are design-system buttons; just make them full-width with the
-   name on the left and the window number (open instances) on the right. */
-.handler-item {
-  width: 100%;
-  justify-content: space-between;
-  gap: var(--space-s);
-}
+/* ─── settings: actions section ────────────────────────────────── */
 
-.handler-pet {
+/* An available action's row: its name, then its default at the line's end,
+   dimmed; open, the napps declaring it, one to tick. */
+.actions-default {
   min-width: 0;
   overflow: hidden;
-  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: var(--dim-l);
 }
 
-.handler-num {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  opacity: 0.55;
+.actions-apps {
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-s) 0;
 }
 
-.handler-open-instances h3 {
-  margin: 0 0 var(--space-s);
-  font-size: var(--text-m);
+/* "remembered" with "forget all" at the line's end, over the callers' rows. */
+.actions-remembered-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.actions-remembered-head > .btn[hidden] {
+  display: none;
+}
+
+/* A caller's name in its row, cut with an ellipsis. */
+.actions-caller {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ─── settings: account section ────────────────────────────────── */
