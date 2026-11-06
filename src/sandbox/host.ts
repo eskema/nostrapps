@@ -4045,9 +4045,19 @@ export async function bootNapp(
     }
 
     onProgress(`Installing ${files.length} file(s) for ${label}…`)
+    // Bodies go in as ArrayBuffers, read here: WebKit's service worker process
+    // can't read a Blob back out of IndexedDB (NotFoundError, "The object can
+    // not be found here"), which left every napp window blank in Safari.
+    const records = await Promise.all(
+      files.map(async f => ({ path: f.path, mime: f.mime, body: await f.body.arrayBuffer() }))
+    )
     // Ship the granted policy alongside the files so the SW's CSP is correct on
     // the napp's very first load (no unlocked window before the grant applies).
-    boot.contentWindow!.postMessage({ __nostrapps: "napp-install", files, policy }, origin)
+    boot.contentWindow!.postMessage(
+      { __nostrapps: "napp-install", files: records, policy },
+      origin,
+      records.map(r => r.body)
+    )
 
     const result = await waitForMessage(boot, origin, "napp-install-done", "napp-install-error")
     if (result.__nostrapps === "napp-install-error") {

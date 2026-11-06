@@ -361,6 +361,6 @@ apps (`window.napp.dev`).
 Each napp runs at its own origin in a sandboxed iframe. The bridge is its only channel to the launcher. The launcher serves published files through a service worker backed by local storage.
 
 The launcher first opens a hidden `/boot.html` iframe. That iframe registers
-the service worker and writes app files to origin storage. The visible iframe
-then loads from that origin. `window.name` carries the instance id across
+the service worker and hands it the app files, which the worker writes to its
+own storage. The visible iframe then loads from that origin. `window.name` carries the instance id across
 same-origin navigations, so per-instance state survives reloads.

@@ -24,45 +24,33 @@
       window.addEventListener("unhandledrejection", e => reportError(e.reason))
       ;(async () => {
         const DB_NAME = `files-${location.origin.split("://")[1]}`
-        const DB_VERSION = 1
-        const STORE = "files"
 
-        function openDB() {
+        let reg
+
+        // The files store belongs to the service worker: it is the one writer
+        // and reader (sw.js, storeCommand). This page only relays. WebKit files
+        // a worker's storage apart from a cross-site iframe's, so a store this
+        // page wrote was one the worker never saw. Each command answers on its
+        // own port.
+        function swCall(data, transfer = []) {
           return new Promise((resolve, reject) => {
-            const req = indexedDB.open(DB_NAME, DB_VERSION)
-            req.onupgradeneeded = () => {
-              const db = req.result
-              if (!db.objectStoreNames.contains(STORE)) {
-                db.createObjectStore(STORE, { keyPath: "path" })
-              }
+            const sw =
+              navigator.serviceWorker.controller || reg?.active || reg?.waiting || reg?.installing
+            if (!sw) return reject(new Error("no service worker"))
+            const ch = new MessageChannel()
+            ch.port1.onmessage = e => {
+              if (e.data?.error) reject(new Error(e.data.error))
+              else resolve(e.data)
             }
-            req.onsuccess = () => resolve(req.result)
-            req.onerror = () => reject(req.error)
+            sw.postMessage(data, [ch.port2, ...transfer])
           })
         }
 
-        async function clearAll() {
-          const db = await openDB()
-          return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE, "readwrite")
-            tx.objectStore(STORE).clear()
-            tx.oncomplete = () => {
-              try {
-                db.close()
-              } catch {}
-              resolve()
-            }
-            tx.onerror = () => {
-              try {
-                db.close()
-              } catch {}
-              reject(tx.error)
-            }
-          })
-        }
+        const buffers = files => files.map(f => f.body).filter(b => b instanceof ArrayBuffer)
 
         // Every step runs, and whatever didn't go is reported: the launcher
-        // says a napp was wiped only when all of it went.
+        // says a napp was wiped only when all of it went. The files store goes
+        // through the worker, before the worker itself does.
         async function wipeAll() {
           const failed = []
           const step = async (what, fn) => {
@@ -72,7 +60,9 @@
               failed.push(`${what}: ${err?.message || err}`)
             }
           }
-          await step("files", clearAll)
+          if (navigator.serviceWorker.controller || reg?.active) {
+            await step("files", () => swCall({ __nostrapps: "sw-store-wipe" }))
+          }
           await step("databases", async () => {
             const names = indexedDB.databases
               ? (await indexedDB.databases()).map(d => d.name).filter(Boolean)
@@ -136,50 +126,8 @@
           } catch {}
         }
 
-        // Every stored file, for the launcher to read a napp's bytes back out
-        // (share-time healing). The policy record isn't a file.
-        async function getAllFiles() {
-          const db = await openDB()
-          return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE, "readonly")
-            const req = tx.objectStore(STORE).getAll()
-            req.onsuccess = () => {
-              try {
-                db.close()
-              } catch {}
-              resolve((req.result || []).filter(r => r.path !== "/__policy__"))
-            }
-            req.onerror = () => {
-              try {
-                db.close()
-              } catch {}
-              reject(req.error)
-            }
-          })
-        }
-
-        async function putFile(path, body, mime) {
-          const db = await openDB()
-          return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE, "readwrite")
-            tx.objectStore(STORE).put({ path, body, mime })
-            tx.oncomplete = () => {
-              try {
-                db.close()
-              } catch {}
-              resolve()
-            }
-            tx.onerror = () => {
-              try {
-                db.close()
-              } catch {}
-              reject(tx.error)
-            }
-          })
-        }
-
         try {
-          const reg = await navigator.serviceWorker.register("/sw.js")
+          reg = await navigator.serviceWorker.register("/sw.js")
           await navigator.serviceWorker.ready
           // `ready` resolves with the currently-ACTIVE worker — which is the
           // old sw.js when this origin was last booted before the launcher
@@ -235,21 +183,15 @@
           if (!data || event.origin !== LAUNCHER) return
           if (data.__nostrapps === "napp-install") {
             try {
-              await clearAll()
               await unregisterForeignSWs()
-              for (const f of data.files) {
-                await putFile(f.path, f.body, f.mime)
-              }
-              // The service worker reads /__policy__ from this store to decide
-              // what it injects. Written here so it's in place before the
-              // napp's first document load.
-              if (data.policy) {
-                await putFile("/__policy__", JSON.stringify(data.policy), "application/json")
-              }
+              const result = await swCall(
+                { __nostrapps: "sw-store-install", files: data.files, policy: data.policy },
+                buffers(data.files)
+              )
               event.source.postMessage(
                 {
                   __nostrapps: "napp-install-done",
-                  fileCount: data.files.length
+                  fileCount: result.fileCount
                 },
                 event.origin
               )
@@ -305,7 +247,7 @@
             // tear down any SW the napp registered for itself, so revoking
             // `network` actually cuts it off (its SW ignores the document CSP).
             try {
-              await putFile("/__policy__", JSON.stringify(data.policy || {}), "application/json")
+              await swCall({ __nostrapps: "sw-store-set-policy", policy: data.policy })
               await unregisterForeignSWs()
               event.source.postMessage({ __nostrapps: "napp-set-policy-done" }, event.origin)
             } catch (err) {
@@ -326,8 +268,12 @@
             }
           } else if (data.__nostrapps === "napp-read-files") {
             try {
-              const files = await getAllFiles()
-              event.source.postMessage({ __nostrapps: "napp-read-files-done", files }, event.origin)
+              const { files } = await swCall({ __nostrapps: "sw-store-read-files" })
+              event.source.postMessage(
+                { __nostrapps: "napp-read-files-done", files },
+                event.origin,
+                buffers(files)
+              )
             } catch (err) {
               event.source.postMessage(
                 { __nostrapps: "napp-read-files-error", error: err.message },

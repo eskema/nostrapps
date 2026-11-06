@@ -24,7 +24,112 @@ self.addEventListener("message", event => {
     }
     return
   }
+
+  // The store commands, from boot.html: this worker is the one writer and
+  // reader of the files store. WebKit files a worker's storage apart from a
+  // cross-site iframe's, so a boot page writing the store itself left this
+  // worker reading an empty one. Each answers on the port the message brings.
+  const port = event.ports[0]
+  if (!port || typeof data.__nostrapps !== "string" || !data.__nostrapps.startsWith("sw-store-")) return
+  event.waitUntil(
+    storeCommand(data).then(
+      result => port.postMessage(result || {}),
+      err => port.postMessage({ error: err?.message || String(err) })
+    )
+  )
 })
+
+async function storeCommand(data) {
+  switch (data.__nostrapps) {
+    case "sw-store-install": {
+      await clearAll()
+      for (const f of data.files) await putFile(f.path, f.body, f.mime)
+      // The policy record: what this worker injects. Written with the files so
+      // it is in place before the napp's first document load.
+      if (data.policy) await putFile("/__policy__", JSON.stringify(data.policy), "application/json")
+      return { fileCount: data.files.length }
+    }
+    case "sw-store-set-policy":
+      await putFile("/__policy__", JSON.stringify(data.policy || {}), "application/json")
+      return
+    case "sw-store-read-files":
+      return { files: await getAllFiles() }
+    case "sw-store-wipe":
+      await deleteDB()
+      return
+    default:
+      throw new Error(`unknown store command ${data.__nostrapps}`)
+  }
+}
+
+async function clearAll() {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.objectStore(STORE).clear()
+    tx.oncomplete = () => {
+      db.close()
+      resolve()
+    }
+    tx.onerror = () => {
+      db.close()
+      reject(tx.error)
+    }
+  })
+}
+
+async function putFile(path, body, mime) {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.objectStore(STORE).put({ path, body, mime })
+    tx.oncomplete = () => {
+      db.close()
+      resolve()
+    }
+    tx.onerror = () => {
+      db.close()
+      reject(tx.error)
+    }
+  })
+}
+
+// Every stored file, for the launcher to read a napp's bytes back out
+// (share-time healing). The policy record isn't a file.
+async function getAllFiles() {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, "readonly").objectStore(STORE).getAll()
+    req.onsuccess = () => {
+      db.close()
+      resolve((req.result || []).filter(r => r.path !== "/__policy__"))
+    }
+    req.onerror = () => {
+      db.close()
+      reject(req.error)
+    }
+  })
+}
+
+// A database still open somewhere is only deleted once it closes. Give it a
+// moment, then call it a failure rather than assume it went.
+function deleteDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB_NAME)
+    let timer
+    req.onsuccess = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    req.onerror = () => {
+      clearTimeout(timer)
+      reject(req.error || new Error(`${DB_NAME} not deleted`))
+    }
+    req.onblocked = () => {
+      timer = setTimeout(() => reject(new Error(`${DB_NAME} is still open`)), 3000)
+    }
+  })
+}
 
 self.addEventListener("fetch", event => {
   const url = new URL(event.request.url)
@@ -61,8 +166,7 @@ async function handleFetch(req, url) {
       if (devFile) {
         const mime = devFile.mime || "application/octet-stream"
         if (mime.startsWith("text/html")) {
-          const text =
-            typeof devFile.body === "string" ? devFile.body : await new Blob([devFile.body]).text()
+          const text = await bodyText(devFile.body)
           const policy = await readDevPolicy()
           const grants = grantsFor(policy)
           const nsite = policy?.nsite === true
@@ -102,7 +206,7 @@ async function handleFetch(req, url) {
     if (record) {
       const mime = record.mime || "application/octet-stream"
       if (mime.startsWith("text/html")) {
-        const text = typeof record.body === "string" ? record.body : await record.body.text()
+        const text = await bodyText(record.body)
         const policy = await readInstalledPolicy()
         const grants = grantsFor(policy)
         const nsite = policy?.nsite === true
@@ -195,9 +299,12 @@ const BOOT_CSP = [
 
 // A napp's http:// loads upgraded: one stale image URL would otherwise flag
 // the whole page as insecure (CSP is per-document, so the launcher's own
-// upgrade meta doesn't reach napp frames). An nsite is served as it is.
+// upgrade meta doesn't reach napp frames). An nsite is served as it is. Only
+// over https, like the launcher's own meta (build only): WebKit upgrades
+// localhost too, and on an http dev server every napp script then fails
+// with an SSL error.
 function htmlHeaders(mime, nsite) {
-  return nsite
+  return nsite || self.location.protocol !== "https:"
     ? { "Content-Type": mime }
     : { "Content-Type": mime, "Content-Security-Policy": "upgrade-insecure-requests" }
 }
@@ -229,8 +336,7 @@ async function readInstalledPolicy() {
       db.close()
     } catch {}
     if (!rec) return null // no record: see grantsFor
-    const text = typeof rec.body === "string" ? rec.body : await rec.body.text()
-    return parsePolicy(text)
+    return parsePolicy(await bodyText(rec.body))
   } catch {
     return UNREADABLE_POLICY
   }
@@ -240,8 +346,7 @@ async function readDevPolicy() {
   try {
     const rec = await requestFileFromHost("/__policy__")
     if (!rec || rec.error) return UNREADABLE_POLICY
-    const text = typeof rec.body === "string" ? rec.body : await new Blob([rec.body]).text()
-    return parsePolicy(text)
+    return parsePolicy(await bodyText(rec.body))
   } catch {
     return UNREADABLE_POLICY
   }
@@ -313,8 +418,7 @@ async function installedWantsWrapper() {
       db.close()
     } catch {}
     if (!rec) return false
-    const text = typeof rec.body === "string" ? rec.body : await rec.body.text()
-    return wrapperFromMetaText(text)
+    return wrapperFromMetaText(await bodyText(rec.body))
   } catch {
     return false
   }
@@ -324,11 +428,19 @@ async function devWantsWrapper() {
   try {
     const meta = await requestFileFromHost("/metadata.json")
     if (!meta || meta.error) return false
-    const text = typeof meta.body === "string" ? meta.body : await new Blob([meta.body]).text()
-    return wrapperFromMetaText(text)
+    return wrapperFromMetaText(await bodyText(meta.body))
   } catch {
     return false
   }
+}
+
+// A stored body: a string (the policy record), an ArrayBuffer (installs, dev
+// files) or a Blob (installs from before ArrayBuffers; Chromium reads those,
+// WebKit's worker process can't).
+async function bodyText(body) {
+  if (typeof body === "string") return body
+  if (body instanceof Blob) return body.text()
+  return new TextDecoder().decode(body)
 }
 
 function openDB() {
