@@ -6,6 +6,7 @@ import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
 import { verifyEvent } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
 import { addedServers, fetchBlob } from "./fetch.js"
+import { BlobTooLargeError } from "./download.js"
 import { healNapp } from "./heal.js"
 import { FALLBACK_RELAYS } from "../relay-health.js"
 
@@ -13,6 +14,8 @@ export const NAPPLET_SNAPSHOT_KIND = 5129
 export const NAPPLET_ROOT_KIND = 15129
 export const NAPPLET_NAMED_KIND = 35129
 export const NAPPLET_KINDS = [NAPPLET_SNAPSHOT_KIND, NAPPLET_ROOT_KIND, NAPPLET_NAMED_KIND]
+// A napplet is one self-contained HTML file; refuse anything larger.
+export const NAPPLET_MAX_BYTES = 8 * 1024 * 1024
 export function isNappletKind(kind: number): boolean {
   return NAPPLET_KINDS.includes(kind)
 }
@@ -256,7 +259,14 @@ export async function loadNappletFromManifest(
 
   onProgress("Fetching napplet…")
   // verifies sha256(blob) === hash; heal only writes to the napplet's own servers
-  const blob = await fetchBlob([...servers, ...addedServers(manifest)], artifactHash)
+  const blob = await fetchBlob([...servers, ...addedServers(manifest)], artifactHash, {
+    maxBytes: NAPPLET_MAX_BYTES,
+    concurrency: 4
+  }).catch(err => {
+    if (err instanceof BlobTooLargeError)
+      throw new Error(`Napplet is larger than ${NAPPLET_MAX_BYTES / 1024 / 1024} MiB`)
+    throw err
+  })
   if (!blob) throw new Error(`Could not fetch napplet (${artifactHash})`)
 
   if (opts.healRelays?.length) {
