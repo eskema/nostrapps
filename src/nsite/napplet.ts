@@ -3,7 +3,7 @@
 // from Blossom by the manifest's x tag and verified before it ever runs.
 import { pool } from "@nostr/gadgets/global"
 import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
-import { verifyEvent } from "../verify.js"
+import { verifyEventFresh } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
 import { addedServers, fetchBlob } from "./fetch.js"
 import { healNapp } from "./heal.js"
@@ -217,7 +217,21 @@ export async function resolveNapplet(
   const filter: any = id
     ? { ids: [id] }
     : { kinds: [kind], authors: [pubkey], ...(dTag ? { "#d": [dTag] } : {}) }
-  const manifest = latest(await pool.querySync(relays, filter, { maxWait: 6000 }))
+  // Relays can return anything: keep only signed napplet manifests that match
+  // what was asked for, so a bad event can't shadow the real latest one.
+  const events = await pool.querySync(relays, filter, { maxWait: 6000 })
+  const manifest = latest(
+    events.filter(
+      event =>
+        isNappletKind(event.kind) &&
+        verifyEventFresh(event) &&
+        (id
+          ? event.id === id
+          : event.kind === kind &&
+            event.pubkey === pubkey &&
+            (kind !== NAPPLET_NAMED_KIND || event.tags.find(t => t[0] === "d")?.[1] === dTag))
+    )
+  )
   if (!manifest) throw new Error("napplet manifest not found")
   return loadNappletFromManifest(manifest, onProgress, { healRelays: relays })
 }
@@ -233,7 +247,8 @@ export async function loadNappletFromManifest(
   // on the RESTORE re-verify, which runs on every launch.
   opts: { healRelays?: string[] } = {}
 ): Promise<ResolvedNapplet> {
-  if (!verifyEvent(manifest)) throw new Error("napplet manifest signature is invalid")
+  if (!isNappletKind(manifest.kind)) throw new Error("not a napplet manifest")
+  if (!verifyEventFresh(manifest)) throw new Error("napplet manifest signature is invalid")
 
   // Turned away here rather than asking every server for a blob that isn't one.
   if (isOldNappletFormat(manifest)) {
