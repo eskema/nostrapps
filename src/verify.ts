@@ -20,3 +20,21 @@ initNostrWasm()
 export function verifyEvent(event: NostrEvent): boolean {
   return (wasmReady && wasmVerifyEvent(event)) || jsVerifyEvent(event)
 }
+
+// Trust boundaries must verify current fields, not nostr-tools' cached symbol.
+// Reconstruct the wire fields so a mutated or copied verified object is checked.
+export function verifyEventFresh(event: NostrEvent): boolean {
+  try {
+    return verifyEvent({
+      id: event.id,
+      pubkey: event.pubkey,
+      created_at: event.created_at,
+      kind: event.kind,
+      tags: event.tags.map(tag => [...tag]),
+      content: event.content,
+      sig: event.sig
+    })
+  } catch {
+    return false
+  }
+}

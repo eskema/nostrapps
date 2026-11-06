@@ -92,7 +92,8 @@ import {
   type AddressPointer,
   type EventPointer
 } from "@nostr/tools/nip19"
-import { verifyEvent } from "../verify.js"
+import { verifyEvent, verifyEventFresh } from "../verify.js"
+import { createNappletLifetime, type NappletCallContext } from "./napplet-lifetime.js"
 import {
   classifyNappId,
   getInstalledApp,
@@ -348,6 +349,8 @@ function clearInstanceRuntimeState(
   clearInstanceActionState(instanceId, reason)
   clearInstanceFeedRequests(instanceId)
   closeInstanceSubs(instanceId)
+  nappletLifetimes.get(instanceId)?.lifetime.abort("Window closed")
+  nappletLifetimes.delete(instanceId)
   rejectInstanceDispatches(instanceId, reason)
 }
 
@@ -698,7 +701,8 @@ const asksWhoYouAre = (type: string) => type.startsWith("identity.") || type ===
 async function dispatchNapplet(
   type: string,
   data: any,
-  nappId: string
+  nappId: string,
+  context: NappletCallContext
 ): Promise<Record<string, unknown>> {
   let pk = getPubkey()
   // Asking who you are before anyone has logged in used to answer "" — the
@@ -706,6 +710,7 @@ async function dispatchNapplet(
   // it. Ask instead. Passive: a napp polling on load asks once per session.
   if (!pk && asksWhoYouAre(type)) {
     pk = await requireAccount({ nappId, what: "know who you are", passive: true })
+    context.check()
   }
   switch (type) {
     // ── identity (read-only; never prompts the signer) ──
@@ -777,12 +782,17 @@ async function dispatchNapplet(
     // ── relay (the napplet never holds keys: publish sends an UNSIGNED
     //    template, the host signs behind a permission prompt) ──
     case "relay.publish":
-      return publishNappletEvent(nappId, data?.event, null)
+      return publishNappletEvent(nappId, data?.event, null, context)
     case "relay.publishEncrypted":
-      return publishNappletEvent(nappId, data?.event, {
-        recipient: String(data?.recipient ?? ""),
-        encryption: data?.encryption === "nip04" ? "nip04" : "nip44"
-      })
+      return publishNappletEvent(
+        nappId,
+        data?.event,
+        {
+          recipient: String(data?.recipient ?? ""),
+          encryption: data?.encryption === "nip04" ? "nip04" : "nip44"
+        },
+        context
+      )
     case "relay.query": {
       const filters: any[] = Array.isArray(data?.filters) ? data.filters : []
       const relays = await nappletReadRelays(pk)
@@ -791,7 +801,9 @@ async function dispatchNapplet(
       for (const f of filters) {
         const filter = sanitizeFilter(f)
         if (!filter) continue
-        for (const e of await pool.querySync(relays, filter, { maxWait: 4000 })) {
+        const found = await pool.querySync(relays, filter, { maxWait: 4000 })
+        context.check()
+        for (const e of found) {
           if (seen.has(e.id)) continue
           seen.add(e.id)
           events.push({ event: e })
@@ -813,7 +825,8 @@ async function dispatchNapplet(
       const events = await outboxQueryEvents([{ ids: [eventId] }], {
         authors: authorHint,
         relays: Array.isArray(opts?.relays) ? opts.relays : [],
-        limit: 1
+        limit: 1,
+        signal: context.signal
       })
       return events.length
         ? { type: "outbox.getEvent.result", result: { event: events[0] } }
@@ -825,12 +838,13 @@ async function dispatchNapplet(
       const events = await outboxQueryEvents(filters, {
         authors: Array.isArray(opts?.authors) ? opts.authors.filter(isHex64) : [],
         relays: Array.isArray(opts?.relays) ? opts.relays : [],
-        limit: Number.isFinite(opts?.limit) ? opts.limit : undefined
+        limit: Number.isFinite(opts?.limit) ? opts.limit : undefined,
+        signal: context.signal
       })
       return { type: "outbox.query.result", events: events.map(event => ({ event })) }
     }
     case "outbox.publish":
-      return publishNappletOutbox(nappId, data?.event, data?.options ?? {})
+      return publishNappletOutbox(nappId, data?.event, data?.options ?? {}, context)
     case "outbox.resolveRelays":
       return { type: "outbox.resolveRelays.result", plan: await outboxResolvePlan(data?.target) }
 
@@ -849,17 +863,17 @@ async function dispatchNapplet(
       return { type: "common.follows.result", ok: true, pubkeys: (await loadFollowsList(pk)).items }
     }
     case "common.follow":
-      return commonFollowChange(nappId, data?.pubkeys, true)
+      return commonFollowChange(nappId, data?.pubkeys, true, context)
     case "common.unfollow":
-      return commonFollowChange(nappId, data?.pubkeys, false)
+      return commonFollowChange(nappId, data?.pubkeys, false, context)
     case "common.react":
-      return commonReact(nappId, data)
+      return commonReact(nappId, data, context)
     case "common.report":
-      return commonReport(nappId, data)
+      return commonReport(nappId, data, context)
 
     // ── link (open a URL in a new tab, behind a prompt) ──
     case "link.open":
-      return linkOpen(nappId, data)
+      return linkOpen(nappId, data, context)
 
     // ── config (shell-owned settings: the app registers a schema, the shell
     //    renders/stores the form; get answers with a config.values message) ──
@@ -908,7 +922,7 @@ function authorsFromFilters(filters: any[]): string[] {
 // read relays (+ any relay hints). Bounded by a wall-clock budget.
 async function outboxQueryEvents(
   rawFilters: any[],
-  opts: { authors?: string[]; relays?: string[]; limit?: number }
+  opts: { authors?: string[]; relays?: string[]; limit?: number; signal?: AbortSignal }
 ): Promise<NostrEvent[]> {
   const clean = rawFilters.map(f => sanitizeFilter(f)).filter(Boolean) as any[]
   if (clean.length === 0) return []
@@ -931,13 +945,14 @@ async function outboxQueryEvents(
       clean.map(({ authors: _drop, ...rest }) => rest),
       { fallbackRelays: [...hintRelays, ...FALLBACK_RELAYS] }
     )
-    if (maps.length) {
+    if (maps.length && !opts.signal?.aborted) {
       await new Promise<void>(resolve => {
         let done = false
         const finish = () => {
           if (done) return
           done = true
           clearTimeout(timer)
+          opts.signal?.removeEventListener("abort", finish)
           try {
             sub.close()
           } catch {}
@@ -949,13 +964,17 @@ async function outboxQueryEvents(
           onevent: collect,
           oneose: finish
         })
+        opts.signal?.addEventListener("abort", finish, { once: true })
       })
     }
   } else {
     const relays = [...hintRelays, ...FALLBACK_RELAYS]
-    for (const filter of clean)
+    for (const filter of clean) {
+      opts.signal?.throwIfAborted()
       for (const e of await pool.querySync(relays, filter, { maxWait: 4000 })) collect(e)
+    }
   }
+  opts.signal?.throwIfAborted()
 
   const limit = opts.limit
   return typeof limit === "number" && limit >= 0 ? events.slice(0, limit) : events
@@ -1003,7 +1022,8 @@ async function outboxResolvePlan(
 async function publishNappletOutbox(
   nappId: string,
   template: any,
-  options: any
+  options: any,
+  context: NappletCallContext
 ): Promise<Record<string, unknown>> {
   const resultType = "outbox.publish.result"
   if (!template || typeof template !== "object") {
@@ -1011,6 +1031,7 @@ async function publishNappletOutbox(
   }
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
+  const owner = getPubkey()
 
   const kind = Number(template.kind)
   if (!(await requireApproval(nappId, "outbox.publish", eventDetail(template)))) {
@@ -1018,12 +1039,15 @@ async function publishNappletOutbox(
   }
 
   try {
+    context.check()
     const signed = await signer.signEvent({
       kind,
       content: String(template.content ?? ""),
       tags: Array.isArray(template.tags) ? template.tags : [],
       created_at: Number(template.created_at) || Math.floor(Date.now() / 1000)
     })
+    checkSignedEvent(signed, owner)
+    context.check()
 
     const targets = new Set<string>()
     if (options?.toOutbox !== false)
@@ -1039,6 +1063,7 @@ async function publishNappletOutbox(
       } catch {}
     }
     if (targets.size === 0) for (const u of FALLBACK_RELAYS) targets.add(u)
+    context.check()
 
     const urls = [...targets]
     const results = await Promise.allSettled(
@@ -1124,13 +1149,22 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
   }
 }
 
+// A signer is outside our control: refuse to publish an event it signed for a
+// different account than the one logged in, or with a bad signature.
+function checkSignedEvent(event: NostrEvent, owner: string | null) {
+  if (!owner || event.pubkey !== owner || !verifyEventFresh(event)) {
+    throw new Error("The signer returned an event for a different account or an invalid signature")
+  }
+}
+
 // Sign (and optionally encrypt) a napplet's event template with the user's
 // signer, behind a permission prompt, then publish. The napplet never sees a
 // key. Returns a relay.publish(.Encrypted).result.
 async function publishNappletEvent(
   nappId: string,
   template: any,
-  enc: { recipient: string; encryption: "nip44" | "nip04" } | null
+  enc: { recipient: string; encryption: "nip44" | "nip04" } | null,
+  context: NappletCallContext
 ): Promise<Record<string, unknown>> {
   const resultType = enc ? "relay.publishEncrypted.result" : "relay.publish.result"
   if (!template || typeof template !== "object") {
@@ -1138,6 +1172,7 @@ async function publishNappletEvent(
   }
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
+  const owner = getPubkey()
 
   const kind = Number(template.kind)
   const detail = enc
@@ -1154,6 +1189,7 @@ async function publishNappletEvent(
   }
 
   try {
+    context.check()
     const tags: string[][] = Array.isArray(template.tags) ? template.tags : []
     let content = String(template.content ?? "")
     let finalTags = tags
@@ -1168,7 +1204,10 @@ async function publishNappletEvent(
       tags: finalTags,
       created_at: Number(template.created_at) || Math.floor(Date.now() / 1000)
     })
+    checkSignedEvent(signed, owner)
+    context.check()
     const relays = await nappletWriteRelays(getPubkey())
+    context.check()
     const settled = await Promise.allSettled(
       pool.publish(relays, signed, { onauth: relayAuthSigner(nappId) })
     )
@@ -1326,12 +1365,14 @@ async function commonAction(
   // Goes on from "<napp> wants to <action's verb>".
   line: Array<Node | string>,
   template: { kind: number; content: string; tags: string[][] },
+  context: NappletCallContext,
   // The caller already asked, in a prompt of its own.
   approved = false
 ): Promise<Record<string, unknown>> {
   const resultType = `${action}.result`
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
+  const owner = getPubkey()
   if (
     !approved &&
     !(await requireApproval(nappId, action, eventDetail(template, { line, object: false })))
@@ -1339,12 +1380,17 @@ async function commonAction(
     return { type: resultType, ok: false, error: "permission denied" }
   }
   try {
+    context.check()
     const signed = await signer.signEvent({
       ...template,
       created_at: Math.floor(Date.now() / 1000)
     })
+    checkSignedEvent(signed, owner)
+    context.check()
+    const relays = await nappletWriteRelays(getPubkey())
+    context.check()
     const settled = await Promise.allSettled(
-      pool.publish(await nappletWriteRelays(getPubkey()), signed, {
+      pool.publish(relays, signed, {
         onauth: relayAuthSigner(nappId)
       })
     )
@@ -1359,7 +1405,8 @@ async function commonAction(
 async function commonFollowChange(
   nappId: string,
   raw: unknown,
-  add: boolean
+  add: boolean,
+  context: NappletCallContext
 ): Promise<Record<string, unknown>> {
   const resultType = add ? "common.follow.result" : "common.unfollow.result"
   const pk = getPubkey()
@@ -1375,6 +1422,7 @@ async function commonFollowChange(
   // unrelated tags survive. If relays hid the current list this can still
   // clobber it — same view identity.getFollows serves, so at least consistent.
   const current = await loadFollowsList(pk)
+  context.check()
   const base: string[][] = current.event?.tags ?? current.items.map(p => ["p", p])
   const have = new Set(base.filter(t => t[0] === "p").map(t => t[1]))
   const wanted = [...targets].filter(t => (add ? !have.has(t) : have.has(t)))
@@ -1394,6 +1442,7 @@ async function commonFollowChange(
     add ? "common.follow" : "common.unfollow",
     line,
     { kind: 3, content: current.event?.content ?? "", tags },
+    context,
     add && !current.event
   )
 }
@@ -1418,14 +1467,18 @@ function confirmNewFollowList(nappId: string, n: number): Promise<boolean> {
   })
 }
 
-async function commonReact(nappId: string, data: any): Promise<Record<string, unknown>> {
+async function commonReact(
+  nappId: string,
+  data: any,
+  context: NappletCallContext
+): Promise<Record<string, unknown>> {
   const resultType = "common.react.result"
   const id = String(data?.targetEventId ?? "")
   if (!isHex64(id)) return { type: resultType, ok: false, error: "invalid event id" }
   const reaction = String(data?.reaction ?? "+") || "+"
   // NIP-25 wants e + p (+ k) — find the target for author/kind; react with a
   // bare e-tag when it's unreachable.
-  const [target] = await outboxQueryEvents([{ ids: [id] }], { limit: 1 })
+  const [target] = await outboxQueryEvents([{ ids: [id] }], { limit: 1, signal: context.signal })
   const tags: string[][] = [["e", id]]
   if (target) tags.push(["p", target.pubkey], ["k", String(target.kind)])
   const shortcode = /^:(.+):$/.exec(reaction)?.[1]
@@ -1439,10 +1492,14 @@ async function commonReact(nappId: string, data: any): Promise<Record<string, un
         "."
       ]
     : [`with ${reaction} on an event.`]
-  return commonAction(nappId, "common.react", line, { kind: 7, content: reaction, tags })
+  return commonAction(nappId, "common.react", line, { kind: 7, content: reaction, tags }, context)
 }
 
-async function commonReport(nappId: string, data: any): Promise<Record<string, unknown>> {
+async function commonReport(
+  nappId: string,
+  data: any,
+  context: NappletCallContext
+): Promise<Record<string, unknown>> {
   const resultType = "common.report.result"
   const t = data?.target
   const reason = String(data?.reason ?? "other")
@@ -1457,16 +1514,23 @@ async function commonReport(nappId: string, data: any): Promise<Record<string, u
   } else {
     return { type: resultType, ok: false, error: "invalid target" }
   }
-  return commonAction(nappId, "common.report", [`a NIP-56 ${reason} report.`], {
-    kind: 1984,
-    content: String(data?.text ?? ""),
-    tags
-  })
+  return commonAction(
+    nappId,
+    "common.report",
+    [`a NIP-56 ${reason} report.`],
+    { kind: 1984, content: String(data?.text ?? ""), tags },
+    context
+  )
 }
 
 // ── link (NAP-LINK) ──
 
-async function linkOpen(nappId: string, data: any): Promise<Record<string, unknown>> {
+async function linkOpen(
+  nappId: string,
+  data: any,
+  // Napplets only: legacy napps have no lifetime to check.
+  context?: NappletCallContext
+): Promise<Record<string, unknown>> {
   const resultType = "link.open.result"
   let url: URL
   try {
@@ -1489,6 +1553,7 @@ async function linkOpen(nappId: string, data: any): Promise<Record<string, unkno
   if (!(await requireApproval(nappId, "link.open", detail))) {
     return { type: resultType, status: "denied" }
   }
+  context?.check()
   // A remembered allow arrives with no user activation left; report a blocked
   // popup as denied rather than pretending it opened.
   const win = window.open(url.href, "_blank", "noopener,noreferrer")
@@ -1520,42 +1585,91 @@ async function nappletWriteRelays(pk: string | null): Promise<string[]> {
 // Each subscription is an AbortController keyed by window + subId; the
 // napplet owns its lifecycle via subId, and it ends with the window (closed
 // or reloaded, see clearInstanceRuntimeState) or the napp (uninstalled).
-const nappletSubs = new Map<
-  string,
-  { controller: AbortController; nappId: string; instanceId: string }
->()
+type NappletSub = {
+  controller: AbortController
+  nappId: string
+  instanceId: string
+  subId: string
+  wire: "relay" | "outbox"
+  post: (msg: object) => void
+}
+const nappletSubs = new Map<string, NappletSub>()
 const nappletSubKey = (instanceId: string, subId: string) => `${instanceId}\u0000${subId}`
 
-function openNappletSub(nappId: string, instanceId: string, subId: string): AbortController {
+function openNappletSub(
+  nappId: string,
+  instanceId: string,
+  subId: string,
+  wire: NappletSub["wire"],
+  post: NappletSub["post"]
+): AbortController {
   const key = nappletSubKey(instanceId, subId)
   nappletSubs.get(key)?.controller.abort() // replace an existing sub with the same id
   const controller = new AbortController()
-  nappletSubs.set(key, { controller, nappId, instanceId })
+  nappletSubs.set(key, { controller, nappId, instanceId, subId, wire, post })
   return controller
+}
+
+// End the matching subscriptions. With a reason the napplet is told, as
+// <wire>.closed, so it never just stops getting events.
+function endNappletSubs(match: (sub: NappletSub) => boolean, reason?: string) {
+  for (const [key, sub] of nappletSubs) {
+    if (!match(sub)) continue
+    sub.controller.abort()
+    nappletSubs.delete(key)
+    if (reason) sub.post({ type: `${sub.wire}.closed`, subId: sub.subId, reason })
+  }
+}
+
+// A subscription's own context: it ends with the document's lifetime or when
+// the napplet closes (or replaces) it.
+function subscriptionContext(context: NappletCallContext, signal: AbortSignal): NappletCallContext {
+  const combined = AbortSignal.any([context.signal, signal])
+  return {
+    signal: combined,
+    check() {
+      combined.throwIfAborted()
+      context.check()
+    }
+  }
 }
 
 async function nappletRelaySubscribe(
   nappId: string,
   instanceId: string,
   data: any,
-  post: (msg: object) => void
+  post: (msg: object) => void,
+  context: NappletCallContext
 ) {
   const subId = String(data?.subId ?? "")
   if (!subId) return
-  const filters: any[] = Array.isArray(data?.filters) ? data.filters : []
-  const controller = openNappletSub(nappId, instanceId, subId)
-  const relays = data?.relay ? [String(data.relay)] : await nappletReadRelays(getPubkey())
-  const clean = filters.map(f => sanitizeFilter(f)).filter(Boolean) as any[]
-  if (clean.length === 0) {
-    post({ type: "relay.eose", subId })
-    return
+  const key = nappletSubKey(instanceId, subId)
+  const controller = openNappletSub(nappId, instanceId, subId, "relay", post)
+  // A sub replaced under the same subId says nothing more.
+  const current = () => nappletSubs.get(key)?.controller === controller
+  const send = (msg: object) => {
+    if (current()) post(msg)
   }
-  streamRelays(nappId, new Map(relays.map(url => [url, clean])), controller.signal, {
-    label: `napplet-${nappShortName(nappId)}-${subId}`,
-    timeout: NAPPLET_EOSE_TIMEOUT,
-    purgatory: true,
-    send: nappletStreamSend("relay", instanceId, subId, post)
-  })
+  const scoped = subscriptionContext(context, controller.signal)
+  try {
+    const filters: any[] = Array.isArray(data?.filters) ? data.filters : []
+    const relays = data?.relay ? [String(data.relay)] : await nappletReadRelays(getPubkey())
+    const clean = filters.map(f => sanitizeFilter(f)).filter(Boolean) as any[]
+    scoped.check()
+    if (clean.length === 0) {
+      send({ type: "relay.eose", subId })
+      return
+    }
+    streamRelays(nappId, new Map(relays.map(url => [url, clean])), scoped.signal, {
+      label: `napplet-${nappShortName(nappId)}-${subId}`,
+      timeout: NAPPLET_EOSE_TIMEOUT,
+      purgatory: true,
+      send: nappletStreamSend("relay", instanceId, subId, send, controller)
+    })
+  } catch (err: any) {
+    send({ type: "relay.closed", subId, reason: err?.message ?? String(err) })
+    if (current()) nappletSubs.delete(key)
+  }
 }
 
 // How long a napplet's stream waits for every relay's EOSE before relay.eose.
@@ -1567,7 +1681,8 @@ function nappletStreamSend(
   wire: "relay" | "outbox",
   instanceId: string,
   subId: string,
-  post: (msg: object) => void
+  post: (msg: object) => void,
+  controller: AbortController
 ) {
   return (msg: SubscriptionMsg) => {
     if (msg.type === "event") post({ type: `${wire}.event`, subId, result: { event: msg.event } })
@@ -1578,7 +1693,8 @@ function nappletStreamSend(
         .map(([url, why]) => `${url}: ${why}`)
         .join(", ")
       post({ type: `${wire}.closed`, subId, reason })
-      nappletSubs.delete(nappletSubKey(instanceId, subId))
+      const key = nappletSubKey(instanceId, subId)
+      if (nappletSubs.get(key)?.controller === controller) nappletSubs.delete(key)
     }
   }
 }
@@ -1590,18 +1706,24 @@ async function nappletOutboxSubscribe(
   nappId: string,
   instanceId: string,
   data: any,
-  post: (msg: object) => void
+  post: (msg: object) => void,
+  context: NappletCallContext
 ) {
   const subId = String(data?.subId ?? "")
   if (!subId) return
   const key = nappletSubKey(instanceId, subId)
-  const controller = openNappletSub(nappId, instanceId, subId)
+  const controller = openNappletSub(nappId, instanceId, subId, "outbox", post)
+  const current = () => nappletSubs.get(key)?.controller === controller
+  const send = (msg: object) => {
+    if (current()) post(msg)
+  }
+  const scoped = subscriptionContext(context, controller.signal)
 
   const clean = (Array.isArray(data?.filters) ? data.filters : [data?.filters])
     .map((f: any) => sanitizeFilter(f))
     .filter(Boolean) as any[]
   if (clean.length === 0) {
-    post({ type: "outbox.closed", subId, reason: "empty filter" })
+    send({ type: "outbox.closed", subId, reason: "empty filter" })
     nappletSubs.delete(key)
     return
   }
@@ -1627,15 +1749,16 @@ async function nappletOutboxSubscribe(
     const requests = new Map<string, Filter[]>()
     for (const { url, filter } of maps) requests.set(url, [...(requests.get(url) ?? []), filter])
     if (!maps.length) for (const url of [...hints, ...FALLBACK_RELAYS]) requests.set(url, clean)
-    streamRelays(nappId, requests, controller.signal, {
+    scoped.check()
+    streamRelays(nappId, requests, scoped.signal, {
       label: `napplet-outbox-${nappShortName(nappId)}-${subId}`,
       timeout: NAPPLET_EOSE_TIMEOUT,
       purgatory: true,
-      send: nappletStreamSend("outbox", instanceId, subId, post)
+      send: nappletStreamSend("outbox", instanceId, subId, send, controller)
     })
   } catch (err: any) {
-    post({ type: "outbox.closed", subId, reason: err?.message ?? String(err) })
-    nappletSubs.delete(key)
+    send({ type: "outbox.closed", subId, reason: err?.message ?? String(err) })
+    if (current()) nappletSubs.delete(key)
   }
 }
 
@@ -1655,22 +1778,21 @@ function nappletRelayClose(instanceId: string, subId: unknown, post: (msg: objec
   post({ type: "relay.closed", subId: String(subId ?? "") })
 }
 
-// Abort every live subscription of one window (closed or reloaded).
+// Abort every live subscription of one window (closed or reloaded): its
+// document is gone, so there is no one to tell.
 function closeInstanceSubs(instanceId: string) {
-  for (const [key, sub] of nappletSubs) {
-    if (sub.instanceId !== instanceId) continue
-    sub.controller.abort()
-    nappletSubs.delete(key)
-  }
+  endNappletSubs(sub => sub.instanceId === instanceId)
 }
 
-// Abort every live subscription of a napp (called on uninstall/reset).
+// Abort every live subscription and in-flight call of a napp (called on
+// uninstall/reset).
 export function closeNappletSubs(nappId: string) {
-  for (const [key, sub] of nappletSubs) {
-    if (sub.nappId !== nappId) continue
-    sub.controller.abort()
-    nappletSubs.delete(key)
-  }
+  endNappletSubs(sub => sub.nappId === nappId)
+  for (const [instanceId, entry] of nappletLifetimes)
+    if (entry.nappId === nappId) {
+      entry.lifetime.abort("Napp removed")
+      nappletLifetimes.delete(instanceId)
+    }
   for (const [iframe, sub] of incSubs) if (sub.nappId === nappId) incSubs.delete(iframe)
   for (const [iframe, id] of configSubs) if (id === nappId) configSubs.delete(iframe)
 }
@@ -1732,6 +1854,31 @@ function incEmit(sender: HTMLIFrameElement, senderNappId: string, data: any) {
   }
 }
 
+// Each window's current document and the lifetime its calls run under. A
+// reload or close ends it (clearInstanceRuntimeState); the next message from
+// the window starts a fresh one.
+const nappletLifetimes = new Map<
+  string,
+  { nappId: string; lifetime: ReturnType<typeof createNappletLifetime> }
+>()
+
+// The account changed, here or in another tab: in-flight work stops before it
+// acts for the wrong account, and subscriptions end with a reason.
+function abortNappletWork(reason: string) {
+  endNappletSubs(() => true, reason)
+  for (const entry of nappletLifetimes.values()) entry.lifetime.abort(reason)
+}
+let nappletAccount = getPubkey()
+function nappletAccountChanged() {
+  const pk = getPubkey()
+  if (nappletAccount && pk !== nappletAccount) abortNappletWork("Account changed")
+  nappletAccount = pk
+}
+onAccountChanged(nappletAccountChanged)
+window.addEventListener("storage", event => {
+  if (event.key === null || event.key === "nostrapps:pubkey") nappletAccountChanged()
+})
+
 // Service one inbound napplet message. No handshake, no session: availability
 // is presence (the shell injected only granted domains), so here we re-check
 // the grant as defense-in-depth and answer with the exact result shape. An
@@ -1746,14 +1893,34 @@ function handleNapplet(
 ) {
   const domain = data.type.split(".")[0]
   if (!nappletDomainsFor(nappId).includes(domain)) return
-  const post = (msg: object) => iframe.contentWindow?.postMessage(msg, origin)
+  let entry = nappletLifetimes.get(instanceId)
+  if (!entry || entry.lifetime.signal.aborted) {
+    entry = { nappId, lifetime: createNappletLifetime(getPubkey) }
+    nappletLifetimes.set(instanceId, entry)
+  }
+  const endpoint = entry
+  const lifetime = entry.lifetime
+  const context = lifetime.context()
+  const source = iframe.contentWindow
+  // Only to the document that asked: a reply that lands after a reload or
+  // close is dropped, and so are events once its lifetime has ended.
+  const post = (msg: object) => {
+    if (lifetime.signal.aborted && ["relay.event", "outbox.event"].includes((msg as any).type))
+      return
+    if (
+      iframe.isConnected &&
+      iframe.contentWindow === source &&
+      nappletLifetimes.get(instanceId) === endpoint
+    )
+      source?.postMessage(msg, origin)
+  }
 
   // Streaming ops have no single .result — they push by subId.
   if (data.type === "relay.subscribe")
-    return void nappletRelaySubscribe(nappId, instanceId, data, post)
+    return void nappletRelaySubscribe(nappId, instanceId, data, post, context)
   if (data.type === "relay.close") return nappletRelayClose(instanceId, data.subId, post)
   if (data.type === "outbox.subscribe")
-    return void nappletOutboxSubscribe(nappId, instanceId, data, post)
+    return void nappletOutboxSubscribe(nappId, instanceId, data, post, context)
   if (data.type === "outbox.close") return nappletOutboxClose(instanceId, data.subId, post)
 
   // inc rides the bus, not dispatch: emit/unsubscribe are fire-and-forget.
@@ -1789,8 +1956,11 @@ function handleNapplet(
     return
   }
 
-  dispatchNapplet(data.type, data, nappId)
-    .then(result => post({ ...result, id: data.id }))
+  dispatchNapplet(data.type, data, nappId, context)
+    .then(result => {
+      context.check()
+      post({ ...result, id: data.id })
+    })
     .catch(err =>
       post({ type: `${data.type}.result`, id: data.id, error: err?.message ?? String(err) })
     )
