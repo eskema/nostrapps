@@ -92,7 +92,7 @@ import {
   type AddressPointer,
   type EventPointer
 } from "@nostr/tools/nip19"
-import { verifyEvent } from "../verify.js"
+import { verifyEvent, verifyEventFresh } from "../verify.js"
 import {
   classifyNappId,
   getInstalledApp,
@@ -1011,6 +1011,7 @@ async function publishNappletOutbox(
   }
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
+  const owner = getPubkey()
 
   const kind = Number(template.kind)
   if (!(await requireApproval(nappId, "outbox.publish", eventDetail(template)))) {
@@ -1024,6 +1025,7 @@ async function publishNappletOutbox(
       tags: Array.isArray(template.tags) ? template.tags : [],
       created_at: Number(template.created_at) || Math.floor(Date.now() / 1000)
     })
+    checkSignedEvent(signed, owner)
 
     const targets = new Set<string>()
     if (options?.toOutbox !== false)
@@ -1124,6 +1126,14 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
   }
 }
 
+// A signer is outside our control: refuse to publish an event it signed for a
+// different account than the one logged in, or with a bad signature.
+function checkSignedEvent(event: NostrEvent, owner: string | null) {
+  if (!owner || event.pubkey !== owner || !verifyEventFresh(event)) {
+    throw new Error("The signer returned an event for a different account or an invalid signature")
+  }
+}
+
 // Sign (and optionally encrypt) a napplet's event template with the user's
 // signer, behind a permission prompt, then publish. The napplet never sees a
 // key. Returns a relay.publish(.Encrypted).result.
@@ -1138,6 +1148,7 @@ async function publishNappletEvent(
   }
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
+  const owner = getPubkey()
 
   const kind = Number(template.kind)
   const detail = enc
@@ -1168,6 +1179,7 @@ async function publishNappletEvent(
       tags: finalTags,
       created_at: Number(template.created_at) || Math.floor(Date.now() / 1000)
     })
+    checkSignedEvent(signed, owner)
     const relays = await nappletWriteRelays(getPubkey())
     const settled = await Promise.allSettled(
       pool.publish(relays, signed, { onauth: relayAuthSigner(nappId) })
@@ -1332,6 +1344,7 @@ async function commonAction(
   const resultType = `${action}.result`
   const signer = await requireSigner(nappId)
   if (!signer) return { type: resultType, ok: false, error: "not logged in" }
+  const owner = getPubkey()
   if (
     !approved &&
     !(await requireApproval(nappId, action, eventDetail(template, { line, object: false })))
@@ -1343,6 +1356,7 @@ async function commonAction(
       ...template,
       created_at: Math.floor(Date.now() / 1000)
     })
+    checkSignedEvent(signed, owner)
     const settled = await Promise.allSettled(
       pool.publish(await nappletWriteRelays(getPubkey()), signed, {
         onauth: relayAuthSigner(nappId)
