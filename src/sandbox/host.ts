@@ -36,7 +36,7 @@ import { httpFetch, httpFetchImage } from "./wasm-http.js"
 // The napplet-only bridge (window.napplet, no window.nostr), inlined verbatim
 // into a napplet's srcdoc before its verified bytes.
 import nappletBridgeSource from "../../public/napplet-bridge.js?raw"
-import { readBoundedBlob } from "../nsite/download.js"
+import { BlobTooLargeError, readBoundedBlob } from "../nsite/download.js"
 import { fetchBlob } from "../nsite/fetch.js"
 import { declaredDomains } from "../nsite/napplet.js"
 import {
@@ -1093,11 +1093,7 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
         mime: blob.type || "application/octet-stream"
       }
     } catch (err: any) {
-      return {
-        type: "resource.bytes.error",
-        error: "fetch-failed",
-        message: err?.message ?? String(err)
-      }
+      return resourceFetchError(err)
     }
   }
   try {
@@ -1122,11 +1118,15 @@ async function fetchNappletResource(url: unknown): Promise<Record<string, unknow
       mime: res.headers.get("content-type") || blob.type || "application/octet-stream"
     }
   } catch (err: any) {
-    return {
-      type: "resource.bytes.error",
-      error: "fetch-failed",
-      message: err?.message ?? String(err)
-    }
+    return resourceFetchError(err)
+  }
+}
+
+function resourceFetchError(err: any): Record<string, unknown> {
+  return {
+    type: "resource.bytes.error",
+    error: err instanceof BlobTooLargeError ? "too-large" : "fetch-failed",
+    message: err?.message ?? String(err)
   }
 }
 

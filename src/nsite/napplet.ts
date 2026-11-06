@@ -6,6 +6,7 @@ import { loadBlossomServers, loadRelayList } from "@nostr/gadgets/lists"
 import { verifyEvent } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
 import { addedServers, fetchBlob } from "./fetch.js"
+import { BlobTooLargeError } from "./download.js"
 import { healNapp } from "./heal.js"
 import { FALLBACK_RELAYS } from "../relay-health.js"
 
@@ -261,6 +262,10 @@ export async function loadNappletFromManifest(
   const blob = await fetchBlob([...servers, ...addedServers(manifest)], artifactHash, {
     maxBytes: NAPPLET_MAX_BYTES,
     concurrency: 4
+  }).catch(err => {
+    if (err instanceof BlobTooLargeError)
+      throw new Error(`Napplet is larger than ${NAPPLET_MAX_BYTES / 1024 / 1024} MiB`)
+    throw err
   })
   if (!blob) throw new Error(`Could not fetch napplet (${artifactHash})`)
 
