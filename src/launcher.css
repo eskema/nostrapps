@@ -2598,6 +2598,22 @@ body.popover-open .napp-body iframe {
   text-overflow: ellipsis;
 }
 
+/* "<N> updates" and "update all" under the installed search, to the right,
+   while some installed app has an update. */
+.apps-updates {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: end;
+  align-items: center;
+  column-gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+.apps-updates[hidden] {
+  display: none;
+}
+
 /* Appearance from .ui-input. */
 .apps-search {
   min-width: 0;

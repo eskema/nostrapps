@@ -57,6 +57,7 @@ import {
   button,
   type ButtonVariant,
   check,
+  chip,
   code,
   details,
   el,
@@ -96,6 +97,12 @@ export function mount(
   // Signature of which installed apps currently have an update available, so the
   // streaming discovery subscription only re-renders the list when it changes.
   let _installedUpdatesSig = ""
+  // The "<N> updates" row under the search: the chip filters the list down to
+  // the apps with an update, the button updates them all.
+  let updatesOnly = false
+  let _updatesRowEl: HTMLElement | null = null
+  let _updatesChipEl: HTMLButtonElement | null = null
+  let _updateAllEl: HTMLButtonElement | null = null
 
   // Type filter shared across both tabs (all · nsites · napps · napplets).
   let typeFilter: "all" | AppType = "all"
@@ -536,6 +543,17 @@ export function mount(
     return best && best.pubkey === app.event.pubkey && best.created_at > base ? best : null
   }
 
+  // Installs the newer manifest `evt` over the installed app.
+  function applyUpdate(evt: any) {
+    const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1] || ""
+    return ctx.update({
+      pubkey: evt.pubkey,
+      dTag,
+      kind: evt.kind,
+      relayHints: Array.from(pool.seenOn.get(evt.id) || []).map((r: any) => r.url)
+    })
+  }
+
   // An "update" button for an installed app, pointed at the newer manifest `evt`.
   function makeInstalledUpdateBtn(app: any, evt: any): HTMLElement {
     const b = button({ label: "update", variant: "warning" })
@@ -543,13 +561,7 @@ export function mount(
       b.disabled = true
       b.textContent = "updating…"
       try {
-        const dTag = evt.tags.find((t: any) => t[0] === "d")?.[1] || ""
-        await ctx.update({
-          pubkey: evt.pubkey,
-          dTag,
-          kind: evt.kind,
-          relayHints: Array.from(pool.seenOn.get(evt.id) || []).map((r: any) => r.url)
-        })
+        await applyUpdate(evt)
         ctx.setStatus?.(`Apps: updated ${app.petname || app.title || app.nappId}`)
         renderInstalledList()
       } catch (err: any) {
@@ -576,6 +588,60 @@ export function mount(
       .map(a => a.nappId)
       .sort()
       .join(",")
+  }
+
+  // The row under the search: "<N> updates" (a chip, pressed → only those
+  // apps show) and "update all". Hidden while nothing has an update.
+  function buildUpdatesRow(): HTMLElement {
+    _updatesChipEl = chip({
+      label: "",
+      active: updatesOnly,
+      onClick: () => {
+        updatesOnly = !updatesOnly
+        paintUpdatesRow()
+        applyInstalledFilter()
+      }
+    })
+    _updateAllEl = button({ label: "update all", variant: "warning", onClick: updateAll })
+    _updatesRowEl = el("div", "apps-updates", _updatesChipEl, _updateAllEl)
+    paintUpdatesRow()
+    return _updatesRowEl
+  }
+
+  function paintUpdatesRow() {
+    if (!_updatesRowEl || !_updatesChipEl) return
+    const n = installedApps().filter(a => latestUpdateFor(a)).length
+    if (!n) updatesOnly = false // nothing left to filter down to
+    _updatesRowEl.hidden = !n
+    _updatesChipEl.querySelector(".btn-chip-label")!.textContent =
+      `${n} ${n === 1 ? "update" : "updates"}`
+    _updatesChipEl.classList.toggle("btn-primary", updatesOnly)
+    _updatesChipEl.classList.toggle("btn-ghost", !updatesOnly)
+  }
+
+  // Updates every app with one, one after the other; a failure is reported
+  // and the rest go on. The list repaints as each lands (apps-changed).
+  async function updateAll() {
+    const b = _updateAllEl
+    if (!b) return
+    const todo = installedApps()
+      .map(a => ({ app: a, evt: latestUpdateFor(a) }))
+      .filter(x => x.evt)
+    b.disabled = true
+    b.textContent = "updating…"
+    let failed = 0
+    for (const { app, evt } of todo) {
+      try {
+        await applyUpdate(evt)
+      } catch (err: any) {
+        failed++
+        ctx.setStatus?.(`Apps: update failed for ${app.nappId}: ${err?.message || String(err)}`)
+      }
+    }
+    if (!failed) ctx.setStatus?.(`Apps: updated ${todo.length} napps`)
+    b.disabled = false
+    b.textContent = "update all"
+    renderInstalledList()
   }
 
   // Re-render the installed tab when discovery changes which apps have updates.
@@ -713,6 +779,7 @@ export function mount(
               nappId: app.nappId
             })
         })
+        el.dataset.update = latestUpdateFor(app) ? "1" : ""
         if (card) card.el.replaceWith(el)
         card = { el, sig }
         installedCards.set(app.nappId, card)
@@ -731,6 +798,7 @@ export function mount(
       if (el === cursor) cursor = cursor.nextElementSibling
       else listEl.insertBefore(el, cursor)
     }
+    paintUpdatesRow()
     applyInstalledFilter()
     // A card that already has its icon is skipped.
     loadCardIcons(
@@ -751,7 +819,8 @@ export function mount(
     let shown = 0
     for (const card of cards) {
       const typeOk = typeFilter === "all" || card.dataset.type === typeFilter
-      const match = typeOk && (!needle || (card.dataset.search || "").includes(needle))
+      const updOk = !updatesOnly || card.dataset.update === "1"
+      const match = typeOk && updOk && (!needle || (card.dataset.search || "").includes(needle))
       card.hidden = !match
       if (match) shown++
     }
@@ -832,7 +901,7 @@ export function mount(
   function renderInstalled() {
     const searchEl = input({ type: "search", class: "apps-search", placeholder: SEARCH_PLACEHOLDER })
     _installedListEl = el("div", "apps-list")
-    installedPane.replaceChildren(toolbar(searchEl))
+    installedPane.replaceChildren(toolbar(searchEl, buildUpdatesRow()))
     if (MOCK_CARD) installedPane.appendChild(mockTemporaryCard())
     installedPane.appendChild(_installedListEl)
     installedCards.clear() // a new list element — the old cards went with the old one
