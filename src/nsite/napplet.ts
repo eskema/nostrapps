@@ -7,6 +7,7 @@ import { verifyEventFresh } from "../verify.js"
 import type { NostrEvent } from "@nostr/tools/core"
 import { addedServers, fetchBlob } from "./fetch.js"
 import { BlobTooLargeError } from "./download.js"
+import { cacheArtifact, cachedArtifact, NAPPLET_MAX_BYTES } from "./artifact-cache.js"
 import { healNapp } from "./heal.js"
 import { FALLBACK_RELAYS } from "../relay-health.js"
 
@@ -15,7 +16,7 @@ export const NAPPLET_ROOT_KIND = 15129
 export const NAPPLET_NAMED_KIND = 35129
 export const NAPPLET_KINDS = [NAPPLET_SNAPSHOT_KIND, NAPPLET_ROOT_KIND, NAPPLET_NAMED_KIND]
 // A napplet is one self-contained HTML file; refuse anything larger.
-export const NAPPLET_MAX_BYTES = 8 * 1024 * 1024
+export { NAPPLET_MAX_BYTES } from "./artifact-cache.js"
 export function isNappletKind(kind: number): boolean {
   return NAPPLET_KINDS.includes(kind)
 }
@@ -241,8 +242,8 @@ export async function resolveNapplet(
 
 // The verify + fetch half, given the manifest event we already hold — used both
 // by resolveNapplet (after the relay query) and on RESTORE, where the launcher
-// already has the stored manifest and just needs to re-fetch + re-verify the
-// bytes (content-addressed: never trust a cached document, re-verify each load).
+// already has the stored manifest. Its signature is always checked; artifact
+// bytes come from the verified cache or a hash-checked Blossom download.
 export async function loadNappletFromManifest(
   manifest: NostrEvent,
   onProgress: (m: string) => void = () => {},
@@ -262,27 +263,34 @@ export async function loadNappletFromManifest(
     throw new Error("napplet manifest needs exactly one x tag")
   }
   const artifactHash = xTags[0][1]
+  const cached = await cachedArtifact(artifactHash)
 
   const pubkey = manifest.pubkey
   const manifestServers = manifest.tags.filter(t => t[0] === "server" && t[1]).map(t => t[1])
-  const userServers = pubkey ? ((await loadBlossomServers(pubkey)).items ?? []) : []
+  const userServers =
+    pubkey && (!cached || opts.healRelays?.length)
+      ? ((await loadBlossomServers(pubkey)).items ?? [])
+      : []
   const servers = [
     "relay.nostrapps.com",
     ...new Set(userServers),
     ...new Set(manifestServers)
   ].filter(Boolean) as string[]
 
-  onProgress("Fetching napplet…")
+  onProgress(cached ? "Loading verified cached napplet…" : "Fetching napplet…")
   // verifies sha256(blob) === hash; heal only writes to the napplet's own servers
-  const blob = await fetchBlob([...servers, ...addedServers(manifest)], artifactHash, {
-    maxBytes: NAPPLET_MAX_BYTES,
-    concurrency: 4
-  }).catch(err => {
-    if (err instanceof BlobTooLargeError)
-      throw new Error(`Napplet is larger than ${NAPPLET_MAX_BYTES / 1024 / 1024} MiB`)
-    throw err
-  })
+  const blob =
+    cached ??
+    (await fetchBlob([...servers, ...addedServers(manifest)], artifactHash, {
+      maxBytes: NAPPLET_MAX_BYTES,
+      concurrency: 4
+    }).catch(err => {
+      if (err instanceof BlobTooLargeError)
+        throw new Error(`Napplet is larger than ${NAPPLET_MAX_BYTES / 1024 / 1024} MiB`)
+      throw err
+    }))
   if (!blob) throw new Error(`Could not fetch napplet (${artifactHash})`)
+  if (!cached) cacheArtifact(artifactHash, blob)
 
   if (opts.healRelays?.length) {
     healNapp({

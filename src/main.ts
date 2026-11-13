@@ -85,6 +85,7 @@ import {
   WASM_NAMED_KIND
 } from "./nsite/fetch.js"
 import { ensureReplicatedAll, type ReplicationTarget } from "./nsite/heal.js"
+import { pruneArtifacts } from "./nsite/artifact-cache.js"
 import { openShareDialog, type ShareCheck, type ShareWindow } from "./share-dialog.js"
 import {
   resolveNapplet,
@@ -492,6 +493,14 @@ async function finalizeNappRemoval(nappId: string, actionLabel = "Uninstalling")
   // failed wipe is retried at the next boot, and erase all data finds it.
   persist.rememberEphemeralOrigin(nappId)
   try {
+    if (nappId.startsWith("napplet~")) {
+      await pruneArtifacts(
+        persist
+          .getInstalledEvents()
+          .filter(event => isNappletKind(event.kind))
+          .flatMap(event => event.tags.filter(t => t[0] === "x" && t[1]).map(t => t[1]))
+      )
+    }
     await wipe(nappId)
     persist.forgetEphemeralOrigin(nappId) // origin is clean; nothing left to sweep
     setStatus(`${actionLabel === "Wiping" ? "Destroyed" : "Uninstalled"} ${nappId}`)
