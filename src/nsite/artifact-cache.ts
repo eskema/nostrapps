@@ -7,6 +7,7 @@ const CACHE_NAME = "nostrapps-napplet-artifacts-v1"
 const BUDGET = 32 * 1024 * 1024
 const memory = new Map<string, Blob>()
 let writing = Promise.resolve()
+let revision = 0
 const key = (hash: string) => new URL(`/__napplet-artifacts/${hash}`, location.origin).href
 
 function remember(hash: string, blob: Blob) {
@@ -23,12 +24,15 @@ function remember(hash: string, blob: Blob) {
 // Persistent entries are untrusted: check both size and hash before reuse.
 // Memory holds only verified, immutable Blobs.
 export async function cachedArtifact(hash: string): Promise<Blob | undefined> {
+  const started = revision
   const hit = memory.get(hash)
   if (hit) {
     remember(hash, hit)
     return hit
   }
   try {
+    // A removal may be queued behind a write. Don't read its old disk entry.
+    await writing
     const cache = await caches.open(CACHE_NAME)
     const response = await cache.match(key(hash))
     if (!response) return
@@ -38,11 +42,30 @@ export async function cachedArtifact(hash: string): Promise<Blob | undefined> {
       await cache.delete(key(hash))
       return
     }
+    if (started !== revision) return
     remember(hash, blob)
     return blob
   } catch {
     // Unavailable storage or a bad entry is a cache miss, not a load failure.
   }
+}
+
+// Keep only artifacts referenced by remaining installs. This also removes old
+// revisions of an uninstalled napplet, without evicting a shared installed hash.
+export function pruneArtifacts(installedHashes: Iterable<string>): Promise<void> {
+  const keep = new Set(installedHashes)
+  revision++
+  for (const hash of memory.keys()) if (!keep.has(hash)) memory.delete(hash)
+  writing = writing
+    .then(async () => {
+      const cache = await caches.open(CACHE_NAME)
+      for (const request of await cache.keys()) {
+        const hash = new URL(request.url).pathname.split("/").pop()!
+        if (!keep.has(hash)) await cache.delete(request)
+      }
+    })
+    .catch(err => console.warn("[napplet-cache] could not remove unused artifacts", err))
+  return writing
 }
 
 // Call only with a verified artifact. Blob values are immutable.
