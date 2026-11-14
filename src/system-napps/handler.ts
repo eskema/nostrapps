@@ -70,7 +70,8 @@ export function buildHandlerBody(o: HandlerBodyOpts): HTMLElement {
         source: "open",
         nappId: win.nappId,
         instanceId: win.instanceId,
-        petname: appLabel(app, win.nappId),
+        // The window's own name: two windows of one app can be called apart.
+        petname: win.petname && win.petname !== win.nappId ? win.petname : appLabel(app, win.nappId),
         ...o.apps.describe(app),
         spaceId,
         spaceName,

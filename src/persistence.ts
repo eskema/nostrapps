@@ -713,7 +713,7 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string, install
   all[nappId] = {
     icon: event.tags.find(t => t[0] === "icon")?.[1] || "",
     title,
-    petname: petname || existing?.petname || title || nappId,
+    petname: petname || title || existing?.petname || nappId,
     actions: event.tags.filter(t => t[0] === "action" && t[1]).map(t => t[1]),
     modes: modesFromEventTags(event.tags),
     initialSize: initialSizeFromEventTags(event.tags),
@@ -1214,16 +1214,17 @@ export function getInstalledEventForNappId(nappId: string): NostrEvent | null {
   return readInstalled()[nappId]?.event || null
 }
 
-export function setInstalledPetname(nappId: string, petname: string) {
-  if (!nappId || !petname) return
-
+// One-off: window renames used to overwrite the app's name. Puts each app with
+// a manifest back on its title. Delete once it has run.
+export function resetInstalledPetnames() {
   const all = readInstalled()
-  // Called on every window commit: the catalog (whole manifests) is only
-  // written back for an actual rename.
-  if (!all[nappId] || all[nappId].petname === petname) return
-
-  all[nappId].petname = petname
-  writeInstalled(all)
+  let changed = false
+  for (const app of Object.values(all))
+    if (app.event && app.title && app.petname !== app.title) {
+      app.petname = app.title
+      changed = true
+    }
+  if (changed) writeInstalled(all)
 }
 
 export function getNappIdForPetname(petname: string) {

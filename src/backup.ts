@@ -553,7 +553,6 @@ export async function restoreBackup(
         continue
       }
     }
-    if (a.petname) persist.setInstalledPetname(nappId, a.petname)
     clearDecisions(nappId)
     for (const p of a.perms) setDecision(nappId, p.method, p.decision)
     if (a.size) persist.rememberWindowSize(nappId, a.size.width, a.size.height)

@@ -1113,8 +1113,9 @@ async function changeRoute(caller: string, action: string) {
   })
 }
 
+// The app's name, never a window's: a window's name stays on that window.
 function friendlyNameFor(nappId: string): string {
-  return petnameForNappId(nappId, persist.readOpen()) || nappId
+  return appName(nappId) || nappId
 }
 
 // ─── system napp ctx ────────────────────────────────────────────
@@ -1399,7 +1400,6 @@ function buildSuggestionItems(): SuggestionItem[] {
   allWindows.sort(
     (a, b) => (a.spaceId === currentSpaceId ? 0 : 1) - (b.spaceId === currentSpaceId ? 0 : 1)
   )
-  const allSessions = allWindows.map(a => a.window)
   // One read of the installed set for the whole build: each record carries its
   // manifest, so a per-row lookup would re-parse all of them every time.
   const installed = persist.getInstalledApps()
@@ -1434,7 +1434,7 @@ function buildSuggestionItems(): SuggestionItem[] {
     out.push({
       source: "napp",
       nappId: app.nappId,
-      petname: petnameForNappId(app.nappId, allSessions, app),
+      petname: appName(app.nappId, app),
       ...describeApp(app)
     })
   }
@@ -1458,15 +1458,9 @@ function ago(at: number): string {
 }
 
 // `app` spares the storage read when the caller already holds the record.
-function petnameForNappId(nappId: string, sessions: any[], app?: InstalledApp): string | null {
-  // Prefer a petname from any session for this nappId — that's typically the
-  // friendliest name (manifest title we set at launch).
-  for (const s of sessions) {
-    if (s.nappId === nappId && s.petname && s.petname !== nappId) {
-      return s.petname
-    }
-  }
-  return (app ?? persist.getInstalledApp(nappId))?.petname || null
+function appName(nappId: string, app?: InstalledApp): string | null {
+  const a = app ?? persist.getInstalledApp(nappId)
+  return a?.petname || a?.title || null
 }
 
 // What the Apps card shows under an app's title: its icon, and "<type> from
@@ -1960,8 +1954,6 @@ function flushWindowStates() {
   pendingWindowStates.clear()
   if (!states.length) return
   persist.updateOpenMany(states)
-  for (const s of states)
-    if (!s.system && s.petname) persist.setInstalledPetname(s.nappId, s.petname)
   refreshSuggestions()
 }
 
@@ -2654,6 +2646,7 @@ async function sweepEphemeralOrigins() {
 }
 
 async function init() {
+  persist.resetInstalledPetnames()
   setStatus(
     "Ready — try /apps, /upload, /settings, /logs, /folder, or enter a pubkey/npub/nsite host"
   )
