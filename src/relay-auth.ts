@@ -3,9 +3,9 @@
 // Two layers, both persisted in localStorage (and thus wiped by factory reset
 // along with every other `nostrapps:*` key):
 //   • the global "always authenticate" switch. When on,
-//     every challenge is answered without asking.
+//     required authentication is approved without asking.
 //   • per-relay decisions ("allow" / "deny") remembered from the confirmation
-//     toasts shown when the switch is off. The next challenge from a relay with
+//     toasts shown when the switch is off. The next authentication requirement from a relay with
 //     a stored decision is answered (or refused) without prompting again.
 //
 // With no setting and no stored decision, a toast pops up and the AUTH answer
@@ -146,7 +146,7 @@ function promptRelayAuth(url: string, askedBy?: string): Promise<boolean> {
 }
 
 // ─── the decision entry point ────────────────────────────────────
-// Called by the signer wrapper below when a relay challenges. Resolves true →
+// Called by the signer wrapper below when a relay requires authentication. Resolves true →
 // sign the auth event; false → refuse.
 
 export async function authorizeRelay(url: string, askedBy?: string): Promise<boolean> {
@@ -162,12 +162,8 @@ export async function authorizeRelay(url: string, askedBy?: string): Promise<boo
 }
 
 // ─── the signer wrapper ──────────────────────────────────────────
-// Answers both ways a challenge arrives: the AUTH a relay sends unprompted, and
-// publish()'s onauth, which is the only thing that retries an "auth-required:"
-// rejection. The draft names its relay, so one function serves any number of
-// them. `askedBy` names whoever provoked it: a napp publishes to relays of its
-// own choosing, and "allow" is remembered, so the prompt has to say where it
-// came from.
+// Called for auth-required responses, using the relay's stored challenge.
+// `askedBy` identifies the napp whose operation requires authentication.
 export function relayAuthSigner(askedBy?: string) {
   return async (draft: EventTemplate): Promise<VerifiedEvent> => {
     const url = draft.tags.find(t => t[0] === "relay")?.[1] || ""
