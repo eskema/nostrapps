@@ -135,7 +135,9 @@ type Utils = {
   loadEmojiSets(pubkey: string): Promise<unknown>
   loadRelayInfo(url: string): Promise<unknown>
   // A plain REQ to exactly these relays (no outbox logic), kept open (and
-  // reopened when a connection drops) until the closer it returns is called.
+  // reopened when a connection drops or can't be made) until the closer it
+  // returns is called. With authors, since and limit, a relay whose page
+  // comes back full is asked for the next ones down to since (10 at most).
   // Every event is also saved to the store.
   subscribe(relays: string[], filter: Filter, opts?: SubscribeOpts): () => void
   loadNostrUser(request: string | { pubkey: string; relays?: string[] }): Promise<unknown>
@@ -455,7 +457,9 @@ type Napp = {
     opts?: { since?: number; until?: number; limit?: number }
   ): Promise<SyncResult>
   // A live subscription to filter, which must have authors, on each author's
-  // write relays (outbox model). Every event is also saved to the store.
+  // write relays (outbox model: three per author, plus their others asked
+  // anyway), paged and reopened as subscribe is. Every event is also saved to
+  // the store.
   outbox(filter: Filter, opts?: SubscribeOpts): { close(): void }
   utils: Utils
   ui: Ui

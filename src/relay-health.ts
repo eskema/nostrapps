@@ -218,7 +218,7 @@ export async function relayHealth(urls: string[], waitMs = 6000): Promise<RelayH
   return list.map(health)
 }
 
-// Where to read an author from, two of their write relays (gadgets has already
+// Where to read an author from, three of their write relays (gadgets has already
 // left out the ones that failed to connect lately):
 //   - none the NIP-66 monitors report offline, unless that's all there is;
 //   - free before those that require payment or auth, which may not let us read;
@@ -233,5 +233,5 @@ setRelayPicker(candidates => {
   const gated = (u: string) =>
     facts.get(u)?.requires?.some(r => r === "payment" || r === "auth") ? 1 : 0
   const rtt = (u: string) => facts.get(u)?.rtt ?? LAST
-  return (up.length ? up : urls).sort((a, b) => gated(a) - gated(b) || rtt(a) - rtt(b)).slice(0, 2)
+  return (up.length ? up : urls).sort((a, b) => gated(a) - gated(b) || rtt(a) - rtt(b)).slice(0, 3)
 })

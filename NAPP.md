@@ -245,8 +245,9 @@ false when some author's relays could not be read, with `error` saying which.
 All syncs, from every napp, share at most 16 REQs open at a time.
 
 `window.napp.outbox(filter, opts)` keeps `filter` open on the write relays of
-its `authors` (two per author, a relay asked only for its own authors), until
-`close()`. It takes the same `opts` as `napp.utils.subscribe` and calls back
+its `authors` (the three fastest per author, plus any other of theirs that is
+asked anyway for someone else; a relay is asked only for the authors who list
+it), until `close()`. It takes the same `opts` as `napp.utils.subscribe` and calls back
 the same way: everything stored at once to `eoseEventsCallback`, then each new
 event to `liveEventCallback`, and `closedCallback` if every relay ends it.
 Every event it brings is also saved to the store, where `nostrdb.subscribe`
@@ -269,8 +270,12 @@ const close = window.napp.utils.subscribe(relays, filter, {
 close() // nothing is delivered after this, and closedCallback is not called
 ```
 
-A relay connection that drops after EOSE is reopened for what is new since.
-Every event is also saved to the store, so the napp does not need to
+A relay connection that drops after EOSE is reopened for what is new since,
+and one that can't be made is tried again the same way (the EOSE batch doesn't
+wait for it). For a filter with `authors`, `since` and `limit`, a relay whose
+page comes back full is asked for the next one down, to `since`, up to 10
+pages: one REQ carries every author routed to that relay, and the limit is
+theirs together. Every event is also saved to the store, so the napp does not need to
 `nostrdb.add` them, and `nostrdb.subscribe` sees them. For "fetch what is
 stored and stop", call the closer from `eoseEventsCallback`.
 

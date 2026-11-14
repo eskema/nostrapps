@@ -4684,6 +4684,8 @@ function startStoreSub(instanceId: string, callbackId: string, filters: Filter[]
 // How long a subscription waits for every relay's EOSE before handing over
 // what it has anyway.
 const DEFAULT_MAX_EOSE_TIMEOUT = 20_000
+// pages a relay is asked for, the first included, when they come back full
+const PAGES = 10
 
 type SubscriptionMsg =
   | { type: "eose"; events: NostrEvent[] }
@@ -4775,7 +4777,8 @@ function streamRelays(
     if (!signal.aborted) opts.send(msg)
   }
 
-  const seen = new Set<string>()
+  // every event that came, with when it was made (paging goes by that)
+  const seen = new Map<string, number>()
   let stored: NostrEvent[] | null = []
   let pending = requests.size // relays that have not sent EOSE (or ended) yet
   let live = requests.size // relays that have not ended yet
@@ -4795,7 +4798,7 @@ function streamRelays(
 
   const onevent = (event: NostrEvent) => {
     if (signal.aborted || seen.has(event.id)) return
-    seen.add(event.id)
+    seen.set(event.id, event.created_at)
     if (stored && opts.batch) stored.push(event)
     else deliver({ type: "event", event })
     if (!opts.save) return
@@ -4816,15 +4819,69 @@ function streamRelays(
     deliver({ type: "closed", reasons })
   }
 
+  // A filter naming its authors and a `since` asks for all they made since
+  // then, but a relay stops at the filter's limit, and one request carries
+  // everyone routed to that relay: a page that comes back full is followed by
+  // the next one down, until the oldest it held, up to PAGES in all.
+  const pageable = (filters: Filter[]) => {
+    const f = filters.length === 1 ? filters[0] : undefined
+    return f?.authors?.length && f.since !== undefined && f.limit && f.limit > 0 ? f : undefined
+  }
+  const pageBack = async (relay: AbstractRelay, f: Filter, first: string[]) => {
+    let ids = first
+    let until = Infinity
+    try {
+      for (let page = 1; page < PAGES && !signal.aborted && relay.connected; page++) {
+        // the oldest the last page held (an invalid event isn't in `seen`)
+        let oldest = Infinity
+        for (const id of ids) {
+          const at = seen.get(id)
+          if (at !== undefined && at < oldest) oldest = at
+        }
+        // past `since`, or one second holding more than a page
+        if (oldest <= f.since! || oldest >= until) return
+        until = oldest
+        ids = await new Promise<string[]>(resolve => {
+          const got: string[] = []
+          const stop = () => sub.close("napp unsubscribed")
+          const sub = relay.subscribe([{ ...f, until }], {
+            label,
+            eoseTimeout: timeout,
+            alreadyHaveEvent: id => seen.has(id),
+            receivedEvent: (_, id) => got.push(id),
+            onevent,
+            oneose: () => sub.close(),
+            onclose() {
+              signal.removeEventListener("abort", stop)
+              resolve(got)
+            }
+          })
+          signal.addEventListener("abort", stop)
+        })
+        if (ids.length < f.limit!) return
+      }
+    } catch {
+      // the connection went between pages
+    }
+  }
+
   // One relay's REQ, kept open until the napp lets go or the relay ends it. A
-  // connection that drops after EOSE is reopened for what is new since.
+  // connection that drops after EOSE is reopened for what is new since; one
+  // that can't be made is tried again the same way.
   const drive = async (url: string, filters: Filter[]) => {
     if (opts.purgatory && pool.allowConnectingToRelay?.(url, ["read", filters]) === false) {
       relayEosed()
       relayEnded(url, "connection skipped by allowConnectingToRelay")
       return
     }
-    let eosed = false
+    // counted once toward the stream's eose: at its first EOSE (its pages
+    // in), or when it first can't be reached
+    let answered = false
+    const answer = () => {
+      if (answered) return
+      answered = true
+      relayEosed()
+    }
     let since: number | undefined
     let interval = 3000
     while (!signal.aborted) {
@@ -4834,14 +4891,12 @@ function streamRelays(
           connectionTimeout: Math.min(timeout, 10_000),
           abort: signal
         })
-      } catch (err) {
+      } catch {
         if (signal.aborted) return
-        if (!eosed) {
-          if (opts.purgatory) pool.onRelayConnectionFailure?.(url)
-          relayEosed()
-          relayEnded(url, "error: " + String((err as any)?.message || err))
-          return
-        }
+        // turned away (a 502, a timeout) or not there: the batch doesn't wait
+        // on it, and what it holds comes once it lets us in
+        if (opts.purgatory) pool.onRelayConnectionFailure?.(url)
+        answer()
         await reconnectWait()
         continue
       }
@@ -4859,21 +4914,27 @@ function streamRelays(
           signal.addEventListener("abort", stop)
           const asked = since === undefined ? filters : filters.map(f => ({ ...f, since }))
           const askedAt = Math.floor(Date.now() / 1000)
+          // the first REQ's page, counted as it comes (those another relay
+          // sent first too), to know whether it came back full
+          const paged = since === undefined ? pageable(filters) : undefined
+          let first: string[] | null = paged ? [] : null
           sub = relay.subscribe(asked, {
             label,
             eoseTimeout: timeout,
             // one another relay sent first is dropped before it is parsed
             alreadyHaveEvent: id => seen.has(id),
+            receivedEvent: paged ? (_, id) => first?.push(id) : undefined,
             onevent,
             oneose() {
               interval = 3000
               // what the relay held when this REQ went out is here: a drop,
               // however late it is noticed, asks again from then
               since = askedAt
-              if (!eosed) {
-                eosed = true
-                relayEosed()
-              }
+              const ids = first
+              first = null
+              if (paged && ids && ids.length >= paged.limit!)
+                void pageBack(relay, paged, ids).finally(answer)
+              else answer()
             },
             onclose(reason) {
               signal.removeEventListener("abort", stop)
@@ -4896,7 +4957,7 @@ function streamRelays(
       })
       if (signal.aborted) return
       if (ended !== null) {
-        if (!eosed) relayEosed()
+        answer()
         relayEnded(url, ended)
         return
       }
@@ -4926,10 +4987,10 @@ function streamRelays(
 
 // ─── outbox subscriptions (napp.outbox) ─────────────────────────
 // A filter with authors, sent to each author's write relays as
-// outboxFilterRelayBatch picks them, each relay asked only for its own
-// authors. Streams like napp.utils.subscribe, a dropped relay reopened the
-// same way, and ends the same way (napp.unsubscribe, the window closing or
-// reloading).
+// outboxFilterRelayBatch picks them (and to their others asked anyway), each
+// relay asked only for its own authors. Streams like napp.utils.subscribe, a
+// dropped relay reopened the same way, and ends the same way (napp.unsubscribe,
+// the window closing or reloading).
 async function startOutboxSubscription(nappId: string, instanceId: string, params: any) {
   const filter: Filter | null = Array.isArray(params?.filter)
     ? null
@@ -4954,12 +5015,21 @@ async function startOutboxSubscription(nappId: string, instanceId: string, param
   // it is one of each, and the batch below finds them all loaded.
   const started = performance.now()
   const secs = () => ((performance.now() - started) / 1000).toFixed(1)
-  await Promise.all(authors.map(pk => loadRelayList(pk).catch(() => null)))
+  const lists = await Promise.all(authors.map(pk => loadRelayList(pk).catch(() => null)))
   if (signal.aborted) return
   const maps = await outboxFilterRelayBatch(authors, base, { fallbackRelays: FALLBACK_RELAYS })
   if (signal.aborted) return
   const requests = new Map<string, Filter[]>()
   for (const { url, filter } of maps) requests.set(url, [...(requests.get(url) ?? []), filter])
+  // The picks go by speed, and people list relays they don't post to: an
+  // author's other write relays, asked anyway for someone else, take them
+  // too. Not one connection more.
+  authors.forEach((pk, i) => {
+    for (const { url, write } of lists[i]?.items ?? []) {
+      if (!write) continue
+      for (const f of requests.get(url) ?? []) if (!f.authors?.includes(pk)) f.authors?.push(pk)
+    }
+  })
   console.info(
     `[outbox] ${label}: relay lists for ${authors.length} authors in ${secs()}s, asking ${requests.size} relays`
   )
