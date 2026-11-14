@@ -4,7 +4,9 @@ import { pool } from "@nostr/gadgets/global"
 import type { NostrEvent } from "@nostr/tools/core"
 import { getStore } from "./store.js"
 import { getPubkey } from "./account.js"
-import { loadFollowsList, loadMuteList, loadSearchRelays } from "@nostr/gadgets/lists"
+import { loadFollowsList, loadMuteList, loadRelayList, loadSearchRelays } from "@nostr/gadgets/lists"
+import type { SubCloser } from "@nostr/tools/abstract-pool"
+import { normalizeURL } from "@nostr/tools/utils"
 import { decode } from "@nostr/tools/nip19"
 import { isNip05, queryProfile } from "@nostr/tools/nip05"
 
@@ -40,13 +42,93 @@ export function indexUser(user: NostrUser) {
   }
 }
 
-// Same as gadgets' loadNostrUser, but feeds the result into the local index.
+// Same as gadgets' loadNostrUser, but feeds the result into the local index,
+// and a miss gets a second round.
 export async function loadNostrUserIndexed(
   request: Parameters<typeof loadNostrUser>[0]
 ): Promise<NostrUser> {
-  const user = await loadNostrUser(request)
+  let user = await loadNostrUser(request)
+  if (!user.lastUpdated) {
+    let round = rounds.get(user.pubkey)
+    if (!round) {
+      const hints = typeof request === "string" ? [] : (request.relays ?? [])
+      round = secondRound(user.pubkey, hints).then(event =>
+        event ? loadNostrUser({ pubkey: event.pubkey, refreshStyle: event }) : user
+      )
+      rounds.set(user.pubkey, round)
+    }
+    user = await round
+  }
   indexUser(user)
   return user
+}
+
+// gadgets asks two of the author's write relays and one indexer, once. A miss
+// is asked again where alphaama looks: the hints, all the author's write
+// relays, and the viewer's read relays, where an author who lists no write
+// relays often is. Batched, once per pubkey per session.
+const rounds = new Map<string, Promise<NostrUser>>()
+let queued: Map<string, { hints: string[]; done: Array<(e: NostrEvent | null) => void> }> | null =
+  null
+
+function secondRound(pubkey: string, hints: string[]): Promise<NostrEvent | null> {
+  return new Promise(resolve => {
+    if (!queued) {
+      queued = new Map()
+      window.setTimeout(askAgain, 100)
+    }
+    const entry = queued.get(pubkey) ?? { hints: [], done: [] }
+    entry.hints.push(...hints)
+    entry.done.push(resolve)
+    queued.set(pubkey, entry)
+  })
+}
+
+async function askAgain() {
+  const batch = queued!
+  queued = null
+  const urls = (items: { url: string }[]) =>
+    items.flatMap(i => {
+      try {
+        return [normalizeURL(i.url)]
+      } catch {
+        return []
+      }
+    })
+  const me = getPubkey()
+  const mine = me
+    ? urls(((await loadRelayList(me).catch(() => null))?.items ?? []).filter(i => i.read))
+    : []
+  const byRelay = new Map<string, string[]>()
+  await Promise.all(
+    [...batch].map(async ([pubkey, { hints }]) => {
+      const theirs = ((await loadRelayList(pubkey).catch(() => null))?.items ?? []).filter(
+        i => i.write
+      )
+      for (const url of new Set([...urls(hints.map(url => ({ url }))), ...urls(theirs), ...mine]))
+        byRelay.set(url, [...(byRelay.get(url) ?? []), pubkey])
+    })
+  )
+
+  const found = new Map<string, NostrEvent>()
+  if (byRelay.size)
+    await new Promise<void>(done => {
+      let sub: SubCloser | undefined
+      sub = pool.subscribeMap(
+        [...byRelay].map(([url, authors]) => ({ url, filter: { kinds: [0], authors } })),
+        {
+          label: "metadata-again",
+          maxWait: 4000,
+          onevent(e) {
+            if (e.kind !== 0 || !batch.has(e.pubkey)) return
+            if ((found.get(e.pubkey)?.created_at ?? -1) < e.created_at) found.set(e.pubkey, e)
+          },
+          oneose: () => sub?.close(),
+          onclose: () => done()
+        }
+      )
+    })
+  for (const [pubkey, { done }] of batch) for (const d of done) d(found.get(pubkey) ?? null)
 }
 
 // Index every kind:0 in the local store (newest event per author wins).
