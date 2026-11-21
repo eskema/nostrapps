@@ -153,6 +153,7 @@ import * as relayAuth from "./relay-auth.js"
 import { buildUserIndex, loadNostrUserIndexed } from "./user-search.js"
 import { verifyEvent } from "./verify.js"
 import { destroyStore } from "./store.js"
+import { hardenPublish } from "./pool-publish.js"
 
 console.info(`nostrapps build ${__BUILD__.id}${__BUILD__.dirty ? "-dirty" : ""} ${__BUILD__.date}`)
 
@@ -162,6 +163,9 @@ pool.verifyEvent = verifyEvent
 // A socket that died quietly (wifi off, sleep) still reads as open, and its
 // subscriptions wait on it for good. Pinged, it closes and they can reopen.
 pool.enablePing = true
+// …and until the ping finds it, a publish over it times out: given longer, and
+// checked and sent again on a fresh connection when it does (pool-publish.ts).
+hardenPublish(pool)
 
 // gadgets' list fetchers (lists.ts) fill their relay set with
 // randomPick(hardcodedRelays), and every loader except kind 3 and 10002 is
