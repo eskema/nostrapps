@@ -246,7 +246,12 @@ export type InstalledApp = {
   // It replaces them without asking; any other napp asks first. Absent for a
   // picked folder.
   installedBy?: string
+  // What a fresh window of the app opens with, in a share link's text form
+  // (share-link.ts decodePayload).
+  defaultAction?: DefaultAction
 }
+
+export type DefaultAction = { name: string; payload: string }
 
 export interface SuggestionItem {
   source: "system" | "action" | "open" | "napp" | "recent"
@@ -316,6 +321,7 @@ export interface SystemCtx {
     list(): Array<InstalledApp>
     events(): NostrEvent[]
     subscribe(fn: () => void): () => void
+    setDefaultAction(nappId: string, action: DefaultAction | null): void
   }
   theme: {
     get(): string

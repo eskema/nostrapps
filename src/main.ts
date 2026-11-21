@@ -135,6 +135,7 @@ import type {
   NappWindow,
   LaunchOpts,
   InstalledApp,
+  DefaultAction,
   Position
 } from "./types.js"
 import {
@@ -1138,6 +1139,10 @@ const systemCtx: SystemCtx = {
     subscribe(fn: () => void) {
       appSubs.add(fn)
       return () => appSubs.delete(fn)
+    },
+    setDefaultAction(nappId: string, action: DefaultAction | null) {
+      persist.setDefaultAction(nappId, action)
+      notifyAppsChanged()
     }
   },
   theme,
@@ -1164,6 +1169,7 @@ const systemCtx: SystemCtx = {
     })
     syncDOM(win)
     win.focus()
+    runDefaultAction(win)
   },
   // Use a thunk so the reference resolves to the function declared later.
   isInstalled: (nappId: string) => !!persist.getInstalledApp(nappId),
@@ -1827,6 +1833,7 @@ async function pickRow(row: Row) {
       })
       syncDOM(win)
       win.focus()
+      runDefaultAction(win)
     } else if (item.link) {
       await importShareLink(item.link)
     } else if (item.raw) {
@@ -3245,6 +3252,7 @@ async function launchFromInput(raw: string): Promise<boolean | void> {
     })
     syncDOM(win)
     win.focus()
+    runDefaultAction(win)
     return
   }
 
@@ -3257,6 +3265,7 @@ async function launchFromInput(raw: string): Promise<boolean | void> {
     })
     syncDOM(win)
     win.focus()
+    runDefaultAction(win)
     return
   }
 
@@ -3544,6 +3553,22 @@ function reportShareLinkError(err: any) {
 // The match handlers.findHandlersForAction makes: exact, or "view" for any view:<kind>.
 function handlesAction(declared: string[], name: string): boolean {
   return declared.includes(name) || (name.startsWith("view:") && declared.includes("view"))
+}
+
+// A fresh window of an installed app gets the app's default action, sent the
+// way a link's is, so the window records it. Not when a held action is about
+// to land there instead.
+function runDefaultAction(win: NappWindow) {
+  const { nappId, instanceId } = win.getState()
+  const app = persist.getInstalledApp(nappId)
+  const d = app?.defaultAction
+  if (!d || !handlesAction(app.actions, d.name)) return
+  if (pendingAction && handlesAction(app.actions, pendingAction.name)) return
+  withTimeout(
+    runNappAction("launcher", d.name, decodePayload(d.name, d.payload), { instance: instanceId }),
+    LINK_ACTION_MS,
+    `${d.name} on ${friendlyNameFor(nappId)}`
+  ).catch((err: any) => setStatus(`${d.name} failed: ${err.message}`))
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
@@ -3874,6 +3899,7 @@ async function launchHere(nappId: string) {
   })
   syncDOM(win)
   win.focus()
+  runDefaultAction(win)
 }
 
 // An address in the launcher input. An app that's here is its own launch. Any

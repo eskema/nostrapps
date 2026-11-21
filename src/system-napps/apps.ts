@@ -2077,6 +2077,22 @@ function detailInfo(
   idBlock.appendChild(detailField("id", code(req.nappId)))
   section.appendChild(idBlock)
 
+  const dflt = ctx?.apps.get(req.nappId)?.defaultAction
+  if (ctx && dflt) {
+    const field = detailField("opens-with", code(`${dflt.name} ${dflt.payload}`), "opens with")
+    field.appendChild(
+      button({
+        label: "clear",
+        variant: "outline",
+        onClick: () => {
+          ctx.apps.setDefaultAction(req.nappId, null)
+          field.remove()
+        }
+      })
+    )
+    section.appendChild(field)
+  }
+
   const event = req.event
   if (event) {
     // Relays the event was seen on (from the shared pool) — empty for a purely

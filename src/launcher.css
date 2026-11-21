@@ -2493,6 +2493,20 @@ body.popover-open .napp-body iframe {
   justify-self: start;
 }
 
+/* What a fresh window opens with: label, action, clear. */
+.apps-detail-opens-with {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-xs);
+}
+.apps-detail-opens-with .apps-detail-label {
+  margin-right: 0;
+}
+.apps-detail-opens-with .apps-detail-value {
+  overflow-wrap: anywhere;
+}
+
 /* Blob availability marks in the files list: amber = some server still has
    the bytes (re-seedable), red = no known server does. */
 /* What the blob probe found (apps.ts renderFiles): a server that answered it

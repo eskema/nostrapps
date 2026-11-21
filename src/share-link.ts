@@ -11,6 +11,7 @@
 // No spaces, no JSON, no `>`: `~` separates name from payload
 // (unreserved, and no action name has one), lists are comma-separated.
 import { decode, neventEncode, npubEncode } from "@nostr/tools/nip19"
+import type { DefaultAction } from "./types.js"
 
 export type LinkAction = { name: string; payload: string }
 export type LinkWindow = { input: string; actions: LinkAction[] }
@@ -110,6 +111,17 @@ export function encodePayload(name: string, payload: unknown): string | null {
   const id = (payload as { id?: unknown } | null)?.id
   if (typeof id === "string" && HEX64.test(id)) return neventEncode({ id })
   return null
+}
+
+// Actions that answer their caller with a value. A fresh window has no caller,
+// so these can't be what it opens with.
+const ANSWERING = new Set(["user-search", "event-search"])
+
+// An action a window can be opened with, in link text form. Null when it can't.
+export function defaultActionFrom(name: string, payload: unknown): DefaultAction | null {
+  if (ANSWERING.has(name) || !ACTION_NAME.test(name)) return null
+  const text = encodePayload(name, payload)
+  return text == null ? null : { name, payload: text }
 }
 
 function pubkeyHex(s: string): string {

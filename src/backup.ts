@@ -8,7 +8,8 @@
 //   ["settings", "theme <choice>"]
 //   ["relay-auth", "auto", "allow <url>", "deny <url>"]
 //   ["app", "a <address>", "relay <url>", "petname <name>", "grant <domain>…",
-//     "perm <method> <decision>", "size <w> [h]", "config <key> <value>"]
+//     "perm <method> <decision>", "size <w> [h]", "config <key> <value>",
+//     "default <action> <payload>"]
 //   ["space", "id <id>", "name <name>", "current", "pack", "saved-pack"]
 //   ["window" | "saved", "space <id>", "a <address>" | "system <id>", "petname <name>",
 //     "pos <l> <t> <w> [h]", "stage <w> <h>", "z <n>", "minimized", "pinned",
@@ -27,6 +28,7 @@ import type { EventTemplate } from "@nostr/tools/pure"
 import type { NostrEvent } from "@nostr/tools/core"
 import { naddrEncode } from "@nostr/tools/nip19"
 import * as persist from "./persistence.js"
+import type { DefaultAction } from "./types.js"
 import { clearDecisions, listDecisions, setDecision } from "./permissions.js"
 import {
   automaticallyAuthOn,
@@ -99,6 +101,7 @@ export function backupTags(theme: string, parts: BackupParts): string[][] {
     for (const [key, value] of Object.entries(configValues(app.nappId))) {
       tag.push(`config ${key} ${value}`)
     }
+    if (app.defaultAction) tag.push(`default ${app.defaultAction.name} ${app.defaultAction.payload}`)
     tags.push(tag)
   }
 
@@ -267,6 +270,7 @@ export interface ParsedApp {
   perms: Array<{ method: string; decision: string }>
   size: { width: number; height?: number } | null
   config: Record<string, string>
+  defaultAction: DefaultAction | null
 }
 
 export interface ParsedSpace {
@@ -318,6 +322,8 @@ export function parseBackup(content: string): ParsedBackup {
       const addr = one("a")
       if (!addr) continue
       const size = numbers(one("size"))
+      const dflt = one("default")
+      const [dName, dPayload] = dflt ? pair(dflt) : ["", ""]
       out.apps.push({
         addr,
         relays: all("relay"),
@@ -330,7 +336,8 @@ export function parseBackup(content: string): ParsedBackup {
           return { method, decision }
         }),
         size: size?.[0] ? { width: size[0], ...(size[1] ? { height: size[1] } : {}) } : null,
-        config: Object.fromEntries(all("config").map(pair))
+        config: Object.fromEntries(all("config").map(pair)),
+        defaultAction: dName ? { name: dName, payload: dPayload } : null
       })
     } else if (r[0] === "space") {
       out.spaces.push({
@@ -555,6 +562,7 @@ export async function restoreBackup(
     }
     clearDecisions(nappId)
     for (const p of a.perms) setDecision(nappId, p.method, p.decision)
+    persist.setDefaultAction(nappId, a.defaultAction)
     if (a.size) persist.rememberWindowSize(nappId, a.size.width, a.size.height)
     if (Object.keys(a.config).length) {
       // Merged: secret values never went in, so the ones kept here stay.

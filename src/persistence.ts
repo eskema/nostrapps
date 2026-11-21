@@ -2,6 +2,7 @@ import { NostrEvent } from "@nostr/tools"
 import { NAPP_NAMED_KIND, NSITE_NAMED_KIND, WASM_NAMED_KIND } from "./nsite/fetch.js"
 import {
   AppType,
+  DefaultAction,
   InstalledApp,
   NappInitialSize,
   NappMode,
@@ -722,8 +723,20 @@ export function storeInstalledEvent(event: NostrEvent, petname?: string, install
     // fresh install (the card's date falls back to this). The update gets a
     // stamp of its own, which lifts the app in the apps list.
     installedAt: existing?.installedAt || installedAt || now,
-    ...(updated ? { updatedAt: now } : existing?.updatedAt ? { updatedAt: existing.updatedAt } : {})
+    ...(updated ? { updatedAt: now } : existing?.updatedAt ? { updatedAt: existing.updatedAt } : {}),
+    ...(existing?.defaultAction ? { defaultAction: existing.defaultAction } : {})
   }
+  writeInstalled(all)
+}
+
+// Null clears it. Dev apps have no stored record, so none.
+export function setDefaultAction(nappId: string, action: DefaultAction | null) {
+  const all = readInstalled()
+  const app = all[nappId]
+  if (!app) return
+  if (action) app.defaultAction = { name: action.name, payload: action.payload }
+  else if (app.defaultAction) delete app.defaultAction
+  else return
   writeInstalled(all)
 }
 
@@ -759,6 +772,7 @@ export function storeInstalledLocalApp(app: {
     ...(app.html ? { html: app.html } : {}),
     ...(app.kind && LOCAL_KINDS.has(app.kind) ? { kind: app.kind } : {}),
     ...(app.installedBy ? { installedBy: app.installedBy } : {}),
+    ...(all[app.nappId]?.defaultAction ? { defaultAction: all[app.nappId].defaultAction } : {}),
     installedAt: all[app.nappId]?.installedAt || Math.floor(Date.now() / 1000)
   }
   writeInstalled(all)
