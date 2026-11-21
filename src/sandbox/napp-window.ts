@@ -14,7 +14,8 @@ import { moveBefore } from "../dom.js"
 import { getWindowSize, rememberWindowSize } from "../persistence.js"
 import { isInstanceSerial } from "../utils.js"
 import { WASM_DEFAULT_HEIGHT, WASM_DEFAULT_WIDTH } from "./wasm-abi.js"
-import { icon, spinner } from "../system-napps/ui.js"
+import { button, icon, spinner } from "../system-napps/ui.js"
+import { attachMenu } from "../menu.js"
 
 // A window's starter height, and the ceiling a content-sized one fits within
 // until the user resizes it. The `max-height` on .napp-window:not(.user-sized)
@@ -138,19 +139,20 @@ export function createNappWindow({
 
   const controls = document.createElement("div")
   controls.className = "napp-controls"
-  const btnMin = makeBtn("–", "Minimize")
-  btnMin.classList.add("napp-btn-min")
+  // Shown only while minimized / pinned (launcher.css): the state, and its undo.
+  const btnMinimized = makeBtn("–", "Expand")
+  btnMinimized.classList.add("napp-btn-minimized")
+  const btnPinned = makeBtn("●", "Unpin")
+  btnPinned.classList.add("napp-btn-pinned")
+  // Minimize, pin, rename and what the launcher adds (menuItems below).
+  const btnMenu = makeBtn("···", "Menu")
+  btnMenu.classList.add("napp-btn-menu")
   const btnMax = makeBtn("▢", "Maximize")
   btnMax.classList.add("napp-btn-max")
-  const btnPin = makeBtn("•", "Pin on top")
-  btnPin.classList.add("napp-btn-pin")
-  const btnMove = makeBtn("", "Move to space")
-  btnMove.classList.add("napp-btn-move")
-  btnMove.append(icon("move"))
   const btnClose = makeBtn("×", system ? "Close" : "Close (keep state)")
   // Destroy (wipe-all) lives only in the Apps window, not on each window —
   // it's a napp-wide, origin-clearing operation, not a per-window control.
-  controls.append(btnMin, btnMax, btnPin, btnMove, btnClose)
+  controls.append(btnMinimized, btnPinned, btnMenu, btnMax, btnClose)
 
   const body = document.createElement("div")
   body.className = "napp-body"
@@ -255,11 +257,7 @@ export function createNappWindow({
   // Only a window with an explicit height sheds the cap. A content-sized one
   // (a system napp) would otherwise grow with its content past the stage.
   if ((status?.userSized || remembered) && root.style.height) root.classList.add("user-sized")
-  if (status?.pinned) {
-    root.classList.add("pinned")
-    btnPin.textContent = "●"
-    btnPin.title = "Unpin"
-  }
+  if (status?.pinned) root.classList.add("pinned")
   if (status && status.zIndex > 0) {
     root.style.zIndex = String(status.zIndex)
     // Bump the shared counter using the *logical* part (subtract pin tier
@@ -371,11 +369,10 @@ export function createNappWindow({
     e.stopPropagation()
     close()
   })
-  btnMin.addEventListener("click", e => {
-    e.stopPropagation()
+  const toggleMinimize = () => {
     root.classList.toggle("minimized")
     notifyState()
-  })
+  }
   const toggleMaximize = () => {
     const nowMaximized = root.classList.toggle("maximized")
     notifyState()
@@ -420,36 +417,61 @@ export function createNappWindow({
     tapX = e.clientX
     tapY = e.clientY
   })
-  btnPin.addEventListener("click", e => {
-    e.stopPropagation()
-    const isPinned = root.classList.toggle("pinned")
-    btnPin.textContent = isPinned ? "●" : "•"
-    btnPin.title = isPinned ? "Unpin" : "Pin on top"
+  const togglePin = () => {
+    root.classList.toggle("pinned")
     // Re-stack: pinning lifts into pin tier, unpinning drops to top of normal.
     bringToFront(root)
     notifyState()
-  })
-  // Ask the launcher (which owns spaces) to open the move-to-space popover,
-  // anchored under this button. It handles the persist + re-tag.
-  btnMove.addEventListener("click", e => {
+  }
+  btnMinimized.addEventListener("click", e => {
     e.stopPropagation()
-    const r = btnMove.getBoundingClientRect()
-    root.dispatchEvent(
-      new CustomEvent("napp-move-request", {
-        bubbles: true,
-        detail: { instanceId, x: r.left, y: r.bottom + 4 }
-      })
-    )
+    toggleMinimize()
   })
+  btnPinned.addEventListener("click", e => {
+    e.stopPropagation()
+    togglePin()
+  })
+  btnMenu.addEventListener("click", e => e.stopPropagation())
 
+  const rename = () =>
+    startRename(titleEl, (newName: string | null) => {
+      if (newName) notifyState()
+    })
   if (!system) {
     titleEl.addEventListener("dblclick", e => {
       e.stopPropagation()
-      startRename(titleEl, (newName: string | null) => {
-        if (newName) notifyState()
-      })
+      rename()
     })
   }
+
+  // Built as it opens. Minimize and pin don't apply to a maximized window, nor
+  // to a packed one on a wide screen (the grid owns layout and stacking), though
+  // a minimized one there can still expand. The
+  // launcher adds what it owns (move to a space, the app's default) through
+  // the bubbling napp-menu-request, its items pushed onto the detail.
+  const menuItem = (label: string, run: () => void) =>
+    button({ label, variant: "ghost", class: "napp-menu-item", onClick: run })
+  attachMenu(
+    btnMenu,
+    root,
+    () => {
+      const maximized = root.classList.contains("maximized")
+      const packed = !!root.parentElement?.classList.contains("pack-mode")
+      const minimized = root.classList.contains("minimized")
+      const items: HTMLElement[] = []
+      if (!maximized && (minimized || !packed || isCompact())) {
+        items.push(menuItem(minimized ? "expand" : "minimize", toggleMinimize))
+      }
+      if (!maximized && !packed) {
+        items.push(menuItem(root.classList.contains("pinned") ? "unpin" : "pin on top", togglePin))
+      }
+      if (!system) items.push(menuItem("rename", rename))
+      const detail = { instanceId, items: [] as HTMLElement[] }
+      root.dispatchEvent(new CustomEvent("napp-menu-request", { bubbles: true, detail }))
+      return [...items, ...detail.items]
+    },
+    "napp-menu"
+  )
 
   ensureFocusTracker()
   root.addEventListener("pointerdown", () => bringToFront(root))

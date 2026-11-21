@@ -541,21 +541,18 @@ button {
   display: none;
 }
 
-.napp-window.minimized .napp-btn[title^="Minimize"],
 .napp-window.maximized .napp-btn[title^="Maximize"] {
   background: color-mix(in srgb, currentColor 22%, transparent);
 }
 
-/* Maximized: of the window controls only maximize/restore stays; the nav
-   group (back/forward/reload, scoped under .napp-nav) is unaffected. */
-.napp-window.maximized .napp-controls .napp-btn:not(.napp-btn-max) {
+/* Maximized: of the window controls only the menu and maximize/restore stay;
+   the nav group (back/forward/reload, scoped under .napp-nav) is unaffected. */
+.napp-window.maximized .napp-controls .napp-btn:not(.napp-btn-max):not(.napp-btn-menu) {
   display: none;
 }
 
-/* Pack mode: minimize and pin don't apply (the grid owns layout + stacking),
-   and dropping them is also a visual cue you're in pack mode. */
-#stage.pack-mode .napp-btn-min,
-#stage.pack-mode .napp-btn-pin {
+/* Pack mode: pin doesn't apply (the grid owns stacking). */
+#stage.pack-mode .napp-btn-pinned {
   display: none;
 }
 
@@ -956,12 +953,6 @@ body.popover-open .napp-body iframe {
   }
   .napp-resize-handle {
     display: none;
-  }
-  /* Pack mode is a desktop-only layout, so keep minimize available on mobile
-     even when the space has pack mode on — it collapses the window to its
-     header in the flow stack. */
-  #stage.pack-mode .napp-btn-min {
-    display: inline-block;
   }
   .napp-header {
     min-height: 40px;
@@ -1741,18 +1732,18 @@ body.popover-open .napp-body iframe {
   font-family: inherit;
 }
 
-.move-popover-list {
-  display: grid;
-  gap: 0.1rem;
-  min-width: 9rem;
-}
-
-.move-popover .move-popover-item {
+/* A window's menu (napp-window.ts, menu.ts): items full width, text at the
+   start, the move-to list under its label. */
+.napp-menu .napp-menu-item {
   justify-content: flex-start;
   width: 100%;
 }
 
-.move-popover-new {
+.napp-menu-label {
+  padding: var(--space-xs) var(--btn-pad-x) 0;
+}
+
+.napp-menu-new {
   opacity: 0.7;
 }
 
@@ -2670,12 +2661,14 @@ body.popover-open .napp-body iframe {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
-.napp-window.pinned .napp-btn-pin {
-  background: color-mix(in srgb, currentColor 22%, transparent);
+.napp-window:not(.minimized) .napp-btn-minimized,
+.napp-window:not(.pinned) .napp-btn-pinned {
+  display: none;
 }
 
-.napp-btn-pin:hover {
-  background: color-mix(in srgb, currentColor 15%, transparent);
+.napp-btn-minimized,
+.napp-btn-pinned {
+  background: color-mix(in srgb, currentColor 22%, transparent);
 }
 
 /* Detail rows of categories (`l` tags) and hashtags (`t` tags): plain words
@@ -2714,10 +2707,10 @@ body.popover-open .napp-body iframe {
   color: color-mix(in srgb, currentColor 70%, transparent);
 }
 
-/* Popover (top layer, card.ts cardMenu). The UA gives it position:fixed +
-   inset:0 + margin:auto (centred); reset that so the JS-set top/right anchor it
-   under the trigger. Its buttons stack full width, each the kit's own. */
-.apps-card-menu {
+/* Popover (top layer, menu.ts). The UA gives it position:fixed + inset:0 +
+   margin:auto (centred); reset that so the JS-set top/right anchor it under
+   the trigger. Its buttons stack full width, each the kit's own. */
+.launcher-menu {
   margin: 0;
   inset: auto;
   padding: var(--space-s);
@@ -2728,7 +2721,7 @@ body.popover-open .napp-body iframe {
   box-shadow: var(--shadow-menu);
 }
 
-.apps-card-menu:popover-open {
+.launcher-menu:popover-open {
   display: grid;
   gap: var(--space-xs);
   min-width: 9rem;
@@ -2737,7 +2730,7 @@ body.popover-open .napp-body iframe {
 /* Under its trigger and right-aligned to it; above it when there's no room
    below. */
 @supports (anchor-name: --a) {
-  .apps-card-menu {
+  .launcher-menu {
     top: anchor(bottom);
     right: anchor(right);
     margin-top: 4px;

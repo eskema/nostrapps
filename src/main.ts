@@ -54,7 +54,7 @@ import {
   setLocalInstaller,
   findOpenWindowByNappId
 } from "./sandbox/host.js"
-import { authors as kitAuthors, button, chip, empty, icon, tab } from "./system-napps/ui.js"
+import { authors as kitAuthors, button, chip, empty, icon, overline, tab } from "./system-napps/ui.js"
 import { nappNameText } from "./napp-name.js"
 import { openDialog } from "./dialog.js"
 import {
@@ -66,6 +66,7 @@ import {
 import {
   buildShareLink,
   decodePayload,
+  defaultActionFrom,
   encodePayload,
   parseShareLink,
   type LinkAction,
@@ -2140,70 +2141,70 @@ async function createSpaceAndSwitch(name?: string): Promise<string> {
   return id
 }
 
-// ─── Move a window to another space ─────────────────────────────
-// The window's move button (in napp-window.ts) bubbles a request up to the
-// stage; the launcher owns spaces so it opens the picker and does the move.
-stage.addEventListener("napp-move-request", e => {
-  const d = (e as CustomEvent).detail as { instanceId: string; x: number; y: number }
-  openMoveToSpace(d.instanceId, d.x, d.y)
+// ─── Window menu ────────────────────────────────────────────────
+// A window's menu (napp-window.ts) asks for what the launcher owns as it
+// opens: the app's default, from what the window shows, and the other spaces
+// to move it to.
+stage.addEventListener("napp-menu-request", e => {
+  const d = (e as CustomEvent).detail as { instanceId: string; items: HTMLElement[] }
+  const item = (label: string, run: () => void, cls = "") =>
+    button({ label, variant: "ghost", class: `napp-menu-item ${cls}`.trim(), onClick: run })
+  const dflt = defaultFromWindow(d.instanceId)
+  if (dflt) {
+    d.items.push(
+      item("use as default", () => {
+        systemCtx.apps.setDefaultAction(dflt.nappId, dflt.action)
+        setStatus(`${friendlyNameFor(dflt.nappId)} opens with ${dflt.action.name}`)
+      })
+    )
+  }
+  d.items.push(overline("move to", "napp-menu-label"))
+  for (const s of persist.listSpaces()) {
+    if (s.id === currentSpaceId) continue
+    d.items.push(item(s.name, () => void moveToSpace(d.instanceId, s.id)))
+  }
+  d.items.push(item("+ new space", () => void moveToSpace(d.instanceId, null), "napp-menu-new"))
 })
 
-const MOVE_NEW_SPACE = "__new__"
-function openMoveToSpace(instanceId: string, x: number, y: number) {
-  const others = persist.listSpaces().filter(s => s.id !== currentSpaceId)
-  openPopover<string | null>({
-    x,
-    y,
-    class: "move-popover",
-    dismissValue: null,
-    build: resolve => {
-      const wrap = document.createElement("div")
-      wrap.className = "move-popover-list"
-      for (const s of others) {
-        wrap.append(
-          button({
-            variant: "ghost",
-            label: s.name,
-            class: "move-popover-item",
-            onClick: () => resolve(s.id)
-          })
-        )
-      }
-      wrap.append(
-        button({
-          variant: "ghost",
-          label: "+ new space",
-          class: "move-popover-item move-popover-new",
-          onClick: () => resolve(MOVE_NEW_SPACE)
-        })
-      )
-      return wrap
-    }
-  }).then(async choice => {
-    if (!choice) return
-    const targetId = choice === MOVE_NEW_SPACE ? persist.createSpace() : choice
-    // The window arrives carrying the position it held in the space it left,
-    // which says nothing about what's already here — keep it and the window
-    // lands on top of whatever occupies those pixels. A packed target treats it
-    // as newly arrived and slots it into the leftover space (the flag has to be
-    // set before switchSpace, which packs on entry); a freeform one gets it a
-    // free spot of its own, leaving the rest of the layout alone.
-    const targetPacks = persist.getSpacePackMode(targetId)
-    if (targetPacks) markPackNew(instanceId)
-    persist.moveOpenToSpace(instanceId, targetId)
-    moveWindowToSpace(instanceId, targetId)
-    maybeRepack() // tidy the source layout now the window has left
-    await switchSpace(targetId) // follow the window into its new space
-    // Placed here rather than left to switchSpace's own maybeRepack: that one is
-    // rAF-coalesced and the maybeRepack above has already claimed the slot, so it
-    // returns early. Landing the window is part of the move — do it now. A full
-    // grid leaves it floating where it was instead.
-    if (!targetPacks) placeInFreeSpot(stage, instanceId)
-    else if (!floatNewWithoutRoom()) bestFitPack(stage)
-    renderSpacesBar()
-    const name = persist.listSpaces().find(s => s.id === targetId)?.name || "space"
-    setStatus(`Moved to ${name}`)
-  })
+// What the window shows, as its app's default: an installed napp's window
+// whose current action can be one and isn't already.
+function defaultFromWindow(instanceId: string): { nappId: string; action: DefaultAction } | null {
+  const state = persist.readOpen().find(w => w.instanceId === instanceId)
+  if (!state || state.system || state.nappId.startsWith("dev~")) return null
+  const app = persist.getInstalledApp(state.nappId)
+  if (!app || app.temporary) return null
+  const cur = persist.currentActions(state).at(-1)
+  const action = cur && defaultActionFrom(cur.name, cur.payload)
+  if (!action || !handlesAction(app.actions, action.name)) return null
+  const had = app.defaultAction
+  if (had && had.name === action.name && had.payload === action.payload) return null
+  return { nappId: state.nappId, action }
+}
+
+// Null: a new space.
+async function moveToSpace(instanceId: string, spaceId: string | null) {
+  const targetId = spaceId ?? persist.createSpace()
+  // The window arrives carrying the position it held in the space it left,
+  // which says nothing about what's already here — keep it and the window
+  // lands on top of whatever occupies those pixels. A packed target treats it
+  // as newly arrived and slots it into the leftover space (the flag has to be
+  // set before switchSpace, which packs on entry); a freeform one gets it a
+  // free spot of its own, leaving the rest of the layout alone.
+  const targetPacks = persist.getSpacePackMode(targetId)
+  if (targetPacks) markPackNew(instanceId)
+  persist.moveOpenToSpace(instanceId, targetId)
+  moveWindowToSpace(instanceId, targetId)
+  maybeRepack() // tidy the source layout now the window has left
+  await switchSpace(targetId) // follow the window into its new space
+  // Placed here rather than left to switchSpace's own maybeRepack: that one is
+  // rAF-coalesced and the maybeRepack above has already claimed the slot, so it
+  // returns early. Landing the window is part of the move — do it now. A full
+  // grid leaves it floating where it was instead.
+  if (!targetPacks) placeInFreeSpot(stage, instanceId)
+  else if (!floatNewWithoutRoom()) bestFitPack(stage)
+  renderSpacesBar()
+  const name = persist.listSpaces().find(s => s.id === targetId)?.name || "space"
+  setStatus(`Moved to ${name}`)
 }
 
 // Commit the current windows as this space's saved layout. The button shows a
