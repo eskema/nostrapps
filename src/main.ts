@@ -1693,6 +1693,7 @@ function syncSuggestions() {
       rows.set(key, row)
     } else if (row.sig !== sig) {
       const fresh = buildRow(item, sig)
+      if (row.el.classList.contains("active")) fresh.el.classList.add("active")
       row.el.replaceWith(fresh.el)
       row = fresh
       rows.set(key, row)
@@ -1747,6 +1748,30 @@ function applyFilter() {
   suggDividers[1].hidden = !((shown.system || shown.open) && shown.apps)
   suggDividers[2].hidden = !((shown.system || shown.open || shown.apps) && shown.recent)
   suggNone.hidden = SECTIONS.some(s => shown[s])
+  suggestions.querySelector(".suggestion.active[hidden]")?.classList.remove("active")
+}
+
+// The row Tab has landed on, marked by its class: Enter opens it instead of
+// what's typed.
+const activeEl = () => suggestions.querySelector<HTMLElement>(".suggestion.active")
+
+function setActive(el: HTMLElement | null) {
+  activeEl()?.classList.remove("active")
+  if (!el) return
+  el.classList.add("active")
+  el.scrollIntoView({ block: "nearest" })
+}
+
+// Moves to the next row shown (the previous for -1), around the ends. False
+// when there is no row to land on.
+function stepActive(dir: 1 | -1): boolean {
+  const els = [...suggestions.querySelectorAll<HTMLElement>(".suggestion:not([hidden])")]
+  if (!els.length) return false
+  const cur = activeEl()
+  const i = cur ? els.indexOf(cur) : -1
+  const from = i === -1 && dir === -1 ? 0 : i
+  setActive(els[(from + dir + els.length) % els.length])
+  return true
 }
 
 function buildRow(item: SuggestionItem, sig: string): Row {
@@ -1771,43 +1796,48 @@ function buildRow(item: SuggestionItem, sig: string): Row {
     el.appendChild(forget)
   }
 
-  el.addEventListener("mousedown", async (e: MouseEvent) => {
+  el.addEventListener("mousedown", (e: MouseEvent) => {
     e.preventDefault()
-    const item = row.item // the row is kept; its item is the current one
-    const label = itemPreferredValue(item)
-    hideSuggestions()
-    try {
-      if (item.systemId) {
-        await invokeSystemNapp(item.systemId)
-      } else if (item.actionId) {
-        actionRegistry[item.actionId]?.run(systemCtx)
-      } else if (item.instanceId) {
-        // Window may live in another space — go there first, then focus it.
-        if (item.spaceId && item.spaceId !== currentSpaceId) {
-          await switchSpace(item.spaceId)
-          renderSpacesBar()
-        }
-        await launchSession(item.instanceId)
-      } else if (item.nappId) {
-        const win = await launch(stage, item.nappId, {
-          ...makeLaunchOpts(),
-          petname: item.petname && item.petname !== item.nappId ? item.petname : item.nappId
-        })
-        syncDOM(win)
-        win.focus()
-      } else if (item.link) {
-        await importShareLink(item.link)
-      } else if (item.raw) {
-        await install(item.raw) // opens where its screen said, if at all
-      }
-      setStatus(`Launched ${label}`)
-      input!.value = ""
-    } catch (err: any) {
-      setStatus(`Error: ${err.message}`)
-      console.error(err)
-    }
+    pickRow(row)
   })
   return row
+}
+
+// Opens what a row stands for: a click on it, or Enter with it selected.
+async function pickRow(row: Row) {
+  const item = row.item // the row is kept; its item is the current one
+  const label = itemPreferredValue(item)
+  hideSuggestions()
+  try {
+    if (item.systemId) {
+      await invokeSystemNapp(item.systemId)
+    } else if (item.actionId) {
+      actionRegistry[item.actionId]?.run(systemCtx)
+    } else if (item.instanceId) {
+      // Window may live in another space — go there first, then focus it.
+      if (item.spaceId && item.spaceId !== currentSpaceId) {
+        await switchSpace(item.spaceId)
+        renderSpacesBar()
+      }
+      await launchSession(item.instanceId)
+    } else if (item.nappId) {
+      const win = await launch(stage, item.nappId, {
+        ...makeLaunchOpts(),
+        petname: item.petname && item.petname !== item.nappId ? item.petname : item.nappId
+      })
+      syncDOM(win)
+      win.focus()
+    } else if (item.link) {
+      await importShareLink(item.link)
+    } else if (item.raw) {
+      await install(item.raw) // opens where its screen said, if at all
+    }
+    setStatus(`Launched ${label}`)
+    input!.value = ""
+  } catch (err: any) {
+    setStatus(`Error: ${err.message}`)
+    console.error(err)
+  }
 }
 
 async function launchSession(instanceId: string) {
@@ -1839,10 +1869,12 @@ function showSuggestions() {
 
 function hideSuggestions() {
   suggestions.hidden = true
+  setActive(null)
 }
 
 input!.addEventListener("focus", showSuggestions)
 input!.addEventListener("input", () => {
+  setActive(null) // typing is for what's typed again
   if (suggestions.hidden) showSuggestions()
   else applyFilter()
 })
@@ -1855,6 +1887,17 @@ input!.addEventListener("blur", () => {
 })
 input!.addEventListener("keydown", (e: KeyboardEvent) => {
   if (e.key === "Escape") hideSuggestions()
+  // Tab walks the rows, Shift+Tab backwards. With the list closed or nothing
+  // matching it is the browser's Tab, the way out of the input.
+  else if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (!suggestions.hidden && stepActive(e.shiftKey ? -1 : 1)) e.preventDefault()
+  } else if (e.key === "Enter" && !e.isComposing) {
+    const el = activeEl()
+    const row = el && [...rows.values()].find(r => r.el === el)
+    if (!row) return // nothing selected: the form submits what's typed
+    e.preventDefault()
+    pickRow(row)
+  }
 })
 
 // Ctrl+K / Cmd+K toggles top input, standard launcher palette shortcut.
